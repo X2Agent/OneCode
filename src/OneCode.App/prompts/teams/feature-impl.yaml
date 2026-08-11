@@ -1,0 +1,42 @@
+# 内置团队模板：功能实现（默认）
+# 模式：Magentic（orchestrator 主导，workers 委派执行）
+# 适用：明确目标的功能实现、bug 修复、重构任务
+# 成员：orchestrator + researcher + executor + tester
+name: feature-impl
+description: 功能实现团队 - orchestrator 主导，研究→实现→验证流水线
+template: magentic-orchestrator
+max_rounds: 20
+workers:
+  - name: orchestrator
+    role: orchestrator
+    # orchestrator 角色 prompt 由 system/coordinator.prompt 加载
+  - name: researcher
+    role: researcher
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+      - WebFetch
+  - name: executor
+    role: executor
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+      - Edit
+      - Bash
+      - SymbolSearch
+  - name: tester
+    role: tester
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+      - Edit
+      - Bash
+      - SymbolSearch

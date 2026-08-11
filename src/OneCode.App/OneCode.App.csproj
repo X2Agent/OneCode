@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneCode.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneCode.Core\OneCode.Core.csproj" />
+    <ProjectReference Include="..\OneCode.Infrastructure\OneCode.Infrastructure.csproj" />
+    <ProjectReference Include="..\OneCode.Automation\OneCode.Automation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AI SDK 包（Anthropic / MAF / Hyperlight / Microsoft.Extensions.AI.OpenAI）已下沉至 Infrastructure，
+         App 通过 ProjectReference 传递依赖使用 MAF 类型。 -->
+    <PackageReference Include="Microsoft.Extensions.AI" />
+
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Terminal.Gui" />
+    <PackageReference Include="Terminal.Gui.Editor" />
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="CliWrap" />
+    <!-- AngleSharp: WebFetchTool HTML→Markdown DOM 解析（替代正则，消除 ReDoS 风险） -->
+    <PackageReference Include="AngleSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Prompt 文件：复制到输出目录（供 PromptManager FilePromptStore 加载）+ 嵌入式资源（供内置资源加载） -->
+    <Content Include="prompts\**\*.prompt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <EmbeddedResource Include="prompts\**\*.prompt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 团队模板 YAML：嵌入式资源（供 RegisterBuiltinTeamsAsync 加载） -->
+    <Content Include="prompts\teams\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <EmbeddedResource Include="prompts\teams\**\*.yaml" />
+  </ItemGroup>
+
+</Project>

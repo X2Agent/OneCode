@@ -1,0 +1,34 @@
+## Performance Review Request
+
+- **Branch:** {{branch}}
+- **Scope:** {{scopeDescription}}
+- **Recent commits:** {{recentLog}}
+{{agentRulesSection}}
+## Changes to Review
+```diff
+{{diff}}
+```
+{{blameSection}}{{lspSection}}
+## Review Instructions
+
+You are performing a **performance-only** review. Ignore style and correctness unless a correctness bug is also a perf bottleneck. Focus on changes that degrade throughput, latency, memory, or scalability:
+
+- **N+1 queries** — loops issuing one DB/API call per iteration; fetch in bulk instead
+- **Unnecessary allocations** — per-iteration `new`, string concatenation in hot loops, LINQ chains that materialize intermediate collections, boxing of value types
+- **Blocking I/O on hot paths** — sync `Read`/`Write`/`.Result`/`.Wait()` on async APIs, `Thread.Sleep` in request handlers
+- **Algorithmic complexity regressions** — O(n²) or worse introduced where O(n) or O(n log n) is feasible; nested loops over the same collection
+- **Missing async / parallelism** — sequential awaits that could be `Task.WhenAll`, independent I/O serialized unnecessarily
+- **Inefficient collection use** — `List<T>` where lookup frequency demands `HashSet`/`Dictionary`; `Contains` on lists in loops; resizing-friendly collections used at known-fixed sizes
+- **Lock contention** — coarse-grained locks held across I/O, `lock`/`Monitor` around cheap operations where lock-free alternatives exist, nested locks risking deadlock
+- **Redundant work** — recomputing pure results inside loops, re-reading unchanged config per call, caching opportunities ignored
+- **Memory pressure** — large object allocations on hot paths (LOH), unbounded caches/grows, missing `ArrayPool`/`MemoryPool`/object pooling for short-lived large buffers
+- **GC pressure** — closure allocations in hot paths, delegate allocations from LINQ in inner loops, `params` arrays on hot paths
+- **I/O amplification** — reading entire files when streaming suffices, full-table scans, missing pagination, unbatched writes
+
+For each finding, estimate the magnitude (e.g., "O(n²) over 10k items", "per-request allocation of ~50KB") and cite the line.
+
+{{severityScope}}
+
+{{editInstruction}}
+
+{{outputFormat}}

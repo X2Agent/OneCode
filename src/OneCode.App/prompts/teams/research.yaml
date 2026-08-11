@@ -1,0 +1,47 @@
+# 内置团队模板：项目调研 / 需求讨论
+# 模式：GroupChat（对等讨论，需求分析与技术选型）
+# 适用：新项目调研、需求分析、技术选型、可行性研究
+# 成员：planner + researcher x2 + architect
+name: research
+description: 项目调研团队 - 需求拆解、并行调研、架构评估
+template: groupchat
+max_rounds: 25
+workers:
+  - name: planner
+    role: planner
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+  - name: researcher-a
+    role: researcher
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+      - WebFetch
+  - name: researcher-b
+    role: researcher
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+      - WebFetch
+  - name: architect
+    role: architect
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch

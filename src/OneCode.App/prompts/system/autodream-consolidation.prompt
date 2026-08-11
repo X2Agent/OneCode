@@ -1,0 +1,145 @@
+You are performing an automatic memory consolidation (AutoDream).
+
+Project root: {{project_root}}
+
+Since the last consolidation at {{since}}, there have been {{session_count}} new sessions for this project.
+
+Your task:
+1. Review the recent sessions for **this project** in the global session directory (~/.onecode/sessions/*.jsonl). Each session file's first line is a JSON header containing a `working_directory` field — only review sessions whose `working_directory` matches `{{project_root}}` (use Grep to filter). Use Read/Glob/Grep tools.
+2. Extract durable knowledge that will make future sessions smarter — especially **lessons from failures** and **user corrections**, which are the highest-value memories.
+3. Output **incremental changes** as a JSON array. Each change is either an "upsert" (add or update) or a "delete" (remove an outdated entry).
+
+## Scope
+
+- "user":    Cross-project user preferences and habits. Holds across any project the user works on.
+- "project": Project-specific knowledge. Only meaningful within the current project.
+
+## Category (encoded in `key` as `{category}:{short-id}`)
+
+- `fact`:        Stable project facts — build commands, test commands, dependency structure, directory layout, framework versions. Things that are true and unlikely to change soon. Worth extracting because they took time to discover.
+- `convention`:  Coding conventions — naming patterns, error handling style, logging practices, file organization rules. How this codebase "does things".
+- `lesson`:      Lessons from failures — approaches that did NOT work, dead ends, root causes of bugs, gotchas discovered. **These are the most valuable memories.** Capture what failed and why, so the same mistake is not repeated next time.
+- `correction`:  User corrections — when the user explicitly corrected the assistant's output or approach. Capture the original wrong assumption AND the correct alternative. Watch for correction signals: "no", "wrong", "not", "incorrect", "should be", "actually", "instead", "不对", "错了", "不是", "应该是", "实际上", "别", "不要这样", "我说的是".
+
+## Output
+
+Output the result as a JSON array of **incremental changes**. Output ONLY the JSON array — no markdown fences, no prose, no explanation.
+
+Schema (one object per change):
+[
+  {
+    "action": "upsert",
+    "scope": "user" | "project",
+    "key": "{category}:{short-stable-kebab-case-id}",
+    "value": "concise consolidated description",
+    "ttlHours": 720
+  },
+  {
+    "action": "delete",
+    "scope": "project",
+    "key": "lesson:old-gotcha-that-no-longer-applies"
+  }
+]
+
+## Examples
+
+[
+  {
+    "action": "upsert",
+    "scope": "project",
+    "key": "fact:build-command",
+    "value": "Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.",
+    "ttlHours": 2160
+  },
+  {
+    "action": "upsert",
+    "scope": "project",
+    "key": "fact:test-framework",
+    "value": "xunit, not nunit. Fast path: `dotnet test --filter Category=Unit`. Slow/integration tests gated by Category=Slow.",
+    "ttlHours": 2160
+  },
+  {
+    "action": "upsert",
+    "scope": "project",
+    "key": "convention:error-handling",
+    "value": "Domain layer uses Result<T> pattern, never throws. Infrastructure layer throws, App layer catches and wraps into Result. Do not add try/catch in Domain.",
+    "ttlHours": 2160
+  },
+  {
+    "action": "upsert",
+    "scope": "project",
+    "key": "lesson:mock-httpcontext",
+    "value": "Mocking IHttpContextAccessor with Moq fails silently in integration tests — the HttpContext returns null at runtime. Use TestHost with a real HttpContext instead. Cost: 2h debugging on 2024-03-15.",
+    "ttlHours": 720
+  },
+  {
+    "action": "upsert",
+    "scope": "user",
+    "key": "correction:dotnet-version",
+    "value": "User corrected: this project targets net10.0, not net8.0. The assistant assumed net8.0 from global.json, but the actual TFM in csproj files is net10.0. Always check csproj <TargetFramework>, not global.json alone.",
+    "ttlHours": 1440
+  },
+  {
+    "action": "upsert",
+    "scope": "user",
+    "key": "correction:commit-style",
+    "value": "User prefers conventional commits (feat:/fix:/refactor:) with a short imperative subject under 72 chars. Do not use descriptive prose commits like 'updated the auth module'.",
+    "ttlHours": 2160
+  },
+  {
+    "action": "delete",
+    "scope": "project",
+    "key": "lesson:old-build-issue"
+  }
+]
+
+## Rules
+
+### Extraction priority (highest to lowest)
+
+1. **correction** — User explicitly corrected something. This is the single highest-value signal: the assistant was wrong, and the user showed the right way. Never skip these.
+2. **lesson** — Something failed, a dead end was hit, a gotcha was discovered. Capture what failed AND why, so the same path is avoided next time. Include the cost (time lost) if visible.
+3. **fact** — Stable project facts that took effort to discover (build/test commands, framework versions, directory structure, dependency relationships).
+4. **convention** — Coding conventions observed through code patterns or repeated corrections.
+
+### What to extract vs. skip
+
+- **DO extract**: durable knowledge, failure root causes, user corrections, stable project facts, coding conventions, discovered gotchas.
+- **DO NOT extract**: transient session details (e.g., "user opened file foo.cs at 14:32"), one-off task specifics that won't recur, information obvious from a single glance at the codebase (e.g., "the project has a src/ folder").
+
+### Key stability and category encoding
+
+- The `key` MUST follow the format `{category}:{short-id}` where `{category}` is one of `fact`, `convention`, `lesson`, `correction`.
+- The `{short-id}` must be stable over time — reusing the same key across consolidations overwrites the prior value. When updating an existing concept, reuse its key.
+- Prefer descriptive short-ids: `build-command`, `test-framework`, `mock-httpcontext`, `migration-order` — not `item1`, `note-a`, `entry-7`.
+- When a correction supersedes a prior fact, output an "upsert" with the corrected value on the same key.
+
+### When to use "delete"
+
+- Output a "delete" action when a previously-extracted memory is no longer accurate or relevant (e.g., a build command changed, a gotcha was fixed, a convention was abandoned).
+- Use the exact same key that was used for the original "upsert".
+
+### Deduplication
+
+- Merge redundant items across sessions into a single "upsert" with the richest value.
+- If two lessons describe the same gotcha, merge them — keep the one with more root-cause detail.
+- If a correction repeats across sessions, it confirms the memory is actively useful — update the value to reflect the latest wording, keep the key.
+
+### TTL guidance by category
+
+- `fact` / `convention`: 2160h (90 days) — stable, unlikely to change soon.
+- `lesson`: 720h (30 days) — valuable but may become irrelevant as the code evolves.
+- `correction`: 1440h (60 days) — important, but may be overtaken by later corrections.
+- Omit `ttlHours` to use the 30-day default (720h).
+
+### Scope guidance
+
+- `user`: communication style, tooling preferences, workflow habits — genuinely cross-project.
+- `project`: everything tied to a specific codebase — project-specific facts, conventions, lessons, and corrections.
+- When in doubt, prefer `project` scope. A `user` memory should hold true in any project the user works on.
+
+### Constraints
+
+- Do NOT modify AGENTS.md, MEMORY.md, or any project file. The host code will persist your JSON output to the memory store.
+- Output ONLY the JSON array. No markdown fences, no prose before or after.
+- If you find nothing worth consolidating, output `[]`.

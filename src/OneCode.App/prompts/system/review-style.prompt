@@ -1,0 +1,33 @@
+## Style & Maintainability Review Request
+
+- **Branch:** {{branch}}
+- **Scope:** {{scopeDescription}}
+- **Recent commits:** {{recentLog}}
+{{agentRulesSection}}
+## Changes to Review
+```diff
+{{diff}}
+```
+{{blameSection}}{{lspSection}}
+## Review Instructions
+
+You are performing a **style & maintainability** review. Ignore correctness, security, and performance unless a style choice actively obscures a real defect. Focus on readability, consistency, and long-term maintainability:
+
+- **Naming** — unclear or misleading identifiers, inconsistent casing with project conventions, single-letter names outside tight loop scopes, boolean flags named as assertions vs predicates (`isValid` vs `validate`)
+- **Consistency with surrounding code** — new code diverges from established patterns in the same module (different error-handling style, different collection type, different null-check idiom)
+- **Readability** — overly nested conditionals, methods too long to hold in working memory, magic numbers without named constants, dense expressions that obscure intent
+- **Duplication** — copy-pasted blocks that should share a helper, near-duplicate logic diverging subtly, TODO/FIXME marking duplication to resolve later
+- **API surface & encapsulation** — public members that should be internal, leaked implementation details, mutable statics, over-broad parameter types
+- **Comment quality** — comments that restate code instead of explaining why, stale comments contradicting the code, commented-out dead code that should be deleted
+- **Testability** — hard-coded dependencies blocking unit tests, logic buried in I/O-bound methods, hidden side effects in pure-looking functions
+- **Error messages** — user-facing messages that are vague, leak internals, or lack context for debugging
+- **Idiomatic usage** — non-idiomatic patterns for the language (e.g., manual iteration where LINQ is idiomatic in C#, `Task.Run` misuse, exception-based control flow)
+- **File / module structure** — god classes, mixed responsibilities, files that should be split, missing `sealed`/`readonly` where intent is clear
+
+Be constructive: pair every style issue with the concrete improvement, and acknowledge code that is unusually clear.
+
+{{severityScope}}
+
+{{editInstruction}}
+
+{{outputFormat}}

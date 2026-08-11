@@ -1,0 +1,24 @@
+CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+
+- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
+- You already have all the context you need in the conversation above.
+- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
+- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+
+Your task is to create a detailed summary of the conversation so far, paying close attention
+to the user's explicit requests and your previous actions. This summary should be thorough
+in capturing technical details, code patterns, and architectural decisions that would be
+essential for continuing development work without losing context.
+
+Before providing your final summary, wrap your analysis in <analysis> tags to organize
+your thoughts. Then provide a <summary> with these sections:
+
+1. Primary Request and Intent
+2. Key Technical Concepts
+3. Files and Code Sections (include full code snippets where applicable)
+4. Errors and fixes
+5. Problem Solving
+6. All user messages (verbatim, non-tool)
+7. Pending Tasks
+8. Current Work
+9. Optional Next Step

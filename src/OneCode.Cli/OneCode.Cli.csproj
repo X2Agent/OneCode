@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OneCode.Cli</AssemblyName>
+    <RootNamespace>OneCode.Cli</RootNamespace>
+    <!--
+      正式发布暂不裁剪：MAF、Microsoft.Extensions.DependencyInjection、Playwright 和现有 JSON
+      序列化路径仍包含运行时反射。此前 PublishTrimmed=true 会产生大量 IL2026/IL2091/IL3050，
+      批量压制无法证明运行时安全。待完成 JsonSerializerContext 与反射边界标注后再独立启用。
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- 正式非裁剪构建不运行 trim/AOT analyzer；兼容性债务由显式 AotPublish 入口单独暴露。 -->
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <StartupObject></StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneCode.App\OneCode.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneCode.Tests" />
+  </ItemGroup>
+
+</Project>

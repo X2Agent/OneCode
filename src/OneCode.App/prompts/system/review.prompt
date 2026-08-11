@@ -1,0 +1,31 @@
+## Code Review Request
+
+- **Branch:** {{branch}}
+- **Scope:** {{scopeDescription}}
+- **Recent commits:** {{recentLog}}
+{{agentRulesSection}}
+## Changes to Review
+```diff
+{{diff}}
+```
+{{blameSection}}{{lspSection}}
+## Review Instructions
+
+Examine the diff above. Classify every finding into one of two categories:
+
+**Functional Issues** — will cause errors, crashes, or data loss if left unfixed:
+  Bugs, crashes, null derefs, security vulnerabilities, data loss, injection, auth bypass
+
+**Design Suggestions** — code works correctly but could be improved:
+  Naming clarity, code duplication, performance optimization, testability, idiomatic patterns
+
+Rules:
+1. Every finding MUST include: file path + line number + relevant code snippet as evidence. Findings without code-level evidence will be rejected.
+2. Before applying any edit (when edit mode is enabled), you MUST first Read the target file to confirm its current content. Do not rely on the diff alone.
+3. Functional Issues and Design Suggestions must be reported in separate sections — never mix them in the same list.
+
+{{severityScope}}
+
+{{editInstruction}}
+
+{{outputFormat}}

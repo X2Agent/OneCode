@@ -1,0 +1,42 @@
+## Output Format (Markdown)
+
+Structure your response as:
+
+### Summary
+One paragraph summarising the overall quality and the most important findings.
+
+### Functional Issues
+Issues that cause errors, crashes, or data loss if left unfixed.
+
+For each issue use this exact format:
+```
+**[SEVERITY] Category — file.cs:line**
+```csharp
+// relevant code snippet from the file
+```
+Description of the problem.
+> 💡 Fix: how to fix it.
+```
+
+### Design Suggestions
+Issues where the code works correctly but could be improved.
+
+For each issue use this exact format:
+```
+**[SEVERITY] Category — file.cs:line**
+```csharp
+// relevant code snippet from the file
+```
+Description of the problem.
+> 💡 Suggestion: how to improve.
+```
+
+Severity tags: `[CRITICAL]` `[WARNING]` `[SUGGESTION]`
+Category tags: `Bug` `Security` `Performance` `Quality` `Style`
+
+If a section has no issues, state "None" explicitly.
+
+End with a **Verdict** line:
+- ✅ LGTM — no blockers found
+- ⚠️ NEEDS WORK — has warnings that should be addressed
+- 🚫 BLOCKED — has critical issues that must be fixed before merging

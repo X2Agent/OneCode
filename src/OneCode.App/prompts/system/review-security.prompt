@@ -1,0 +1,32 @@
+## Security-Focused Code Review Request
+
+- **Branch:** {{branch}}
+- **Scope:** {{scopeDescription}}
+- **Recent commits:** {{recentLog}}
+{{agentRulesSection}}
+## Changes to Review
+```diff
+{{diff}}
+```
+{{blameSection}}{{lspSection}}
+## Review Instructions
+
+You are performing a **security-only** review. Ignore style, performance, and general quality concerns unless they create a security risk. Focus exclusively on:
+
+- **Hardcoded secrets or API keys** — credentials, tokens, private keys, passwords committed to source
+- **Injection vulnerabilities** — SQL injection, command injection, XSS, LDAP/XPath/NoSQL injection, template injection
+- **Broken authentication & access control** — auth bypass, missing authorization checks, privilege escalation, insecure session handling
+- **Insecure cryptography** — weak algorithms (MD5, SHA1 for passwords), hardcoded IVs, ECB mode, weak random, plaintext storage of secrets
+- **Unsafe deserialization** — untrusted data fed into deserializers, type confusion, gadget chains
+- **Path traversal & SSRF** — user-controlled paths, URLs, or file access without validation
+- **OWASP Top 10** — any other category from the OWASP Top 10 not listed above
+- **Secrets in logs/telemetry** — sensitive data written to logs, error messages, or metrics
+- **Insecure dependencies** — known-vulnerable library versions visible in the diff
+
+For each finding, determine exploitability from the diff context alone — do not speculate about runtime conditions you cannot verify.
+
+{{severityScope}}
+
+{{editInstruction}}
+
+{{outputFormat}}

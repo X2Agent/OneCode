@@ -1,0 +1,52 @@
+## Task: Initialize AGENTS.md
+
+You are initializing an `AGENTS.md` file for this project. This file provides
+guidance to AI coding agents working with the codebase. Analyze the project
+context below and produce a concrete, project-specific AGENTS.md — NOT a template
+with placeholder comments.
+
+## Project Context
+
+- **Project type:** {{projectType}}
+{{buildCommandLine}}{{testCommandLine}}
+## README (excerpts)
+```markdown
+{{readmeContent}}
+```
+{{markerSection}}
+## Directory Structure (top 2 levels)
+```
+{{directoryTree}}
+```
+{{existingAgentsMdSection}}
+## Instructions
+
+Use the Read / Glob / Grep tools to explore the codebase further if the context
+above is insufficient. Then write a complete `AGENTS.md` file using the Write tool.
+
+The file MUST include these sections (in order):
+
+1. **Project Overview** — 2-4 sentences describing what this project does, based on
+   README and directory structure. Do NOT leave placeholder comments.
+2. **Build & Test Commands** — concrete commands for this project type. Use the
+   detected commands above as the starting point; refine if you find better ones.
+3. **Project Architecture** — describe the key directories and modules visible in
+   the directory tree, and how they likely interact.
+4. **Coding Conventions** — infer conventions from file naming, language, and any
+   config files (.editorconfig, .eslintrc, biome.json, etc.). State conventions
+   as concrete rules, not placeholders.
+5. **Agent Guidelines** — 3-6 practical instructions for AI agents (e.g.,
+   "run `dotnet test` before declaring a task complete").
+6. **Tool Permissions** — list any shell commands that are safe to auto-approve
+   (build/test/lint) and any that must never be run without explicit user approval.
+
+### Quality Requirements
+- Every section must contain REAL content derived from the project. No
+  `<!-- placeholder -->` comments.
+- Commands must be executable as-is (no placeholder paths).
+- Keep the file under 200 lines. Prefer concise concrete rules over verbose prose.
+- Use Markdown formatting with `##` section headers and fenced code blocks for commands.
+
+### Safety
+- Do NOT modify any file other than `AGENTS.md`.
+- Do NOT run build or test commands — only document them.

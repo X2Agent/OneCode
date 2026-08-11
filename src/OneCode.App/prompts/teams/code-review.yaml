@@ -1,0 +1,37 @@
+# 内置团队模板：代码评审
+# 模式：GroupChat（对等讨论，多视角碰撞）
+# 适用：代码评审、架构讨论、技术方案评估
+# 成员：reviewer + architect + researcher
+name: code-review
+description: 代码评审团队 - 对等讨论，多视角审查代码与设计
+template: groupchat
+max_rounds: 15
+workers:
+  - name: reviewer
+    role: reviewer
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+  - name: architect
+    role: architect
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+  - name: researcher
+    role: researcher
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+      - WebSearch
+      - WebFetch

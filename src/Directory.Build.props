@@ -1,0 +1,52 @@
+<Project>
+
+  <!--
+    Common build settings for all OneCode .NET projects.
+    See AGENTS.md for the full coding/quality rules this enforces.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AnalysisLevel>latest-default</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!--
+      Phase 0: 关闭噪声类规则，避免警告淹没真正的问题。
+      Phase-1 计划 (ปลอด): 移除 CA1305, CA1310, CA1311, CA1510, CA1846 (StringComparison.Ordinal/ArgumentNullException.ThrowIfNull/AsSpan)。
+      Phase-2 计划: 移除 CA1861, CA1862, CA1860 (集合性能类)。
+      Phase-3 计划: 移除 CA1725, CA1513 (风格一致性类)。
+      Phase-4 计划: 移除 CA2007 (确保所有 await 使用 ConfigureAwait(false) 后可启用)。
+      Final: 移除 CA2254, CS1591, CA1848, CA1852 并启用 TreatWarningsAsErrors=true。
+    -->
+    <NoWarn>$(NoWarn);CA1848;CA2007;CA1852;CA2254;CA1707;CA1861;CA1862;CA1725;CA1513;CA1860;CS1591;MAAI001</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NeutralLanguage>en-US</NeutralLanguage>
+
+    <!--
+      We progressively raise quality. For Phase 0 we don't break the build on
+      warnings, but we do flag the most critical async/dispose/result anti-patterns
+      that AGENTS.md forbids. Promote to errors per project once cleaned up.
+    -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors>
+      CS4014;
+      CS1998;
+      CA2016;
+      CA2200
+    </WarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>OneCode Contributors</Authors>
+    <Company>OneCode</Company>
+    <Product>OneCode .NET</Product>
+    <Copyright>Copyright (c) 2026 OneCode Contributors</Copyright>
+    <!-- Single source of truth for version. Referenced by ProductInfo and build scripts. -->
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+</Project>

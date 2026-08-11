@@ -1,0 +1,34 @@
+## Crash & Reliability Review Request
+
+- **Branch:** {{branch}}
+- **Scope:** {{scopeDescription}}
+- **Recent commits:** {{recentLog}}
+{{agentRulesSection}}
+## Changes to Review
+```diff
+{{diff}}
+```
+{{blameSection}}{{lspSection}}
+## Review Instructions
+
+You are performing a **crash & reliability** review. Ignore style and pure performance concerns. Focus on code paths that can cause crashes, panics, exceptions, data corruption, or undefined behavior:
+
+- **Null / nil dereferences** — unchecked null returns (`FirstOrDefault`, `TryGetValue`, map lookups) followed by member access
+- **Bounds violations** — array/slice/string index out of range, off-by-one in loops, unchecked `.Length` assumptions
+- **Division by zero** — denominator derived from user input, collection counts, or external state without guards
+- **Uninitialized / partially initialized state** — fields used before assignment, struct zero-value misuse, ordering bugs in constructors
+- **Exception swallowing that hides failures** — empty catch blocks, catch-all that discards stack traces, error states silently coerced to success
+- **Resource leaks leading to exhaustion** — unclosed file handles, sockets, DB connections, mutexes; missing `using`/`finally`/`defer`
+- **Concurrency hazards** — data races, deadlocks, missing synchronization on shared mutable state, unsafe lazy initialization
+- **Integer overflow / underflow** — unchecked arithmetic on untrusted inputs, signed/unsigned confusion
+- **Type coercion traps** — unsafe casts, `as` without null check, unboxing mismatches, enum range assumptions
+- **Error propagation gaps** — async void, fire-and-forget tasks, ignored `Result`/`Either` return values
+- **State machine invalid transitions** — reachable states the code does not handle, enum values added but not switched on
+
+For each finding, cite the exact line and explain the input or sequence that triggers the crash.
+
+{{severityScope}}
+
+{{editInstruction}}
+
+{{outputFormat}}

@@ -1,0 +1,67 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,targets,xml}]
+indent_style = space
+indent_size = 2
+
+[*.{json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.cs]
+indent_style = space
+indent_size = 4
+max_line_length = 140
+
+# C# language conventions ------------------------------------------------------
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_prefer_top_level_statements = false:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+
+# Modern C# features
+dotnet_style_prefer_collection_expression = true:suggestion
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_style_readonly_field = true:warning
+
+# Naming
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+# AGENTS.md anti-patterns: promote to warnings/errors -------------------------
+dotnet_diagnostic.CA2007.severity = none           # ConfigureAwait(false) — only required for libraries; we use mixed contexts
+dotnet_diagnostic.CA1822.severity = suggestion     # Mark members static
+dotnet_diagnostic.CA1031.severity = suggestion     # Catch general Exception — too noisy for now
+dotnet_diagnostic.CA2016.severity = warning        # Forward CancellationToken
+dotnet_diagnostic.CA2200.severity = error          # Re-throw to preserve stack
+dotnet_diagnostic.VSTHRD002.severity = warning     # Avoid sync Wait/Result (third-party analyzer name kept for future)
+dotnet_diagnostic.CS4014.severity = error          # Unawaited Task
+dotnet_diagnostic.CS1998.severity = warning        # Async without await
+
+# ENG-1.4/1.5 Phase-1: 5 条规则已清理全部违规，提升为 error 实现新增代码零豁免
+dotnet_diagnostic.CA1305.severity = error          # Specify IFormatProvider / StringComparison
+dotnet_diagnostic.CA1310.severity = error          # Specify StringComparison for string comparison
+dotnet_diagnostic.CA1311.severity = error          # Specify a culture or use an invariant version
+dotnet_diagnostic.CA1510.severity = error          # Use ArgumentNullException.ThrowIfNull
+dotnet_diagnostic.CA1846.severity = error          # Prefer AsSpan over Substring
+
+# Style
+dotnet_diagnostic.IDE0005.severity = warning       # Remove unused usings
+dotnet_diagnostic.IDE0290.severity = none          # Use primary ctor (suggestion only)
+
+# MAAI001: 类型仅用于评估，在将来的更新中可能会被更改或删除。取消此诊断以继续。
+dotnet_diagnostic.MAAI001.severity = warning

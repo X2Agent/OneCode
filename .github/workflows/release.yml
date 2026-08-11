@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CONFIGURATION: Release
+  SOLUTION: src/OneCode.slnx
+  CLI_PROJECT: src/OneCode.Cli/OneCode.Cli.csproj
+  TEST_PROJECT: src/OneCode.Tests/OneCode.Tests.csproj
+
+jobs:
+  validate:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        run: dotnet build "$SOLUTION" -c "$CONFIGURATION" --no-restore
+
+      - name: Test
+        run: dotnet test "$TEST_PROJECT" -c "$CONFIGURATION" --no-build --no-restore
+
+  publish:
+    name: Publish ${{ matrix.rid }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-latest
+            archive: zip
+          - rid: win-arm64
+            runner: windows-11-arm
+            archive: zip
+          - rid: linux-x64
+            runner: ubuntu-latest
+            archive: tar.gz
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+            archive: tar.gz
+          - rid: osx-x64
+            runner: macos-15-intel
+            archive: tar.gz
+          - rid: osx-arm64
+            runner: macos-latest
+            archive: tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw "Tag '${{ github.ref_name }}' is not a supported semantic version tag."
+          }
+          $binaryVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BINARY_VERSION=$binaryVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "artifacts/publish/${{ matrix.rid }}"
+          dotnet publish $env:CLI_PROJECT `
+            -c $env:CONFIGURATION `
+            -r "${{ matrix.rid }}" `
+            --self-contained true `
+            -p:Version=$env:VERSION `
+            -p:AssemblyVersion=$env:BINARY_VERSION `
+            -p:FileVersion=$env:BINARY_VERSION `
+            -p:PublishTrimmed=false `
+            -p:PublishSingleFile=true `
+            -p:PublishReadyToRun=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke test published executable
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/smoke-test-release.ps1" `
+            -PublishDir "$env:GITHUB_WORKSPACE/artifacts/publish/${{ matrix.rid }}" `
+            -ExpectedVersion $env:VERSION `
+            -Runtime "${{ matrix.rid }}"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "artifacts/publish/${{ matrix.rid }}"
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts/release"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          $baseName = "onecode-$env:VERSION-${{ matrix.rid }}"
+          if ("${{ matrix.archive }}" -eq "zip") {
+            $archive = Join-Path $releaseDir "$baseName.zip"
+            Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $archive -CompressionLevel Optimal
+          } else {
+            $archive = Join-Path $releaseDir "$baseName.tar.gz"
+            tar -czf $archive -C $publishDir .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Create SHA256 checksum
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts/release"
+          $archive = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notlike '*.sha256' } | Select-Object -Single
+          $hash = (Get-FileHash -Path $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($archive.Name)" | Set-Content -Path "$($archive.FullName).sha256" -Encoding ascii -NoNewline
+
+      - name: Upload packaged asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: onecode-${{ matrix.rid }}
+          path: artifacts/release/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/release
+          pattern: onecode-*
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" artifacts/release/* --repo "${{ github.repository }}" --verify-tag --generate-notes --title "OneCode ${{ github.ref_name }}"
