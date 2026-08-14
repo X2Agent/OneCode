@@ -537,11 +537,10 @@ public sealed class TeamOrchestrationService
 
             var decision = await _clarificationInteraction.AskAsync(
                 $"团队 {teamName} 计划审批",
-                [$"执行方案：{plan.Summary}\n任务数：{plan.Tasks.Count}\n批准执行？(yes/no)"],
+                [$"执行方案：{plan.Summary}\n任务数：{plan.Tasks.Count}\n批准执行？"],
+                confirmationOnly: true,
                 ct: ct).ConfigureAwait(false);
-            var approved = !decision.IsCancelled
-                && !string.IsNullOrWhiteSpace(decision.Response)
-                && decision.Response.Contains("yes", StringComparison.OrdinalIgnoreCase);
+            var approved = !decision.IsCancelled;
 
             var response = BuildApprovalResponse(pending.PortId, pending.RequestId, approved);
             approval = await _approvalWorkflowHost.RunApprovalAsync(

@@ -138,10 +138,13 @@ internal sealed class ChatTextEditor : View
                 KeyDownEvent?.Invoke(this, e);
         };
         _editor.Document.TextChanged += (_, _) => OnDocumentChanged();
-        // Keep the text caret stable while other animated views redraw. The terminal
-        // already provides insertion feedback; a steady bar avoids the apparent
-        // double-blink caused by Terminal.Gui redraws plus the terminal blink timer.
-        _editor.Cursor = _editor.Cursor with { Style = CursorStyle.SteadyBar };
+        // Conventional editor caret: a single blinking vertical bar (DECSCUSR Ps=5),
+        // universally supported by modern terminals incl. Windows Terminal/ConPTY.
+        // Setting a "steady" caret (e.g. SteadyBar, Ps=6) is NOT honored by many
+        // terminals, which fall back to their default (block) shape and then blink at
+        // an erratic cadence on every Terminal.Gui redraw — the "weird" flicker users
+        // saw. BlinkingBar keeps the caret visible at a stable, standard rate.
+        _editor.Cursor = _editor.Cursor with { Style = CursorStyle.BlinkingBar };
 
         Add(_editor);
     }

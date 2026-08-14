@@ -258,13 +258,6 @@ public sealed class QueryStreamService(
     }
 
     /// <summary>
-    /// Shared post-turn auto-compaction check for all streaming paths (Normal/Goal/Team/Command).
-    /// Yields a <see cref="TuiCompactSuggested"/> event when token usage crosses 70%.
-    ///
-    /// Actual compaction runs inside the MAF CompactionProvider pipeline; this method
-    /// only surfaces the 70% warning.
-    /// </summary>
-    /// <summary>
     /// 检查关键配置项（model、apiKey）是否已配置。
     /// 全部就绪返回 null；缺少任一项返回用户友好的提示消息。
     /// </summary>
@@ -287,6 +280,13 @@ public sealed class QueryStreamService(
                "  3. 在 settings.json 中设置对应字段";
     }
 
+    /// <summary>
+    /// Shared post-turn auto-compaction check for all streaming paths (Normal/Goal/Team/Command).
+    /// Yields a <see cref="TuiCompactSuggested"/> event when token usage crosses 70%.
+    ///
+    /// Actual compaction runs inside the MAF CompactionProvider pipeline; this method
+    /// only surfaces the 70% warning.
+    /// </summary>
     private async IAsyncEnumerable<TuiEvent> EmitAutoCompactIfNeededAsync(
         OneCode.Core.Domain.Conversation? conversation,
         string? systemPrompt,

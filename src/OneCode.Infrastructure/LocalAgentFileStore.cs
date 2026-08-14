@@ -215,8 +215,8 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
 
     IReadOnlyList<string> IFileSystem.FindFiles(
         string directory,
-        string? patterns = null,
-        string[]? excludeDirs = null)
+        string? patterns,
+        string[]? excludeDirs)
     {
         var resolved = ResolvePath(directory);
         if (!Directory.Exists(resolved))

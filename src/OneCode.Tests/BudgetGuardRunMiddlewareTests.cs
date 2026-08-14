@@ -62,7 +62,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("result"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("result");
     }
@@ -76,7 +76,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("should-not-reach"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         // Should NOT contain the agent's response — must be the budget-exceeded message
         response.Text.Should().NotBe("should-not-reach");
@@ -95,7 +95,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("should-not-reach"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Contain("Budget Exceeded");
         response.Usage.Should().BeNull();
@@ -108,7 +108,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("result"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("result");
     }
@@ -120,7 +120,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("result"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(null, maxBudgetUsd: 0.01m, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("result");
     }
@@ -133,7 +133,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("result"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: null, null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("result");
     }
@@ -153,7 +153,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
         var results = new List<AgentResponseUpdate>();
-        await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             results.Add(update);
 
         results.Should().HaveCount(2);
@@ -173,7 +173,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 5.0m, null);
 
         var results = new List<AgentResponseUpdate>();
-        await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             results.Add(update);
 
         results.Should().HaveCount(1);
@@ -192,7 +192,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(null, maxBudgetUsd: 0.01m, null);
 
         var results = new List<AgentResponseUpdate>();
-        await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             results.Add(update);
 
         results.Should().HaveCount(1);
@@ -256,7 +256,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var (usageRun, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
         // Step 1: Run through UsageTracking directly (simulates BudgetGuard passing through)
-        var response1 = await usageRun([], null, null, stubAgent1, CancellationToken.None);
+        var response1 = await usageRun([], null, null, stubAgent1, TestContext.Current.CancellationToken);
         response1.Text.Should().Be("run-1-result");
         tracker.GetTotalCost().Should().Be(2.00m);
 
@@ -265,7 +265,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         {
             Messages = [new ChatMessage(ChatRole.Assistant, "should-not-reach")],
         });
-        var response2 = await guardRun([], null, null, stubAgent2, CancellationToken.None);
+        var response2 = await guardRun([], null, null, stubAgent2, TestContext.Current.CancellationToken);
 
         response2.Text.Should().Contain("Budget Exceeded");
         response2.Text.Should().Contain("$2.0000");

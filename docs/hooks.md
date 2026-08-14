@@ -165,7 +165,7 @@ OneCode 运行时
 | `WebhookNotificationProviderBase` | Webhook 通知渠道基类（飞书/企微/钉钉共享流程） |
 | `FeishuNotificationProvider` | 飞书机器人通知 Provider |
 | `WeChatWorkNotificationProvider` | 企业微信群机器人通知 Provider |
-| `HookSerializerContext` | JSON Source Generator（支持 AOT + 高频序列化性能） |
+| `HookSerializerContext` | JSON Source Generator（高频序列化性能） |
 
 ### 3.3 集成点（`OneCode.Infrastructure/Middleware/`）
 

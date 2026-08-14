@@ -178,7 +178,7 @@ public sealed class StatusCommand(
 
         // 环境变量 ONECODE_MAX_CONTEXT_TOKENS 仍可作为最终覆盖手段保留
         if (int.TryParse(
-            Environment.GetEnvironmentVariable("ONECODE_MAX_CONTEXT_TOKENS"), out var envMax) && envMax > 0)
+            Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.MaxContextTokens), out var envMax) && envMax > 0)
             maxTokens = envMax;
 
         var usedTokens = (usage?.InputTokens ?? 0) + (usage?.OutputTokens ?? 0);

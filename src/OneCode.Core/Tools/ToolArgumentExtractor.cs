@@ -80,8 +80,6 @@ public static class ToolArgumentExtractor
     }
 
     /// <summary>
-    /// 从工具参数中提取文件路径。
-    ///
     /// 正确处理多种入参类型：
     /// - <c>AIFunctionArguments</c> / <c>Dictionary&lt;string, object?&gt;</c>
     ///   （运行时中间件收到的 <c>ctx.Arguments</c> 即此类型）

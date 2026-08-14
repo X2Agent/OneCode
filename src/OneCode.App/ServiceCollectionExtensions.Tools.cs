@@ -24,6 +24,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<ILspNotifier, LspNotifier>();
         services.AddSingleton<McpConnectionManager>();
         services.AddSingleton<IMcpConnectionManager>(sp => sp.GetRequiredService<McpConnectionManager>());
+        services.AddSingleton<IBrowserPageRenderer, McpBrowserGateway>();
 
         services.AddSingleton<TaskContextProvider>();
         services.AddSingleton<FileContentCache>();
@@ -83,8 +84,6 @@ public static partial class ServiceCollectionExtensions
         services.AddTool<ApplyWorkspaceEditTool>("ApplyWorkspaceEdit", nameof(ApplyWorkspaceEditTool.ApplyAsync), ToolRisk.Destructive, concurrency: false, searchHint: "apply an LSP workspace edit to files",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["workspace edit"], category: ToolCategory.FileWrite);
 
-        services.AddSingleton<BrowserLauncher>();
-        services.AddSingleton<PlaywrightRenderer>();
         services.AddTool<WebFetchTool>("WebFetch", nameof(WebFetchTool.FetchAsync), ToolRisk.ReadOnly, searchHint: "fetch web page content as markdown",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["web fetch", "fetch web", "url"]);
         services.AddTool<WebSearchTool>("WebSearch", nameof(WebSearchTool.SearchAsync), ToolRisk.ReadOnly, searchHint: "search the web",
@@ -116,8 +115,6 @@ public static partial class ServiceCollectionExtensions
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["symbol"]);
         services.AddTool<LspTool>("Lsp", nameof(LspTool.ExecuteLspAsync), ToolRisk.ReadOnly, searchHint: "perform language-server operations",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["lsp", "language server"]);
-        services.AddTool<ChromeDevToolsTool>("ChromeDevTools", nameof(ChromeDevToolsTool.ExecuteDevToolsAsync), ToolRisk.Dynamic, searchHint: "inspect browser via DevTools protocol",
-            loadPolicy: ToolLoadPolicy.Deferred, keywords: ["browser", "chrome", "devtools"]);
         services.AddTool<EnterWorktreeTool>("EnterWorktree", nameof(EnterWorktreeTool.EnterAsync), ToolRisk.Destructive, concurrency: false, searchHint: "enter or create a git worktree",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["worktree"]);
         services.AddTool<ExitWorktreeTool>("ExitWorktree", nameof(ExitWorktreeTool.ExitAsync), ToolRisk.Destructive, concurrency: false, searchHint: "exit a git worktree",

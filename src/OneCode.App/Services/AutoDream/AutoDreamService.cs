@@ -26,8 +26,8 @@ namespace OneCode.App.Services.AutoDream;
 ///
 /// <para><b>默认开启</b>，无需任何配置。两个自然门控防止频繁触发：</para>
 /// <list type="bullet">
-/// <item>距上次整合 ≥ 24 小时</item>
-/// <item>新会话数 ≥ 5 个</item>
+/// <item>距上次整合 ≥ 6 小时</item>
+/// <item>新会话数 ≥ 3 个</item>
 /// </list>
 /// <para>不写入 AGENTS.md——那是人工维护的规范，自动改写会污染它。</para>
 /// </remarks>

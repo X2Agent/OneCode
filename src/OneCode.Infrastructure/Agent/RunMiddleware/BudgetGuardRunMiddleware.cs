@@ -43,7 +43,7 @@ public static class BudgetGuardRunMiddleware
 {
     /// <summary>
     /// 创建 Agent Run 级预算守卫中间件的 (runFunc, runStreamingFunc) 委托对。
-    /// 传给 <see cref="AIAgentBuilder.Use"/> 的 Run 中间件重载。
+    /// 传给 <see cref="AIAgentBuilder.Use(System.Func{Microsoft.Agents.AI.AIAgent, Microsoft.Agents.AI.AIAgent})"/> 的 Run 中间件重载。
     /// </summary>
     /// <param name="costTracker">ICostTracker 实例（null 时不执行预算检查）。</param>
     /// <param name="maxBudgetUsd">预算上限（USD）。null 时不执行预算检查。</param>

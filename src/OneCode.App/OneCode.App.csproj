@@ -22,7 +22,6 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
-    <PackageReference Include="Microsoft.Playwright" />
     <PackageReference Include="Terminal.Gui" />
     <PackageReference Include="Terminal.Gui.Editor" />
     <PackageReference Include="Markdig" />

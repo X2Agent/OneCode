@@ -96,7 +96,7 @@ if (-not ($versionOutput -match [regex]::Escape($ExpectedVersion))) {
 Write-Pass "版本号匹配: $versionOutput"
 
 # ── 3. 关键运行时资源检查 ────────────────────────────────────────
-# 发布包包含 prompts、Team YAML 与 Playwright 资源(见 install.ps1 注释)。
+# 发布包包含 prompts、Team YAML 等运行时资源(见 install.ps1 注释)。
 # 这里只验证最关键的几个:缺了它们 TUI 起不来 / 命令报错。
 $requiredResources = @(
     "prompts/system/harness.prompt",

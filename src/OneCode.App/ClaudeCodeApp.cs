@@ -122,27 +122,7 @@ public sealed class OneCodeApp : IAsyncDisposable
 
     private static DebugLogConfig GetDebugConfig()
     {
-        var isDebugBuild = DebugLogConfig.DebugBuild;
-        var debugEnv = Environment.GetEnvironmentVariable("ONECODE_DEBUG");
-        var verboseEnv = Environment.GetEnvironmentVariable("ONECODE_VERBOSE");
-        var explicitDebug = !string.IsNullOrEmpty(debugEnv)
-            && !string.Equals(debugEnv, "0", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(debugEnv, "false", StringComparison.OrdinalIgnoreCase);
-        var verboseEnabled = !string.IsNullOrEmpty(verboseEnv)
-            && !string.Equals(verboseEnv, "0", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(verboseEnv, "false", StringComparison.OrdinalIgnoreCase);
-
-        if (!isDebugBuild && !explicitDebug)
-            return DebugLogConfig.Disabled;
-
-        var minLevel = verboseEnabled ? LogLevel.Trace : LogLevel.Debug;
-
-        return new DebugLogConfig
-        {
-            Enabled = true,
-            MinimumLevel = minLevel,
-            OutputToConsole = true,
-            OutputToFile = true,
-        };
+        var levelEnv = Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.LogLevel);
+        return DebugLogConfig.Resolve(DebugLogConfig.DebugBuild, levelEnv);
     }
 }

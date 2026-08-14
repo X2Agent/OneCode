@@ -30,9 +30,6 @@ internal sealed class SpinnerController
     private int _frameIndex;
     private object? _timeoutToken;
 
-    /// <summary>
-    /// 创建 spinner 控制器。
-    /// </summary>
     /// <param name="app">Terminal.Gui 应用实例，用于 timeout 调度。</param>
     /// <param name="onFrameAdvanced">每次帧推进后调用的回调。
     /// 通常是所属 View 的 <c>() => SetNeedsDraw()</c>。</param>

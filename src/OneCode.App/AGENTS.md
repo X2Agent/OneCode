@@ -36,7 +36,6 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | `YamlDotNet` | YAML 解析（Skill frontmatter、主题文件） | App |
 | `Markdig` | Markdown 渲染（TUI 消息展示） | App |
 | `CliWrap` | 进程调用（Bash/PowerShell 工具执行） | App |
-| `Microsoft.Playwright` | 浏览器自动化（ChromeDevToolsTool） | App |
 | `Microsoft.Extensions.FileSystemGlobbing` | 文件 Glob 匹配 | App |
 
 ### 禁止的依赖

@@ -224,8 +224,7 @@ public void IsReadOnly_CorrectlyClassifies(string command, bool expectedReadOnly
 1. **纯数据模型**（POCO/DTO/Record）：没有行为的类型不需要测试
 2. **DI 注册**（`services.AddXxx()`）：启动时的容器验证优于单元测试
 3. **第三方库的封装层**（薄 wrapper）：测试第三方库本身不是你的责任
-4. **AOT 兼容性**：由 linker/trimmer 分析工具保证，不是单元测试
-5. **日志输出**：验证 `logger.Received()` 没有防回归价值
+4. **日志输出**：验证 `logger.Received()` 没有防回归价值
 
 ---
 

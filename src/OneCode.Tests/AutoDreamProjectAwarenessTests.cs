@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.AutoDream;
 using OneCode.App.Tools;
+using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
@@ -44,7 +45,7 @@ public sealed class AutoDreamProjectAwarenessTests : IDisposable
             NullLogger<AutoDreamService>.Instance,
             NullLoggerFactory.Instance,
             agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(new InMemoryMemoryEntryStore(), Substitute.For<IConfigManager>(), _wdAccessor),
+            storage: new AutoDreamStorageDependencies(Substitute.For<IMemoryEntryStore>(), Substitute.For<IConfigManager>(), _wdAccessor),
             globalConfigDirOverride: _globalConfigDir);
     }
 

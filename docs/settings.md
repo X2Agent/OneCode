@@ -114,7 +114,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `nextPromptSuggesterEnabled` | `bool` | `true` | 是否生成下一步输入建议 |
 | `notificationsEnabled` | `bool` | `false` | 是否启用本地任务完成通知 |
 
-详细日志由运行标志 `ONECODE_VERBOSE` 控制，不属于持久化配置。
+详细日志由运行标志 `ONECODE_LOG_LEVEL` 控制（`off` / `debug` / `trace`），不属于持久化配置。
 
 ### Web 搜索
 
@@ -212,7 +212,7 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 
 > 环境变量由 `ConfigManager` 映射到配置键并标记来源为 `Environment`。环境变量作用域只读，任何保存操作都不会将其值持久化到 `settings.json`。
 >
-> `ONECODE_DEBUG`、`ONECODE_VERBOSE`、`ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。
+> `ONECODE_LOG_LEVEL`、`ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。调试日志级别 `ONECODE_LOG_LEVEL` 取值 `off|debug|trace`（空按构建默认；`off` 可显式关闭，`trace` 隐含开启调试）。
 
 ---
 

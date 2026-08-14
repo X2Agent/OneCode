@@ -99,8 +99,6 @@ public sealed class McpCommand(
         return sb.ToString().TrimEnd();
     }
 
-    // get
-
     private async Task<string> GetServerAsync(string name, CancellationToken ct)
     {
         var merged = await configLoader.LoadAllAsync(ct: ct).ConfigureAwait(false);

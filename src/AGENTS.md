@@ -28,7 +28,7 @@
 - [文件和目录命名约定](#文件和目录命名约定)
 - [参考资源](#参考资源)
 
-> **项目级补充文件：** [OneCode.Core/AGENTS.md](OneCode.Core/AGENTS.md)（依赖约束 + 接口规范）| [OneCode.Infrastructure/AGENTS.md](OneCode.Infrastructure/AGENTS.md)（外部集成约束）| [OneCode.Automation/AGENTS.md](OneCode.Automation/AGENTS.md)（后台调度服务约束）| [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md)（业务逻辑 + TUI 约束）| [OneCode.Cli/AGENTS.md](OneCode.Cli/AGENTS.md)（AOT 约束 + 入口点规范）| [OneCode.Tests/AGENTS.md](OneCode.Tests/AGENTS.md)（单元测试约束，禁止敷衍测试）
+> **项目级补充文件：** [OneCode.Core/AGENTS.md](OneCode.Core/AGENTS.md)（依赖约束 + 接口规范）| [OneCode.Infrastructure/AGENTS.md](OneCode.Infrastructure/AGENTS.md)（外部集成约束）| [OneCode.Automation/AGENTS.md](OneCode.Automation/AGENTS.md)（后台调度服务约束）| [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md)（业务逻辑 + TUI 约束）| [OneCode.Cli/AGENTS.md](OneCode.Cli/AGENTS.md)（入口点规范）| [OneCode.Tests/AGENTS.md](OneCode.Tests/AGENTS.md)（单元测试约束，禁止敷衍测试）
 
 ---
 
@@ -53,7 +53,6 @@
 
 - **.NET SDK 10** — 项目目标框架为 `net10.0`，必须安装对应 SDK
 - **IDE** — Visual Studio 2022 v17.14+、Rider 2025.1+ 或 VS Code + C# Dev Kit
-- **AOT 分析** — CLI 项目启用 `EnableAotAnalyzer`，详见 [Cli/AGENTS.md](OneCode.Cli/AGENTS.md)
 
 ### 构建命令
 
@@ -68,7 +67,7 @@ dotnet build src/OneCode.slnx
 dotnet build src/OneCode.Core/OneCode.Core.csproj
 dotnet build src/OneCode.App/OneCode.App.csproj
 
-# 发布 CLI（AOT 裁剪）
+# 发布 CLI
 dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release
 ```
 
@@ -445,7 +444,7 @@ services.AddHttpClient("anthropic")
 |---------|--------|---------|----------|
 | HTTP 客户端 | `HttpClient` + `Microsoft.Extensions.Http` | BCL 内置，官方 IHttpClientFactory 集成 | 自定义 HTTP 包装器 |
 | 弹性/重试 | `Microsoft.Extensions.Http.Resilience` (Polly) | 官方 Polly 集成，零额外依赖 | 自己写重试循环 |
-| JSON 序列化 | `System.Text.Json` | BCL 内置，高性能，AOT 友好 | Newtonsoft.Json（除非有特殊需要） |
+| JSON 序列化 | `System.Text.Json` | BCL 内置，高性能 | Newtonsoft.Json（除非有特殊需要） |
 | YAML 解析 | `YamlDotNet` | 最成熟的 .NET YAML 库 | 自定义 YAML 解析器 |
 | MCP 协议 | `ModelContextProtocol` v1.4.0（官方 SDK） | 官方支持，活跃维护 | 自实现 MCP 协议 |
 | 全屏 TUI | `Terminal.Gui` v2.4+ | 实例化 IApplication 模型 + Scheme 主题 + Command/KeyBindings 输入架构；唯一的交互式 UI 框架 | `Spectre.Console`（命令式 `LiveDisplay` 无法模拟组件树，已下线）、手动 ANSI 转义码 |
@@ -470,7 +469,7 @@ OneCode.Core          ← 仅 BCL + MS.Ext.Abstractions + MS.Extensions.AI.Abstr
 OneCode.Infrastructure← 依赖 Core + Microsoft.ML.Tokenizers + YamlDotNet
 OneCode.Automation    ← 依赖 Core + Infrastructure（后台调度服务：Cron / Hooks 清理 / ModelCatalog 刷新 / YOLO 规则加载）
 OneCode.App           ← 依赖 Core + Infrastructure + Automation（主业务逻辑 + TUI）
-OneCode.Cli           ← 依赖 App（命令行入口，AOT 发布）
+OneCode.Cli           ← 依赖 App（命令行入口）
 OneCode.Tests         ← 依赖上述所有（xUnit v3 测试）
 ```
 
@@ -646,11 +645,11 @@ MAF 同时提供 `IFunctionInvocationFilter` 接口作为类型化的函数调�
 
 ### 7. 源生成器优先
 
-减少反射、提升 AOT 友好性，下列场景**必须**使用源生成器：
+减少反射，下列场景**必须**使用源生成器：
 
 | 场景 | 方式 | 示例 |
 |------|------|------|
-| JSON 序列化（类型 > 100KB 或 AOT 发布） | `JsonSerializerContext` 源生成器 | `[JsonSerializable(typeof(MyDto))]` |
+| JSON 序列化（类型 > 100KB） | `JsonSerializerContext` 源生成器 | `[JsonSerializable(typeof(MyDto))]` |
 | 正则常量 | `[GeneratedRegex]` | `[GeneratedRegex(@"\d+")]` |
 | P/Invoke | `LibraryImport`（替代 `DllImport`） | `[LibraryImport("kernel32.dll")]` |
 
@@ -662,8 +661,6 @@ private static partial Regex QueryTokenRegex();
 // ❌ 禁止：运行时编译正则（反射开销）
 private static readonly Regex QueryTokenRegex = new(@"[\p{L}\p{N}_-]{2,}", RegexOptions.Compiled);
 ```
-
-> AOT 发布的完整约束和 JSON 源生成器迁移路线图见 [Cli/AGENTS.md](OneCode.Cli/AGENTS.md)。
 
 ---
 

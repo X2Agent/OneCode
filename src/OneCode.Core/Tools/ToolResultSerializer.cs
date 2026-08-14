@@ -52,15 +52,12 @@ public static class ToolResultSerializer
 
         var parts = new List<string>(5) { $"[{tag}] {result.Content}" };
 
-        // ERR-1.2: 结构化 problemDetails 块（当 Telemetry 含 problem.type 时提取）
-        if (result.Telemetry is { Count: > 0 }
-            && result.Telemetry.TryGetValue("problem.type", out var probType)
-            && probType is string probTypeStr)
+        // 结构化 problemDetails 块（RFC 9457 语义）
+        if (result.ErrorDetails is { } problem)
         {
-            parts.Add($"Problem: {probTypeStr} (status={result.Telemetry.GetValueOrDefault("problem.status")})");
-            if (result.Telemetry.TryGetValue("problem.traceId", out var traceId)
-                && traceId is string { Length: > 0 } tid)
-                parts.Add($"TraceId: {tid}");
+            parts.Add($"Problem: {problem.Type} (status={problem.Status})");
+            if (!string.IsNullOrEmpty(problem.TraceId))
+                parts.Add($"TraceId: {problem.TraceId}");
         }
 
         if (result.SuggestedNextAction is not null)
@@ -69,7 +66,7 @@ public static class ToolResultSerializer
         if (result.Telemetry is { Count: > 0 })
         {
             var telemetryParts = result.Telemetry
-                .Where(kv => kv.Value is not null && !kv.Key.StartsWith("problem.", StringComparison.Ordinal))
+                .Where(kv => kv.Value is not null)
                 .Select(kv => $"  {kv.Key}: {kv.Value}");
             var telemetryList = string.Join("\n", telemetryParts);
             if (telemetryList.Length > 0)

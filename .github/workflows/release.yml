@@ -95,7 +95,6 @@ jobs:
             -p:Version=$env:VERSION `
             -p:AssemblyVersion=$env:BINARY_VERSION `
             -p:FileVersion=$env:BINARY_VERSION `
-            -p:PublishTrimmed=false `
             -p:PublishSingleFile=true `
             -p:PublishReadyToRun=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `

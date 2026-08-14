@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI.Mcp;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.Infrastructure.Mcp;
@@ -16,6 +15,9 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
     private readonly McpMultiScopeConfigLoader _multiScopeLoader;
     private readonly McpElicitationHandler _elicitationHandler;
     private readonly ConcurrentDictionary<string, McpServerConnection> _connections = new(StringComparer.Ordinal);
+    // 同名服务器的连接门闩：将"检查-连接-写入"串行化，避免并发调用下
+    // 非原子的 ContainsKey 检查导致重复创建客户端或互相断开对方刚建立的连接。
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _connectGates = new(StringComparer.Ordinal);
     private bool _disposed;
 
     public McpConnectionManager(
@@ -51,9 +53,19 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
         if (disabledCount > 0)
             _logger.LogInformation("Skipping {Count} disabled MCP server(s).", disabledCount);
 
+        // 内置服务（如 playwright）默认按需连接：不随启动连接，由消费方
+        // 在首次使用时通过 ConnectOneAsync 触发。连接时机是"正向约定"，
+        // 无需用户在配置里表达。
+        var builtIn = enabled.Where(kv => BuiltInMcpServers.IsBuiltIn(kv.Key)).Select(kv => kv.Key).ToList();
+        if (builtIn.Count > 0)
+        {
+            _logger.LogDebug("Deferring {Count} built-in MCP server(s) (on-demand): {Names}", builtIn.Count, string.Join(", ", builtIn));
+            enabled = enabled.Where(kv => !BuiltInMcpServers.IsBuiltIn(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
         if (enabled.Count == 0)
         {
-            _logger.LogDebug("No MCP servers configured.");
+            _logger.LogDebug("No MCP servers to connect at startup.");
             return;
         }
 
@@ -99,19 +111,58 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
             return false;
         }
 
-        // Drop any stale connection first so the inner ConnectOneAsync below
-        // isn't short-circuited by its own "already connected" early-return.
-        if (_connections.TryRemove(name, out var prior))
+        var gate = await AcquireConnectGateAsync(name, ct).ConfigureAwait(false);
+        try
         {
-            try { await prior.Client.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Error disposing prior MCP client for '{Name}'", name); }
+            // Drop any stale connection first so the reconnect below
+            // isn't short-circuited by the "already connected" early-return in the core.
+            if (_connections.TryRemove(name, out var prior))
+            {
+                try { await prior.Client.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Error disposing prior MCP client for '{Name}'", name); }
+            }
+
+            await ConnectOneAsyncCore(name, def, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
         }
 
-        await ConnectOneAsync(name, def, ct).ConfigureAwait(false);
         return _connections.TryGetValue(name, out var updated) && updated.IsConnected;
     }
 
     public async Task ConnectOneAsync(string name, McpServerDefinition def, CancellationToken ct = default)
+    {
+        var gate = await AcquireConnectGateAsync(name, ct).ConfigureAwait(false);
+        try
+        {
+            await ConnectOneAsyncCore(name, def, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 获取指定服务器的连接门闩，并将连接操作串行化。同名服务器的并发连接/重连
+    /// （如按需连接、/mcp connect、ConnectAll）不会同时越过 <see cref="ConnectOneAsyncCore"/>
+    /// 里非原子的 ContainsKey 检查，避免重复创建客户端或互相断开对方刚建立的连接。
+    /// 门闩按名缓存；连接集合很小，会话生命周期内增长有界。
+    /// </summary>
+    private async Task<SemaphoreSlim> AcquireConnectGateAsync(string name, CancellationToken ct)
+    {
+        var gate = _connectGates.GetOrAdd(name, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        return gate;
+    }
+
+    /// <summary>
+    /// 在已持有 <see cref="_connectGates"/> 门闩的前提下执行实际连接。
+    /// 调用方负责获取/释放门闩；本方法不做加锁，避免重复获取造成死锁。
+    /// </summary>
+    private async Task ConnectOneAsyncCore(string name, McpServerDefinition def, CancellationToken ct)
     {
         if (_connections.ContainsKey(name))
             return;
@@ -272,33 +323,30 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
     private const int MaxFunctionNameLength = 64;
 
     /// <summary>
-    /// 通过 MAF <see cref="McpClientTaskExtensions.ListAgentToolsWithTaskSupportAsync"/> 加载工具，
-    /// 并为每个工具名添加模型兼容的 <c>mcp__{server}__{tool}</c> 前缀。
+    /// 用 MCP SDK 原生 API（<see cref="McpClient.ListToolsAsync"/>）加载工具并包装为
+    /// <see cref="AIFunction"/>，工具名带 <c>mcp__{server}__{tool}</c> 前缀。
+    ///
+    /// <para>注意：不使用 MAF 的 <c>ListAgentToolsWithTaskSupportAsync</c>——MAF
+    /// （Microsoft.Agents.AI.Mcp）针对 ModelContextProtocol 1.2.0 编译（引用
+    /// <c>ModelContextProtocol.Protocol.ToolTaskSupport</c>），运行时绑定 2.1.0 会抛
+    /// TypeLoadException（该类型在 2.1.0 已移除）。改用 SDK 原生工具枚举 + 自包装
+    /// <see cref="McpToolAIFunction"/> 可同时兼容 1.x / 2.x SDK。</para>
     /// </summary>
     private static async Task<IReadOnlyList<AIFunction>> LoadAgentToolsAsync(
         McpClient client,
         string serverName,
         CancellationToken ct)
     {
-        var sdkClient = client.SdkClient;
-        if (sdkClient is null)
+        var tools = await client.ListToolsAsync(ct).ConfigureAwait(false);
+        if (tools.Count == 0)
             return [];
-
-        var tools = await sdkClient.ListAgentToolsWithTaskSupportAsync(cancellationToken: ct)
-            .ConfigureAwait(false);
 
         var prefixed = new List<AIFunction>(tools.Count);
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var tool in tools)
         {
             var prefixedName = CreateUniqueToolName(serverName, tool.Name, usedNames);
-
-            // McpClientTool has a public WithName() that returns a renamed copy.
-            // TaskAwareMcpClientAIFunction (MAF internal) does not, so we wrap it.
-            if (tool is ModelContextProtocol.Client.McpClientTool mcpTool)
-                prefixed.Add(mcpTool.WithName(prefixedName));
-            else
-                prefixed.Add(new RenamedAIFunction(tool, prefixedName));
+            prefixed.Add(new McpToolAIFunction(client, tool, prefixedName));
         }
 
         return prefixed;
@@ -382,4 +430,54 @@ internal sealed class RenamedAIFunction : AIFunction
 
     protected override ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         => _inner.InvokeAsync(arguments, cancellationToken);
+}
+
+/// <summary>
+/// 将 MCP 工具（<see cref="McpTool"/>）包装为 <see cref="AIFunction"/>：
+/// 名称带 <c>mcp__{server}__{tool}</c> 前缀，调用时经 <see cref="McpClient.CallToolAsync"/>
+/// 转发到 MCP 服务器，返回文本内容。
+///
+/// <para>替代 MAF 的 <c>ListAgentToolsWithTaskSupportAsync</c>（其依赖 ModelContextProtocol
+/// 1.2.0 的 ToolTaskSupport 类型，与运行时绑定的 2.x SDK 不兼容）。</para>
+/// </summary>
+internal sealed class McpToolAIFunction : AIFunction
+{
+    private readonly McpClient _client;
+    private readonly string _toolName;
+    private readonly string _description;
+    private readonly JsonElement _inputSchema;
+
+    public McpToolAIFunction(McpClient client, McpTool tool, string name)
+    {
+        _client = client;
+        _toolName = tool.Name;
+        _description = tool.Description ?? "";
+        _inputSchema = tool.InputSchema
+            ?? JsonSerializer.SerializeToElement(new { type = "object", properties = new Dictionary<string, object?>() });
+        Name = name;
+    }
+
+    public override string Name { get; }
+    public override string Description => _description;
+    public override JsonElement JsonSchema => _inputSchema;
+    public override JsonElement? ReturnJsonSchema => null;
+    public override JsonSerializerOptions JsonSerializerOptions => JsonSerializerOptions.Default;
+
+    protected override async ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, object?>? args = null;
+        if (arguments.Count > 0)
+        {
+            // AIFunctionArguments 继承自 Dictionary<string, object?>，可直接复制。
+            args = new Dictionary<string, object?>(arguments, StringComparer.Ordinal);
+        }
+
+        var result = await _client.CallToolAsync(_toolName, args, cancellationToken).ConfigureAwait(false);
+        if (result.IsError)
+            throw new InvalidOperationException($"MCP tool '{_toolName}' failed: {result.Content}");
+
+        return result.Content;
+    }
 }

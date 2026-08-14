@@ -113,8 +113,6 @@ public sealed class VcrChatClientDecorator : IChatClient
     }
 
     /// <summary>
-    /// 计算 fixture 文件路径。
-    ///
     /// Key 范围（故意为之，仅基于以下两项）：
     /// <list type="bullet">
     /// <item><see cref="ChatOptions.ModelId"/> — 不同模型 fixture 隔离</item>

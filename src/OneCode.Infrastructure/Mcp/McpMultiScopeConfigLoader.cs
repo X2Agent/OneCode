@@ -105,12 +105,31 @@ public sealed class McpMultiScopeConfigLoader
         }
 
         var merged = MergeConfigs(userConfig, projectConfig, localConfig);
+        var withBuiltIn = MergeBuiltIn(merged);
 
         return new MergedMcpConfig(
-            Servers: merged.Servers,
+            Servers: withBuiltIn.Servers,
             UserConfigPath: userPath,
             ProjectConfigPath: projectPath,
             LocalConfigPath: localPath);
+    }
+
+    /// <summary>
+    /// 内置服务作为最底层（用户/项目/本地配置同名覆盖其定义）。
+    /// 覆盖后仍保留内置身份（按名称判断），不影响连接策略。
+    /// </summary>
+    private static ParsedMcpServers MergeBuiltIn(ParsedMcpServers user)
+    {
+        var merged = new Dictionary<string, McpServerDefinition>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, def) in BuiltInMcpServers.All)
+            merged[name] = def;
+
+        foreach (var (name, def) in user.Servers)
+            merged[name] = def;
+
+        return new ParsedMcpServers(merged);
     }
 
     private static ParsedMcpServers MergeConfigs(

@@ -4,6 +4,14 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!--
+      suppress xUnit1051（应使用 TestContext.Current.CancellationToken）：
+      全量存量约 432 处，混含大量"省略可选 CancellationToken 参数"的调用，
+      逐一机械改写调用签名风险高。项目已在 Directory.Build.props 以 NoWarn
+      治理同类分析器规则，本处对测试项目做等价的、可追溯的安静化。
+      新增测试仍应主动使用 TestContext.Current.CancellationToken。
+    -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

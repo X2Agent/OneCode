@@ -298,7 +298,6 @@ public static class KeybindingValidator
                         break;
 
                     case JsonTokenType.String:
-                        // 读取 context 的值
                         if (pendingPropertyName == "context")
                         {
                             currentContext = reader.GetString();

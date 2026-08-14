@@ -39,7 +39,7 @@
 | 包管理 | npm/bun | NuGet (CPM) |
 | 测试框架 | Jest | xUnit v3 + NSubstitute + FluentAssertions |
 | Agent 框架 | 自研 while 循环 | MAF 1.11 (ChatClientAgent + 中间件管道) |
-| 发布方式 | JavaScript bundle | .NET 自包含单文件（Native AOT 尚未启用） |
+| 发布方式 | JavaScript bundle | .NET 自包含单文件 |
 
 **MAF 包依赖**：
 
@@ -77,7 +77,7 @@
 
 ```
 src/
-├── OneCode.Cli/                 # AOT 入口 · 快速路径分发（4 文件）
+├── OneCode.Cli/                 # CLI 入口 · 快速路径分发（4 文件）
 │   ├── Program.cs              #   主入口
 │   ├── CliModeDetector.cs      #   快速路径检测
 │   └── FastPathDispatcher.cs   #   特殊模式快速分发
@@ -119,7 +119,7 @@ src/
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  OneCode.Cli  (4 文件)                                          │
-│  AOT 入口 · 快速路径分发 · CliModeDetector · FastPathDispatcher │
+│  CLI 入口 · 快速路径分发 · CliModeDetector · FastPathDispatcher │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
@@ -160,7 +160,7 @@ src/
 | 11 | Deep Reasoning 深度思考 | 88% | `EffortThinking`（4 级强度） |
 | 12 | Web Search 网络搜索 | 87% | `WebSearchTool`（Brave + DuckDuckGo 双引擎） |
 | 13 | Terminal Execution | 92% | `BashTool` + `PowerShellTool` + `REPLTool` |
-| 14 | Headless Mode CI/CD 模式 | 90% | `--no-input` + `--permission-mode` + AOT |
+| 14 | Headless Mode CI/CD 模式 | 90% | `--no-input` + `--permission-mode` |
 | 15 | Code Review 代码审查 | 85% | `/review` 斜杠命令（--staged / --output json / LSP / blame / 增量） |
 | 16 | Sandboxed Execution 沙箱 | 85% | `HyperlightCodeActService`（默认启用，自动挂载工作目录） |
 | 17 | Background Tasks 后台任务 | 92% | `TaskService` + 6 个 Task 工具 + `CronTools` |
@@ -194,7 +194,7 @@ cd OneCode
 ./scripts/build.ps1 -Mode Publish -Runtime win-x64
 ```
 
-默认发布到仓库根目录 `artifacts/Publish/<RID>/`。正式 Release 使用 self-contained + single-file，当前明确关闭 trimming；推送 `v<major>.<minor>.<patch>` Tag 后，GitHub Actions 会执行 Build → Test → 跨平台 Publish → 冒烟测试 → ZIP/TAR.GZ 打包 → SHA256 → GitHub Release。
+默认发布到仓库根目录 `artifacts/Publish/<RID>/`。正式 Release 使用 self-contained + single-file；推送 `v<major>.<minor>.<patch>` Tag 后，GitHub Actions 会执行 Build → Test → 跨平台 Publish → 冒烟测试 → ZIP/TAR.GZ 打包 → SHA256 → GitHub Release。
 
 ### 快速开始
 
@@ -267,7 +267,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 | 工具 | 功能 |
 |------|------|
-| WebFetch | 抓取网页（支持 Playwright 渲染 SPA） |
+| WebFetch | 抓取网页（HTTP→Markdown；已连接 Playwright MCP 时自动用 navigate/snapshot 兜底 SPA） |
 | WebSearch | 网络搜索（Brave + DuckDuckGo） |
 
 ### 任务管理
@@ -311,7 +311,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 | 工具 | 功能 |
 |------|------|
-| ChromeDevTools | Chrome DevTools 浏览器控制 |
+| mcp__playwright__* | 浏览器自动化（可选；`/mcp add playwright --transport stdio --command npx --args @playwright/mcp@latest --scope user --connect`） |
 | AskUserQuestion | 向用户提问 |
 | EnterWorktree / ExitWorktree | Git Worktree 管理 |
 | CronCreate / CronDelete / CronList | 定时任务 |
@@ -535,7 +535,7 @@ ChatClientAgent
 | **AutoDream 记忆整合** | 后台自动提取关键信息写入记忆文件 |
 | **Git Worktree 管理** | `EnterWorktreeTool` / `ExitWorktreeTool`，任务级隔离 |
 | **Cron 定时任务** | `CronTools` 跨会话持续运行的定时任务 |
-| **自包含单文件发布** | .NET 10 self-contained + single-file；Native AOT 待反射与序列化兼容性改造完成后启用 |
+| **自包含单文件发布** | .NET 10 self-contained + single-file |
 | **Vim 模式** | 5 种子模式完整 Vim 键绑定（Normal / Insert / Visual / VisualLine / Replace） |
 | **主题系统** | 6 套内置主题 + 自定义，运行时热切换，Agent 8 色区分 |
 | **多级上下文压缩** | Auto / Micro / Snip / Collapse 四级策略 |

@@ -271,7 +271,8 @@ public sealed class LspTool
     {
         var @params = new { textDocument = new { uri }, position = new { line = line - 1, character = column - 1 } };
         var result = await _serverManager.SendRequestAsync(server, "textDocument/prepareRename", JsonSerializer.SerializeToElement(@params), ct).ConfigureAwait(false);
-        // null result means the position is not renamable — return that explicitly so the agent can decide.
+        // null result means the position is not renamable — return an explicit renamable=false
+        // marker so the agent can decide.
         return (object?)result ?? new { renamable = false };
     }
 

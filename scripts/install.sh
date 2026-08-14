@@ -117,7 +117,7 @@ install_binary() {
     mkdir -p "$extract_dir"
     tar -xzf "${temp_dir}/onecode.tar.gz" -C "$extract_dir"
 
-    # 发布包包含 prompts、Team YAML 与 Playwright 资源，必须整体安装。
+    # 发布包包含 prompts、Team YAML 等运行时资源，必须整体安装。
     if [ ! -f "${extract_dir}/OneCode.Cli" ]; then
         err "在归档根目录中找不到 OneCode.Cli"; exit 1
     fi

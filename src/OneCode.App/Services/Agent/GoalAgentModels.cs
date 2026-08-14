@@ -38,7 +38,7 @@ public sealed record GoalRunOptions
     public Action<OneCode.Core.Coordinator.OrchestrationEvent>? OrchestrationEventSink { get; init; }
 
     /// <summary>
-    /// 三级预算（attempt + token + 时间 + 美元）。
+    /// 四级预算（attempt + token + 时间 + 美元）。
     /// 默认 null → Goal 工作流 Runtime 使用 <see cref="GoalBudget"/> 默认值。
     /// 100% 消耗时强制终止 + 保存 Checkpoint；70%/90% 触发 TUI 警告。
     /// </summary>

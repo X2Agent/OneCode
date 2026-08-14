@@ -29,7 +29,6 @@ public static class EffortThinking
     };
 
     /// <summary>
-    /// 计算 thinking budget。
     /// 优先使用 <paramref name="model"/> 中的 catalog ThinkingBudget 作为基础值；
     /// 缺省时回退到模型名称启发式。
     /// </summary>

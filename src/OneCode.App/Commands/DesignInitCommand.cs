@@ -2,6 +2,7 @@ using System.Text;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Abstractions;
 using OneCode.Infrastructure.Config;
+using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Commands;
 
@@ -13,7 +14,8 @@ public sealed class DesignInitCommand(
     IFileSystem fileSystem,
     IConfigManager configManager,
     IPromptManager promptManager,
-    ILogger<DesignInitCommand>? logger = null) : Command
+    ILogger<DesignInitCommand>? logger = null,
+    IMcpConnectionManager? mcpConnectionManager = null) : Command
 {
     public override string Name => "design-init";
     public override string Description => "Initialize DESIGN.md from project assets or by cloning a website's design";
@@ -24,7 +26,8 @@ public sealed class DesignInitCommand(
     private static readonly string[] AllowedTools =
     [
         "Read(*)", "Glob(*)", "Grep(*)",
-        "ChromeDevTools(*)", "WebFetch(*)",
+        "WebFetch(*)",
+        "mcp__playwright__*",
         "Write(DESIGN.md)",
     ];
 
@@ -76,7 +79,28 @@ public sealed class DesignInitCommand(
             return CommandResult.Text($"Created DESIGN.md at {designPath}{suffix}");
         }
 
+        // Website clone needs Playwright MCP tools in the catalog (screenshot / computed styles).
+        // Playwright is a built-in on-demand server — connect it here so /design-init <url>
+        // works without a prior /mcp add, matching the old in-process Playwright path.
+        // Fail fast only if the on-demand connect itself fails; do not silently degrade.
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            await EnsurePlaywrightMcpConnectedAsync(ct).ConfigureAwait(false);
+            if (!IsPlaywrightMcpConnected(mcpConnectionManager))
+            {
+                return CommandResult.Error(
+                    "Website clone mode needs a connected Playwright MCP server, but none is connected.\n" +
+                    "browser_navigate / browser_take_screenshot / browser_evaluate are unavailable, so the\n" +
+                    "visual clone cannot proceed (WebFetch alone cannot capture screenshots/computed styles).\n\n" +
+                    "Playwright is a built-in MCP server. Retry /design-init <url> after:\n" +
+                    "  /mcp connect playwright\n" +
+                    "and ensure npx can run @playwright/mcp@latest.\n" +
+                    "(Project introspection mode — /design-init without a URL — does not require Playwright MCP.)");
+            }
+        }
+
         var context = await CollectContextAsync(cwd, designPath, url, ct).ConfigureAwait(false);
+
         var variables = BuildVariables(context);
         var prompt = await LoadPromptAsync(promptManager, "system/design-init", variables, ct).ConfigureAwait(false);
         if (prompt is null)
@@ -118,7 +142,7 @@ public sealed class DesignInitCommand(
     private static Dictionary<string, string> BuildVariables(DesignInitContext ctx)
     {
         var urlSection = !string.IsNullOrWhiteSpace(ctx.Url)
-            ? $"## Target Website (clone mode)\nURL: {ctx.Url}\n\nThe user wants to CLONE the visual design of this website. Use the ChromeDevTools tool (action: screenshot, url: {ctx.Url}, fullPage: true) to capture a screenshot, and the evaluate action to extract computed CSS variables. Then use WebFetch to scrape the page structure.\n\n"
+            ? BuildCloneInstruction(ctx.Url)
             : "## Target Website\n(not specified - use project introspection mode)\n\n";
 
         var existingSection = !string.IsNullOrWhiteSpace(ctx.ExistingDesignMd)
@@ -135,6 +159,21 @@ public sealed class DesignInitCommand(
             ["existingDesignMdSection"] = existingSection,
             ["forceOverwrite"] = ctx.ForceOverwrite.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
         };
+    }
+
+    private static string BuildCloneInstruction(string url)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Target Website (clone mode)");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"URL: {url}");
+        sb.AppendLine();
+        sb.AppendLine("The user wants to CLONE the visual design of this website.");
+        sb.AppendLine("Playwright MCP is connected, so use these browser tools:");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  (1) browser_navigate with url \"{url}\",");
+        sb.AppendLine("      (2) browser_take_screenshot with fullPage true (no url param),");
+        sb.AppendLine("      (3) browser_evaluate with a function that returns computed CSS variables.");
+        sb.AppendLine();
+        return sb.ToString();
     }
 
     private string ScanFrontendFiles(string cwd)
@@ -389,5 +428,47 @@ public sealed class DesignInitCommand(
             return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Connects the built-in playwright MCP server if it is not already connected.
+    /// Failures are swallowed so the caller can surface a user-facing error.
+    /// </summary>
+    private async Task EnsurePlaywrightMcpConnectedAsync(CancellationToken ct)
+    {
+        if (mcpConnectionManager is null || IsPlaywrightMcpConnected(mcpConnectionManager))
+            return;
+
+        try
+        {
+            await mcpConnectionManager.ConnectOneAsync("playwright", ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "On-demand connect of built-in Playwright MCP failed");
+        }
+    }
+
+    /// <summary>
+    /// Website clone 模式需要 playwright 作为 LLM 工具服务器（browser_navigate /
+    /// browser_take_screenshot / browser_evaluate 注入工具目录）。检查名为
+    /// "playwright" 的 MCP server 是否已连接（名称匹配，忽略大小写）。
+    /// WebFetch SPA fallback 走独立的 McpBrowserGateway 按需连接，
+    /// 与这里把 MCP 工具注入 LLM 目录是两条路径。
+    /// </summary>
+    private static bool IsPlaywrightMcpConnected(IMcpConnectionManager? mcp)
+    {
+        if (mcp is null)
+            return false;
+
+        if (mcp.GetClient("playwright") is not null)
+            return true;
+
+        return mcp.GetConnectedClients()
+            .Any(c => c.Name.Contains("playwright", StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -1,9 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Ai;
 using OneCode.Infrastructure.Config;
-using OneCode.Infrastructure.Goals;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Infrastructure;

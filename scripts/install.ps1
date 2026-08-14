@@ -84,7 +84,7 @@ function Install-Binary {
         Write-Info "解压中..."
         Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
 
-        # 发布包包含 prompts、Team YAML 与 Playwright 资源，必须整体安装。
+        # 发布包包含 prompts、Team YAML 等运行时资源，必须整体安装。
         $sourceExecutable = Join-Path $extractDir "OneCode.Cli.exe"
         if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
             throw "在归档根目录中找不到 OneCode.Cli.exe"

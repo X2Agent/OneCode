@@ -23,7 +23,7 @@ public static class SessionStateExtensions
 {
     /// <summary>
     /// Per-session 锁映射。<see cref="ConditionalWeakTable{TKey,TValue}"/> 不会阻止
-    /// StateBag 被 GC 回收，避免内存泄漏。<see cref="GetOrCreateValue"/> 本身线程安全。
+    /// StateBag 被 GC 回收，避免内存泄漏。<see cref="ConditionalWeakTable{TKey,TValue}.GetOrCreateValue"/> 本身线程安全。
     /// </summary>
     private static readonly ConditionalWeakTable<AgentSessionStateBag, object> _sessionLocks = new();
 

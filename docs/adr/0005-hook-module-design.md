@@ -459,7 +459,7 @@ public sealed class FeishuNotificationProvider(HttpClient httpClient, ILogger<Fe
 - 字段值为 null 时替换为空字符串
 - 大小写敏感（必须与字段名完全一致）
 
-**实现**（两个执行器各自的 `RenderTemplate` 方法，语义一致）：
+**实现**（共享 `HookTemplateRenderer.Render`，两个执行器调用同一实现）：
 
 ```csharp
 internal static string RenderTemplate(string template, HookPayload payload)
@@ -489,9 +489,9 @@ internal static string RenderTemplate(string template, HookPayload payload)
 - `{{Field}}` 语法比 `${field}` / `$field` 更显式，避免与 shell 变量混淆
 - 使用 `[GeneratedRegex]` 源生成器编译正则，避免运行时编译开销
 
-> **设计决策**：`RenderTemplate` 在两个执行器中各有一份副本，而非提取到共享工具类。理由：两份代码完全相同但各自 `internal`，提取为共享类会增加跨模块依赖。若未来字段集分化（如 Http 需要支持 `{{Headers}}` 复合字段），可再提取。
+> **设计决策**（2026-08-14 修订）：`RenderTemplate` 已提取为共享的 `HookTemplateRenderer`（同程序集 `internal` 静态类，`HttpHookExecutor`/`NotificationHookExecutor` 共用）。原"两个执行器各留一份副本、提取会增加跨模块依赖"的表述不成立——两个执行器本就在同一程序集内，不存在跨模块依赖；字段集若未来分化（如 Http 需要支持 `{{Headers}}` 复合字段），再按执行器拆分。
 
-### 13. JSON Source Generator 支持 AOT
+### 13. 使用 JSON Source Generator
 
 **决策**：`HookSerializerContext` 为 Hook 子系统的 JSON 序列化提供 Source Generator 支持。
 
@@ -514,7 +514,7 @@ internal partial class HookSerializerContext : JsonSerializerContext;
 - `HookSettingsLoader`：反序列化 `hooks.json`（通过 `JsonSerializerOptions` 而非 Source Generator，因需要动态检测新旧格式）
 
 **理由**：
-- 消除运行时反射，支持 AOT 发布（OneCode 计划支持 NativeAOT）
+- 消除运行时反射
 - 提升高频序列化性能（`CommandHookExecutor` 每次 hook 触发都需序列化 payload）
 - 集中声明序列化选项（CamelCase / 忽略 null / 枚举转字符串），避免多处重复配置
 

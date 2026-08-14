@@ -188,8 +188,17 @@ public partial class MainAgentRunner : IMainAgentRunner
                 }
 
                 // 无审批请求或达到上限 → 结束循环
-                if (approvalRequests.Count == 0 || ++approvalRound > maxApprovalRounds)
+                if (approvalRequests.Count == 0)
                     break;
+
+                // 达到审批轮数上限：丢弃本轮审批请求前记录告警，避免静默丢失用户决策
+                if (++approvalRound > maxApprovalRounds)
+                {
+                    _logger.LogWarning(
+                        "Approval round limit reached ({MaxRounds}); discarding {PendingCount} pending approval request(s)",
+                        maxApprovalRounds, approvalRequests.Count);
+                    break;
+                }
 
                 // PERM-1.7: 推送 ApprovalRequestEvent 并构造续跑 input
                 var approvalMessages = new List<ChatMessage>();

@@ -404,7 +404,6 @@ public sealed class LspClient : IAsyncDisposable
         while (i < headerText.Length && (headerText[i] == ' ' || headerText[i] == '\t'))
             i++;
 
-        // 读取连续的数字字符
         var start = i;
         while (i < headerText.Length && headerText[i] >= '0' && headerText[i] <= '9')
             i++;

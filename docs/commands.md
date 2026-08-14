@@ -156,11 +156,11 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 模式 | 触发条件 | 行为 |
 |---|---|---|
 | 项目内省 | 无 URL | 扫描前端文件（`.html`/`.css`/`.vue`/`.tsx`/`.jsx`/`.svelte` 等）、检测 CSS 框架（Tailwind/UnoCSS/MUI/Ant Design 等）、收集项目上下文，交给 LLM 生成项目特定的 `DESIGN.md` |
-| 网站克隆 | 带 URL | 用 `ChromeDevTools` 截图 + 提取计算样式（CSS 变量、字体、颜色），用 `WebFetch` 抓取页面结构，交给 LLM 克隆目标网站的视觉设计 |
+| 网站克隆 | 带 URL | 用 Playwright MCP（如已连接 `mcp__playwright__*`）截图 + 提取计算样式；否则用 `WebFetch` 抓取页面结构，交给 LLM 克隆视觉设计 |
 | 静态模板 | `--no-llm` 或无 API Key | 跳过 LLM，直接生成包含默认 design token 的模板（颜色、排版、间距、组件、阴影、设计准则） |
 
 > ProgressMessage：`initializing DESIGN.md`。
-> 允许工具：`Read(*)`、`Glob(*)`、`Grep(*)`、`ChromeDevTools(*)`、`WebFetch(*)`、`Write(DESIGN.md)`。
+> 允许工具：`Read(*)`、`Glob(*)`、`Grep(*)`、`WebFetch(*)`、`mcp__playwright__*`（可选）、`Write(DESIGN.md)`。
 > Prompt 来源：`prompts/system/design-init.prompt`（可通过 `.onecode/prompts/system/design-init.prompt` 覆盖）。
 > 如 `DESIGN.md` 已存在且未指定 `--force`，命令将拒绝覆盖并提示使用 `--force`。
 
@@ -837,6 +837,16 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `--scope <project\|user>` | 配置作用域 |
 | `--args ...` | 透传参数（stdio 命令参数） |
 | `--connect` | 添加后立即连接 |
+
+配置写入 `.mcp.json`（用户级为 `~/.onecode/.mcp.json`，项目级为工作区 `.mcp.json`）。
+
+**Playwright 浏览器扩展（可选）**：
+
+```
+/mcp add playwright --transport stdio --command npx --args @playwright/mcp@latest --scope user --connect
+```
+
+前置条件：Node.js 20+。写入配置不等于安装浏览器；Chromium 在首次调用 MCP 工具时下载。
 
 ---
 

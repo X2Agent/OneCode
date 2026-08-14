@@ -56,9 +56,7 @@ public sealed class ListMcpResourcesTool
     }
 }
 
-/// <summary>
-/// 读取 MCP 资源 — 读取 MCP 服务器上指定 URI 的资源内容。
-/// </summary>
+/// <summary>读取 MCP 服务器上指定 URI 的资源内容。</summary>
 public sealed class ReadMcpResourceTool
 {
     private readonly IMcpConnectionManager _connectionManager;

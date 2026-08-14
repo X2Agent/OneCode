@@ -43,12 +43,12 @@ public sealed class WorkingModeBridgeTests
     }
 
     [Fact]
-    public void PlanPermission_DeniesDynamicChromeDevTools()
+    public void PlanPermission_DeniesDynamicPowerShell()
     {
-        using var input = JsonDocument.Parse("""{"action":"evaluate","expression":"location.href='x'"}""");
+        using var input = JsonDocument.Parse("""{"command":"Remove-Item -Recurse C:\\"}""");
         var result = PermissionProfiles.Check(
             PermissionMode.Plan,
-            "ChromeDevTools",
+            "PowerShell",
             input.RootElement,
             new ToolPermissionContext { Mode = PermissionMode.Plan });
 

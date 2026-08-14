@@ -88,7 +88,7 @@ if errorlevel 1 (
     goto cleanup
 )
 
-:: 发布包包含 prompts、Team YAML 与 Playwright 资源，必须整体安装。
+:: 发布包包含 prompts、Team YAML 等运行时资源，必须整体安装。
 if not exist "%EXTRACT_DIR%\OneCode.Cli.exe" (
     echo ✗ 在归档根目录中找不到 OneCode.Cli.exe!
     set "INSTALL_FAILED=1"

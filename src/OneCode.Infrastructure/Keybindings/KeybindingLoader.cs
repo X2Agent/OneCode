@@ -56,14 +56,8 @@ public sealed class KeybindingLoader : IDisposable
         _keybindingsPath = Path.Combine(home, ProductInfo.Default.ConfigDirName, "keybindings.json");
     }
 
-    /// <summary>
-    /// 获取 keybindings.json 文件路径。
-    /// </summary>
     public string KeybindingsPath => _keybindingsPath;
 
-    /// <summary>
-    /// 获取缓存的绑定条目。
-    /// </summary>
     public KeybindingEntry[]? CachedBindings => _cachedBindings;
 
     /// <summary>

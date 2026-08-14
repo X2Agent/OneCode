@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Tools;
-using OneCode.Infrastructure;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Text;
 using OneCode.Core.Domain;

@@ -25,14 +25,16 @@ template with placeholder comments.
 
 The user wants to CLONE the visual design of the target website. Follow these steps:
 
-1. **Capture a screenshot** using the ChromeDevTools tool:
-   - action: `screenshot`
-   - url: `{{url}}`
-   - fullPage: `true`
+1. **Capture a screenshot** using Playwright MCP (`mcp__playwright__*` tools — a connected
+   server is guaranteed in clone mode otherwise this command would not have run):
+   - First: `mcp__playwright__browser_navigate` with `{ "url": "{{url}}" }`
+   - Then: `mcp__playwright__browser_take_screenshot` with `{ "fullPage": true }`
+     (do **not** pass `url` — screenshot has no url parameter; navigate first)
 
-2. **Extract computed styles** using the ChromeDevTools tool with action `evaluate`:
+2. **Extract computed styles** using Playwright MCP `browser_evaluate`
+   (argument name is `function`, value is a JS arrow function that returns JSON):
    ```javascript
-   JSON.stringify({
+   () => JSON.stringify({
      cssVars: Array.from(document.styleSheets).flatMap(s => {
        try { return Array.from(s.cssRules).flatMap(r => r.cssText); } catch { return []; }
      }).filter(t => t.startsWith(':root')).join('\n'),
@@ -56,7 +58,7 @@ The user wants to CLONE the visual design of the target website. Follow these st
    "extract the navigation structure, primary components (cards, buttons, inputs, modals),
    and any visible design tokens (colors, fonts, spacing)".
 
-4. **Synthesize the DESIGN.md** from the screenshot, computed styles, and page structure.
+4. **Synthesize the DESIGN.md** from the screenshot (if any), computed styles (if any), and page structure.
    Translate observed values into semantic tokens (e.g. `primary`, `success`, `bg-surface`)
    rather than copying raw hex values verbatim where a semantic role is clear.
 

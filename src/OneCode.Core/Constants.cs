@@ -20,6 +20,17 @@ public static class Constants
         public const string HttpProxyLower = "http_proxy";
         public const string HttpsProxy = "HTTPS_PROXY";
         public const string HttpsProxyLower = "https_proxy";
+        /// <summary>
+        /// 调试日志级别（单开关）：off | debug | trace。
+        /// 空/未设置 → 按构建默认（DEBUG 构建开、Release 关）；显式 off/0/false 可关闭（含 DEBUG 构建）；
+        /// debug/1 → Debug 级别；trace/2 → Trace 级别（隐含开启调试），在 Release 构建也强制生效。
+        /// 其他未知值回退到构建默认。
+        /// </summary>
+        public const string LogLevel = "ONECODE_LOG_LEVEL";
+        /// <summary>Worker 子代理标志：为 1/true 时表示为 Worker 进程。</summary>
+        public const string IsWorker = "ONECODE_IS_WORKER";
+        /// <summary>覆盖上下文窗口上限（token 数，最终覆盖手段）。</summary>
+        public const string MaxContextTokens = "ONECODE_MAX_CONTEXT_TOKENS";
     }
 
     public static class ConfigKeys

@@ -55,11 +55,12 @@ public static class UsageTrackingRunMiddleware
 {
     /// <summary>
     /// 创建 Agent Run 级中间件的 (runFunc, runStreamingFunc) 委托对。
-    /// 传给 <see cref="AIAgentBuilder.Use"/> 的 Run 中间件重载。
+    /// 传给 <see cref="AIAgentBuilder.Use(System.Func{Microsoft.Agents.AI.AIAgent, Microsoft.Agents.AI.AIAgent})"/> 的 Run 中间件重载。
     /// </summary>
     /// <param name="costTracker">ICostTracker 实例（null 时不拦截 usage）。</param>
     /// <param name="modelId">当前模型 ID（用于定价查找）。</param>
     /// <param name="logger">日志器（可选）。</param>
+    /// <param name="sessionId">会话 ID（可选，用于按会话记录 usage）。</param>
     /// <returns>(runFunc, runStreamingFunc) 委托对。</returns>
     public static (
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, Task<AgentResponse>>,

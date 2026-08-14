@@ -1,3 +1,5 @@
+using OneCode.Core.Errors;
+
 namespace OneCode.Core.Tools;
 
 /// <summary>
@@ -18,6 +20,7 @@ public sealed record ToolResult(
     string Content,
     bool IsError = false,
     string? Severity = null,
+    AgentProblemDetails? ErrorDetails = null,
     IReadOnlyDictionary<string, object?>? Telemetry = null,
     string? SuggestedNextAction = null)
 {
@@ -27,7 +30,6 @@ public sealed record ToolResult(
 
     /// <summary>
     /// 将匿名对象/DTO 序列化为 JSON 并创建成功结果。
-    /// 统一工具层反复出现的「匿名对象序列化为 JSON 的成功结果」模式（曾达 20+ 处）。
     /// </summary>
     public static ToolResult JsonSuccess(object data, string? suggestedNextAction = null) =>
         Success(System.Text.Json.JsonSerializer.Serialize(data), suggestedNextAction);
@@ -41,28 +43,13 @@ public sealed record ToolResult(
         new(content, IsError: false, Severity: "warning", SuggestedNextAction: suggestedNextAction);
 
     /// <summary>
-    /// ERR-1: 从 <see cref="Errors.AgentProblemDetails"/> 创建结构化错误结果。
-    /// 将 problemDetails 字段写入 Telemetry，使 ToolResultSerializer 能输出结构化 problemDetails 块。
+    /// 从 <see cref="AgentProblemDetails"/> 创建结构化错误结果，保留完整错误契约。
     /// </summary>
-    public static ToolResult Error(Errors.AgentProblemDetails details)
-    {
-        var telemetry = new Dictionary<string, object?>
-        {
-            ["problem.type"] = details.Type,
-            ["problem.status"] = details.Status,
-            ["problem.traceId"] = details.TraceId ?? string.Empty,
-            ["problem.toolName"] = details.ToolName ?? string.Empty,
-        };
-        if (details.Extensions is { Count: > 0 })
-        {
-            foreach (var kv in details.Extensions)
-                telemetry[$"problem.ext.{kv.Key}"] = kv.Value;
-        }
-        return new ToolResult(
+    public static ToolResult Error(AgentProblemDetails details) =>
+        new(
             Content: details.Detail ?? details.Title,
             IsError: true,
             Severity: "error",
-            Telemetry: telemetry,
+            ErrorDetails: details,
             SuggestedNextAction: details.SuggestedNextAction);
-    }
 }

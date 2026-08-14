@@ -25,7 +25,7 @@ public sealed class AutoCompactService
     private const int MaxTrackedSessions = 100;
 
     private static bool IsRunningAsWorkerAgent() =>
-        Environment.GetEnvironmentVariable("ONECODE_IS_WORKER") is "1" or "true";
+        Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.IsWorker) is "1" or "true";
 
     private readonly CompactService _compactService;
     private readonly ISessionConversationAccess _sessionManager;
