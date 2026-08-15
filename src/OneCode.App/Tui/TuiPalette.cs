@@ -9,7 +9,11 @@ namespace OneCode.App.Tui;
 internal static class TuiPalette
 {
     // 品牌主色
-    /// <summary>品牌主色（Accent），Teal #14B8A6。</summary>
+    /// <summary>
+    /// 终端交互驱动色（Teal #14B8A6）。DESIGN.md 的终端渲染规则把设计 token
+    /// <c>accent</c>（蓝 #5b8dee）的交互驱动职责映射到此色——#5b8dee 在终端
+    /// 中仅用于角色色（researcher）等全彩语境，见 <see cref="AgentBlue"/>。
+    /// </summary>
     public static readonly Color Accent = new(0x14, 0xB8, 0xA6);
 
     /// <summary>品牌次色，用于较弱高亮（如 hover/focus 弱态）。#0E8A80。</summary>
@@ -122,7 +126,7 @@ internal static class TuiPalette
     // Agent 8-色系统（design-spec §6.2）
     /// <summary>orchestrator — 紫色 #A386D8。</summary>
     public static readonly Color AgentPurple = new(0xA3, 0x86, 0xD8);
-    /// <summary>researcher — 蓝色 #5B8DEE。</summary>
+    /// <summary>researcher — 蓝色 #5B8DEE。即设计 token accent 的原色值，终端中仅作角色色使用。</summary>
     public static readonly Color AgentBlue = new(0x5B, 0x8D, 0xEE);
     /// <summary>planner — 绿色 #4CAF84。</summary>
     public static readonly Color AgentGreen = new(0x4C, 0xAF, 0x84);

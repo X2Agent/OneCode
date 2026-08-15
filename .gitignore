@@ -419,3 +419,7 @@ FodyWeavers.xsd
 
 # IDE LSP cache files (should never be committed)
 *.csproj.lscache
+
+# VS F5 本地测试沙盒（launchSettings.json --cwd 目标目录），含 OneCode 生成的 .onecode 等运行时产物
+.dev-workspace/*
+!.dev-workspace/.gitkeep

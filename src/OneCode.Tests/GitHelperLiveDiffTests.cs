@@ -7,7 +7,8 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Optional live-repository smoke tests. Deterministic pathspec behavior is covered by
-/// <see cref="GitHelperTests"/>; these tests only run when the repository has a suitable change.
+/// <see cref="GitHelperTests"/>; these tests skip explicitly (Assert.Skip) when the
+/// repository has no suitable pending change.
 /// </summary>
 [Collection(nameof(CurrentDirectoryCollection))]
 public sealed class GitHelperLiveDiffTests
@@ -28,7 +29,7 @@ public sealed class GitHelperLiveDiffTests
         var entries = await git.GetPendingDiffStatAsync(ct);
         var diff = await FindFirstTextDiffAsync(git, entries, ct);
         if (diff is null)
-            return;
+            Assert.Skip("工作区没有待处理的文本变更，无法执行本冒烟测试");
 
         diff.Should().Contain("diff --git",
             "file detail must work when cwd is src/OneCode.Cli (uses repo root + :(top) pathspec)");
@@ -44,7 +45,7 @@ public sealed class GitHelperLiveDiffTests
         var entries = await git.GetPendingDiffStatAsync(ct);
         var diff = await FindFirstTextDiffAsync(git, entries, ct);
         if (diff is null)
-            return;
+            Assert.Skip("工作区没有待处理的文本变更，无法执行本冒烟测试");
 
         diff.Should().Contain("diff --git");
     }

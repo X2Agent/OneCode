@@ -76,8 +76,8 @@ public static class WelcomeRenderer
         {
             ("/ ", "斜杠命令"),
             ("@ ", "提及文件"),
-            ("Tab ", "切模式"),
-            ("Esc ", "清空输入"),
+            ("Tab ", "空输入切模式"),
+            ("Esc ", "中断"),
             ("/find ", "搜索会话"),
         };
 

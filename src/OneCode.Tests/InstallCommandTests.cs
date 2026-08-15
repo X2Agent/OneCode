@@ -73,8 +73,10 @@ public sealed class InstallCommandTests : IDisposable
         File.Exists(expectedDest).Should().BeTrue();
     }
 
-    [Fact]
-    public async Task LocalDir_GlobalFlag_InstallsToUserHomeSkillsDir()
+    [Theory]
+    [InlineData("-g")]
+    [InlineData("--global")]
+    public async Task LocalDir_GlobalFlag_InstallsToUserHomeSkillsDir(string globalFlag)
     {
         // 用 GUID 保证 skill 名唯一，避免覆盖用户真实 skill
         var uniqueName = $"test-skill-{Guid.NewGuid():N}"[..16];
@@ -85,42 +87,15 @@ public sealed class InstallCommandTests : IDisposable
 
         try
         {
-            var result = await sut.ExecuteAsync([skillSrc, "-g"]);
+            var result = await sut.ExecuteAsync([skillSrc, globalFlag]);
 
             result.Should().BeOfType<CommandResult.TextResult>();
-            File.Exists(destFile).Should().BeTrue($"-g 标志应将 skill 安装到用户目录 {globalRoot}");
+            File.Exists(destFile).Should().BeTrue($"{globalFlag} 标志应将 skill 安装到用户目录 {globalRoot}");
             (await File.ReadAllTextAsync(destFile)).Should().Contain(uniqueName);
         }
         finally
         {
             // 清理用户目录下的测试 skill
-            var destDir = Path.Combine(globalRoot, uniqueName);
-            if (Directory.Exists(destDir))
-            {
-                try { Directory.Delete(destDir, recursive: true); } catch { /* best effort */ }
-            }
-        }
-    }
-
-    [Fact]
-    public async Task LocalDir_GlobalLongFlag_InstallsToUserHomeSkillsDir()
-    {
-        // 验证 --global 长标志与 -g 短标志行为一致
-        var uniqueName = $"test-skill-{Guid.NewGuid():N}"[..16];
-        var skillSrc = CreateTempSkill(uniqueName, $"# {uniqueName}\nGlobal long-flag test.");
-        var sut = CreateSut();
-        var globalRoot = InstallCommand.ResolveSkillsRoot(global: true);
-        var destFile = Path.Combine(globalRoot, uniqueName, "SKILL.md");
-
-        try
-        {
-            var result = await sut.ExecuteAsync([skillSrc, "--global"]);
-
-            result.Should().BeOfType<CommandResult.TextResult>();
-            File.Exists(destFile).Should().BeTrue($"--global 标志应将 skill 安装到用户目录 {globalRoot}");
-        }
-        finally
-        {
             var destDir = Path.Combine(globalRoot, uniqueName);
             if (Directory.Exists(destDir))
             {

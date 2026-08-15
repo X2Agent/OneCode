@@ -2,7 +2,6 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// Session/config modal handlers for <see cref="OneCodeToplevel"/>.
-/// Extracted as a partial to keep the main file under the 300-line guideline.
 /// Hosts the session chooser, settings overlay, and permission prompt flows.
 /// </summary>
 public sealed partial class OneCodeToplevel
@@ -304,21 +303,8 @@ public sealed partial class OneCodeToplevel
             var wizard = new QuestionWizard(title, questions);
             _shell.ShowQuestionWizard(wizard);
 
-            // 检查第一个问题是否是文本输入类型，如果是则自动进入输入模式
-            if (questions.Count > 0)
-            {
-                var firstQuestion = questions[0];
-                if (firstQuestion.Type == QuestionType.ShortText)
-                {
-                    // 短文本题：进入输入模式
-                    _shell.EnterShortTextModeForWizard();
-                }
-                else if (firstQuestion.Type == QuestionType.LongText)
-                {
-                    // 长文本题：进入长文本输入模式
-                    _shell.EnterLongTextModeForWizard();
-                }
-            }
+            // 首题为文本题时自动进入输入模式（选择题由挂起态直接接管键盘）
+            _shell.EnterTextModeForCurrentQuestion();
 
             _ = wizard.ResultTask.ContinueWith(t =>
             {

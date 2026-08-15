@@ -8,6 +8,9 @@ public sealed class GitGoalWorkspaceService(
     IGitHelper git,
     IWorkspaceFingerprintProvider fingerprintProvider) : IGoalWorkspaceService
 {
+    // 8: enough to show the dirty set without dumping a large status listing into the TUI error line.
+    private const int DirtyPathSampleLimit = 8;
+
     public async Task<GoalWorkspaceSnapshot> PrepareAsync(
         GoalRun run,
         CancellationToken ct = default)
@@ -17,7 +20,11 @@ public sealed class GitGoalWorkspaceService(
         var dirtyCount = await git.CountPorcelainChangesAsync(repositoryRoot, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Could not inspect the Goal target workspace.");
         if (dirtyCount != 0)
-            throw new InvalidOperationException("Goal isolated execution requires a clean target workspace.");
+        {
+            var status = await git.RunAsync(["status", "--porcelain"], repositoryRoot, ct).ConfigureAwait(false);
+            throw CreateDirtyWorkspaceException(
+                run.WorkingDirectory, repositoryRoot, dirtyCount, status?.Stdout);
+        }
 
         var baseCommit = await ReadRequiredAsync(["rev-parse", "HEAD"], repositoryRoot, ct).ConfigureAwait(false);
         var targetBranch = await ReadRequiredAsync(
@@ -267,6 +274,54 @@ public sealed class GitGoalWorkspaceService(
         var result = await git.RunAsync(arguments, directory, ct).ConfigureAwait(false);
         if (result is not { Success: true })
             throw new InvalidOperationException($"Git command failed: git {string.Join(' ', arguments)} — {result?.Stderr ?? "git unavailable"}");
+    }
+
+    private static InvalidOperationException CreateDirtyWorkspaceException(
+        string workingDirectory,
+        string repositoryRoot,
+        int dirtyCount,
+        string? porcelain)
+    {
+        var samples = ParsePorcelainPaths(porcelain).Take(DirtyPathSampleLimit).ToList();
+        var sampleText = samples.Count == 0
+            ? string.Empty
+            : " Examples: " + string.Join(", ", samples) + (dirtyCount > samples.Count ? ", …" : ".");
+
+        var sameDirectory = string.Equals(
+            Path.GetFullPath(workingDirectory),
+            Path.GetFullPath(repositoryRoot),
+            StringComparison.OrdinalIgnoreCase);
+        var location = sameDirectory
+            ? $"Checked Git repository '{repositoryRoot}'."
+            : $"Checked Git repository root '{repositoryRoot}' (session working directory is '{workingDirectory}').";
+
+        return new InvalidOperationException(
+            "Goal isolated execution requires a clean Git working tree. "
+            + $"{location} Found {dirtyCount} dirty path(s).{sampleText} "
+            + "Commit, stash, or discard those changes, then retry Goal mode.");
+    }
+
+    private static IEnumerable<string> ParsePorcelainPaths(string? porcelain)
+    {
+        if (string.IsNullOrWhiteSpace(porcelain))
+            yield break;
+
+        foreach (var rawLine in porcelain.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var raw = rawLine.TrimEnd();
+            if (raw.Length == 0)
+                continue;
+            // Porcelain: two-char XY status, space, path. Do not trim the prefix;
+            // a worktree-only modify is " M path" and trimming would drop the path head.
+            var path = raw.Length >= 4 && raw[2] == ' '
+                ? raw[3..]
+                : raw.Trim();
+            var arrow = path.IndexOf(" -> ", StringComparison.Ordinal);
+            if (arrow >= 0)
+                path = path[(arrow + 4)..].Trim();
+            if (path.Length > 0)
+                yield return path;
+        }
     }
 
     private static void ValidateFencing(GoalRun run, long fencingToken)

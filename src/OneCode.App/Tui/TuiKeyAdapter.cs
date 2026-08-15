@@ -60,4 +60,13 @@ public sealed class TuiKeyAdapter : IKeyInput
         var result = resolver.Resolve(this, activeContexts);
         return result.Result == KeyResolveResult.Match ? result.Action : null;
     }
+
+    /// <summary>
+    /// Shared single entry point for Terminal.Gui key → action resolution.
+    /// Returns null when no binding matches — callers must not fall back to
+    /// hardcoded keys; unmatched keys are simply not handled.
+    /// </summary>
+    public static string? ResolveAction(
+        Key key, KeybindingResolver resolver, IReadOnlySet<string> activeContexts)
+        => new TuiKeyAdapter(key).ResolveAction(resolver, activeContexts);
 }

@@ -59,19 +59,14 @@ public sealed class WorkingModeTests
         c.IsGroupChat.Should().BeTrue();
     }
 
-    [Fact]
-    public void ToggleStrategy_BuildMode_NoOp()
+    [Theory]
+    [InlineData(WorkingMode.Build)]
+    [InlineData(WorkingMode.Plan)]
+    public void ToggleStrategy_OutsideTeamMode_NoOp(WorkingMode mode)
     {
-        var c = new WorkingModeController(WorkingMode.Build, TeamStrategy.Magentic);
+        var c = new WorkingModeController(mode, TeamStrategy.Magentic);
         c.ToggleStrategy().Should().Be(TeamStrategy.Magentic);
         c.Strategy.Should().Be(TeamStrategy.Magentic);
-    }
-
-    [Fact]
-    public void ToggleStrategy_PlanMode_NoOp()
-    {
-        var c = new WorkingModeController(WorkingMode.Plan, TeamStrategy.Magentic);
-        c.ToggleStrategy().Should().Be(TeamStrategy.Magentic);
     }
 
     [Fact]

@@ -1,17 +1,30 @@
-using System.Text.RegularExpressions;
-
 namespace OneCode.App.Tui;
 
-public sealed class MessageListView : View
+/// <summary>
+/// Conversation line store + scrolling + input handling.
+/// Rendering lives in <see cref="MessageListView.Rendering.cs"/>, search in
+/// <see cref="MessageListView.Search.cs"/>, expandable blocks in
+/// <see cref="MessageListView.Expansion.cs"/>.
+/// </summary>
+public sealed partial class MessageListView : View
 {
     private readonly List<LineEntry> _lines = new();
     private readonly OneCode.Core.IO.IClipboardService? _clipboard;
     private readonly ScrollState _scroll;
     private int _toolDetailLayoutWidth;
+    private int _streamingPreviewStart = -1;
 
     public int TotalLines => _lines.Count;
     public IReadOnlyList<string> RenderedLines => _lines.Select(static l => l.Text).ToArray();
     public int ScrollOffset => _scroll.ScrollOffset;
+
+    /// <summary>
+    /// Live streaming preview size, including user-expanded tool/thinking details.
+    /// Count-based <c>ReplaceLastLines</c> cannot see those extra rows, so callers
+    /// that insert above the preview must use this value.
+    /// </summary>
+    public int StreamingPreviewLineCount
+        => _streamingPreviewStart < 0 ? 0 : Math.Max(0, _lines.Count - _streamingPreviewStart);
 
     public MessageListView(OneCode.Core.IO.IClipboardService? clipboard = null)
     {
@@ -29,6 +42,8 @@ public sealed class MessageListView : View
     public void Clear()
     {
         _lines.Clear();
+        _tailRegionStart = -1;
+        _streamingPreviewStart = -1;
         _toolDetailLayoutWidth = 0;
         _scroll.Reset();
         SetNeedsDraw();
@@ -59,8 +74,14 @@ public sealed class MessageListView : View
     {
         var insertIndex = _lines.Count - Math.Min(tailCount, _lines.Count);
         if (insertIndex < 0) insertIndex = 0;
+        var inserted = 0;
         foreach (var l in lines)
+        {
             _lines.Insert(insertIndex++, new LineEntry(l.FullText, l.Color, l.Segments, l.Bg, l.Tag));
+            inserted++;
+        }
+        if (_streamingPreviewStart >= 0 && insertIndex - inserted <= _streamingPreviewStart)
+            _streamingPreviewStart += inserted;
         _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
     }
@@ -74,6 +95,7 @@ public sealed class MessageListView : View
         var actual = Math.Min(count, _lines.Count - index);
         if (actual <= 0) return;
         _lines.RemoveRange(index, actual);
+        ShiftStreamingPreviewStart(index, -actual);
         _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
     }
@@ -86,8 +108,13 @@ public sealed class MessageListView : View
         if (actual > 0)
             _lines.RemoveRange(index, actual);
 
+        var inserted = 0;
         foreach (var line in lines)
+        {
             _lines.Insert(index++, new LineEntry(line.FullText, line.Color, line.Segments, line.Bg, line.Tag));
+            inserted++;
+        }
+        ShiftStreamingPreviewStart(index - inserted, inserted - actual);
 
         _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
@@ -125,7 +152,11 @@ public sealed class MessageListView : View
         {
             var actualRemove = Math.Min(removeCount, _lines.Count);
             if (actualRemove > 0)
-                _lines.RemoveRange(_lines.Count - actualRemove, actualRemove);
+            {
+                var removeAt = _lines.Count - actualRemove;
+                _lines.RemoveRange(removeAt, actualRemove);
+                ShiftStreamingPreviewStart(removeAt, -actualRemove);
+            }
         }
 
         if (addLines is not null)
@@ -135,132 +166,113 @@ public sealed class MessageListView : View
         SetNeedsDraw();
     }
 
-    public void ScrollToBottom() => _scroll.ScrollToBottom();
+    /// <summary>
+    /// Marks the current end of the transcript as the streaming preview start.
+    /// Subsequent <see cref="ReplaceStreamingPreview"/> calls replace that window,
+    /// including any detail rows the user expanded inside it.
+    /// </summary>
+    public void BeginStreamingPreview()
+    {
+        if (_streamingPreviewStart < 0)
+            _streamingPreviewStart = _lines.Count;
+    }
+
+    /// <summary>Seals the current preview as committed history.</summary>
+    public void EndStreamingPreview() => _streamingPreviewStart = -1;
 
     /// <summary>
-    /// Rebuilds all expanded tool detail blocks using the current content width.
-    /// A redraw alone is insufficient because detail lines are materialized and
-    /// wrapped when expanded.
+    /// Replaces the live streaming preview window and restores tool/thinking
+    /// expansion the user already opened so a thinking delta cannot collapse it.
     /// </summary>
-    public void ReflowExpandedToolDetails(int viewportWidth)
+    public void ReplaceStreamingPreview(IEnumerable<FormattedLine>? addLines)
     {
-        var contentWidth = TuiSpacing.GetContentColumnWidth(viewportWidth);
-        if (contentWidth <= 0 || contentWidth == _toolDetailLayoutWidth)
-            return;
+        if (_streamingPreviewStart < 0)
+            _streamingPreviewStart = _lines.Count;
 
-        _toolDetailLayoutWidth = contentWidth;
-        var changed = false;
-
-        for (var lineIndex = 0; lineIndex < _lines.Count; lineIndex++)
+        var start = Math.Min(_streamingPreviewStart, _lines.Count);
+        var toolSnapshots = new List<(string Name, string? Args, bool IsExpanded)>();
+        bool? thinkingExpanded = null;
+        for (var i = start; i < _lines.Count; i++)
         {
-            if (_lines[lineIndex].Tag is not ToolLineTag { IsExpanded: true } tag)
-                continue;
-
-            var removeCount = CountToolDetailLinesAfter(lineIndex);
-            if (removeCount > 0)
-                _lines.RemoveRange(lineIndex + 1, removeCount);
-
-            var details = MessageRenderer.BuildToolDetailLines(tag, contentWidth);
-            _lines.InsertRange(lineIndex + 1, details);
-            lineIndex += details.Count;
-            changed = true;
+            if (_lines[i].Tag is ToolLineTag tool)
+                toolSnapshots.Add((tool.Name, tool.Args, tool.IsExpanded));
+            else if (_lines[i].Tag is ThinkingLineTag thinking && thinkingExpanded is null)
+                thinkingExpanded = thinking.IsExpanded;
         }
 
-        if (!changed)
-            return;
+        if (start < _lines.Count)
+            _lines.RemoveRange(start, _lines.Count - start);
 
+        if (addLines is not null)
+        {
+            foreach (var line in addLines)
+                _lines.Add(new LineEntry(line.FullText, line.Color, line.Segments, line.Bg, line.Tag));
+        }
+
+        RestorePreviewExpansions(start, toolSnapshots, thinkingExpanded);
         _scroll.RequestScrollToBottomIfAutoScroll();
-        SetNeedsLayout();
         SetNeedsDraw();
     }
 
-    /// <summary>
-    /// 搜索包含指定文本的行，返回所有匹配行的索引列表。
-    /// </summary>
-    public List<int> FindMatches(string query, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
+    internal bool TryToggleExpansionAt(int lineIdx)
     {
-        var results = new List<int>();
-        if (string.IsNullOrWhiteSpace(query)) return results;
-        for (var i = 0; i < _lines.Count; i++)
+        if (lineIdx < 0 || lineIdx >= _lines.Count)
+            return false;
+        switch (_lines[lineIdx].Tag)
         {
-            if (_lines[i].Text.Contains(query, comparison))
-                results.Add(i);
+            case ToolLineTag tool:
+                ToggleToolExpansion(lineIdx, tool);
+                return true;
+            case ThinkingLineTag thinking:
+                ToggleThinkingExpansion(lineIdx, thinking);
+                return true;
+            case ErrorLineTag error:
+                ToggleErrorExpansion(lineIdx, error);
+                return true;
+            default:
+                return false;
         }
-        return results;
     }
 
-    /// <summary>
-    /// 使用正则表达式搜索匹配行。
-    /// <paramref name="compiled"/> 返回本次编译的正则，供 <see cref="SetSearchHighlight"/> 复用，避免二次编译。
-    /// </summary>
-    public List<int> FindMatchesRegex(
-        string pattern, out Regex? compiled, RegexOptions options = RegexOptions.IgnoreCase)
+    private void ShiftStreamingPreviewStart(int changeIndex, int delta)
     {
-        compiled = null;
-        var results = new List<int>();
-        if (string.IsNullOrWhiteSpace(pattern)) return results;
-        compiled = new Regex(pattern, options, TimeSpan.FromSeconds(1));
-        for (var i = 0; i < _lines.Count; i++)
-        {
-            if (compiled.IsMatch(_lines[i].Text))
-                results.Add(i);
-        }
-        return results;
+        if (_streamingPreviewStart < 0 || delta == 0)
+            return;
+        if (changeIndex < _streamingPreviewStart)
+            _streamingPreviewStart = Math.Max(changeIndex, _streamingPreviewStart + delta);
     }
 
-    /// <summary>滚动到指定行索引（居中显示）。</summary>
-    public void ScrollToLine(int lineIdx) => _scroll.ScrollToLine(lineIdx);
+    public void ScrollToBottom() => _scroll.ScrollToBottom();
 
-    private string? _highlightQuery;
-    private bool _highlightIsRegex;
-    private Regex? _highlightRegex;
-    private HashSet<int>? _highlightedLineIndices;
+    // —— 尾部交互区域 ——
+    // 内联选择器 / 提问向导的行整体挂在对话尾部，可整体替换或移除。
+    // 起始行号由 MessageListView 簿记，调用方不再维护行数（D2）。
+    private int _tailRegionStart = -1;
 
-    /// <summary>
-    /// 设置搜索高亮：在指定行中高亮匹配的关键词。
-    /// 传 null / 空列表清除高亮。
-    /// 优先使用 <paramref name="compiledRegex"/>（与搜索侧共用同一实例）；
-    /// 若仅设 <paramref name="isRegex"/> 则就地编译，失败时跳过行内高亮（不抛、也不回退为字面量匹配）。
-    /// </summary>
-    public void SetSearchHighlight(
-        string? query,
-        IReadOnlyList<int>? matchedLineIndices,
-        bool isRegex = false,
-        Regex? compiledRegex = null)
+    /// <summary>开始一个尾部交互区域，后续 <see cref="ReplaceTailRegion"/> 整体替换这些行。</summary>
+    public void BeginTailRegion(IEnumerable<FormattedLine> lines)
     {
-        _highlightedLineIndices = matchedLineIndices is { Count: > 0 }
-            ? new HashSet<int>(matchedLineIndices)
-            : null;
+        EndTailRegion();
+        _tailRegionStart = _lines.Count;
+        AppendLines(lines);
+    }
 
-        if (compiledRegex is not null)
-        {
-            _highlightQuery = query;
-            _highlightRegex = compiledRegex;
-            _highlightIsRegex = true;
-        }
-        else if (isRegex && !string.IsNullOrEmpty(query))
-        {
-            try
-            {
-                _highlightRegex = new Regex(query, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
-                _highlightQuery = query;
-                _highlightIsRegex = true;
-            }
-            catch (RegexParseException)
-            {
-                // 无效 pattern：保留匹配行索引用于滚动，但不做行内高亮（避免字面量 IndexOf 误匹配）
-                _highlightRegex = null;
-                _highlightQuery = null;
-                _highlightIsRegex = false;
-            }
-        }
-        else
-        {
-            _highlightQuery = query;
-            _highlightRegex = null;
-            _highlightIsRegex = false;
-        }
+    /// <summary>整体替换当前尾部交互区域的内容。</summary>
+    public void ReplaceTailRegion(IEnumerable<FormattedLine> lines)
+    {
+        if (_tailRegionStart < 0) return;
+        ReplaceRange(_tailRegionStart, _lines.Count - _tailRegionStart, lines);
+    }
 
+    /// <summary>移除当前尾部交互区域。</summary>
+    public void EndTailRegion()
+    {
+        if (_tailRegionStart < 0) return;
+        var count = _lines.Count - _tailRegionStart;
+        if (count > 0)
+            _lines.RemoveRange(_tailRegionStart, count);
+        _tailRegionStart = -1;
+        _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
     }
 
@@ -271,6 +283,28 @@ public sealed class MessageListView : View
     public void PageUp() => _scroll.PageUp();
 
     public void PageDown() => _scroll.PageDown();
+
+    /// <summary>滚动到指定行索引（居中显示）。</summary>
+    public void ScrollToLine(int lineIdx) => _scroll.ScrollToLine(lineIdx);
+
+    protected override bool OnKeyDown(Key kb)
+    {
+        switch (kb)
+        {
+            case var k when k == Key.CursorUp: ScrollUp(); return true;
+            case var k when k == Key.CursorDown: ScrollDown(); return true;
+            case var k when k == Key.PageUp: PageUp(); return true;
+            case var k when k == Key.PageDown: PageDown(); return true;
+            case var k when k == Key.Home:
+                _scroll.ScrollToTop();
+                return true;
+            case var k when k == Key.End:
+                _scroll.ScrollToEnd();
+                return true;
+            default:
+                return base.OnKeyDown(kb);
+        }
+    }
 
     protected override bool OnMouseEvent(Mouse mouse)
     {
@@ -319,396 +353,5 @@ public sealed class MessageListView : View
         }
 
         return base.OnMouseEvent(mouse);
-    }
-
-    /// <summary>
-    /// Clamps a mouse Y coordinate to the valid viewport range [0, viewportHeight-1].
-    /// Prevents ArgumentOutOfRangeException when the mouse is slightly outside the view.
-    /// </summary>
-    private int ClampMouseY(int y)
-    {
-        var max = Math.Max(0, Viewport.Height - 1);
-        return Math.Clamp(y, 0, max);
-    }
-
-    protected override bool OnKeyDown(Key kb)
-    {
-        switch (kb)
-        {
-            case var k when k == Key.CursorUp: ScrollUp(); return true;
-            case var k when k == Key.CursorDown: ScrollDown(); return true;
-            case var k when k == Key.PageUp: PageUp(); return true;
-            case var k when k == Key.PageDown: PageDown(); return true;
-            case var k when k == Key.Home:
-                _scroll.ScrollToTop();
-                return true;
-            case var k when k == Key.End:
-                _scroll.ScrollToEnd();
-                return true;
-            default:
-                return base.OnKeyDown(kb);
-        }
-    }
-
-    protected override bool OnDrawingContent(DrawContext? context)
-    {
-        if (_scroll.NeedsScrollToBottom)
-            _scroll.ScrollToBottom();
-
-        base.OnDrawingContent(context);
-
-        if (_lines.Count == 0) return false;
-
-        var viewport = Viewport;
-        var showScrollbar = _lines.Count > viewport.Height;
-        // Reserve the rightmost column for the scrollbar when needed; content
-        // otherwise fills the available width (no artificial center column).
-        var availableWidth = showScrollbar ? Math.Max(0, viewport.Width - 1) : viewport.Width;
-        var contentWidth = TuiSpacing.GetContentColumnWidth(availableWidth);
-        var leftPad = 0;
-        var visibleLines = Math.Min(viewport.Height, _lines.Count - _scroll.ScrollOffset);
-
-        for (var i = 0; i < visibleLines; i++)
-        {
-            var lineIdx = _scroll.ScrollOffset + i;
-            if (lineIdx >= _lines.Count) break;
-
-            var entry = _lines[lineIdx];
-            Move(0, i);
-
-            var lineBg = entry.Bg ?? TuiPalette.BgPrimary;
-
-            // Always fill the full row with the background first.
-            // This clears stale characters from previous frames regardless of
-            // which content path (segments/plain) runs below.
-            SetAttribute(new Attribute(entry.Color, lineBg));
-            AddStr(new string(' ', viewport.Width));
-            Move(leftPad, i);
-
-            // Search highlight: split the line's text around the query and render
-            // matched portions with a distinct background color.
-            if (_highlightedLineIndices is not null
-                && _highlightedLineIndices.Contains(lineIdx)
-                && !string.IsNullOrEmpty(_highlightQuery))
-            {
-                var remaining = contentWidth;
-                var highlightBg = TuiPalette.Warning;
-                var segBg = lineBg;
-
-                void RenderHighlight(string text, Color fg, bool isMatch)
-                {
-                    if (remaining <= 0 || string.IsNullOrEmpty(text)) return;
-                    if (text.Length > remaining)
-                        text = text[..remaining];
-                    SetAttribute(new Attribute(fg, isMatch ? highlightBg : segBg));
-                    AddStr(text);
-                    remaining -= text.Length;
-                }
-
-                void RenderText(string text, Color fg)
-                {
-                    if (_highlightIsRegex && _highlightRegex is not null)
-                        SplitAndRenderRegex(text, _highlightRegex, fg, RenderHighlight);
-                    else
-                        SplitAndRender(text, _highlightQuery!, fg, RenderHighlight);
-                }
-
-                if (entry.Segments is { Count: > 0 })
-                {
-                    foreach (var seg in entry.Segments)
-                        RenderText(seg.Text, seg.Color);
-                }
-                else
-                {
-                    RenderText(entry.Text, entry.Color);
-                }
-                continue;
-            }
-
-            if (entry.Segments is { Count: > 0 })
-            {
-                var remaining = contentWidth;
-                foreach (var seg in entry.Segments)
-                {
-                    if (remaining <= 0) break;
-                    var segBg = seg.Bg ?? lineBg;
-                    SetAttribute(new Attribute(seg.Color, segBg));
-                    if (seg.Text.Length <= remaining)
-                    {
-                        AddStr(seg.Text);
-                        remaining -= seg.Text.Length;
-                    }
-                    else
-                    {
-                        AddStr(seg.Text[..remaining]);
-                        remaining = 0;
-                    }
-                }
-                // remaining chars already cleared by the initial fill above.
-            }
-            else
-            {
-                SetAttribute(new Attribute(entry.Color, lineBg));
-                AddStr(MessageRenderer.TruncateVisual(entry.Text, contentWidth));
-                // remaining chars already cleared by the initial fill above.
-            }
-        }
-
-        if (showScrollbar)
-            DrawScrollIndicator();
-
-        return false;
-    }
-
-    /// <summary>
-    /// 将文本按搜索关键词拆分为匹配/非匹配段，通过回调渲染。
-    /// </summary>
-    private static void SplitAndRender(string text, string query, Color fg, Action<string, Color, bool> render)
-    {
-        if (string.IsNullOrEmpty(text))
-            return;
-
-        var idx = 0;
-        while (idx < text.Length)
-        {
-            var matchPos = text.AsSpan(idx).IndexOf(query.AsSpan(), StringComparison.OrdinalIgnoreCase);
-            if (matchPos < 0)
-            {
-                render(text[idx..], fg, false);
-                return;
-            }
-
-            if (matchPos > 0)
-                render(text[idx..(idx + matchPos)], fg, false);
-
-            var matchLen = query.Length;
-            render(text[(idx + matchPos)..(idx + matchPos + matchLen)], fg, true);
-            idx += matchPos + matchLen;
-        }
-    }
-
-    /// <summary>
-    /// 将文本按正则匹配拆分为匹配/非匹配段，通过回调渲染。
-    /// </summary>
-    private static void SplitAndRenderRegex(string text, Regex regex, Color fg, Action<string, Color, bool> render)
-    {
-        if (string.IsNullOrEmpty(text))
-            return;
-
-        var idx = 0;
-        foreach (Match m in regex.Matches(text))
-        {
-            if (m.Index > idx)
-                render(text[idx..m.Index], fg, false);
-            render(m.Value, fg, true);
-            idx = m.Index + m.Length;
-        }
-
-        if (idx < text.Length)
-            render(text[idx..], fg, false);
-    }
-
-    /// <summary>
-    /// 在视口右侧绘制 1 列宽的滚动位置指示器。
-    /// 仅当内容行数超过视口高度时显示。拇指位置反映当前滚动偏移。
-    /// </summary>
-    private void DrawScrollIndicator()
-    {
-        var viewport = Viewport;
-        var barCol = viewport.Width - 1;
-        if (barCol < 0) return;
-
-        var scrollRange = _lines.Count - viewport.Height;
-        if (scrollRange <= 0) return;
-
-        var thumbSize = Math.Max(1, viewport.Height * viewport.Height / _lines.Count);
-        var thumbPos = (int)((float)_scroll.ScrollOffset / scrollRange * (viewport.Height - thumbSize));
-
-        for (var i = 0; i < viewport.Height; i++)
-        {
-            Move(barCol, i);
-            if (i >= thumbPos && i < thumbPos + thumbSize)
-            {
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
-                AddStr(TuiGlyphs.BlockFull);
-            }
-            else
-            {
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-                AddStr(TuiGlyphs.BlockLight);
-            }
-        }
-    }
-
-    private int CountToolDetailLinesAfter(int lineIdx)
-    {
-        var count = 0;
-        for (var i = lineIdx + 1; i < _lines.Count && _lines[i].Tag is ToolDetailLineTag; i++)
-            count++;
-        return count;
-    }
-
-    private void ToggleToolExpansion(int lineIdx, ToolLineTag tag)
-    {
-        if (tag.IsExpanded)
-        {
-            var removeCount = CountToolDetailLinesAfter(lineIdx);
-            if (removeCount > 0)
-                _lines.RemoveRange(lineIdx + 1, removeCount);
-
-            var collapsed = tag with { IsExpanded = false };
-            var entry = _lines[lineIdx];
-            var newSegments = MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: true);
-            _lines[lineIdx] = new LineEntry(entry.Text, entry.Color, newSegments, entry.Bg, collapsed);
-        }
-        else
-        {
-            var expanded = tag with { IsExpanded = true };
-            var entry = _lines[lineIdx];
-            var newSegments = MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: false);
-            _lines[lineIdx] = new LineEntry(entry.Text, entry.Color, newSegments, entry.Bg, expanded);
-
-            _toolDetailLayoutWidth = TuiSpacing.GetContentColumnWidth(Viewport.Width);
-            var detailLines = MessageRenderer.BuildToolDetailLines(expanded, _toolDetailLayoutWidth);
-            _lines.InsertRange(lineIdx + 1, detailLines);
-        }
-        _scroll.RequestScrollToBottomIfAutoScroll();
-        SetNeedsDraw();
-    }
-
-    private void ToggleThinkingExpansion(int lineIdx, ThinkingLineTag tag)
-    {
-        if (tag.IsExpanded)
-        {
-            var removeCount = 0;
-            for (var i = lineIdx + 1; i < _lines.Count; i++)
-            {
-                if (_lines[i].Tag is ThinkingDetailLineTag)
-                    removeCount++;
-                else
-                    break;
-            }
-
-            if (removeCount > 0)
-                _lines.RemoveRange(lineIdx + 1, removeCount);
-
-            var collapsed = tag with { IsExpanded = false };
-            var entry = _lines[lineIdx];
-            _lines[lineIdx] = new LineEntry(
-                entry.Text,
-                entry.Color,
-                MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: true),
-                entry.Bg,
-                collapsed);
-        }
-        else
-        {
-            var expanded = tag with { IsExpanded = true };
-            var entry = _lines[lineIdx];
-            _lines[lineIdx] = new LineEntry(
-                entry.Text,
-                entry.Color,
-                MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: false),
-                entry.Bg,
-                expanded);
-
-            var maxContentWidth = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - ConversationRenderer.ContentIndent - 2);
-            var details = new List<LineEntry>();
-            foreach (var line in expanded.Content
-                .Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n'))
-            {
-                foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxContentWidth))
-                {
-                    details.Add(new LineEntry(
-                        $"{ConversationRenderer.Indent}  {w}",
-                        TuiPalette.FgSecondary,
-                        null,
-                        null,
-                        new ThinkingDetailLineTag()));
-                }
-            }
-            details.Add(new LineEntry(
-                "",
-                TuiPalette.FgMuted,
-                null,
-                null,
-                new ThinkingDetailLineTag()));
-            _lines.InsertRange(lineIdx + 1, details);
-        }
-
-        _scroll.RequestScrollToBottomIfAutoScroll();
-        SetNeedsDraw();
-    }
-
-    /// <summary>切换错误详情的展开/折叠状态。</summary>
-    private void ToggleErrorExpansion(int lineIdx, ErrorLineTag tag)
-    {
-        if (tag.IsExpanded)
-        {
-            var removeCount = 0;
-            for (var i = lineIdx + 1; i < _lines.Count; i++)
-            {
-                if (_lines[i].Tag is ErrorLineTag { IsExpanded: true } subTag && subTag.Content == tag.Content)
-                    removeCount++;
-                else break;
-            }
-            if (removeCount > 0)
-                _lines.RemoveRange(lineIdx + 1, removeCount);
-
-            var collapsed = tag with { IsExpanded = false };
-            var entry = _lines[lineIdx];
-            _lines[lineIdx] = new LineEntry(
-                entry.Text, entry.Color,
-                MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: true),
-                entry.Bg, collapsed);
-        }
-        else
-        {
-            var expanded = tag with { IsExpanded = true };
-            var entry = _lines[lineIdx];
-            _lines[lineIdx] = new LineEntry(
-                entry.Text, entry.Color,
-                MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: false),
-                entry.Bg, expanded);
-
-            var maxContentWidth = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - ConversationRenderer.ContentIndent - 2);
-            var details = new List<LineEntry>();
-            var contentLines = expanded.Content
-                .Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-            // Skip the first line — already shown (possibly truncated) in the summary.
-            // If it was truncated, still show the full first line in the detail block.
-            var startIdx = 0;
-            if (contentLines.Length > 0)
-            {
-                var first = contentLines[0];
-                var summaryBudget = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - 6);
-                if (first.Length <= summaryBudget - 6)
-                    startIdx = 1;
-            }
-
-            for (var li = startIdx; li < contentLines.Length; li++)
-            {
-                var line = contentLines[li];
-                if (string.IsNullOrEmpty(line))
-                {
-                    details.Add(new LineEntry(
-                        ConversationRenderer.Indent, TuiPalette.Error, null, null, expanded));
-                    continue;
-                }
-                foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxContentWidth))
-                {
-                    details.Add(new LineEntry(
-                        $"{ConversationRenderer.Indent}  {w}",
-                        TuiPalette.Error, null, null,
-                        expanded));
-                }
-            }
-            if (details.Count > 0)
-                _lines.InsertRange(lineIdx + 1, details);
-        }
-
-        _scroll.RequestScrollToBottomIfAutoScroll();
-        SetNeedsDraw();
     }
 }

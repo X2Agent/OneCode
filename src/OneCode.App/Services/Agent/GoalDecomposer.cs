@@ -5,7 +5,7 @@ namespace OneCode.App.Services.Agent;
 
 /// <summary>
 /// GOAL 模式分解器：负责将用户的高层目标分解为子目标列表，以及失败后的重规划。
-/// 抽取自原 Goal 外层执行器以满足单文件 300 行规范。
+/// 抽取自原 Goal 外层执行器，独立成类以便单独演进与测试。
 ///
 /// 设计说明：
 /// - 不走 AgentPipelineBuilder（decompose/replan 不需要工具循环、权限检查等重型中间件）

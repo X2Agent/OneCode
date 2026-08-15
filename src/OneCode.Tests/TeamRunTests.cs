@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using OneCode.App.Services;
 using OneCode.App.Services.Coordinator;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
@@ -119,23 +120,116 @@ public sealed class TeamRunStateMachineTests
 public sealed class TeamRequirementServiceTests
 {
     [Fact]
-    public void Analyze_BroadRequest_ReturnsBlockingQuestions()
+    public async Task AnalyzeAsync_BroadRequest_UsesGeneratorQuestionsAndIntake()
     {
-        var sut = new TeamRequirementService(new OneCode.App.Services.BuildMode.RequirementAssessmentService());
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        generator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new OneCode.App.Services.RequirementIntake(
+                ["第一期要优先落地哪个产研环节？"],
+                [],
+                ["产研平台完成验收"],
+                ["技术栈不限制"]));
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
 
-        var result = sut.Analyze("开发一个产研、测试和发布一体化 AI 平台");
+        var result = await sut.AnalyzeAsync(
+            "开发一个产研、测试和发布一体化 AI 平台",
+            TestContext.Current.CancellationToken);
 
         result.CanProceedWithoutClarification.Should().BeFalse();
-        result.Questions.Should().NotBeEmpty().And.OnlyContain(question => question.Blocking);
-        result.Questions.Should().OnlyContain(question => question.Question.Contains("产研、测试和发布一体化 AI 平台"));
+        result.Questions.Should().ContainSingle(question => question.Blocking);
+        result.Questions[0].Question.Should().Contain("产研");
+        result.Questions[0].Question.Should().NotContain("可观察行为");
+        result.Questions[0].Question.Should().NotContain("公共接口");
         result.Draft.OpenQuestions.Should().BeEquivalentTo(result.Questions.Select(question => question.Question));
+        result.Draft.AcceptanceCriteria.Should().Equal("产研平台完成验收");
+        result.Draft.Constraints.Should().Equal("技术栈不限制");
+        result.Draft.InScope.Should().BeEmpty();
     }
 
     [Fact]
-    public void CreateImplementationPlan_BoundedRequest_CreatesDependencyGraphAndIndependentGates()
+    public async Task AnalyzeAsync_GeneratorFailure_PropagatesWithoutFallback()
     {
-        var sut = new TeamRequirementService(new OneCode.App.Services.BuildMode.RequirementAssessmentService());
-        var analysis = sut.Analyze("修复 Foo.cs 空引用并运行测试验证不再抛出异常");
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        generator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<OneCode.App.Services.RequirementIntake>(
+                new InvalidOperationException("澄清问题生成失败：模型不可用")));
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+
+        var act = () => sut.AnalyzeAsync("开发一个产研 AI 系统", TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*澄清问题生成失败*");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_UsesGeneratedQuestionsInsteadOfTemplates()
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        generator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new OneCode.App.Services.RequirementIntake(
+                ["第一期要先做成哪个可演示的产研环节？", "哪些角色是第一期用户，哪些明确不做？"],
+                [], [], []));
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+
+        var result = await sut.AnalyzeAsync(
+            "我想开发一个产研+AI的系统，技术栈不限制",
+            TestContext.Current.CancellationToken);
+
+        result.CanProceedWithoutClarification.Should().BeFalse();
+        result.Questions.Select(question => question.Question).Should().Equal(
+            "第一期要先做成哪个可演示的产研环节？",
+            "哪些角色是第一期用户，哪些明确不做？");
+        result.Questions.Should().NotContain(question => question.Question.Contains("可观察行为"));
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_AfterClarificationAnswer_ProceedsWithoutAskingAgain()
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+        var clarified = """
+            我想开发一个产研+AI的系统
+            Clarification response:
+            第一期做需求文档生成，用户是产品经理，不做代码仓库托管。
+            """;
+
+        var result = await sut.AnalyzeAsync(clarified, TestContext.Current.CancellationToken);
+
+        result.CanProceedWithoutClarification.Should().BeTrue();
+        result.Questions.Should().BeEmpty();
+        await generator.DidNotReceive().GenerateAsync(
+            Arg.Any<string>(),
+            Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateImplementationPlan_BoundedRequest_CreatesDependencyGraphAndIndependentGates()
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+        var analysis = await sut.AnalyzeAsync(
+            "修复 Foo.cs 空引用并运行测试验证不再抛出异常",
+            TestContext.Current.CancellationToken);
 
         var plan = sut.CreateImplementationPlan(analysis);
 

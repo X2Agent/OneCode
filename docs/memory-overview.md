@@ -18,17 +18,16 @@
 
 ## 1. 概述
 
-OneCode 的记忆模块旨在让 Agent **跨会话、跨项目、跨团队成员地积累与复用知识**，而非每次交互从零开始。
+OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用知识**，而非每次交互从零开始。
 
-模块按"记忆生命周期 + 作用域"两个维度划分为 3 个子系统：
+模块按"记忆生命周期 + 作用域"两个维度划分为 2 个子系统：
 
 | 子系统 | 生命周期 | 作用域 | 存储形式 | 写入者 |
 |--------|---------|--------|---------|--------|
 | 结构化条目记忆 | 永久（含 TTL / LRU 淘汰） | 用户级 / 项目级 | `MEMORY.md` 结构化条目 | 用户手动 + AutoDream 自动 |
 | 会话记忆 | 会话内 + 跨会话持久 | 单会话 | JSON Lines + 元数据 | LLM 自动提取 + 用户手动 |
-| 团队记忆 | 永久 | 团队共享 | Markdown 文件 | 团队成员手动 |
 
-> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [ADR 0004](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。
+> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [ADR 0004](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemoryFileContextProvider`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [ADR 0004 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
 
 ---
 
@@ -50,11 +49,8 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目、跨团队成员
   ├─ 即时约束 ──▶ 会话记忆（Session Memory）
   │  "记住用 DPAPI 加密"         注入当前会话 + 跨重启持久
   │
-  ├─ 持久事实 ──▶ 结构化条目记忆（MEMORY.md）
-  │  /memory add 或 AutoDream    跨会话复用，摘要常驻 prompt
-  │
-  └─ 团队规范 ──▶ 团队记忆（Team Memory）
-     团队成员维护 .md 文件        注入 Team 子 Agent
+  └─ 持久事实 ──▶ 结构化条目记忆（MEMORY.md）
+     /memory add 或 AutoDream    跨会话复用，摘要常驻 prompt
 ```
 
 ### 2.3 注入策略
@@ -66,7 +62,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目、跨团队成员
 | **System Prompt 注入** | `PromptConfigBuilder` 调用 `MemoryService.LoadMemoryPromptAsync` | 摘要索引常驻；构建 prompt 时若已知 query，附加 Top 相关条目 |
 | **工具按需检索** | `MemoryFileContextProvider` 暴露 `search_memories` 工具 | LLM 主动检索完整记忆内容 |
 
-会话记忆与团队记忆则通过对应的 `AIContextProvider` 在 Agent 调用前注入。
+会话记忆通过对应的 `AIContextProvider`（`SessionMemoryContextProvider`）在 Agent 调用前注入。
 
 ---
 
@@ -79,22 +75,22 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目、跨团队成员
                          │  (条目摘要索引 + 相关条目)                   │
                          └─────────────────────────────────────────────┘
                                           ▲
-          ┌───────────────────────────────┼───────────────────────────────┐
-          │                               │                               │
-  MemoryFileContextProvider     SessionMemoryContextProvider     TeamMemoryContextProvider
-  (search_memories 工具)         (Provide + Store 双向)           (Team 子 Agent 专用)
-          │                               │                               │
-          ▼                               ▼                               ▼
-  ┌─────────────────┐          ┌──────────────────┐          ┌──────────────────┐
-  │  MemoryService  │          │ SessionMemorySvc │          │ TeamMemoryService│
-  │ (条目加载/检索) │          │ (会话事实 CRUD)  │          │ (团队共享 md)    │
-  └────────┬────────┘          └────────┬─────────┘          └──────────────────┘
-           │                            │
-           ▼                            ▼
-  ┌─────────────────┐          ┌──────────────────┐
-  │IMemoryEntryStore│          │Conversation.Meta │
-  │ (MemoryEntryStore)│        │ + jsonl 文件     │
-  └────────┬────────┘          └──────────────────┘
+                ┌─────────────────────────┴─────────────────────────┐
+                │                                                   │
+  MemoryFileContextProvider                             SessionMemoryContextProvider
+  (search_memories 工具)                                 (Provide + Store 双向)
+                │                                                   │
+                ▼                                                   ▼
+  ┌─────────────────────┐                          ┌──────────────────────┐
+  │  MemoryService      │                          │ SessionMemoryService │
+  │ (条目加载/检索)     │                          │ (会话事实 CRUD)      │
+  └────────┬────────────┘                          └──────────┬───────────┘
+           │                                                  │
+           ▼                                                  ▼
+  ┌─────────────────────┐                          ┌──────────────────────┐
+  │ IMemoryEntryStore   │                          │ Conversation.Metadata│
+  │ (MemoryEntryStore)  │                          │ + Metadata 键      │
+  └────────┬────────────┘                          └──────────────────────┘
            │
            ▼
   ~/.onecode/memory/MEMORY.md
@@ -125,22 +121,12 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目、跨团队成员
 **定位**：会话范围内的事实/偏好记忆。记录用户在对话中表达的"记住……"、"不要……"、"优先……"等约束。
 
 **核心特性**：
-- 双重存储：`Conversation.Metadata`（运行时）+ `session-memory.jsonl`（持久化）
-- 双向 ContextProvider：注入 Top 5 条 + 响应后节流提取
+- 存储于 `Conversation.Metadata`（`sessionMemories` 键），随会话文件 `~/.onecode/sessions/{sessionId}.jsonl` 持久化
+- 双向 ContextProvider：注入 Top 5 条（按重要性排序）+ 响应后节流提取
 - 四重节流防止过度提取：最小消息数、消息增量、轮次间隔、Token 增量
 - LLM 摘要提取失败时回退到启发式规则（偏好信号词过滤）
 
-### 3.3 团队记忆
-
-**定位**：团队共享的 Markdown 记忆，所有团队成员在同一项目中可见。适合存放团队编码规范、架构决策。
-
-**核心特性**：
-- 目录解析支持环境变量 `ONECODE_TEAM_MEMORY_DIR` 自定义根目录
-- `MEMORY.md` 作为入口索引 + 其余 `.md` 主题文件（前 4 个）
-- 仅注入 Team 子 Agent，替代 `SessionMemoryContextProvider`
-- 文件可带 YAML frontmatter（`type` / `scope` 字段）
-
-### 3.4 AutoDream 自动整合
+### 3.3 AutoDream 自动整合
 
 **定位**："睡眠式记忆整合"后台服务。当用户积累了足够多的新会话后，自动启动轻量 Agent 回顾会话，提取关键信息写入 `MEMORY.md`。
 
@@ -209,15 +195,6 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 - 手动添加的条目建议用 `manual:` 前缀的 Key，与 AutoDream 提取的条目区分
 - Agent 不通过工具直接写 `MEMORY.md`——所有程序化写入经 `IMemoryEntryStore` 或 AutoDream 清洗管线
 
-### 4.5 团队记忆
-
-在 `{cwd}/.onecode/team-memory/` 目录下放置 `.md` 文件：
-
-- `MEMORY.md` — 团队索引（注入 Team 子 Agent）
-- 其余 `.md` — 团队主题文件（前 4 个注入）
-
-可通过环境变量 `ONECODE_TEAM_MEMORY_DIR` 自定义团队记忆根目录，按 `{teamRoot}/{teamName}/memory/` 组织。
-
 ---
 
 ## 5. 存储目录速查
@@ -226,9 +203,7 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 |--------|--------|---------|
 | 结构化条目记忆 | 用户级（全局） | `~/.onecode/memory/MEMORY.md` |
 | 结构化条目记忆 | 项目级 | `{cwd}/.onecode/memory/MEMORY.md` |
-| 会话记忆 | 会话级 | `~/.onecode/conversations/{sessionId}/session-memory.jsonl` |
-| 团队记忆 | 团队级（默认） | `{cwd}/.onecode/team-memory/` |
-| 团队记忆 | 团队级（环境变量） | `$ONECODE_TEAM_MEMORY_DIR/{teamName}/memory/` |
+| 会话记忆 | 会话级 | `~/.onecode/sessions/{sessionId}.jsonl`（`sessionMemories` 元数据键） |
 | AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（lock、时间戳文件） |
 
 > **已移除**：旧版本的 `~/.onecode/memory-store/` 与 `{cwd}/.onecode/memory-store/`（KV Store）目录不再使用。

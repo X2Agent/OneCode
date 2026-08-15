@@ -6,7 +6,6 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// TuiEvent dispatch for <see cref="OneCodeToplevel"/>.
-/// Extracted as a partial to keep the main top-level file under the 300-line guideline.
 /// Hosts the <see cref="DispatchEvent"/> switch and its private helpers.
 /// </summary>
 public sealed partial class OneCodeToplevel

@@ -3,18 +3,48 @@ using OneCode.Core.Keybindings;
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Keyboard dispatch for <see cref="ChatInputView"/>.
-/// Extracted as a partial to keep the main view file under the 300-line guideline.
-/// Hosts the 195-line <see cref="OnInputKeyPress"/> switch and its private helpers.
+/// Keyboard dispatch for <see cref="ChatInputView"/> — the single key-resolution
+/// point of the TUI. Hosts <see cref="OnInputKeyPress"/>: KeybindingResolver
+/// lookup, interaction-session routing while suspended/question mode, and the
+/// chat-branch switch (completion / history / submit / global shortcuts).
+/// Kept as a partial because key handling is Editor-framework-bound and shares
+/// the view's private state.
 /// </summary>
 public sealed partial class ChatInputView
 {
+    /// <summary>
+    /// Dispatches a key as if the nested editor raised KeyDownEvent.
+    /// Tests use this to exercise the OnInputKeyPress path without a live driver loop.
+    /// </summary>
+    internal void DispatchInputKey(Key key) => OnInputKeyPress(_input, key);
+
+    /// <summary>
+    /// Simulates the same key bubbling to this view after OnInputKeyPress.
+    /// Returns true when the bubble was swallowed (interaction already handled).
+    /// </summary>
+    internal bool DispatchBubbledKeyDown(Key key) => OnKeyDown(key);
+
+    protected override bool OnKeyDown(Key key)
+    {
+        // Terminal.Gui may drop Key.Handled (value-type Key). Swallow the bubble
+        // here so ReplShell.OnKeyDown cannot re-run HandleInteractionKey.
+        if (_suppressKeyBubble)
+        {
+            _suppressKeyBubble = false;
+            return true;
+        }
+
+        return base.OnKeyDown(key);
+    }
+
     private void OnInputKeyPress(object? sender, Key e)
     {
+        _suppressKeyBubble = false;
+
         // Ctrl+D (app:exit) must work even when interaction is suspended
         // (InlineSelector/QuestionWizard active) — otherwise the user is
         // trapped and cannot exit without dismissing the selector first.
-        var earlyAction = TryResolveKey(e);
+        var earlyAction = TuiKeyAdapter.ResolveAction(e, _keyResolver, _keyContextManager.ActiveContexts);
         if (earlyAction == KeybindingDefaults.ActionAppExit)
         {
             QuitRequested?.Invoke();
@@ -22,83 +52,31 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+Enter is not a configurable chat binding, but long-text wizard
-        // questions reserve it for submit (Ctrl+Shift+Enter goes to previous).
-        if (_isQuestionMode && _isLongTextMode && e == Key.Enter.WithCtrl)
+        // —— 交互会话接管（提问向导 / 内联选择器）——
+        // 选择题/选择器挂起态：Editor 只读，全部键转发给会话，未消耗的键也
+        // 吞掉，防止回落到聊天分支（如 Enter 误提交）。
+        // 文本题：Editor 仍需接收可打印字符，只转发导航/取消/确认组合键。
+        var interactionSuspended = _interactionSuspended && !_isQuestionMode;
+        if (interactionSuspended || IsQuestionInteractionKey(e))
         {
-            QuestionLongTextNavigationRequested?.Invoke(false);
-            e.Handled = true;
-            return;
-        }
-        if (_isQuestionMode && _isLongTextMode && e == Key.Enter.WithCtrl.WithShift)
-        {
-            QuestionLongTextNavigationRequested?.Invoke(true);
-            e.Handled = true;
-            return;
-        }
-
-        // Text questions preserve bare Left/Right for caret movement. Alt+Left/Right
-        // is reserved for switching wizard questions and must be handled before the
-        // Editor's normal text-navigation path.
-        if (_isQuestionMode && e.IsAlt && !e.IsCtrl && !e.IsShift)
-        {
-            var bare = e.NoShift.NoCtrl.NoAlt;
-            if (bare == Key.CursorLeft || bare == Key.CursorRight)
+            if (InteractionSession?.HandleInteractionKey(e) == true || interactionSuspended)
             {
-                QuestionTextNavigationRequested?.Invoke(bare == Key.CursorLeft);
+                _suppressKeyBubble = true;
                 e.Handled = true;
                 return;
             }
-        }
-
-        // Question text input owns the Editor even while a wizard is active. It must
-        // run before the generic suspended-input forwarding path; otherwise Enter,
-        // Esc and all typed characters are swallowed by the wizard suspension state.
-        if (_isQuestionMode)
-        {
-            if (e.NoShift.NoCtrl.NoAlt == Key.Esc)
-            {
-                QuestionCancelRequested?.Invoke();
-                e.Handled = true;
-                return;
-            }
-
-            if (_isLongTextMode && e.NoShift.NoCtrl.NoAlt == Key.Enter && e.IsCtrl)
-            {
-                QuestionLongTextNavigationRequested?.Invoke(e.IsShift);
-                e.Handled = true;
-                return;
-            }
-
-            if (!_isLongTextMode && e.NoShift.NoCtrl.NoAlt == Key.Enter && e.IsShift)
-            {
-                QuestionPreviousRequested?.Invoke();
-                e.Handled = true;
-                return;
-            }
-        }
-
-        if (_interactionSuspended && !_isQuestionMode)
-        {
-            // Editor has focus and consumes all keys; ReplShell.OnKeyDown never fires.
-            // Forward the key so ReplShell can route it to the active InlineSelector
-            // or choice-based QuestionWizard.
-            InteractionSuspendedKeyForwarded?.Invoke(e);
-            e.Handled = true;
-            return;
         }
 
         // Reuse the already-resolved action for the rest of the switch
         var action = earlyAction;
 
         // Newline MUST be checked before plain Enter.
-        // Short-text wizard questions reserve Shift+Enter for "previous question".
-        // Long-text questions accept ordinary/newline bindings for document input.
+        // 短文本提问模式下 newline 映射 = 回到上一题；其余情况插入换行。
         if (action == KeybindingDefaults.ActionChatNewline)
         {
             if (_isQuestionMode && !_isLongTextMode)
             {
-                QuestionPreviousRequested?.Invoke();
+                InteractionSession?.HandleQuestionNewline();
             }
             else
             {
@@ -366,26 +344,19 @@ public sealed partial class ChatInputView
         _completionList.SelectedItem = _completion.SelectedIndex;
     }
 
-    public void AcceptCompletion()
-    {
-        var accepted = _completion.Accept();
-        if (accepted is not null)
-        {
-            _suppressCompletion = true;
-            _input.Text = accepted;
-            _input.InsertionPoint = _input.Text.Length;
-            _suppressCompletion = false;
-        }
-    }
-
     /// <summary>
-    /// Resolves a key press to an action string via KeybindingResolver.
-    /// Returns null when no binding matches — callers must not fall back to
-    /// hardcoded keys; unmatched keys are simply not handled.
+    /// 提问模式下需要交给交互会话的组合键，其余键仍由 Editor / 聊天分支处理。
+    /// 通用：Esc；长文本：Ctrl+Enter / Ctrl+Shift+Enter；短文本：Shift+Enter、Alt+←/→。
     /// </summary>
-    private string? TryResolveKey(Key key)
+    private bool IsQuestionInteractionKey(Key e)
     {
-        var adapter = new TuiKeyAdapter(key);
-        return adapter.ResolveAction(_keyResolver, _keyContextManager.ActiveContexts);
+        if (!_isQuestionMode) return false;
+        var bare = e.NoShift.NoCtrl.NoAlt;
+        if (bare == Key.Esc) return true;
+        if (_isLongTextMode)
+            return e == Key.Enter.WithCtrl || e == Key.Enter.WithCtrl.WithShift;
+        if (e.IsAlt && !e.IsCtrl && !e.IsShift && (bare == Key.CursorLeft || bare == Key.CursorRight))
+            return true;
+        return bare == Key.Enter && e.IsShift;
     }
 }

@@ -61,3 +61,14 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 - PERM-1.5 删除 ApprovalHandler 垫片的决策有 ADR 背书
 - 未来新增拦截机制时有明确的归属判断依据
 - MAF-M2（`tool_latency_metrics` 中间件）符合本 ADR：它是无决策权的观测性拦截器，用 `.Use()` 中间件实现（MAF 1.13 不含 `IFunctionInvocationFilter` 接口）
+
+## 现状更新（2026-08-15）
+
+「Permission 只做安全决策、ToolApproval 专管协议审批」的两独立环节边界，已演进为**合并式拦截器**：`PermissionAndLimitMiddleware`（`OneCode.Infrastructure/Middleware/PermissionAndLimitMiddleware.cs`）在一个 `.Use()` 中间件内依次完成：
+
+1. `IsToolAllowed` 白名单过滤（超限只失败当前调用，保留批次完整性）
+2. 工具调用计数 + `MaxToolCalls` 上限（被拒绝的调用不计入）
+3. 权限检查（`PermissionChecker.CheckAsync`，Allow/Deny/Ask/Passthrough 四路决策）
+4. 审批路由：Ask/Passthrough → MAF `ToolApprovalAgent` 或 inline `ApprovalHandler`（`IApprovalBroker` 抽象，见 ADR 0003 现状注记）
+
+观测性中间件（`RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking）仍为无决策权的 `.Use()` 拦截器，与本 ADR 约束一致。

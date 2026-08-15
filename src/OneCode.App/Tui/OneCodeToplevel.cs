@@ -304,8 +304,8 @@ public sealed partial class OneCodeToplevel : Window
         onAccepted?.Invoke();
     }
 
-    // Event handlers & submit dispatch live in CodeAssistantToplevel.Dispatch.cs
-    // Session/config modal handlers live in CodeAssistantToplevel.Modals.cs
+    // Event handlers & submit dispatch live in OneCodeToplevel.Dispatch.cs
+    // Session/config modal handlers live in OneCodeToplevel.Modals.cs
 
     /// <summary>
     /// Push any view onto the overlay host on the UI thread.
@@ -370,7 +370,7 @@ public sealed partial class OneCodeToplevel : Window
         _shell.FocusChatInput();
     }
 
-    // Query loop and event dispatch live in CodeAssistantToplevel.Query.cs and CodeAssistantToplevel.Events.cs
+    // Query loop and event dispatch live in OneCodeToplevel.Query.cs and OneCodeToplevel.Events.cs
 
     private void Invoke(Action action) => _app.Invoke(action);
 }

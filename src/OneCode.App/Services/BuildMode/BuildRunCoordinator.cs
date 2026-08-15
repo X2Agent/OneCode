@@ -58,6 +58,7 @@ public sealed partial class BuildRunCoordinator(
     RequirementAssessmentService assessmentService,
     BuildStateTransitionService transitions,
     ITaskService taskService,
+    IClarificationQuestionGenerator clarificationGenerator,
     ILogger<BuildRunCoordinator> logger) : IBuildRunCoordinator
 {
     public async Task<BuildRun> BeginOrResumeAsync(
@@ -201,9 +202,19 @@ public sealed partial class BuildRunCoordinator(
         // but must not send that contract back through clarification.
         if (prescribedPlan is null && assessment.RequiresClarification)
         {
+            IReadOnlyList<string> questions;
+            try
+            {
+                questions = (await clarificationGenerator.GenerateAsync(prompt, assessment, ct).ConfigureAwait(false)).Questions;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return await BlockClarificationFailureAsync(run, ex, ct, durableStateObserver).ConfigureAwait(false);
+            }
+
             run = transitions.Transition(run, BuildRunState.Clarifying, now) with
             {
-                ClarificationQuestions = assessmentService.BuildClarificationQuestions(assessment, prompt),
+                ClarificationQuestions = questions,
             };
             return await SaveAndReloadAsync(run, run.Version, ct, durableStateObserver).ConfigureAwait(false);
         }
@@ -548,10 +559,20 @@ public sealed partial class BuildRunCoordinator(
         var assessment = run.Assessment ?? assessmentService.Assess(run.IntakePrompt);
         if (run.Plan is null && assessment.RequiresClarification)
         {
+            IReadOnlyList<string> questions;
+            try
+            {
+                questions = (await clarificationGenerator.GenerateAsync(run.IntakePrompt, assessment, ct).ConfigureAwait(false)).Questions;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return await BlockClarificationFailureAsync(run, ex, ct, durableStateObserver).ConfigureAwait(false);
+            }
+
             run = transitions.Transition(run, BuildRunState.Clarifying, now) with
             {
                 Assessment = assessment,
-                ClarificationQuestions = assessmentService.BuildClarificationQuestions(assessment, run.IntakePrompt),
+                ClarificationQuestions = questions,
             };
             return await SaveAndReloadAsync(
                 run,
@@ -594,9 +615,20 @@ public sealed partial class BuildRunCoordinator(
 
         var combined = $"{current.IntakePrompt}\nClarification response: {response.Trim()}";
         var assessment = assessmentService.Assess(combined);
-        var questions = assessmentService.BuildClarificationQuestions(assessment, current.IntakePrompt);
         BuildScopeSnapshot? proposed = null;
-        if (!assessment.RequiresClarification)
+        IReadOnlyList<string> questions;
+        if (assessment.RequiresClarification)
+        {
+            try
+            {
+                questions = (await clarificationGenerator.GenerateAsync(combined, assessment, ct).ConfigureAwait(false)).Questions;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return await BlockClarificationFailureAsync(current, ex, ct, durableStateObserver).ConfigureAwait(false);
+            }
+        }
+        else
         {
             proposed = CreateScope(combined, "pending-user-confirmation", now, current.Plan);
             questions = ["开始修改前，请确认建议的任务范围；也可以取消或补充修正。"];
@@ -612,6 +644,24 @@ public sealed partial class BuildRunCoordinator(
             UpdatedAt = now,
         };
         return await SaveAndReloadAsync(updated, current.Version, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Fail-closed clarification: the generator refused (model error / no valid questions),
+    /// so the run is parked as Blocked instead of falling back to template questions.
+    /// </summary>
+    private async Task<BuildRun> BlockClarificationFailureAsync(
+        BuildRun run,
+        Exception error,
+        CancellationToken ct,
+        Action<BuildRun>? durableStateObserver = null)
+    {
+        var blocked = transitions.Transition(run, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
+        {
+            TerminalReason = BuildTerminalReason.Blocked,
+            FailureSummary = $"澄清问题生成失败：{error.Message}",
+        };
+        return await SaveAndReloadAsync(blocked, run.Version, ct, durableStateObserver).ConfigureAwait(false);
     }
 
     private async Task<BuildRun> PrepareForExecutionAsync(

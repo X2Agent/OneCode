@@ -10,6 +10,35 @@ namespace OneCode.Tests;
 public sealed class GitGoalWorkspaceServiceTests
 {
     [Fact]
+    public async Task Prepare_DirtyWorkspace_ThrowsWithRepositoryRootAndDirtyCount()
+    {
+        var git = Substitute.For<IGitHelper>();
+        var run = CreateRun() with { WorkingDirectory = "C:/repo/.dev-workspace" };
+        git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
+        git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(2);
+        git.RunAsync(
+                Arg.Is<string[]>(args => args.SequenceEqual(new[] { "status", "--porcelain" })),
+                "C:/repo",
+                Arg.Any<CancellationToken>())
+            .Returns(new GitCommandResult(true, " M src/A.cs\n?? .dev-workspace/notes.md\n", ""));
+        var service = new GitGoalWorkspaceService(git, Substitute.For<IWorkspaceFingerprintProvider>());
+
+        var act = () => service.PrepareAsync(run, TestContext.Current.CancellationToken);
+
+        var error = await act.Should().ThrowAsync<InvalidOperationException>();
+        error.Which.Message.Should().Contain("clean Git working tree");
+        error.Which.Message.Should().Contain("C:/repo");
+        error.Which.Message.Should().Contain(".dev-workspace");
+        error.Which.Message.Should().Contain("2 dirty path");
+        error.Which.Message.Should().Contain("src/A.cs");
+        error.Which.Message.Should().Contain(".dev-workspace/notes.md");
+        await git.DidNotReceive().RunAsync(
+            Arg.Is<string[]>(args => args.Length > 0 && args[0] == "worktree"),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Prepare_CreatesStableRunScopedWorktreeWithoutSessionState()
     {
         var git = Substitute.For<IGitHelper>();

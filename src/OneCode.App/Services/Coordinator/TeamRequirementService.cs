@@ -1,5 +1,5 @@
-using System.Text.RegularExpressions;
 using OneCode.App.Services.BuildMode;
+using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Services.Coordinator;
@@ -14,34 +14,29 @@ public sealed record RequirementAnalysisResult(
     IReadOnlyList<TeamClarificationQuestion> Questions,
     bool CanProceedWithoutClarification);
 
-public sealed class TeamRequirementService(RequirementAssessmentService assessmentService)
+public sealed class TeamRequirementService(
+    RequirementAssessmentService assessmentService,
+    IClarificationQuestionGenerator questionGenerator)
 {
-    public RequirementAnalysisResult Analyze(string goal)
+    private const string ClarificationResponseMarker = "Clarification response:";
+
+    /// <summary>
+    /// Clarification call rules: an already-answered goal and an assessment that does not
+    /// require clarification never hit the model — the generator is only called when the
+    /// deterministic gate demands questions, so its fail-closed errors stay scoped to that path.
+    /// </summary>
+    public async Task<RequirementAnalysisResult> AnalyzeAsync(string goal, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goal);
+        if (HasClarificationResponse(goal))
+            return ComposeResult(goal, RequirementIntake.Empty, canProceed: true);
+
         var assessment = assessmentService.Assess(goal);
-        var questionTexts = assessmentService.BuildClarificationQuestions(assessment, goal);
-        var questions = questionTexts
-            .Select((question, index) => new TeamClarificationQuestion(
-                $"requirement-{index + 1}",
-                question,
-                Blocking: true))
-            .ToList();
-        var acceptance = ExtractAcceptanceCriteria(goal);
-        var target = ExtractTarget(goal);
-        var draft = new RequirementBaseline(
-            ProductGoal: goal.Trim(),
-            InScope: target is null ? [] : [target],
-            OutOfScope: [],
-            AcceptanceCriteria: acceptance,
-            Constraints: [],
-            Assumptions: [],
-            OpenQuestions: questions.Select(question => question.Question).ToList(),
-            RequiresApproval: true);
-        return new RequirementAnalysisResult(
-            draft,
-            questions,
-            CanProceedWithoutClarification: questions.Count == 0);
+        if (!assessment.RequiresClarification)
+            return ComposeResult(goal, RequirementIntake.Empty, canProceed: true);
+
+        var intake = await questionGenerator.GenerateAsync(goal, assessment, ct).ConfigureAwait(false);
+        return ComposeResult(goal, intake, canProceed: false);
     }
 
     public ImplementationPlan CreateImplementationPlan(RequirementAnalysisResult analysis)
@@ -112,38 +107,44 @@ public sealed class TeamRequirementService(RequirementAssessmentService assessme
                 new QualityGateDefinition("unit-test", QualityGateKind.UnitTest, Required: true, "Configured unit tests must pass before commit."),
                 new QualityGateDefinition("acceptance", QualityGateKind.AcceptanceCriteria, Required: true, "Required tasks must provide acceptance evidence."),
             ],
-            Risks: assessmentService.Assess(goal).Risk == OneCode.Core.Build.BuildRiskLevel.High
+            Risks: assessmentService.Assess(goal).Risk == BuildRiskLevel.High
                 ? ["The request contains operations with elevated change risk."]
                 : [],
             NonGoals: analysis.Draft.OutOfScope);
     }
 
-    private static IReadOnlyList<string> ExtractAcceptanceCriteria(string goal)
+    private RequirementAnalysisResult ComposeResult(
+        string goal,
+        RequirementIntake intake,
+        bool canProceed)
     {
-        var criteria = new List<string>();
-        if (ContainsAny(goal, "build", "compile", "构建", "编译"))
-            criteria.Add("The project build succeeds.");
-        if (ContainsAny(goal, "test", "测试"))
-            criteria.Add("Relevant automated tests pass.");
-        if (ContainsAny(goal, "fix", "修复"))
-            criteria.Add("The reported defect is no longer reproducible.");
-        if (ContainsAny(goal, "refactor", "重构"))
-            criteria.Add("Existing observable behavior remains compatible unless explicitly changed.");
-        return criteria;
+        var questions = intake.Questions
+            .Select((question, index) => new TeamClarificationQuestion(
+                $"requirement-{index + 1}",
+                question,
+                Blocking: true))
+            .ToList();
+        var draft = new RequirementBaseline(
+            ProductGoal: goal.Trim(),
+            InScope: intake.InScope,
+            OutOfScope: [],
+            AcceptanceCriteria: intake.AcceptanceCriteria,
+            Constraints: intake.Constraints,
+            Assumptions: [],
+            OpenQuestions: questions.Select(question => question.Question).ToList(),
+            RequiresApproval: true);
+        return new RequirementAnalysisResult(draft, questions, canProceed);
     }
 
-    private static string? ExtractTarget(string goal)
+    internal static bool HasClarificationResponse(string goal)
     {
-        var match = Regex.Match(
-            goal,
-            @"(?<!\w)(?:[A-Za-z]:[\\/]|[./])?[^\s,，;；]+\.(?:cs|csproj|slnx?|json|ya?ml|md)(?!\w)",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        return match.Success ? match.Value : null;
+        var index = goal.IndexOf(ClarificationResponseMarker, StringComparison.Ordinal);
+        if (index < 0)
+            return false;
+        var answer = goal[(index + ClarificationResponseMarker.Length)..];
+        return !string.IsNullOrWhiteSpace(answer);
     }
 
     private static string Summarize(string goal)
         => goal.Length <= 80 ? goal : goal[..77] + "...";
-
-    private static bool ContainsAny(string value, params string[] terms)
-        => terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 }

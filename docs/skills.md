@@ -13,23 +13,25 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 | 来源 | 路径 | 作用域 |
 |---|---|---|
 | **内置技能** | `BundledSkills.cs` 硬编码 | 所有用户共享，随版本发布 |
-| **用户技能** | `~/.onecode/skills/` | 当前用户全局，跨项目共享 |
-| **项目技能** | `<项目>/.onecode/skills/` | 当前项目，团队共享 |
+| **用户技能** | `~/{候选目录}/skills/` | 当前用户全局，跨项目共享 |
+| **项目技能** | `<项目>/{候选目录}/skills/` | 当前项目，团队共享 |
 
-同名技能优先级：内置 > 用户 > 项目（后两者中内置名称不可被覆盖）。
+> 读取/发现按优先级枚举三个候选配置目录：`.onecode` → `.agent` → `.claude`（`ConfigDirPaths.EnumerateExisting`，见 `Infrastructure/Config/Constants.cs` 的 `ConfigDirCandidates`）；写入/安装始终使用主目录 `.onecode`。
+
+同名技能**后加载者覆盖先加载者**：`BundledSkills`（硬编码）→ 打包技能目录 → 用户技能 → 项目技能（`SkillCatalog.LoadUserInvocableSkills` 按字典后写覆盖）。因此实际生效优先级为**项目 > 用户 > 内置**——项目级同名技能最后写入，会覆盖用户级/内置的同名技能。
 
 ---
 
 ## 参数占位符
 
-技能 prompt 模板支持两类占位符：
+技能 prompt 模板支持两类占位符，均在调用斜杠命令时由 `SkillCatalog.Render` 运行时替换：
 
-| 占位符 | 替换时机 | 示例 |
+| 占位符 | 替换规则 | 示例 |
 |---|---|---|
-| `$ARGUMENTS` | 用户输入斜杠命令时，`/skill-name foo bar` 中的 `foo bar` 会被替换进去 | `/remember 新工具必须 sealed + AddTool 注册` |
-| `{xxx}` | **不**被运行时替换，作为 prompt 内的语义占位符，由 LLM 根据对话上下文理解 | `{instruction}`、`{context}` |
+| `$ARGUMENTS` | 替换为全部参数拼接（`/skill-name foo bar` → `foo bar`） | `/remember 新工具必须 sealed + AddTool 注册` |
+| `{xxx}` | **命名占位符**：从 prompt 中推断参数名（`ArgumentNames`），按位置映射 `args[i]`；技能只有一个（或零个）命名占位符时，该占位符吸收全部拼接参数；未匹配到值的占位符保持原样留给 LLM 理解 | `/batch 修复登录页样式` → `{instruction}` 被替换为 `修复登录页样式` |
 
-> **注意**：使用 `{xxx}` 占位符的技能（如 `/batch`、`/debug`、`/loop`、`/stuck`、`/verify`、`/simplify`）不会把斜杠命令的参数注入到 prompt 模板。调用这些技能时，应在对话中提供完整上下文，LLM 会从对话历史中提取信息填充这些占位符。
+> **注意**：多占位符技能按位置映射（如 `/loop` 的 `{task}` ← 第 1 个参数、`{expected}` ← 第 2 个参数）；参数不足时对应占位符替换为空字符串；占位符名不在参数名列表中时保持原样。
 
 ---
 
@@ -55,7 +57,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 3. **Dispatch Workers** — 每个 worktree 派发一个 worker agent
 4. **Collect and Merge** — 合并所有 worktree 回 main
 
-**占位符**：`{instruction}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{instruction}`（运行时替换：吸收全部参数）
 
 > 与 `ParallelAgentsTool`（DAG 并行调度，同一工作目录）的区别：`/batch` 用 git worktree 做文件级隔离（每个 worker 独立工作树）。
 
@@ -73,7 +75,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **作用**：引导 LLM 按六步调试法工作：复现 → 隔离 → 假设 → 测试假设 → 修复 → 验证修复。
 
-**占位符**：`{issue}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{issue}`（运行时替换：吸收全部参数）
 
 ---
 
@@ -89,7 +91,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **作用**：引导 LLM 反复执行任务并与期望输出对比，不正确则分析修正后重试，直到正确或达到最大迭代次数。
 
-**占位符**：`{task}` + `{expected}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{task}` + `{expected}`（运行时按位置替换：第 1/2 个参数）
 
 > 适用于需要"生成 → 验证 → 修正"循环的场景，如生成匹配特定格式的输出。
 
@@ -107,7 +109,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **作用**：当 LLM 陷入重复操作无进展时，引导其暂停 → 评估已尝试的方法 → 换一种根本性不同的策略 → 必要时用 `AskUserQuestion` 向用户求助。
 
-**占位符**：`{context}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{context}`（运行时替换：吸收全部参数）
 
 > 可在 LLM 表现出"转圈"行为时手动触发，打断无效循环。
 
@@ -125,7 +127,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **作用**：引导 LLM 按五项检查清单验证变更：Build → Test → Lint → 手动验证 → 边界情况。
 
-**占位符**：`{context}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{context}`（运行时替换：吸收全部参数）
 
 > 适用于代码变更完成后的收尾验证。
 
@@ -143,7 +145,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **作用**：引导 LLM 在实现变更后审查并简化：通读所有改动 → 去除重复 → 简化逻辑 → 检查约定 → 删除死代码（未使用的 import、变量、函数）。
 
-**占位符**：`{changes}`（不被运行时替换，LLM 从对话提取）
+**占位符**：`{changes}`（运行时替换：吸收全部参数）
 
 > 适用于重构或新功能实现完成后的"收尾打扫"。
 
@@ -216,7 +218,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 ### 文件格式
 
-自定义技能是一个 markdown 文件，放在 `~/.onecode/skills/`（用户级）或 `<项目>/.onecode/skills/`（项目级）下。支持两种目录结构：
+自定义技能是一个 markdown 文件，放在 `~/.onecode/skills/`（用户级）或 `<项目>/.onecode/skills/`（项目级）下（`.agent`/`.claude` 候选目录下的技能也会被发现，但安装/生成始终写入 `.onecode`）。支持两种目录结构：
 
 ```
 # 结构一：单文件
@@ -271,7 +273,6 @@ $ARGUMENTS
 | `/skills` | 列出所有可用技能（内置 + 用户 + 项目），显示名称和一行描述 |
 | `/skills list` | 同上 |
 | `/skills show <name>` 或 `/skills <name>` | 查看指定技能的详情（预览，不执行） |
-| `F3` | TUI 技能浏览弹窗 |
 | `/<skill-name> <args>` | **执行**技能的唯一入口（斜杠补全支持 Tab） |
 | `SkillTool`（LLM 工具） | LLM 在对话中自主调用技能 |
 
@@ -299,17 +300,22 @@ SkillsCommand                             →  /skills 命令，列出所有技�
 
 ### Prompt 渲染
 
-`SkillProxyCommand.ExecuteAsync` 的核心逻辑：
+`SkillProxyCommand.ExecuteAsync` 调用时重新解析技能（使 frontmatter/正文编辑在去抖刷新前即生效），再经 `SkillCatalog.Render(skill, args)` 渲染：
 
 ```csharp
-var skillContent = BundledSkills.Get(name)?.Prompt ?? ReadFromFileSystem(name);
-var resolved = args.Length > 0
-    ? skillContent.Replace("$ARGUMENTS", string.Join(" ", args))
-    : skillContent;
+// SkillCatalog.Render 核心逻辑：
+var joined = string.Join(" ", args);
+
+// 1. 命名占位符按位置映射：ArgumentNames[i] ← args[i]（不足补空串）
+// 2. 替换 $ARGUMENTS ← joined
+// 3. {xxx} 正则替换：
+//    - 名字在参数名表中 → 对应参数值
+//    - 技能只有 0/1 个命名占位符 → 吸收全部 joined
+//    - 其他 → 保持原样（留给 LLM 理解）
 return CommandResult.Prompt(resolved);
 ```
 
-- 只替换 `$ARGUMENTS`，不替换 `{xxx}` 占位符
+- `$ARGUMENTS` 与 `{xxx}` 均被运行时替换（规则见[参数占位符](#参数占位符)）
 - 返回 `CommandResult.Prompt`，由 query 流交给 LLM 执行
 
 ### 真相源

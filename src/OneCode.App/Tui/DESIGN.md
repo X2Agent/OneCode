@@ -198,10 +198,14 @@ than background contrast.
 
 ### Brand & Semantic (5 colors)
 
-- **accent (`#5b8dee`):** The sole interaction driver — links, active borders,
-  PLAN mode, focused states. Never used for decoration.
+- **accent (`#5b8dee`):** The sole interaction driver in full-color contexts —
+  links, active borders, PLAN mode, focused states. Never used for decoration.
+  **Terminal mapping (normative):** interactive accent duty in the terminal is
+  rendered by `accent-teal` via `TuiPalette.Accent`; `#5b8dee` appears only as
+  the researcher role color (`TuiPalette.AgentBlue`).
 - **accent-teal (`#14B8A6`):** Secondary brand color used as the product
-  accent in terminal rendering (mapped to `BrightCyan`).
+  accent in terminal rendering (mapped to `BrightCyan`) — the single
+  interaction driver color for TUI code (`TuiPalette.Accent`).
 - **success (`#4caf84`):** BUILD mode identity, completed states, diff additions.
 - **warning (`#e5b14c`):** Pending confirmations, tool-call indicators.
 - **error (`#e0556a`):** Failures, rejected states, diff deletions.
@@ -466,7 +470,7 @@ chat view renders a centered welcome screen instead of being blank:
 
                   v1.0.0
 
-    / 斜杠命令 · @ 提及文件 · Tab 切模式 · Esc 清空 · /find 搜索
+    / 斜杠命令 · @ 提及文件 · Tab 空输入切模式 · Esc 中断 · /find 搜索
 
 ```
 
@@ -490,7 +494,11 @@ The welcome screen re-renders on terminal resize to stay centered.
   can be dismissed with `Esc`. Never add persistent panels to the chat area.
 - **Indicate mode once.** Render the current mode and TEAM strategy/team only in
   `AgentStatusBar`. `ChatInputView` handles mode shortcuts but does not duplicate
-  mode labels.
+  mode labels. A single **transient** mode-change banner in the transcript (rendered
+  once on switch and replaced in place, never accumulating) is permitted as change
+  feedback; it must never become a persistent per-message label.
+- **Advertise only real interactions.** Welcome-screen tips and inline hints must
+  match actual key behavior (e.g. Esc interrupts/cancels; it does not clear input).
 - **Use the agent 8-color system consistently.** When rendering any
   agent-identified content (messages, plan steps, coordination lines),
   color-code it with `TuiPalette.FromAgentName()`.

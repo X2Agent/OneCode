@@ -4,46 +4,44 @@ namespace OneCode.App.Tui;
 /// InlineSelector and QuestionWizard lifecycle management extracted from ReplShell.
 /// Manages the show/dismiss/refresh cycle for inline selector overlays (permission prompts)
 /// and multi-question interactive wizards within the conversation view.
+///
+/// This partial also implements <see cref="IInteractionSession"/>: interaction keys are
+/// routed here from ChatInputView (and the ReplShell.OnKeyDown fallback), replacing the
+/// former loose forwarding events and the triplicated wizard/selector dispatch logic.
+/// Interaction lines live in a MessageListView tail region — line counts are tracked by
+/// the view, not by hand-rolled bookkeeping fields.
 /// </summary>
-public sealed partial class ReplShell
+public sealed partial class ReplShell : IInteractionSession
 {
-    // Inline Selector (replaces modal overlays)
+    // At most one interaction session is active (no stack). Plan-card approval
+    // reuses InlineSelector, so these two pointers are the whole session set.
     private InlineSelector? _activeInlineSelector;
-    private int _inlineSelectorLineCount;
-
-    // Question Wizard (multi-question interactive flow)
     private QuestionWizard? _activeQuestionWizard;
-    private int _questionWizardLineCount;
 
     public void ShowInlineSelector(InlineSelector selector)
     {
-        DismissInlineSelector();
+        DismissActiveSession();
         _activeInlineSelector = selector;
         _chatInput.SetInteractionSuspended(true);
 
-        // Render the selector as lines in the conversation view
-        var lines = InlineSelector.RenderAsLines(
+        _transcript.MessageView.BeginTailRegion(InlineSelector.RenderAsLines(
             selector.Title,
             selector.Options,
             selector.SelectedIndex,
             selector.Prompt,
-            selector.UseInformationRequestCard);
-        _inlineSelectorLineCount = lines.Count;
-        _transcript.MessageView.AppendLines(lines);
+            selector.UseInformationRequestCard));
     }
 
     public void DismissInlineSelector()
     {
-        if (_activeInlineSelector is not null)
-        {
-            // Remove the selector lines from the conversation view
-            if (_inlineSelectorLineCount > 0)
-                _transcript.MessageView.ReplaceLastLines(_inlineSelectorLineCount, null);
-            _activeInlineSelector = null;
-            _inlineSelectorLineCount = 0;
-            _chatInput.SetInteractionSuspended(false);
-            FocusChatInput();
-        }
+        if (_activeInlineSelector is null) return;
+
+        // Complete waiters fail-closed so a replaced/torn-down selector cannot hang.
+        _activeInlineSelector.Dismiss();
+        _activeInlineSelector = null;
+        _transcript.MessageView.EndTailRegion();
+        _chatInput.SetInteractionSuspended(false);
+        FocusChatInput();
     }
 
     /// <summary>
@@ -51,14 +49,11 @@ public sealed partial class ReplShell
     /// </summary>
     public void ShowQuestionWizard(QuestionWizard wizard)
     {
-        DismissQuestionWizard();
+        DismissActiveSession();
         _activeQuestionWizard = wizard;
         UpdateQuestionWizardInputState();
 
-        // Render the wizard as lines in the conversation view
-        var lines = wizard.RenderAsLines();
-        _questionWizardLineCount = lines.Count;
-        _transcript.MessageView.AppendLines(lines);
+        _transcript.MessageView.BeginTailRegion(wizard.RenderAsLines());
     }
 
     /// <summary>
@@ -66,26 +61,32 @@ public sealed partial class ReplShell
     /// </summary>
     public void DismissQuestionWizard()
     {
-        if (_activeQuestionWizard is not null)
-        {
-            // Remove the wizard lines from the conversation view
-            if (_questionWizardLineCount > 0)
-                _transcript.MessageView.ReplaceLastLines(_questionWizardLineCount, null);
-            _activeQuestionWizard = null;
-            _questionWizardLineCount = 0;
-            if (_chatInput.IsQuestionMode)
-                _chatInput.ClearQuestionMode();
-            _chatInput.SetInteractionSuspended(false);
-            FocusChatInput();
-        }
+        if (_activeQuestionWizard is null) return;
+
+        // Complete waiters fail-closed so a replaced/torn-down wizard cannot hang.
+        _activeQuestionWizard.CancelWizard();
+        _activeQuestionWizard = null;
+        _transcript.MessageView.EndTailRegion();
+        if (_chatInput.IsQuestionMode)
+            _chatInput.ClearQuestionMode();
+        _chatInput.SetInteractionSuspended(false);
+        FocusChatInput();
+    }
+
+    /// <summary>
+    /// Tears down whichever session is showing. Tail region is a single slot,
+    /// so Show* must never leave both pointers non-null.
+    /// </summary>
+    private void DismissActiveSession()
+    {
+        DismissInlineSelector();
+        DismissQuestionWizard();
     }
 
     private void RefreshQuestionWizard()
     {
         if (_activeQuestionWizard is null) return;
-        var lines = _activeQuestionWizard.RenderAsLines();
-        _transcript.MessageView.ReplaceLastLines(_questionWizardLineCount, lines);
-        _questionWizardLineCount = lines.Count;
+        _transcript.MessageView.ReplaceTailRegion(_activeQuestionWizard.RenderAsLines());
         UpdateQuestionWizardInputState();
     }
 
@@ -94,7 +95,7 @@ public sealed partial class ReplShell
         if (_activeQuestionWizard is null)
             return;
 
-        // Choice questions fully suspend text editing and forward navigation keys.
+        // Choice questions fully suspend text editing and consume navigation keys.
         // Text questions keep the prompt editable; question mode prevents normal chat submission.
         _chatInput.SetInteractionSuspended(!_activeQuestionWizard.CurrentQuestion.IsTextType);
     }
@@ -102,150 +103,156 @@ public sealed partial class ReplShell
     private void RefreshInlineSelector()
     {
         if (_activeInlineSelector is null) return;
-        var lines = InlineSelector.RenderAsLines(
+        _transcript.MessageView.ReplaceTailRegion(InlineSelector.RenderAsLines(
             _activeInlineSelector.Title,
             _activeInlineSelector.Options,
             _activeInlineSelector.SelectedIndex,
             _activeInlineSelector.Prompt,
-            _activeInlineSelector.UseInformationRequestCard);
-        _transcript.MessageView.ReplaceLastLines(_inlineSelectorLineCount, lines);
-        _inlineSelectorLineCount = lines.Count;
+            _activeInlineSelector.UseInformationRequestCard));
     }
+
+    // ── IInteractionSession ──────────────────────────────────────────────
 
     /// <summary>
-    /// Handles keys forwarded from ChatInputView while interaction is suspended
-    /// (e.g. InlineSelector for permission prompts is active). Editor consumes
-    /// all keys when it has focus, so this is the only path for arrow/Enter/Esc
-    /// to reach the InlineSelector.
+    /// 交互会话按键入口 — ChatInputView 在提问/挂起期间转发到这里，
+    /// ReplShell.OnKeyDown 兜底路径复用同一实现，消除重复的向导/选择器分发。
     /// </summary>
-    private void OnQuestionPreviousRequested()
+    public bool HandleInteractionKey(Key kb)
     {
-        if (_activeQuestionWizard is null || _activeQuestionWizard.IsFirstQuestion)
-            return;
-
-        _activeQuestionWizard.SetTextAnswer(_chatInput.CurrentText.Trim());
-        _chatInput.ClearQuestionMode();
-        _activeQuestionWizard.MoveToPrevious();
-        RefreshQuestionWizard();
-        EnterTextModeForCurrentQuestion();
-    }
-
-    private void OnQuestionCancelRequested()
-    {
-        if (_activeQuestionWizard is null)
-            return;
-
-        _activeQuestionWizard.CancelWizard();
-        _chatInput.ClearQuestionMode();
-    }
-
-    private void OnQuestionLongTextNavigationRequested(bool moveToPrevious)
-    {
-        if (_activeQuestionWizard is null || !_activeQuestionWizard.IsLongTextMode)
-            return;
-
-        _activeQuestionWizard.SetTextAnswer(_chatInput.CurrentText.Trim());
-        _chatInput.ClearQuestionMode();
-        _activeQuestionWizard.HandleKey(
-            moveToPrevious ? Key.Enter.WithCtrl.WithShift : Key.Enter.WithCtrl);
-        RefreshQuestionWizard();
-        EnterTextModeForCurrentQuestion();
-    }
-
-    private void OnQuestionTextNavigationRequested(bool moveToPrevious)
-    {
-        if (_activeQuestionWizard is null || !_activeQuestionWizard.CurrentQuestion.IsTextType)
-            return;
-        if (moveToPrevious && _activeQuestionWizard.IsFirstQuestion)
-            return;
-        if (!moveToPrevious && _activeQuestionWizard.IsLastQuestion)
-            return;
-
-        _activeQuestionWizard.SetTextAnswer(_chatInput.CurrentText.Trim());
-        _chatInput.ClearQuestionMode();
-        if (moveToPrevious)
-            _activeQuestionWizard.MoveToPrevious();
-        else
-            _activeQuestionWizard.MoveToNext();
-        RefreshQuestionWizard();
-        EnterTextModeForCurrentQuestion();
-    }
-
-    private void OnInteractionSuspendedKey(Key kb)
-    {
-        // Question wizard takes priority
-        if (_activeQuestionWizard is not null)
+        // 提问向导优先
+        if (_activeQuestionWizard is { } wizard)
         {
-            // 长文本模式下，特殊按键处理
-            if (_activeQuestionWizard.IsLongTextMode)
-            {
-                // Ctrl+Enter 提交
-                if (kb == Key.Enter.WithCtrl)
-                {
-                    var answer = _chatInput.CurrentText.Trim();
-                    _activeQuestionWizard.SetTextAnswer(answer);
-                    _chatInput.ClearQuestionMode();
-                    _activeQuestionWizard.HandleKey(kb);
-                    RefreshQuestionWizard();
-                    return;
-                }
+            // 文本题：Editor 持有焦点，仅导航/取消组合键到达，其余留给输入
+            if (_chatInput.IsQuestionMode)
+                return HandleQuestionTextInputKey(wizard, kb);
 
-                // Ctrl+Shift+Enter 上一题 — 保持与 OnKeyDown 路径一致
-                if (kb == Key.Enter.WithCtrl.WithShift)
-                {
-                    var answer = _chatInput.CurrentText.Trim();
-                    _activeQuestionWizard.SetTextAnswer(answer);
-                    _chatInput.ClearQuestionMode();
-                    _activeQuestionWizard.HandleKey(kb);
-                    RefreshQuestionWizard();
-                    // 重新进入长文本模式（与 OnKeyDown 路径行为一致）
-                    EnterLongTextModeIfNeeded();
-                    return;
-                }
-
-                // Esc 取消
-                if (kb == Key.Esc)
-                {
-                    _activeQuestionWizard.CancelWizard();
-                    _chatInput.ClearQuestionMode();
-                    return;
-                }
-
-                // 其他键让 ChatInputView 处理
-                return;
-            }
-
+            // 选择题：挂起态，全部键先经向导
             if (kb == Key.Esc)
             {
-                _activeQuestionWizard.CancelWizard();
-                return;
+                wizard.CancelWizard();
+                return true;
             }
-
-            if (_activeQuestionWizard.HandleKey(kb))
+            if (wizard.HandleKey(kb))
             {
                 RefreshQuestionWizard();
-                return;
+                // 推进后当前题可能变为文本题 — 立即进入输入模式，否则输入框会
+                // 回落到普通聊天提交路径（Enter 误发消息）
+                EnterTextModeForCurrentQuestion();
+                return true;
             }
         }
 
-        if (_activeInlineSelector is not null)
+        if (_activeInlineSelector is { } selector && selector.HandleKey(kb))
         {
-            if (_activeInlineSelector.HandleKey(kb))
-                RefreshInlineSelector();
+            RefreshInlineSelector();
+            return true;
         }
+
+        return false;
     }
 
-    // Question Wizard Text Input Modes
+    /// <summary>文本题输入期间的组合键处理（Esc 取消 / Enter 家族导航）。</summary>
+    private bool HandleQuestionTextInputKey(QuestionWizard wizard, Key kb)
+    {
+        var bare = kb.NoShift.NoCtrl.NoAlt;
+
+        if (bare == Key.Esc)
+        {
+            wizard.CancelWizard();
+            _chatInput.ClearQuestionMode();
+            return true;
+        }
+
+        if (wizard.IsLongTextMode)
+        {
+            // 长文本：Ctrl+Enter 提交并前进，Ctrl+Shift+Enter 回到上一题
+            // （Enter 本身留给输入框换行）
+            if (kb == Key.Enter.WithCtrl || kb == Key.Enter.WithCtrl.WithShift)
+            {
+                wizard.SetTextAnswer(_chatInput.CurrentText.Trim());
+                _chatInput.ClearQuestionMode();
+                wizard.HandleKey(kb);
+                RefreshQuestionWizard();
+                EnterTextModeForCurrentQuestion();
+                return true;
+            }
+            return false;
+        }
+
+        // 短文本：Shift+Enter 上一题，Alt+←/→ 跨题导航
+        if (bare == Key.Enter && kb.IsShift)
+        {
+            MoveToPreviousTextQuestion();
+            return true;
+        }
+        if (kb.IsAlt && !kb.IsCtrl && !kb.IsShift && (bare == Key.CursorLeft || bare == Key.CursorRight))
+        {
+            MoveToTextQuestion(moveToPrevious: bare == Key.CursorLeft);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>chat:newline 映射在提问模式触发 — 短文本题回到上一题。</summary>
+    public void HandleQuestionNewline() => MoveToPreviousTextQuestion();
+
+    // Question Wizard text input
 
     /// <summary>
-    /// 进入短文本输入模式（供外部调用）。
+    /// 短文本题回到上一题 — 保存当前答案，重新渲染并进入上一题输入模式。
+    /// 首题不动作。
     /// </summary>
-    public void EnterShortTextModeForWizard()
+    private void MoveToPreviousTextQuestion()
     {
-        if (_activeQuestionWizard is null) return;
+        if (_activeQuestionWizard is not { } wizard || wizard.IsFirstQuestion)
+            return;
 
-        _chatInput.SetQuestionMode(_activeQuestionWizard.CurrentQuestion.Question, answer =>
+        wizard.SetTextAnswer(_chatInput.CurrentText.Trim());
+        _chatInput.ClearQuestionMode();
+        wizard.MoveToPrevious();
+        RefreshQuestionWizard();
+        EnterTextModeForCurrentQuestion();
+    }
+
+    /// <summary>
+    /// 文本题 Alt+←/→ — 保存当前答案并在问题间移动（边界处不动作）。
+    /// </summary>
+    private void MoveToTextQuestion(bool moveToPrevious)
+    {
+        if (_activeQuestionWizard is not { } wizard)
+            return;
+        if (moveToPrevious && wizard.IsFirstQuestion)
+            return;
+        if (!moveToPrevious && wizard.IsLastQuestion)
+            return;
+
+        wizard.SetTextAnswer(_chatInput.CurrentText.Trim());
+        _chatInput.ClearQuestionMode();
+        if (moveToPrevious)
+            wizard.MoveToPrevious();
+        else
+            wizard.MoveToNext();
+        RefreshQuestionWizard();
+        EnterTextModeForCurrentQuestion();
+    }
+
+    /// <summary>
+    /// 根据当前问题类型进入文本输入模式（短文本 / 长文本），选择题不进入。
+    /// 短文本提交后自动进入下一题的输入模式；长文本恢复之前输入的内容，
+    /// 由 Ctrl+Enter 导航路径提交。
+    /// </summary>
+    public void EnterTextModeForCurrentQuestion()
+    {
+        if (_activeQuestionWizard is not { } wizard) return;
+        var question = wizard.CurrentQuestion;
+        if (!question.IsTextType) return;
+
+        var longText = question.Type == QuestionType.LongText;
+
+        _chatInput.SetQuestionMode(answer =>
         {
+            if (longText) return; // 长文本答案由 Ctrl+Enter 导航路径提交
             _app.Invoke(() =>
             {
                 _activeQuestionWizard?.SetTextAnswer(answer);
@@ -254,87 +261,9 @@ public sealed partial class ReplShell
                 RefreshQuestionWizard();
                 EnterTextModeForCurrentQuestion();
             });
-        }, longText: false);
-    }
+        }, longText);
 
-    /// <summary>
-    /// 进入长文本输入模式（供外部调用）。
-    /// </summary>
-    public void EnterLongTextModeForWizard()
-    {
-        if (_activeQuestionWizard is null) return;
-        if (_activeQuestionWizard.CurrentQuestion.Type != QuestionType.LongText) return;
-
-        // 恢复之前输入的内容
-        var previousAnswer = _activeQuestionWizard.CurrentQuestion.Answer ?? "";
-        _chatInput.SetQuestionMode(_activeQuestionWizard.CurrentQuestion.Question, answer =>
-        {
-            // 回调在 Ctrl+Enter 时触发，这里不需要额外处理
-        }, longText: true);
-
-        // 恢复之前的内容
-        if (!string.IsNullOrEmpty(previousAnswer))
-        {
-            _chatInput.SetText(previousAnswer);
-        }
-    }
-
-    /// <summary>
-    /// 根据当前问题类型进入相应的文本输入模式。
-    /// </summary>
-    private void EnterTextModeForCurrentQuestion()
-    {
-        if (_activeQuestionWizard is null) return;
-
-        var currentType = _activeQuestionWizard.CurrentQuestion.Type;
-        if (currentType == QuestionType.ShortText)
-        {
-            EnterShortTextModeForWizard();
-        }
-        else if (currentType == QuestionType.LongText)
-        {
-            EnterLongTextModeForWizard();
-        }
-    }
-
-    /// <summary>
-    /// 进入短文本输入模式（内部使用，不触发自动导航）。
-    /// </summary>
-    private void EnterShortTextMode()
-    {
-        if (_activeQuestionWizard is null) return;
-
-        _chatInput.SetQuestionMode(_activeQuestionWizard.CurrentQuestion.Question, answer =>
-        {
-            _app.Invoke(() =>
-            {
-                _activeQuestionWizard?.SetTextAnswer(answer);
-                _chatInput.ClearQuestionMode();
-                _activeQuestionWizard?.HandleKey(Key.Enter);
-                RefreshQuestionWizard();
-            });
-        }, longText: false);
-    }
-
-    /// <summary>
-    /// 如果需要，进入长文本输入模式（内部使用）。
-    /// </summary>
-    private void EnterLongTextModeIfNeeded()
-    {
-        if (_activeQuestionWizard is null) return;
-        if (_activeQuestionWizard.CurrentQuestion.Type != QuestionType.LongText) return;
-
-        // 恢复之前输入的内容
-        var previousAnswer = _activeQuestionWizard.CurrentQuestion.Answer ?? "";
-        _chatInput.SetQuestionMode(_activeQuestionWizard.CurrentQuestion.Question, answer =>
-        {
-            // 回调在 Ctrl+Enter 时触发
-        }, longText: true);
-
-        // 恢复之前的内容
-        if (!string.IsNullOrEmpty(previousAnswer))
-        {
-            _chatInput.SetText(previousAnswer);
-        }
+        if (longText && !string.IsNullOrEmpty(question.Answer))
+            _chatInput.SetText(question.Answer);
     }
 }

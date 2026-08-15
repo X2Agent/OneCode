@@ -195,9 +195,12 @@ public sealed class AgentStatusBar : View
             WorkingMode.Goal => TuiPalette.ModeGoalFg,
             _ => TuiPalette.FgSecondary,
         };
+        // Design-spec mode tag: steady state is a colored-background badge with
+        // dark (bg-root) text; the momentary flash inverts to a colored-text
+        // highlight so a mode change is still noticed.
         SetAttribute(_modeFlash
-            ? new Attribute(TuiPalette.BgPrimary, modeColor)
-            : new Attribute(modeColor, TuiPalette.BgPrimary));
+            ? new Attribute(modeColor, TuiPalette.BgPrimary)
+            : new Attribute(TuiPalette.BgPrimary, modeColor));
         AddStr(modeTag);
 
         if (strategyLabel.Length > 0)

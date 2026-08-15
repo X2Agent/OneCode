@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using NSubstitute;
+using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
@@ -24,20 +25,6 @@ public sealed class BuildRunCoordinatorTests : IDisposable
         var result = sut.Assess("Build a product-development and AI system.");
 
         result.RequiresClarification.Should().BeTrue();
-        sut.BuildClarificationQuestions(result).Should().NotBeEmpty();
-    }
-
-    [Fact]
-    public void RequirementAssessment_ClarificationQuestions_IncludeRequestContext()
-    {
-        var sut = new RequirementAssessmentService();
-        const string prompt = "开发一个订单和支付平台";
-        var assessment = sut.Assess(prompt);
-
-        var questions = sut.BuildClarificationQuestions(assessment, prompt);
-
-        questions.Should().NotBeEmpty();
-        questions.Should().OnlyContain(question => question.Contains(prompt));
     }
 
     [Fact]
@@ -194,6 +181,30 @@ public sealed class BuildRunCoordinatorTests : IDisposable
         run.Scope.Should().BeNull();
         run.ClarificationQuestions.Should().NotBeEmpty();
         (await store.LoadAsync(sessionId)).Should().BeEquivalentTo(run);
+    }
+
+    [Fact]
+    public async Task BeginOrResumeAsync_GeneratorFailure_BlocksRunWithFailureSummary()
+    {
+        var store = new InMemoryBuildRunStore();
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        generator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<RequirementIntake>(
+                new InvalidOperationException("model down")));
+        var sut = CreateCoordinator(store, "fingerprint-a", clarificationGenerator: generator);
+
+        var run = await sut.BeginOrResumeAsync(
+            SessionId.NewId(),
+            "Build a product-development and AI system.",
+            Path.GetTempPath());
+
+        run.State.Should().Be(BuildRunState.Blocked);
+        run.TerminalReason.Should().Be(BuildTerminalReason.Blocked);
+        run.FailureSummary.Should().Contain("澄清问题生成失败");
+        run.FailureSummary.Should().Contain("model down");
     }
 
     [Fact]
@@ -1092,25 +1103,42 @@ public sealed class BuildRunCoordinatorTests : IDisposable
     private static BuildRunCoordinator CreateCoordinator(
         IBuildRunStore store,
         string fingerprint,
-        TaskService? taskService = null)
+        TaskService? taskService = null,
+        IClarificationQuestionGenerator? clarificationGenerator = null)
     {
         var provider = Substitute.For<IWorkspaceFingerprintProvider>();
         provider.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(fingerprint));
-        return CreateCoordinator(store, provider, taskService);
+        return CreateCoordinator(store, provider, taskService, clarificationGenerator);
     }
 
     private static BuildRunCoordinator CreateCoordinator(
         IBuildRunStore store,
         IWorkspaceFingerprintProvider provider,
-        TaskService? taskService = null) =>
+        TaskService? taskService = null,
+        IClarificationQuestionGenerator? clarificationGenerator = null) =>
         new(
             store,
             provider,
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             taskService ?? new TaskService(),
+            clarificationGenerator ?? CreateFakeClarificationGenerator(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
+
+    private static IClarificationQuestionGenerator CreateFakeClarificationGenerator(
+        IReadOnlyList<string>? questions = null)
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        generator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new RequirementIntake(
+                questions ?? ["第一期要交付哪个可用切片？"],
+                [], [], []));
+        return generator;
+    }
 
     private static BuildRun CreateAcceptingRun()
     {

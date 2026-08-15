@@ -156,25 +156,30 @@ public sealed class NotificationHookExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_TimeoutMsNull_DefaultsTo5000()
+    public async Task ExecuteAsync_TimeoutMsNull_AppliesDefaultTimeout()
     {
-        var provider = CreateMockProvider("feishu", NotificationSendResult.Ok());
+        CancellationToken? providerToken = null;
+        var provider = CreateMockProvider("feishu");
+        provider.SendAsync(Arg.Any<NotificationMessage>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                providerToken = ci.Arg<CancellationToken>();
+                return NotificationSendResult.Ok();
+            });
         var sut = CreateSut(provider);
         var config = new HookConfig
         {
             Provider = "feishu",
             WebhookUrl = "https://example.com/hook",
-            TimeoutMs = null, // 显式 null
+            TimeoutMs = null, // 显式 null → 应回落到默认超时（5000ms）
         };
 
-        await sut.ExecuteAsync(SamplePayload, config, TestContext.Current.CancellationToken);
+        // 外部 ct 传 None：捕获到的 token 若可取消，唯一来源就是默认超时 CTS
+        await sut.ExecuteAsync(SamplePayload, config, CancellationToken.None);
 
-        // 验证正常路径下默认超时不影响执行
-        await provider.Received(1).SendAsync(
-            Arg.Any<NotificationMessage>(),
-            Arg.Any<string>(),
-            Arg.Any<string?>(),
-            Arg.Any<CancellationToken>());
+        providerToken.Should().NotBeNull();
+        providerToken!.Value.CanBeCanceled.Should().BeTrue(
+            "TimeoutMs=null 必须应用默认超时 CTS，而不是把 CancellationToken.None 传给 Provider");
     }
 
     // CancellationToken 传播

@@ -1,8 +1,9 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Paste / image-attachment handling for <see cref="ChatInputView"/>.
-/// Extracted as a partial to keep the main view file under the 300-line guideline.
+/// Paste / image-attachment handling for <see cref="ChatInputView"/>:
+/// clipboard reads, large-paste collapsing, image detection and path expansion.
+/// Partial of the view because it shares the paste/attachment state.
 /// </summary>
 public sealed partial class ChatInputView
 {

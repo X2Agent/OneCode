@@ -280,8 +280,9 @@ private async Task<string> LoadPromptAsync(
 ## TUI 组件规范（Tui/）
 
 - **颜色**：所有颜色通过 `TuiTheme` 取值，**禁止硬编码**颜色值
-- **状态指示器**：新增全局状态（如沙箱模式 🔒、Plan 模式 📋）须在 `TuiStatusBar` 中注册
+- **状态指示器**：新增全局状态（如沙箱模式 🔒、Plan 模式 📋）须在 `AgentStatusBar` 中注册
 - **Terminal.Gui 限制**：不支持字体大小/行间距配置，不支持鼠标精确位置，不支持透明背景
+- **文件体量与拆分原则**：~300 行是**参考信号而非硬上限**，内聚优先于行数。超限时的拆分优先级：① 提取**真实类型**（协作者类 / 静态工具类，如 `ChatCompletionController`、`CompletionTextMetrics`、`IInteractionSession`）；② 仅当成员被框架绑定（View 的 `OnDrawingContent` / 按键处理）或强耦合共享私有状态时才用 partial（如 `ChatInputView.Keys.cs`、`MessageListView.Rendering.cs`）；③ **禁止**为凑行数把无状态方法组或互不相关的功能捆进新 partial 文件。partial 文件名与类名对齐（`OneCodeToplevel*.cs`），头注释标明自身职责
 
 ---
 

@@ -127,11 +127,11 @@
 
 | 快捷键 | 动作 | 说明 |
 |---|---|---|
-| `Ctrl+C` | `app:interrupt` | 有选中文本时复制；否则中断/退出 * |
 | `Ctrl+D` | `app:exit` | 退出应用 * |
-| `Ctrl+Shift+D` | `app:lspDiagnostics` | LSP 诊断覆盖层 |
 
 > \* 标记的快捷键为保留快捷键，不可重新绑定。
+>
+> 其他常见全局行为不经 `keybindings.json` 配置：`Ctrl+C` 复制选中文本（编辑器层行为）；中断运行中的查询用 `Escape`（`chat:cancel`）或自定义和弦（如 `ctrl+x ctrl+k` → `chat:killAgents`）。
 
 ### Chat（聊天输入）
 
@@ -187,7 +187,6 @@
 
 | 快捷键 | 原因 | 严重级别 |
 |---|---|---|
-| `Ctrl+C` | 中断/退出，终端协议硬编码 | Error |
 | `Ctrl+D` | 退出，终端协议硬编码 | Error |
 | `Ctrl+M` | 与 Enter 等价（终端均发送 CR） | Error |
 
@@ -322,7 +321,7 @@
 |---|---|
 | [KeybindingDefaults.cs](../src/OneCode.Core/Keybindings/KeybindingDefaults.cs) | 默认绑定定义（源头） |
 | [KeybindingResolver.cs](../src/OneCode.Core/Keybindings/KeybindingResolver.cs) | 按键解析器 |
-| [KeybindingLoader.cs](../src/OneCode.Core/Keybindings/KeybindingLoader.cs) | 配置加载与热重载 |
+| [KeybindingLoader.cs](../src/OneCode.Infrastructure/Keybindings/KeybindingLoader.cs) | 配置加载与热重载 |
 | [KeybindingSchema.cs](../src/OneCode.Core/Keybindings/KeybindingSchema.cs) | JSON Schema 生成 |
 | [KeybindingParser.cs](../src/OneCode.Core/Keybindings/KeybindingParser.cs) | 按键字符串解析 |
 | [KeybindingValidator.cs](../src/OneCode.Core/Keybindings/KeybindingValidator.cs) | 绑定验证 |

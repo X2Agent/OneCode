@@ -350,12 +350,19 @@ public sealed class ChatServiceTests
             var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
             fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult("fingerprint-durable"));
+            var questionGenerator = Substitute.For<IClarificationQuestionGenerator>();
+            questionGenerator.GenerateAsync(
+                    Arg.Any<string>(),
+                    Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(new RequirementIntake(["第一期要交付什么？"], [], [], []));
             var coordinator = new BuildRunCoordinator(
                 buildStore,
                 fingerprint,
                 new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
                 new TaskService(),
+                questionGenerator,
                 Substitute.For<ILogger<BuildRunCoordinator>>());
             var registry = new JsonWorkflowRunRegistry(Path.Combine(root, "workflow-runs"));
             var durableHost = new DurableWorkflowHost(
@@ -540,12 +547,19 @@ public sealed class ChatServiceTests
             var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
             fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult("fingerprint-cancel"));
+            var questionGenerator = Substitute.For<IClarificationQuestionGenerator>();
+            questionGenerator.GenerateAsync(
+                    Arg.Any<string>(),
+                    Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(new RequirementIntake(["第一期要交付什么？"], [], [], []));
             var coordinator = new BuildRunCoordinator(
                 buildStore,
                 fingerprint,
                 new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
                 new TaskService(),
+                questionGenerator,
                 Substitute.For<ILogger<BuildRunCoordinator>>());
             var clarifier = Substitute.For<IClarificationInteractionService>();
             clarifier.AskAsync(

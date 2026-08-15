@@ -51,18 +51,12 @@ public sealed class CancellationTokenPropagationTests
         var stubAgent = new CountingAgent(() => agentCallCount++);
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 100m, null);
 
-        // Act: 即使预算未超支，预先取消的 token 也应传播到 agent.RunAsync
-        try
-        {
-            _ = await runFunc([], null, null, stubAgent, cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // 预期行为：取消传播
-        }
+        // Act & Assert: 预算未超支时 BudgetGuard 必须放行，且预先取消的 token 要原样传播——
+        // OCE 被吞掉或 token 被换成 None，两条断言各会失败一条
+        var act = () => runFunc([], null, null, stubAgent, cts.Token);
 
-        // Assert: agent 的 RunCoreAsync 被调用了（BudgetGuard 预算未超支放行）
-        // 但 agent 内部检查到 ct 已取消时应抛 OperationCanceledException
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "预先取消的 token 必须传播到 agent 并以 OCE 抛出，不能被 BudgetGuard 吞掉");
         agentCallCount.Should().Be(1, "BudgetGuard should pass through to agent when budget is not exceeded");
     }
 

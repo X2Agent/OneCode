@@ -248,7 +248,15 @@ public sealed class TeamOrchestrationService
 
         var runId = TeamRunId.NewId();
         var effectiveGoal = goal;
-        var analysis = _requirementService.Analyze(effectiveGoal);
+        RequirementAnalysisResult analysis;
+        try
+        {
+            analysis = await _requirementService.AnalyzeAsync(effectiveGoal, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return TeamError(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+        }
         var clarificationRunCreated = false;
         if (!analysis.CanProceedWithoutClarification)
         {
@@ -271,7 +279,14 @@ public sealed class TeamOrchestrationService
             }
 
             effectiveGoal = $"{goal}\nClarification response:\n{clarification.Answer}";
-            analysis = _requirementService.Analyze(effectiveGoal);
+            try
+            {
+                analysis = await _requirementService.AnalyzeAsync(effectiveGoal, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return TeamError(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+            }
             if (!analysis.CanProceedWithoutClarification)
             {
                 return TeamError(
@@ -364,7 +379,15 @@ public sealed class TeamOrchestrationService
                 if (string.IsNullOrWhiteSpace(clarification.Answer))
                     return TeamError(teamRun.TeamName, "Team clarification was cancelled.", eventSink);
                 var clarifiedGoal = $"{teamRun.OriginalRequest}\nClarification response:\n{clarification.Answer}";
-                var analysis = _requirementService.Analyze(clarifiedGoal);
+                RequirementAnalysisResult analysis;
+                try
+                {
+                    analysis = await _requirementService.AnalyzeAsync(clarifiedGoal, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    return TeamError(teamRun.TeamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+                }
                 if (!analysis.CanProceedWithoutClarification)
                     return TeamError(teamRun.TeamName, "Team request remains ambiguous.", eventSink);
                 var clarifiedPlan = _requirementService.CreateImplementationPlan(analysis);

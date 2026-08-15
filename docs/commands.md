@@ -12,11 +12,11 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 类别 | 说明 | 数量 |
 |---|---|---|
-| `Builtin` | 内置通用命令（配置、模式、工具等） | 29 |
-| `Session` | 会话管理（记忆、检查点、导出、队列等） | 7 |
+| `Builtin` | 内置通用命令（配置、模式、工具等） | 23 |
+| `Session` | 会话管理（记忆、检查点、导出、队列等） | 8 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
-| `Git` | Git 工作流命令 | 7 |
+| `Git` | Git 工作流命令 | 6 |
 
 ---
 
@@ -90,25 +90,28 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /config
 
-查看或编辑配置项。
+查看或编辑配置项（按显式作用域 Patch 修改）。
 
 **用法**：
 
 ```
-/config [list|get <key>|set <key> <value>]
+/config [list|get <key>|set <scope> <key> <value>|remove <scope> <key>]
 ```
+
+`<scope>` 取值：`user` / `project` / `session`。
 
 **参数**：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` / `ls` | 列出所有配置（user + project scope） |
+| 无参数 / `list` / `ls` | 列出所有配置及来源、生效模式 |
 | `get <key>` | 获取指定配置值 |
-| `set <key> <value>` | 设置配置值（写入 user scope） |
+| `set <scope> <key> <value>` | 在指定作用域写入配置值 |
+| `remove <scope> <key>` | 移除指定作用域的配置覆盖 |
 
 > 配置项白名单请参考 [settings.md](settings.md)。
 >
-> **⚠️ 生效时机**：`/config set` 会将值写入配置文件并更新内存配置。对于 `model` 键，会同时更新运行时 `AppState.MainLoopModel`，当前会话立即生效。对于 `effortValue`、`thinkingEnabled` 等键，仅写配置不更新运行时状态，需重启后才生效，请使用对应的专用命令（如 `/think`）在当前会话动态调整。
+> **⚠️ 生效时机**：`/config set` 会将值写入配置文件并更新内存配置。`model`、`thinkingEnabled`、`showThinking`、`effortValue` 四个键会额外经 `ApplyRuntimeState` 同步更新运行时 `AppState`：`showThinking` 立即生效；`model` / `thinkingEnabled` / `effortValue` 属“下次操作生效”（下一次 LLM 调用按新设置执行）。其余键按各自生效模式（下次操作 / 重启后）生效。
 
 ---
 
@@ -424,45 +427,26 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /think
 
-切换扩展思考，或设置思考模式。
+配置扩展思考：模型思考开关 + reasoning_effort 努力程度 + TUI 思考块显示，共两个独立维度。
 
 **用法**：
 
 ```
-/think [on|off|auto|adaptive|show|hide|<budget_tokens>]
+/think [on|off|low|medium|high|max|show|hide]
 ```
 
 **参数**：
 
 | 值 | 说明 |
 |---|---|
-| 无参数 | 切换开关 |
-| `on` / `off` | 启用 / 禁用 |
-| `show` / `hide` | 显示 / 折叠 thinking 块 |
-| `auto` / `adaptive` | 自适应模式（effort ≥ medium 时启用） |
-| `<budget_tokens>` | 设置 token 预算（范围 1024–100000） |
+| 无参数 | 显示当前状态（思考开关、effort、TUI 显示） |
+| `on` / `off` | 启用 / 禁用模型扩展思考（`thinkingEnabled`） |
+| `low` / `medium` / `high` / `max` | 设置 reasoning_effort（同时自动开启思考） |
+| `show` / `hide` | 展开 / 折叠对话历史中的思考块（`showThinking`，立即生效） |
 
-> **✅ 运行时立即生效**：`/think` 会同时更新内存中的 `AppState.ThinkingEnabled`（及 `thinkingBudget`/`thinkingMode`）和配置文件，当前会话的下一次 LLM 调用即按新设置计算 thinking 预算。
+> **✅ 运行时立即生效**：`/think` 会同时更新内存中的 `AppState`（`ThinkingEnabled`/`EffortValue`/`ShowThinking`）和配置文件，当前会话的下一次 LLM 调用即按新设置计算 thinking 预算。
 >
-> 与 `/config set thinkingEnabled <value>` 的区别：`/config set` 只写文件、不更新运行时状态，需重启后才生效。`/think` 是 thinking 设置的推荐调整方式。
-
----
-
-### /tool
-
-展开最近被折叠的工具结果。
-
-**用法**：
-
-```
-/tool expand
-```
-
-**参数**：
-
-| 子命令 | 说明 |
-|---|---|
-| `expand` | 展开最近一次被折叠的工具结果 |
+> 与 `/config set thinkingEnabled <value>` 的区别：`/config set` 也会同步更新运行时 `AppState`（当前会话生效），但 `/think` 提供 effort / show / hide 等更完整的校验与交互入口，仍是调整 thinking 设置的推荐方式。
 
 ---
 
@@ -482,15 +466,20 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /upgrade
 
-检查更新。
+检查并安装 OneCode 更新。
 
 **用法**：
 
 ```
-/upgrade
+/upgrade [--apply|-y] [--check|-c]
 ```
 
-无参数。检查 GitHub 最新 release。
+**参数**：
+
+| 参数 | 说明 |
+|---|---|
+| 无参数 / `--check` / `-c` | 只检查 GitHub 最新 release 版本，不执行升级 |
+| `--apply` / `-y` / `--yes` | 执行自动升级 |
 
 ---
 
@@ -594,6 +583,27 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 参数 | 简写 | 默认 | 说明 |
 |---|---|---|---|
 | `--output <path>` | `-o` | 带时间戳的默认名 | 输出路径（必须在当前工作目录内） |
+
+---
+
+### /find
+
+在会话记录中搜索关键词并滚动到匹配位置。
+
+**用法**：
+
+```
+/find <keyword>
+```
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `keyword` | 位置参数 | 是 | 搜索关键词 |
+
+> 别名：`search`。TUI 路径由 `OneCodeToplevel` 拦截并滚动到匹配行；非 TUI 宿主仅提示在交互式 TUI 中使用。
+> 元数据：`Immediate = true`。
 
 ---
 
@@ -709,7 +719,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /doctor
 
-诊断配置、显示环境变量或运行 onboarding 检查清单。
+诊断环境与配置健康：API Key 解析（settings.json → 环境变量，按 provider 判断是否必需）、settings.json 解析健康、MCP 服务器连通性（已配置 vs 已连接、每服务器工具数）、LSP 服务器状态（运行 vs 初始化）、Git 可用性（/commit、/review 等依赖）。
 
 **用法**：
 
@@ -721,9 +731,9 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `info` | 配置诊断（API Key / Config dir / Git / Runtime） |
+| 无参数 / `info` | 完整诊断报告 |
 | `env` | 显示相关环境变量 |
-| `setup` | 引导检查清单（API Key / Git / AGENTS.md） |
+| `setup` | 首次使用引导检查清单（API Key / Git / AGENTS.md） |
 
 ---
 
@@ -992,9 +1002,9 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 
 ## 汇总统计
 
-- **总命令数**：45 个
+- **总命令数**：42 个
 - **隐藏命令**：`/gc-stats`
-- **即时命令**（绕过 query 队列）：`/session`
+- **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`
 - **带别名的命令**：
 
   | 命令 | 别名 |
@@ -1003,5 +1013,6 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
   | `/exit` | `quit` |
   | `/version` | `v` |
   | `/team` | `teams` |
+  | `/find` | `search` |
 
 > **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceExtensions.cs` 中的 `AddCommands()` 方法。本文档与此注册表保持同步，新增或删除命令时请同时更新。

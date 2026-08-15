@@ -1,18 +1,18 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Overlay management for <see cref="ReplShell"/>.
-/// Extracted as a partial to keep the main file under the 300-line guideline.
-///
-/// Hosts review/diff overlays and the completion popup lifecycle.
+/// Overlay management for <see cref="ReplShell"/>:
+/// review/diff overlays and the completion popup lifecycle.
 /// </summary>
 public sealed partial class ReplShell
 {
     private void ShowOverlay(View overlay)
     {
         _overlayHost.Visible = true;
-        // Host was often layout-skipped while Visible=false; nudge layout so
+        // Host was layout-skipped while Visible=false; nudge layout so
         // Position() can read a real Viewport (or SuperView Frame fallback).
+        // Terminal.Gui defers actual layout to the next pass — this is the
+        // minimal workaround, not avoidable via static Pos/Dim.
         SetNeedsLayout();
         _overlayHost.Push(overlay);
         _overlayHost.RepositionAll();
@@ -79,6 +79,8 @@ public sealed partial class ReplShell
 
     private void PositionCompletionOverlay(int height)
     {
+        // 高度随补全条目数动态变化，无法用静态 Pos/Dim 表达，
+        // 只能按输入框当前位置手工定位到其上方。
         var inputY = _chatInput.Frame.Y;
         _completionOverlay.X = 1;
         _completionOverlay.Y = inputY - height;

@@ -2,8 +2,7 @@
   "profiles": {
     "OneCode.Cli": {
       "commandName": "Project",
-      "commandLineArgs": "--debug",
-      "workingDirectory": "..\\..\\src"
+      "commandLineArgs": "--cwd E:\\OneCode\\.dev-workspace"
     }
   }
 }

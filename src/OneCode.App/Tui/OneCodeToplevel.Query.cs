@@ -2,7 +2,6 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// Background query streaming for <see cref="OneCodeToplevel"/>.
-/// Extracted as a partial to keep the main top-level file under the 300-line guideline.
 /// Hosts <see cref="RunQueryAsync"/> and <see cref="RunCommandPromptAsync"/>,
 /// which stream TuiEvents from the backend and forward them to <see cref="DispatchEvent"/>.
 /// </summary>

@@ -58,12 +58,18 @@ public sealed class InlineSelector
 
         if (kb == Key.Esc)
         {
-            _tcs.TrySetResult(InlineSelectorResult.Dismissed);
+            Dismiss();
             return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// Completes the selector as dismissed. Idempotent — a later successful
+    /// Enter/Esc is a no-op via <c>TrySetResult</c>.
+    /// </summary>
+    public void Dismiss() => _tcs.TrySetResult(InlineSelectorResult.Dismissed);
 
     /// <summary>
     /// Renders the selector state as FormattedLines for embedding in the conversation view

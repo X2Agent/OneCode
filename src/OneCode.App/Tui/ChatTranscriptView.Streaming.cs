@@ -15,6 +15,7 @@ public sealed partial class ChatTranscriptView
             Id: Guid.NewGuid().ToString("N"),
             Content: new List<ContentBlock>(),
             Timestamp: DateTimeOffset.UtcNow));
+        _messageView.BeginStreamingPreview();
 
         _app.Invoke(() => ActivityChanged?.Invoke("处理中"));
     }
@@ -36,13 +37,15 @@ public sealed partial class ChatTranscriptView
         if (_stream.HasThinking)
             FinalizeThinkingMarker();
 
-        if (_stream.PendingLines is { Count: > 0 } && _stream.PreviewLineCount > 0)
+        if (_stream.PendingLines is { Count: > 0 } && _messageView.StreamingPreviewLineCount > 0)
         {
             var committedLines = BuildFinalCommittedLines();
-            _messageView.ReplaceLastLines(_stream.PreviewLineCount, committedLines);
+            _messageView.ReplaceStreamingPreview(committedLines);
         }
 
+        _messageView.EndStreamingPreview();
         _stream.ResetForNextTurn();
+        _messageView.BeginStreamingPreview();
 
         _app.Invoke(() => ActivityChanged?.Invoke("处理中"));
     }
@@ -69,7 +72,7 @@ public sealed partial class ChatTranscriptView
             // now we render the complete text through the Markdown renderer so
             // code blocks, headings, lists, and tables display correctly.
             var finalLines = BuildFinalCommittedLines();
-            _messageView.ReplaceLastLines(_stream.PreviewLineCount, finalLines);
+            _messageView.ReplaceStreamingPreview(finalLines);
         }
         else if (_stream.StatusLines.Count > 0)
         {
@@ -82,6 +85,7 @@ public sealed partial class ChatTranscriptView
             _messageView.AppendLines(_stream.StatusLines);
         }
 
+        _messageView.EndStreamingPreview();
         _stream.CompleteStream();
     }
 
@@ -119,7 +123,7 @@ public sealed partial class ChatTranscriptView
         // coalesce into ~60 FPS rebuilds.
         if (_stream.PreviewLineCount == 0)
         {
-            RebuildStreamingPreview(0);
+            RebuildStreamingPreview();
         }
         else
         {
@@ -132,7 +136,7 @@ public sealed partial class ChatTranscriptView
     // _stream.TextBuffer on every token makes streaming O(n²) in response length
     // and causes visible lag on long answers. We coalesce token bursts into a
     // single rebuild on the next UI-loop iteration.
-    private void RebuildStreamingPreview(int previousLineCount)
+    private void RebuildStreamingPreview()
     {
         _renderer.CurrentWidth = ContentWidth;
         _stream.PendingLines = new List<FormattedLine>();
@@ -140,8 +144,12 @@ public sealed partial class ChatTranscriptView
         for (var i = 0; i < _stream.StatusLines.Count; i++)
         {
             _stream.PendingLines.Add(_stream.StatusLines[i]);
-            if (i < _stream.StatusLines.Count - 1)
+            if (i < _stream.StatusLines.Count - 1
+                && _stream.StatusLines[i].Tag is not ThinkingDetailLineTag
+                && _stream.StatusLines[i + 1].Tag is not ThinkingDetailLineTag)
+            {
                 _stream.PendingLines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+            }
         }
 
         // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
@@ -157,8 +165,8 @@ public sealed partial class ChatTranscriptView
             _stream.PendingLines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{line}", TuiPalette.AssistantMessage));
         }
 
-        _stream.PreviewLineCount = _stream.PendingLines.Count;
-        _messageView.ReplaceLastLines(previousLineCount, _stream.PendingLines);
+        _messageView.ReplaceStreamingPreview(_stream.PendingLines);
+        _stream.PreviewLineCount = _messageView.StreamingPreviewLineCount;
     }
 
     /// <summary>
@@ -243,7 +251,7 @@ public sealed partial class ChatTranscriptView
                 if (!_stream.IsStreaming) return false;
                 // Reuse the current line count as "previous" — RebuildStreamingPreview
                 // replaces exactly that many trailing lines with the new preview.
-                RebuildStreamingPreview(_stream.PreviewLineCount);
+                RebuildStreamingPreview();
                 return false; // one-shot
             });
     }

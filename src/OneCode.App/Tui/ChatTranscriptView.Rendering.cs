@@ -41,37 +41,22 @@ public sealed partial class ChatTranscriptView
 
         RebuildExpandedThinkingLines();
 
-        RebuildStreamingPreview(_stream.PreviewLineCount);
+        RebuildStreamingPreview();
     }
 
     /// <summary>
-    /// Rebuilds _stream.StatusLines with an expanded thinking block:
-    /// summary header (▼) + wrapped thinking content lines.
-    /// Called on every thinking delta during streaming.
-    /// Only replaces the tracked thinking span — tool/notice lines after it stay.
+    /// Rebuilds the thinking header in _stream.StatusLines.
+    /// Detail lines are materialized by MessageListView from <see cref="ThinkingLineTag.Content"/>
+    /// so a preview rebuild cannot split one thought into stacked headers.
     /// </summary>
     private void RebuildExpandedThinkingLines()
     {
         if (_stream.ThinkingSummaryLineIndex < 0) return;
 
-        var newLines = new List<FormattedLine>
+        ReplaceThinkingSpan(new List<FormattedLine>
         {
             BuildThinkingSummary("Thinking", isExpanded: true),
-        };
-
-        var thinking = _stream.ThinkingBuffer.ToString();
-        var maxWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
-        foreach (var line in thinking.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
-        {
-            foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxWidth))
-            {
-                newLines.Add(FormattedLine.Plain(
-                    $"{ConversationRenderer.Indent}  {w}",
-                    TuiPalette.FgSecondary));
-            }
-        }
-
-        ReplaceThinkingSpan(newLines);
+        });
     }
 
     /// <summary>
@@ -135,14 +120,13 @@ public sealed partial class ChatTranscriptView
             _stream.IsStreaming, name, toolId);
         if (!_stream.IsStreaming) return;
 
-        var prevCount = _stream.PreviewLineCount;
         var lineIndex = _stream.StatusLines.Count;
         // 使用 ToolResultSummarizer 格式化目标显示
         var formattedTarget = ToolResultSummarizer.FormatTarget(name, toolInput);
         _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null));
         _stream.ToolTracker.RegisterStart(toolId, lineIndex);
         _app.Invoke(() => ActivityChanged?.Invoke($"执行 {name}"));
-        RebuildStreamingPreview(prevCount);
+        RebuildStreamingPreview();
     }
 
     public void AddToolDone(string name, bool isError, string? toolInput, string result, string toolId)
@@ -152,8 +136,6 @@ public sealed partial class ChatTranscriptView
             _stream.IsStreaming, name, toolId, isError);
         if (_stream.IsStreaming)
         {
-            var prevCount = _stream.PreviewLineCount;
-
             // 按 ToolId 精确匹配
             if (_stream.ToolTracker.TryMatchByToolId(toolId, out var pending)
                 && pending.LineIndex < _stream.StatusLines.Count)
@@ -170,7 +152,7 @@ public sealed partial class ChatTranscriptView
             if (isError && !string.IsNullOrWhiteSpace(result))
                 _stream.StatusLines.Add(ConversationRenderer.MakeStreamingNotice(result, TuiPalette.Error));
 
-            RebuildStreamingPreview(prevCount);
+            RebuildStreamingPreview();
             return;
         }
 
@@ -198,9 +180,8 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        var prevCount = _stream.PreviewLineCount;
         _stream.StatusLines.Add(ConversationRenderer.MakeStreamingNotice(text, color ?? TuiPalette.SystemMessage));
-        RebuildStreamingPreview(prevCount);
+        RebuildStreamingPreview();
     }
 
     public void UpdateBuildRunStatus(TuiBuildRunState state)
@@ -212,7 +193,6 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        var previousLineCount = _stream.PreviewLineCount;
         if (_stream.BuildRunStatusLineIndex >= 0)
         {
             var oldCount = _stream.BuildRunStatusLineCount;
@@ -229,7 +209,7 @@ public sealed partial class ChatTranscriptView
             _stream.StatusLines.AddRange(lines);
         }
         _stream.BuildRunStatusLineCount = lines.Count;
-        RebuildStreamingPreview(previousLineCount);
+        RebuildStreamingPreview();
     }
 
     public void AddBuildDeliveryCard(OneCode.Core.Build.BuildRunResult result) =>
@@ -244,7 +224,6 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        var previousLineCount = _stream.PreviewLineCount;
         if (_stream.ModeProgressLineIndex >= 0)
         {
             var oldCount = _stream.ModeProgressLineCount;
@@ -263,7 +242,7 @@ public sealed partial class ChatTranscriptView
             _stream.StatusLines.AddRange(lines);
         }
         _stream.ModeProgressLineCount = lines.Count;
-        RebuildStreamingPreview(previousLineCount);
+        RebuildStreamingPreview();
     }
 
     /// <summary>
@@ -287,10 +266,9 @@ public sealed partial class ChatTranscriptView
     {
         if (_stream.IsStreaming)
         {
-            var prevCount = _stream.PreviewLineCount;
             foreach (var line in lines)
                 _stream.StatusLines.Add(line);
-            RebuildStreamingPreview(prevCount);
+            RebuildStreamingPreview();
         }
         else
         {

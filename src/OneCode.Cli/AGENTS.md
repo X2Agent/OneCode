@@ -19,9 +19,13 @@ public static void Main(string[] args)
 public static int Main(string[] args)
 ```
 
-### 三层启动架构
+### 分层启动架构
 
 ```
+0. --cwd/-C 预处理（Program.Main 最前端，快路径与 DI 之前）
+   └── 解析全局工作目录选项并 Directory.SetCurrentDirectory，随后从 args 剥离
+   └── 实现见 CliWorkingDirectory；目录不存在/缺参时以退出码 2 终止
+
 1. Fast-path 检测（零 DI 加载）
    └── --version / ps / logs / kill → 直接返回
 

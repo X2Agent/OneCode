@@ -67,6 +67,20 @@ public sealed class PromptComposerTests
     }
 
     [Fact]
+    public async Task ComposeWithRoleAsync_AppendsMemoryRecallHintAfterRoleBody()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var composer = CreateComposer(harness: "HARNESS_BLOCK");
+
+        var result = await composer.ComposeWithRoleAsync("ROLE_BODY_SENTINEL", ct);
+
+        result.Should().Contain("search_memories");
+        result.IndexOf("ROLE_BODY_SENTINEL", StringComparison.Ordinal)
+            .Should().BeLessThan(result.IndexOf("search_memories", StringComparison.Ordinal),
+                "hint must come after the role body, not before it");
+    }
+
+    [Fact]
     public async Task GetHarnessAsync_Missing_Throws()
     {
         var ct = TestContext.Current.CancellationToken;

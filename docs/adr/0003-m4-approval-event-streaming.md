@@ -81,7 +81,7 @@ MAF workflow manager 无法处理 `ToolApprovalRequestContent`（与 Main 路径
 | `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射 + Team 路径 `OrchestrationEvent.ApprovalRequest` → `TuiApprovalRequest` 映射，均桥接 ResponseSource |
 | `TeamEventMapper.cs` | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest` |
 | `TeamAgentFactory.cs` / `TeamOrchestrationService.cs` | 移除 `IApprovalUi` 构造参数 |
-| `CodeAssistantToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
+| `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 `workingMode: WorkingMode.Plan` 实现只读策略 |
 | `ChatService.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数，新增 `ApprovalRequestEvent` 透传 |
 | `ServiceCollectionExtensions.Business.cs` / `ServiceCollectionExtensions.Advanced.cs` | 移除 `IApprovalUi` DI 注册与 Team 路径注入 |
@@ -114,3 +114,12 @@ R1 原型的"双路径并行"是典型的兼容性陷阱：为了不破坏现有
 - 统一了 Main 路径与 Team 路径的审批机制（均为事件驱动）
 - `ApprovalDecision` 提升为公共枚举，消除对 `IApprovalUi` 的耦合
 - `ApprovalRequiredTools` 统一到 `PermissionCheckHelpers`，遵循"白名单统一来源"约定
+
+## 现状更新（2026-08-15）
+
+事件驱动审批的总体架构未变（Main 路径 `ApprovalRequestEvent`、Team 路径 `OrchestrationEvent.ApprovalRequest`、`TuiApprovalRequest` 桥接、`ApprovalDecision` 公共枚举均存在），以下细节已演进：
+
+1. **`PermissionCheckHelpers.ApprovalRequiredTools` 静态名单已不存在**。危险工具判别改为运行时分类：`ToolNames.FileWriteTools` / `ToolNames.ReadOnlyTools` + `IsReadOnlyShell` / `IsDestructiveShell` 分类器 + `AutoAllowFileWriteAndShell`（`PermissionCheckHelpers.cs`）。
+2. **Main 路径决策链路经 `IApprovalBroker` 抽象**：`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 通过 `IApprovalBroker.RequestAsync` 获取决策（`OneCode.Core/Permissions/IApprovalBroker.cs`），不再直接 await `ResponseSource.Task`。
+3. **文件改名**：`CodeAssistantToplevel.Events.cs` → `OneCodeToplevel.Events.cs`（TUI 审批事件消费现位于此）。
+4. **Cron 路径工作模式**：`CronJobExecutor` 现使用 `workingMode: WorkingMode.Goal`（非本文所述 `WorkingMode.Plan`）实现无审批 UI 的只读策略。

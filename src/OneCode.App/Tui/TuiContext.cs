@@ -1,5 +1,7 @@
 using OneCode.App.Services;
 using OneCode.App.Services.Lsp;
+using OneCode.Core.Commands;
+using OneCode.Core.IO;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Lsp;
 using OneCode.Core.Models;
@@ -17,7 +19,7 @@ public sealed record TuiQueryServices(
     Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand = null,
     Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt = null,
     Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow = null,
-    OneCode.App.Services.InputQueue? InputQueue = null,
+    InputQueue? InputQueue = null,
     Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun = null);
 
 /// <summary>Current session, team, and workspace dependencies.</summary>
@@ -62,6 +64,10 @@ public sealed record TuiLaunchOptions(
 /// <summary>
 /// Grouped dependencies passed from <see cref="TuiHost"/> to <see cref="OneCodeToplevel"/>.
 /// Forwarding properties keep consumers concise while construction remains organized by responsibility.
+///
+/// 架构决策（tui-refactor D4 保守分支）：叶子组件（ReplShell / ChatInputView 等）
+/// 一律按组件显式注入所需依赖，不接收本对象；TuiContext 的转发外观只服务
+/// OneCodeToplevel 一个叶子消费者，不引入按消费方的 ISP 接口拆分。
 /// </summary>
 public sealed record TuiContext(
     TuiQueryServices Query,
@@ -78,7 +84,7 @@ public sealed record TuiContext(
     public Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand => Query.TryResolvePromptCommand;
     public Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt => Query.StreamCommandPrompt;
     public Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow => Query.StreamResumeWorkflow;
-    public OneCode.App.Services.InputQueue? InputQueue => Query.InputQueue;
+    public InputQueue? InputQueue => Query.InputQueue;
     public Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun => Query.ReplayCurrentBuildRun;
 
     public Func<IReadOnlyList<string>>? GetSessionUserPrompts => Session.GetSessionUserPrompts;
@@ -86,7 +92,7 @@ public sealed record TuiContext(
     public Func<string?>? GetActiveTeam => Session.GetActiveTeam;
     public Func<IReadOnlyList<string>>? GetRegisteredTeams => Session.GetRegisteredTeams;
     public Func<string?>? CycleTeam => Session.CycleTeam;
-    public OneCode.Core.Commands.IGitHelper? GitHelper => Session.GitHelper;
+    public IGitHelper? GitHelper => Session.GitHelper;
 
     public Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus => Diagnostics.GetLspServerStatus;
     public Func<IReadOnlyList<LspDiagnostic>>? GetLspDiagnostics => Diagnostics.GetLspDiagnostics;
@@ -101,7 +107,7 @@ public sealed record TuiContext(
     public TrustService? TrustService => Runtime.TrustService;
     public ImagePipeline? ImagePipeline => Runtime.ImagePipeline;
     public Func<string>? RecordCost => Runtime.RecordCost;
-    public OneCode.Core.IO.IClipboardService? Clipboard => Runtime.Clipboard;
+    public IClipboardService? Clipboard => Runtime.Clipboard;
     public Func<IReadOnlyCollection<string>>? GetToolNames => Runtime.GetToolNames;
     public Func<bool>? GetShowThinking => Runtime.GetShowThinking;
     public Action<TuiEvent>? EmitEvent => Runtime.EmitEvent;

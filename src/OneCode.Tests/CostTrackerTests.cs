@@ -207,17 +207,6 @@ public sealed class CostTrackerTests
         info.TotalCostUsd.Should().Be(0.06m);
     }
 
-    // SessionCostInfo.TotalCostUsd thread safety
-
-    [Fact]
-    public void SessionCostInfo_TotalCostUsd_IsReadableViaProperty()
-    {
-        var info = new SessionCostInfo();
-        info.Record(new UsageRecord("m", 100, 50, 0, 0), 1.23m);
-
-        info.TotalCostUsd.Should().Be(1.23m);
-    }
-
     // SyncPricingFromCatalog hot-reload
 
     [Fact]

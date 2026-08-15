@@ -56,8 +56,15 @@ public sealed class MafTeamOrchestrationTests
         var deliveryReportBuilder = new DeliveryReportBuilder();
         var teamRunService = new TeamRunApplicationService(
             teamRunStore, stateMachine, qualityGateRunner, deliveryReportBuilder);
+        var questionGenerator = Substitute.For<IClarificationQuestionGenerator>();
+        questionGenerator.GenerateAsync(
+                Arg.Any<string>(),
+                Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new RequirementIntake(["第一期要分析哪个模块？"], [], [], []));
         var requirementService = new TeamRequirementService(
-            new OneCode.App.Services.BuildMode.RequirementAssessmentService());
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            questionGenerator);
         var clarification = Substitute.For<IClarificationInteractionService>();
         // By default, answer clarification questions with a positive response to proceed.
         clarification.AskAsync(

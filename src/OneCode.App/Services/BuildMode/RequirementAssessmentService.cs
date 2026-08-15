@@ -97,36 +97,6 @@ public sealed partial class RequirementAssessmentService
             reasons);
     }
 
-    public IReadOnlyList<string> BuildClarificationQuestions(RequirementAssessment assessment, string? prompt = null)
-    {
-        var subject = BuildQuestionSubject(prompt);
-        var questions = new List<string>();
-        if (!assessment.GoalIsClear)
-            questions.Add($"针对{subject}，最终需要新增、修复或重构成什么可观察行为？");
-        if (!assessment.ScopeIsBounded)
-            questions.Add($"针对{subject}，修改范围限定在哪个仓库、模块、文件或公共接口？哪些内容明确不改？");
-        if (!assessment.AcceptanceIsDeterministic)
-            questions.Add($"针对{subject}，请给出验收方式：应运行什么构建/测试命令，或观察到什么结果才算完成？");
-        if (!assessment.ConstraintsAreComplete)
-            questions.Add($"实施{subject}时，有哪些必须遵守的技术、兼容性、部署、性能、数据或安全约束？没有可回答“无额外约束”。");
-        if (assessment.RequiresUserDecision)
-            questions.Add($"关于{subject}，仍未确定的产品范围、仓库、数据模型、外部依赖或架构选项应选择哪一个？");
-        return questions;
-    }
-
-    private static string BuildQuestionSubject(string? prompt)
-    {
-        if (string.IsNullOrWhiteSpace(prompt))
-            return "这项需求";
-
-        var normalized = Normalize(prompt);
-        const int maxLength = 48;
-        var summary = normalized.Length <= maxLength
-            ? normalized
-            : normalized[..maxLength].TrimEnd() + "…";
-        return $"需求“{summary}”";
-    }
-
     private static BuildRiskLevel DetermineRisk(
         string normalized,
         bool scopeIsLarge,

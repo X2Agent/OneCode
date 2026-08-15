@@ -200,6 +200,54 @@ public sealed class ChatTranscriptViewStreamingTests
         activities.Should().Equal("处理中", "思考中", "回复中");
     }
 
+    [Fact]
+    public void ExpandedToolDetails_SurviveNextThinkingDelta()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AddToolStart("Read", "notes.txt", toolId: "call_read");
+        view.AddToolDone("Read", isError: false, toolInput: "notes.txt",
+            result: "line-one-of-tool-result", toolId: "call_read");
+
+        var toolIdx = -1;
+        var rendered = view.MessageView.RenderedLines;
+        for (var i = 0; i < rendered.Count; i++)
+        {
+            if (rendered[i].Contains("Read", StringComparison.Ordinal))
+            {
+                toolIdx = i;
+                break;
+            }
+        }
+        toolIdx.Should().BeGreaterThanOrEqualTo(0);
+        view.MessageView.TryToggleExpansionAt(toolIdx).Should().BeTrue();
+        string.Join('\n', view.MessageView.RenderedLines).Should().Contain("line-one-of-tool-result");
+
+        view.AddThinking("The user wants a product-research system. The");
+
+        var afterThinking = string.Join('\n', view.MessageView.RenderedLines);
+        afterThinking.Should().Contain("line-one-of-tool-result");
+        afterThinking.Should().Contain("Read");
+        CountOccurrences(afterThinking, " Thinking").Should().Be(1);
+    }
+
+    [Fact]
+    public void ThinkingUpdates_KeepSingleHeader()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AddThinking("The user wants to develop a full-chain system. The");
+        view.AddThinking(" next sentence continues the same thought.");
+        view.AddThinking(" Still the same turn.");
+
+        var text = string.Join('\n', view.MessageView.RenderedLines);
+        CountOccurrences(text, " Thinking").Should().Be(1);
+        text.Should().Contain("full-chain system");
+        text.Should().Contain("same thought");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         var count = 0;

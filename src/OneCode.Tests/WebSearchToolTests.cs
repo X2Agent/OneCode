@@ -335,19 +335,12 @@ public sealed class WebSearchToolTests : IDisposable
     ];
 
     [Fact]
-    public void FilterDomains_AllowedDomains_KeepsOnlyMatchingHosts()
+    public void FilterDomains_AllowedDomains_KeepsOnlyMatchingHostsAndSubdomains()
     {
         var hits = InvokeFilterDomains(SampleHits(), allowedDomains: ["example.com"], blockedDomains: null);
 
         hits.Should().HaveCount(2);
-        hits.Should().OnlyContain(h => h.Url.Contains("example.com"));
-    }
-
-    [Fact]
-    public void FilterDomains_AllowedDomains_MatchesSubdomain()
-    {
-        var hits = InvokeFilterDomains(SampleHits(), allowedDomains: ["example.com"], blockedDomains: null);
-
+        hits.Should().Contain(h => h.Url == "https://example.com/page");
         hits.Should().Contain(h => h.Url == "https://docs.example.com/guide");
     }
 

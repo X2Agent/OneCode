@@ -46,8 +46,20 @@ public sealed class PromptComposer(IPromptManager promptManager)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(roleBody);
         var harness = await GetHarnessAsync(ct).ConfigureAwait(false);
-        return Compose(harness, roleBody);
+        return Compose(harness, AppendMemoryHint(roleBody));
     }
+
+    // 子代理（Team 成员 / Explore、Plan fork）持有 search_memories 工具但没有主会话的
+    // {{memory_section}} 摘要索引——末尾显式引导一行，避免"有工具却不知道用"。
+    private const string MemoryRecallHint =
+        """
+        ## Memory
+
+        Persistent memories (project conventions, past decisions, lessons learned) are available via the `search_memories` tool. Recall them with a natural-language query when relevant to your task.
+        """;
+
+    private static string AppendMemoryHint(string roleBody) =>
+        $"{roleBody.TrimEnd()}\n\n{MemoryRecallHint}";
 
     internal static string Compose(string harness, string body)
     {

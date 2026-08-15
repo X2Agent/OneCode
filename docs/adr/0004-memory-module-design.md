@@ -1,7 +1,7 @@
 # ADR 0004: 记忆模块架构设计
 
 **状态**: Accepted
-**日期**: 2026-07-17
+**日期**: 2026-07-17（§8 决策补充于 2026-08-15）
 **关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)
 
 ## 语境
@@ -124,7 +124,7 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 **选取**：评分 > 0 的条目按分数降序 → `UpdatedAt` 降序，最多取 6 条（`MaxRelevantMemories`）。
 
-> **设计决策**：不使用"年龄桶加成"。`MemoryAge` 仅用于团队记忆的展示标签，不参与结构化条目评分。理由：评分应反映"相关性"而非"新旧"，且 `UpdatedAt` 降序作为次要排序键已隐含新鲜度偏好。
+> **设计决策**：不使用"年龄桶加成"。评分应反映"相关性"而非"新旧"，且 `UpdatedAt` 降序作为次要排序键已隐含新鲜度偏好。
 
 ### 5. System Prompt 注入策略
 
@@ -222,53 +222,39 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 **门控**：默认开启，距上次整合 ≥ 6 小时（`autodream.minHours`）+ 新会话数 ≥ 3 个（`autodream.minSessions`）。`ONECODE_AUTODREAM=false` 或 `ONECODE_REMOTE=true` 时关闭。
 
-### 8. 团队记忆设计
+### 8. 决策：不实现独立团队记忆子系统
 
-**与结构化条目记忆的区别**：团队记忆是传统 Markdown 文件（带可选 frontmatter），由团队成员人工维护，不使用 `MemoryEntryStore`。理由：团队规范天然是文档形态，强制结构化为条目反而损失表达力。
+**决策**（2026-08-15 确立）：不为 Team 模式的多 Agent 团队引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不再实施）。Team 共享记忆需求由现有机制覆盖：
 
-**目录解析**（`GetTeamMemoryDir`）：
-1. 环境变量 `ONECODE_TEAM_MEMORY_DIR` → `{teamRoot}/{teamName}/memory/`
-2. 默认 → `{cwd}/.onecode/team-memory/`
+- **共享知识库 = project 级 `MEMORY.md`**。Team 成员经 `SharedContextProviderBuilder.BuildCommon` 无条件获得 `MemoryFileContextProvider`（`search_memories` 工具），可检索 project + user 级条目——`PipelineProfile.TeamMember` 关闭的仅是 `SessionMemory`（主会话私有事实）与 `CodeAct`，MEMORY.md 检索通道始终开放。
+- **写入统一收口**：AutoDream / `/memory` 命令 / `IMemoryEntryStore`，成员 Agent 不直接写（防结构注入安全边界，见「影响」节）。
+- **会话内成员协作**（如 reviewer 结论传递给 implementer）由编排机制承担（GroupChat 共享对话流 / Magentic 经 orchestrator 中转），不属于记忆职责。
 
-团队名推断（`InferTeamName`）：读取 `{cwd}/.onecode/team.txt`，否则用工作目录名。
+**理由**：
+1. 与本 ADR §1 核心决策（消除多套存储抽象，统一 `MEMORY.md`）一致——引入第三套存储属于方向回退
+2. OneCode 是单用户 CLI，"Agent 团队"是同进程同工作目录的子 Agent；独立目录 + 环境变量路由的"团队"语义没有真实落点
+3. 独立 md 目录 + 自有 frontmatter 解析器 + 截断保护的维护成本，相对"成员多读一份 MEMORY.md"没有增量价值
 
-**Frontmatter**（`MemdirFrontmatterParser` 解析并剥离）：
+已知小缺口（已于 2026-08-15 补齐）：Team 成员的 system prompt 经 `ComposeWithRoleAsync`（harness + role）合成，不含主会话的 `{{memory_section}}` 摘要索引——现由 `PromptComposer.ComposeWithRoleAsync` 在 role prompt 末尾追加一行 `search_memories` 引导（Team 成员与 Explore/Plan fork 子代理均生效），无需架构变更。
 
-| 字段 | 可选值 | 默认值 |
-|------|--------|--------|
-| `type` | `user`/`feedback`/`project`/`reference` | `project` |
-| `scope` | `private`/`team` | `private` |
-
-**截断保护**（`TeamMemoryService.TruncateContent`）：
-
-| 内容类型 | 最大行数 | 最大字节 |
-|---------|---------|---------|
-| 入口文件（MEMORY.md） | 200 行 | 25,000 字节 |
-| 主题文件 | 120 行 | 12,000 字节 |
-
-超限截断并追加 `> (truncated)`。
-
-**注入方式**（`TeamMemoryContextProvider`，`TeamAgentFactory` 内部嵌套类）：
-1. 递归扫描团队目录 `.md` 文件，剥离 frontmatter
-2. 入口文件作为 `### Team index` 注入（截断 200 行 / 25KB）
-3. 其余主题文件按枚举顺序 `Take(4)` 作为 `### Team shared topics` 注入（截断 120 行 / 12KB）
-
-**Team 子 Agent 装配差异**：
-- `IncludeSessionMemory = false`（用 `TeamMemoryContextProvider` 替代）
-- `IncludeCodeAct = false`（沙箱隔离）
-- Provider 追加顺序：`TeamSystemPromptProvider` → `TeamMemoryContextProvider` → `BuildCommon` 通用列表
+> 历史设计稿（目录解析 / MemdirFrontmatterParser / 截断保护 / 专用 Provider 注入）见 git history 本文件 2026-08-15 之前的版本。
 
 ### 9. DI 注册
 
-`ServiceCollectionExtensions.Memory.cs`：
+`ServiceCollectionExtensions.Memory.cs`（`RegisterMemoryServices`）：
 
 ```csharp
 services.AddSingleton<IMemoryEntryStore>(sp => new MemoryEntryStore(
     sp.GetRequiredService<IWorkingDirectoryAccessor>(),
-    sp.GetService<ILogger<MemoryEntryStore>>()));
+    sp.GetRequiredService<ILogger<MemoryEntryStore>>()));
 services.AddSingleton<MemoryService>();
+services.AddSingleton<IMemoryService>(sp => sp.GetRequiredService<MemoryService>());
 services.AddSingleton<SessionMemoryService>();
-services.AddSingleton<TeamMemoryService>();
+services.AddSingleton<ISessionMemoryService>(sp => sp.GetRequiredService<SessionMemoryService>());
+
+// 同一方法内还注册了压缩子系统服务（CompactSessionDependencies / CompactService /
+// AutoCompactService / ReviewCacheService / CompactPromptBuilder / CompactApplier），
+// 见 compact-thresholds.md
 ```
 
 `ServiceCollectionExtensions.Advanced.cs`：
@@ -282,23 +268,24 @@ MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建
 
 ### 10. ContextProvider 装配
 
-`AgentContextProviderFactory.BuildCommon` 统一构建所有 Agent 共享的 ContextProvider：
+`SharedContextProviderBuilder.ApplyProfileDefaults` 按 `PipelineProfile` 应用默认开关（`Worker`/`Explore`/`Plan` 关闭 LSP 诊断与 Shell 环境；`TeamMember` 关闭会话记忆与 CodeAct），随后 `BuildCommon(options)` 按以下顺序构建所有 Agent 共享的 ContextProvider：
 
 | 顺序 | Provider | 开关 |
 |------|---------|------|
-| 1 | `SkillsProvider` | `skillProviderHolder.Current != null` |
-| 2 | `MemoryFileContextProvider` | `memoryService != null` |
+| 1 | MAF `AgentSkillsProvider` | `skillProviderHolder.Current != null` |
+| 2 | `MemoryFileContextProvider` | 始终添加 |
 | 3 | `SessionMemoryContextProvider` | `IncludeSessionMemory` |
-| 4 | `DesignContextProvider` | `sessionManager != null` |
+| 4 | `DesignContextProvider` | 始终添加 |
 | 5 | `LspDiagnosticContextProvider` | `IncludeLspDiagnostics` |
-| 6 | `TodoProvider` | `todoProvider != null` |
-| 7 | `ShellEnvironmentProvider` | `IncludeShellEnvironment` |
+| 6 | `TaskContextProvider`（运行时注入） | 始终添加 |
+| 7 | `ShellEnvironmentProvider` | `IncludeShellEnvironment` 且前台会话存在 shell executor |
 | 8 | `CodeActProvider` | `IncludeCodeAct` |
-| — | `TeamMemoryContextProvider` | Team 专用，`TeamAgentFactory` 内部追加 |
+
+> Team 子 Agent 专用 Provider（如 `TeamSystemPromptProvider`）由 `TeamAgentFactory` 在装配时追加。MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建。
 
 ## 影响
 
-- **存储模型简化**：从 4 子系统（含 KV Store）收敛为 3 子系统，消除 `memory-store/` 目录与 `IMemoryStore` 抽象
+- **存储模型简化**：消除 `memory-store/` 目录与 `IMemoryStore` 抽象，结构化记忆统一到 `MEMORY.md`——子系统收敛为 2 个（结构化条目记忆 + 会话记忆）；团队共享记忆不设独立子系统，由 project 级 `MEMORY.md` 覆盖（§8）
 - **后端可替换**：`IMemoryEntryStore` 基于 `MemoryScope` 操作，未来可无缝替换为 SQLite 等后端，无需修改 `MemoryService` / `AutoDreamService` / `MemoryCommand`
 - **自动积累闭环**：AutoDream 直接写入 `MEMORY.md`，用户知识库可持续自动丰富，无需手动迁移
 - **安全边界明确**：Agent 不通过工具直接写 `MEMORY.md`，所有程序化写入经 `IMemoryEntryStore` 或 AutoDream 清洗管线，防止结构注入
@@ -313,8 +300,3 @@ MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建
 ### 新增记忆类别
 
 在 AutoDream 整合 prompt（`prompts/system/autodream-consolidation.prompt`）中引导 Agent 输出新 category 的 Key，`MemoryEntry.DeriveCategory` 自动从 Key 前缀推导，无需改代码。
-
-### 扩展团队记忆
-
-- 新增 frontmatter 字段：在 `MemdirFrontmatterParser.Parse` 添加解析，在 `TeamMemoryService.LoadTeamMemoryAsync` 决定展示
-- 对接外部知识库：在 `ScanTeamFilesAsync` 增加数据源

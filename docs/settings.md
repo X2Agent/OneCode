@@ -213,6 +213,13 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 > 环境变量由 `ConfigManager` 映射到配置键并标记来源为 `Environment`。环境变量作用域只读，任何保存操作都不会将其值持久化到 `settings.json`。
 >
 > `ONECODE_LOG_LEVEL`、`ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。调试日志级别 `ONECODE_LOG_LEVEL` 取值 `off|debug|trace`（空按构建默认；`off` 可显式关闭，`trace` 隐含开启调试）。
+>
+> 其他不走 `ConfigManager` 的环境变量：
+>
+> | 环境变量 | 作用 |
+> |---|---|
+> | `ONECODE_MAX_CONTEXT_TOKENS` | 最终覆盖手段：显式指定上下文窗口上限（正整数），优先于模型目录/默认值解析 |
+> | `ONECODE_VCR` | VCR 录制/回放模式：`off`（默认，走真实网络）/ `record`（录制响应到 fixture）/ `replay`（命中 fixture 返回缓存）；其他值 fail-safe 回落 `off` |
 
 ---
 

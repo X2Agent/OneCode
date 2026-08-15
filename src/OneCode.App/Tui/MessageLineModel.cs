@@ -46,6 +46,9 @@ public sealed class FormattedLine
 
     public static FormattedLine Plain(string text, Color color) => new(text, color);
 
+    public static FormattedLine PlainWithTag(string text, Color color, object tag)
+        => new FormattedLine(text, color) { Tag = tag };
+
     /// <summary>Full-width line with a distinct background color (for mode banners, plan headers).</summary>
     public static FormattedLine WithBackground(string text, Color fg, Color bg) => new(text, fg, bg);
 

@@ -103,3 +103,18 @@ internal sealed class PlanCardState(
     public PlanCardPhase Phase { get; } = phase;
     public string? Markdown { get; } = markdown;
 }
+
+public enum PlanStepStatus { Pending = 0, Current = 1, Done = 2, }
+
+/// <summary>
+/// A single step in a plan card.
+/// </summary>
+/// <param name="Label">Short label shown as the primary line.</param>
+/// <param name="Content">Optional longer description shown as a secondary line under the label.</param>
+/// <param name="Assignee">Optional agent name shown as → name on the right.</param>
+/// <param name="Status">Pending / Current / Done. Controls color and strikethrough.</param>
+public sealed record PlanStep(
+    string Label,
+    string? Content = null,
+    string? Assignee = null,
+    PlanStepStatus Status = PlanStepStatus.Pending);

@@ -62,11 +62,12 @@ public sealed class AgentToolTests
 
         var sut = new AgentTool(runner, NullParams(), CreateTaskService(), logger: null);
 
-        var resultStr = await sut.RunAgentAsync("hello");
+        await sut.RunAgentAsync("hello");
 
-        using var doc = JsonDocument.Parse(resultStr.Content);
-        var json = doc.RootElement;
-        json.GetProperty("agent").GetString().Should().Be("general-purpose");
+        // 默认值必须落在发给 Runner 的请求里；断言响应 JSON 只是 mock 回声，观测不到回归
+        await runner.Received(1).RunAsync(
+            Arg.Is<AgentRunRequest>(r => r.Agent == "general-purpose"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

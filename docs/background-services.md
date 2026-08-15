@@ -18,11 +18,11 @@
 
 ## 1. 概述
 
-OneCode 共有 **4 个长循环后台服务** + **2 个启动加载服务** + **1 个 UI 定时器**：
+OneCode 共有 **5 个长循环后台服务** + **2 个启动加载服务** + **1 个 UI 定时器**：
 
 | 类别 | 机制 | 数量 | 说明 |
 |------|------|------|------|
-| 长循环后台服务 | `BackgroundService` | 4 个 | 周期性轮询或事件驱动，进程生命周期内常驻 |
+| 长循环后台服务 | `BackgroundService` | 5 个 | 周期性轮询或事件驱动，进程生命周期内常驻 |
 | 启动加载服务 | `IHostedService` | 2 个 | 仅启动时执行一次，停止时清理资源 |
 | UI 定时器 | `IApplication.AddTimeout` | 1 个 | Terminal.Gui 主循环节拍，非业务调度 |
 
@@ -92,7 +92,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 类型 | `BackgroundService` |
 | 执行时机 | `StartAsync` 同步加载磁盘缓存 → `ExecuteAsync` 启动即检查（若 stale）→ 之后 **24 小时检查** |
 | 职责 | 维护 models.dev 快照，缓存 7 天过期，过期则从远程刷新 |
-| 依赖 | `IModelCatalogCache`（Core） |
+| 依赖 | `IModelCatalogCache`、`IModelCatalog`（Core） |
 
 24 小时检查间隔选择理由：缓存本身的过期阈值是 7 天，每天检查一次足够及时。
 
@@ -104,7 +104,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 类型 | `IHostedService` |
 | 执行时机 | **仅启动时一次** |
 | 职责 | 加载 `~/.onecode/yolo_rules.json` 到 `YoloRuleStore` |
-| 依赖 | `YoloRuleStore`（Core） |
+| 依赖 | `YoloRuleStore`、`IYoloRuleFileStore`（Core） |
 
 设计选择（HostedService 而非 DI 工厂内同步加载）：
 - 同步阻塞 DI 工厂会拖慢启动且违反 async 规范
@@ -148,7 +148,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 |------|-----|
 | 文件 | [OneCode.App/Services/AutoDream/AutoDreamService.cs](../src/OneCode.App/Services/AutoDream/AutoDreamService.cs) |
 | 类型 | `BackgroundService`（Singleton + HostedService 双注册） |
-| 执行时机 | 定时轮询（每小时 1 次，硬编码安全网）+ 外部 `Trigger()` 信号（如 SessionEnd 钩子） |
+| 执行时机 | 定时轮询（每小时 1 次，硬编码安全网）+ 外部 `Trigger()` 信号（如 `/memory autodream trigger` 命令） |
 | 职责 | 四重门控后启动轻量 Agent 整理会话记忆，增量变更 JSON 合并写入 `MEMORY.md` |
 | 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor` |
 
@@ -156,6 +156,20 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 确保既可通过 DI 获取实例调用 `Trigger()`，又让 `BackgroundService.ExecuteAsync` 随宿主自动启停。
 
 详见 [AutoDream 记忆整合](#5-autodream-记忆整合)。
+
+#### 3.2.4 PlanExecutionRecoveryService
+
+| 属性 | 值 |
+|------|-----|
+| 文件 | [OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs](../src/OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs) |
+| 类型 | `BackgroundService`（注册于 `ServiceCollectionExtensions.Business.cs`） |
+| 执行时机 | `PeriodicTimer` 每 **5 秒**扫描 + `AttachSession` 时立即触发一次 |
+| 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing`/`Verifying` 状态与持久化 BuildRun 对账后由幂等派发器续跑；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
+| 依赖 | `IPlanAggregateStore`、`IPlanWorkflowApplicationService`、`IBuildRunStore`、`IPlanAgentRunDispatcher` |
+
+会话门控：TUI 启动时通过 `AttachSession` 挂接交互会话；未挂接或会话未加载时仅保留持久化恢复状态，不执行派发。扫描经 `SemaphoreSlim(1,1)` 串行化，单工作流恢复失败仅记 Warning，不影响其余工作流。
+
+留在 App 层的原因：依赖 Plan/Build 工作流应用服务与交互会话抽象（App 层业务）。
 
 ### 3.3 UI 定时器
 
@@ -197,7 +211,7 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 │  │  - SemaphoreSlim 串行化（防与 TUI 主循环重叠）        │   │
 │  │  - 构建/缓存系统提示词                                │   │
 │  │  - 确保前台会话存在                                   │   │
-│  │  - WorkingMode.Plan（只读权限）执行 prompt           │   │
+│  │  - WorkingMode.Goal（无人值守）执行 prompt           │   │
 │  │  - 排空事件流至完成                                   │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -239,9 +253,9 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 
 `CronJobExecutor` 使用 `SemaphoreSlim` 串行化执行，确保 cron 触发的运行不会与 TUI 主循环在同一个 `ForegroundConversation` 上重叠。
 
-### 4.6 权限策略
+### 4.6 执行策略
 
-Cron 触发的任务以 `WorkingMode.Plan` 执行，保证 headless 运行只读，无法执行写/破坏性工具。
+Cron 触发的任务以 `WorkingMode.Goal` 执行——无人值守下模型可自主分解子任务并迭代验证（`CronJobExecutor.ExecuteJobAsync`）。早期实现使用 `WorkingMode.Plan`（只读），但 Plan 模式下提交的计划会进入持久化 `AwaitingApproval`，必须由用户审批，不适合无人值守的 Cron 场景，因此已改为 Goal 模式。
 
 ---
 
@@ -266,7 +280,7 @@ JSON 形式合并写入 `MEMORY.md`。
 | 触发方式 | 机制 | 说明 |
 |----------|------|------|
 | 定时轮询 | `BackgroundService.ExecuteAsync` 周期循环 | 每小时 1 次（硬编码，安全网） |
-| 外部信号 | `Trigger()` | 供 SessionEnd 钩子、`/autodream` 命令、测试调用 |
+| 外部信号 | `Trigger()` | 供 `/memory autodream trigger` 命令、测试调用 |
 
 双触发通过 `Channel<bool>` 实现：`ExecuteAsync` 同时等待定时器和通道信号，
 任一就绪即执行门控检查。通道容量 1（DropWrite 模式），保证幂等。

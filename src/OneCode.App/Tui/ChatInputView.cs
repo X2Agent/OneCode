@@ -7,6 +7,10 @@ namespace OneCode.App.Tui;
 /// <summary>
 /// Complete chat input region: separator, prompt state, multiline editor,
 /// completion popup coordination, paste handling, and dynamic bottom layout.
+/// Key dispatch in ChatInputView.Keys.cs, paste in ChatInputView.Paste.cs,
+/// question mode in ChatInputView.Question.cs, completion wiring in
+/// ChatInputView.Completion.cs, view construction and draw geometry in
+/// ChatInputView.Layout.cs.
 /// </summary>
 public sealed partial class ChatInputView : View
 {
@@ -17,15 +21,19 @@ public sealed partial class ChatInputView : View
     private readonly WorkingModeController _modeController;
     private readonly IReadOnlyList<SlashCommandEntry> _allCommands;
 
-    private readonly Label _separatorLabel;
-    private readonly ChatTextEditor _input;
+    // 子控件在 BuildViews()（构造函数调用）中创建，见 ChatInputView.Layout.cs
+    private Label _separatorLabel = null!;
+    private ChatTextEditor _input = null!;
     private int _lastHeight = 1 + MinVisibleLines;
     private int _lastBottomOffset;
-    private readonly ListView _completionList;
-    private readonly FrameView _completionFrame;
+    private ListView _completionList = null!;
+    private FrameView _completionFrame = null!;
 
     private bool _isBusy;
     private bool _interactionSuspended;
+    // Set when OnInputKeyPress consumes an interaction key so a bubbled
+    // OnKeyDown (Terminal.Gui may drop Key.Handled) does not re-dispatch.
+    private bool _suppressKeyBubble;
 
     private ObservableCollection<string> _completionItems = [];
 
@@ -41,7 +49,7 @@ public sealed partial class ChatInputView : View
     private int _imageCount;
     private readonly Dictionary<int, string> _pendingImages = new();
 
-    private readonly Label _placeholderLabel;
+    private Label _placeholderLabel = null!;
     private IReadOnlyList<string> _suggestions = [];
     private int _suggestionIndex;
 
@@ -94,23 +102,10 @@ public sealed partial class ChatInputView : View
     public event Action? CycleTeamRequested;
 
     /// <summary>
-    /// Raised when a key is pressed while interaction is suspended (e.g. InlineSelector
-    /// for permission prompts is active). Editor consumes all keystrokes so ReplShell.OnKeyDown
-    /// never fires — this event lets ReplShell forward keys to the active InlineSelector.
+    /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。
+    /// 交互接管期间的按键交由会话统一处理（见 <see cref="IInteractionSession"/>）。
     /// </summary>
-    public event Action<Key>? InteractionSuspendedKeyForwarded;
-
-    /// <summary>提问模式下回到上一题。</summary>
-    public event Action? QuestionPreviousRequested;
-
-    /// <summary>提问模式下取消当前向导。</summary>
-    public event Action? QuestionCancelRequested;
-
-    /// <summary>长文本提问模式下提交或回到上一题；参数 true 表示上一题。</summary>
-    public event Action<bool>? QuestionLongTextNavigationRequested;
-
-    /// <summary>文本题中使用 Alt+Left/Alt+Right 在问题之间导航；参数 true 表示上一题。</summary>
-    public event Action<bool>? QuestionTextNavigationRequested;
+    internal IInteractionSession? InteractionSession { get; set; }
 
     // Global shortcut forwarding
     // These events let global shortcuts fire even while the prompt has focus,
@@ -178,155 +173,12 @@ public sealed partial class ChatInputView : View
         // bracketed-paste channel (e.g., terminal menu paste).
         _app.Paste += OnApplicationPaste;
 
-        _completion.CompletionStateChanged += (visible, height) =>
-        {
-            CompletionStateChanged?.Invoke(visible, height);
-            // 激活/取消 ContextAutocomplete：补全菜单可见时，up/down 解析为
-            // autocomplete:previous/next（覆盖 ContextChat 的 history:previous/next）。
-            // 这让用户可以通过 keybindings.json 重映射补全菜单的导航键。
-            if (visible)
-                _keyContextManager.PushContext(KeybindingDefaults.ContextAutocomplete);
-            else
-                _keyContextManager.PopContext(KeybindingDefaults.ContextAutocomplete);
-
-            if (!visible)
-            {
-                _completionFrame.Visible = false;
-                _completionFrame.SetNeedsDraw();
-                SetNeedsDraw();
-                return;
-            }
-            _completionFrame.Visible = true;
-            if (_completion.CurrentDisplayItems is { } items)
-            {
-                _completionItems = new ObservableCollection<string>(items);
-                _completionList.SetSource(_completionItems);
-                _completionList.SelectedItem = _completion.SelectedIndex;
-            }
-            _completionFrame.SetNeedsDraw();
-        };
+        WireCompletionStateChanged();
 
         _smartPaste.ImagePasteRequested += () => ImagePasteRequested?.Invoke();
 
-        X = 0;
-        Width = Dim.Fill();
-        Height = 1 + MinVisibleLines;
-        SetScheme(TuiTheme.ChatInput);
-        // Focus belongs exclusively to ChatTextEditor.Editor; the wrapper only
-        // keeps the ancestor focus path valid and must not become a tab target.
-        CanFocus = true;
-        TabStop = TabBehavior.NoStop;
-
-        _separatorLabel = new Label
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = 1,
-            // 分隔线：300 字符足够覆盖大多数终端宽度（最多约 300 列）。
-            Text = new string((char)0x2500, 300),
-            CanFocus = false,
-        };
-
-        _input = new ChatTextEditor
-        {
-            X = 1,
-            Y = 1,
-            Width = Dim.Fill(1),
-            Height = Dim.Fill() - 1,
-            CanFocus = true,
-        };
-        _input.KeyDownEvent += OnInputKeyPress;
-        _input.ContentsChanged += OnInputTextChanged;
-
-        CycleModeRequested += () => _modeController.CycleMode();
-        ToggleStrategyRequested += () => _modeController.ToggleStrategy();
-
-        // Fallback for terminals/drivers where IApplication.Paste doesn't fire
-        // (e.g. ConPTY may strip bracketed-paste markers and deliver text as
-        // regular input). ChatTextEditor detects large pastes by line-count
-        // jumps in ContentsChanged and raises LargeTextPasted.
-        //
-        // Deferred via _app.Invoke: LargeTextPasted fires synchronously inside
-        // OnDocumentChanged (during Editor's TextChanged event). If we call
-        // HandlePastedText inline, Editor may continue inserting raw text
-        // after we set _input.Text to the collapsed summary, overriding it.
-        // Deferring to the next UI cycle ensures Editor has fully completed
-        // its paste processing before we collapse.
-        _input.LargeTextPasted += text => _app.Invoke(() => HandlePastedText(text, isFullText: true));
-
-        _completionList = new ListView
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            CanFocus = false,
-        };
-
-        _completionFrame = new FrameView
-        {
-            X = 0,
-            Y = -15,
-            Width = Dim.Fill(),
-            Height = 16,
-            Title = " commands (Tab 切换 · Enter 选择 · Esc 关闭) ",
-            CanFocus = false,
-        };
-        _completionFrame.Add(_completionList);
-
-        _placeholderLabel = new Label
-        {
-            X = 1,
-            Y = 1,
-            Width = Dim.Fill(1),
-            Height = 1,
-            Text = "",
-            CanFocus = false,
-            Visible = false,
-        };
-
-        Add(_separatorLabel);
-        Add(_placeholderLabel);
-        Add(_input);
+        BuildViews();
     }
-
-    protected override bool OnDrawingContent(DrawContext? context)
-    {
-        var width = Viewport.Width;
-        if (width <= 0)
-            return false;
-
-        var inputLines = Math.Clamp(_input.LineCount, MinVisibleLines, ChatTextEditor.MaxVisibleLines);
-        var totalHeight = 1 + inputLines;
-        if (_lastHeight != totalHeight || _lastBottomOffset != BottomOffset)
-        {
-            _lastHeight = totalHeight;
-            _lastBottomOffset = BottomOffset;
-            Height = totalHeight;
-            Y = Pos.AnchorEnd(totalHeight + BottomOffset);
-            SetNeedsLayout();
-        }
-
-        _separatorLabel.Width = width;
-        var editorWidth = Math.Max(1, width - 2);
-        _input.X = 1;
-        _input.Y = 1;
-        _input.Width = editorWidth;
-        _input.Height = inputLines;
-        _placeholderLabel.X = 1;
-        _placeholderLabel.Y = 1;
-        _placeholderLabel.Width = editorWidth;
-
-        return base.OnDrawingContent(context);
-    }
-
-    /// <summary>
-    /// Replaces the command list used for slash-completion at runtime.
-    /// Call after dynamic commands (skills, MCP) are loaded or refreshed.
-    /// </summary>
-    public void UpdateCommands(IReadOnlyList<SlashCommandEntry> commands)
-        => _completion.UpdateCommands(commands);
 
     public void SetBusy(bool busy)
     {
@@ -423,22 +275,17 @@ public sealed partial class ChatInputView : View
     }
 
     /// <summary>
-    /// Hides the completion popup if visible. Called by ReplShell.OnKeyDown
-    /// as a fallback when ESC doesn't reach ChatInputView.OnInputKeyPress
-    /// (e.g., when Editor consumes ESC internally).
-    /// </summary>
-    public void HideCompletion()
-    {
-        if (_completion.IsCompletionActive)
-            _completion.Hide();
-    }
-
-    /// <summary>
     /// Directly sets keyboard focus to the internal Editor.
     /// Use this instead of <c>SetFocus()</c> to ensure the input field
     /// (not just the ChatInputView container) receives keyboard events.
     /// </summary>
     public void FocusInput() => _input.SetFocus();
+
+    /// <summary>
+    /// True when the nested editor currently has keyboard focus.
+    /// ReplShell uses this to skip interaction-key fallback and avoid double-handling.
+    /// </summary>
+    internal bool HasInputFocus => _input.HasEditorFocus;
 
     /// <summary>
     /// Fires AFTER the Editor text has changed. Used to trigger command/file completion
@@ -505,79 +352,4 @@ public sealed partial class ChatInputView : View
         _input.InsertionPoint = (_input.Text?.Length ?? 0);
         _suppressCompletion = false;
     }
-
-    // 用于 AskUserQuestionTool 的交互式提问
-
-    private bool _isQuestionMode;
-    private bool _isLongTextMode;
-    private Action<string>? _questionCallback;
-
-    /// <summary>
-    /// 进入提问模式 — 显示问题并等待用户输入回答。
-    /// </summary>
-    public void SetQuestionMode(string question, Action<string> callback, bool longText = false)
-    {
-        _isQuestionMode = true;
-        _isLongTextMode = longText;
-        _input.QuestionNavigationEnabled = true;
-        _questionCallback = callback;
-        _interactionSuspended = false;
-
-        ClearInput();
-        _input.ReadOnly = false;
-
-        _placeholderLabel.Visible = false;
-
-        SetNeedsDraw();
-        FocusInput();
-    }
-
-    /// <summary>
-    /// 退出提问模式。
-    /// </summary>
-    public void ClearQuestionMode()
-    {
-        _isQuestionMode = false;
-        _isLongTextMode = false;
-        _input.QuestionNavigationEnabled = false;
-        _questionCallback = null;
-        ClearInput();
-        _input.ReadOnly = _interactionSuspended;
-        UpdatePlaceholder();
-        SetNeedsDraw();
-    }
-
-    /// <summary>
-    /// 提交提问模式的回答。
-    /// </summary>
-    private void SubmitQuestionAnswer()
-    {
-        if (!_isQuestionMode || _questionCallback is null) return;
-
-        var answer = CurrentText.Trim();
-        if (string.IsNullOrEmpty(answer))
-        {
-            // 空回答视为取消
-            _questionCallback("(user cancelled)");
-        }
-        else
-        {
-            _questionCallback(answer);
-        }
-    }
-
-    /// <summary>
-    /// 提交长文本模式的回答（允许空内容）。
-    /// </summary>
-    private void SubmitLongTextAnswer()
-    {
-        if (!_isQuestionMode || _questionCallback is null) return;
-        _questionCallback(CurrentText.Trim());
-    }
-
-    /// <summary>当前是否处于提问模式。</summary>
-    public bool IsQuestionMode => _isQuestionMode;
-
-    /// <summary>当前是否处于长文本提问模式。</summary>
-    public bool IsLongTextQuestionMode => _isQuestionMode && _isLongTextMode;
 }

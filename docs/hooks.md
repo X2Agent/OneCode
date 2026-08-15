@@ -58,9 +58,8 @@ OneCode 运行时
   │
   ├─ 生命周期事件 ──▶ IHookExecutionService.FireAsync(payload)
   │                   │
-  │                   ├─ 策略前置检查（全局禁用 / 工作区信任）
+  │                   ├─ 策略前置检查（工作区信任）
   │                   ├─ matcher 过滤（event + matcherValue 两维）
-  │                   ├─ 策略过滤（allowManagedOnly）
   │                   ├─ priority 升序排序
   │                   ├─ 串行执行 IHookExecutor
   │                   ├─ 结果聚合（HookResultAggregator）
@@ -75,7 +74,7 @@ OneCode 运行时
 
 | 事件 | 集成点 | 行为 |
 |------|--------|------|
-| `PreToolUse` | `HookMiddleware`（在 `AgentPipelineBuilder` 中 `.Use()` 注册） | 阻断时返回 `ToolResult.Error` + `ctx.Terminate`；异常 fail-closed |
+| `PreToolUse` | `HookMiddleware`（在 `AgentPipelineBuilder` 中 `.Use()` 注册） | 阻断时返回 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性）；异常 fail-closed |
 | `PostToolUse` | 同上（next 之后） | 不消费 result，仅做通知/审计；异常 fail-soft |
 
 其他事件（`SessionStart` / `Stop` / `PreCompact` 等）由对应业务模块直接调用 `IHookExecutionService.FireAsync` 触发。
@@ -108,9 +107,9 @@ OneCode 运行时
   ┌──────────────────┐                ┌─────────────────────────────────┐
   │ HookPolicyService│◀──策略检查──── │     HookExecutionService        │
   │  · 工作区信任    │                │  · 策略前置检查                 │
-  │  · disableAll    │                │  · matcher 过滤 + 策略过滤      │
-  │  · allowManaged  │                │  · priority 排序                │
-  │  · strictPlugin  │                │  · 串行执行 + 结果聚合          │
+  │                  │                │  · matcher 过滤                 │
+  │                  │                │  · priority 排序                │
+  │                  │                │  · 串行执行 + 结果聚合          │
   └──────────────────┘                └──────────────┬──────────────────┘
                                                      │ 按 HookType 分发
                           ┌──────────────────────────┼──────────────────────────┐
@@ -155,9 +154,9 @@ OneCode 运行时
 |------|------|
 | `HookRegistry` | 钩子注册表，按 (Event, Matcher) 二维索引 |
 | `HookExecutionService` | 执行服务实现，策略前置 + 过滤 + 排序 + 串行执行 + 聚合 |
-| `HookPolicyService` | 策略控制（工作区信任、disableAll、allowManagedOnly、strictPluginOnly） |
+| `HookPolicyService` | 策略控制（工作区信任检查：当前目录是否在 `trustedDirectories` 中） |
 | `GlobHookMatcher` | Glob 风格通配符匹配器 |
-| `HookSettingsLoader` | 从 `hooks.json` 加载配置（支持新旧两种格式） |
+| `HookSettingsLoader` | 从独立 `hooks.json` 加载配置（matcher-group 格式） |
 | `HookConfigBootstrapper` | 启动加载器，从用户/项目配置目录注册 |
 | `CommandHookExecutor` | Command 类型执行器（CliWrap + stdin JSON + exit code 语义） |
 | `NotificationHookExecutor` | Notification 类型执行器（Provider 策略分发） |
@@ -190,7 +189,7 @@ OneCode 运行时
 
 | 事件 | 触发时机 | matcher 字段 | 可选值 | 可阻断 |
 |------|---------|-------------|--------|--------|
-| `PreToolUse` | 工具调用执行前 | `tool_name` | Bash / Write / Read / Grep / Glob / WebFetch / WebSearch / Task / todos_add | ✅ exit code 2 |
+| `PreToolUse` | 工具调用执行前 | `tool_name` | Bash / Write / Read / Grep / Glob / WebFetch / WebSearch / Task | ✅ exit code 2 |
 | `PostToolUse` | 工具调用成功执行后 | `tool_name` | 同上 | ❌ |
 | `Notification` | 发送通知时 | `notification_type` | permission_prompt / idle_prompt / auth_success | ❌ |
 | `UserPromptSubmit` | 用户提交 prompt 后 | 无 matcher | — | ❌ |
@@ -417,20 +416,9 @@ OneCode 运行时
 }
 ```
 
-#### 旧格式（兼容）：平铺
+#### 旧格式（平铺）——已不再支持
 
-每个事件下直接是 hook 配置数组，自动包装为 `matcher=""`（匹配所有）：
-
-```json
-{
-  "preToolUse": [
-    { "type": "command", "command": "echo 'Before tool'" }
-  ],
-  "postToolUse": [
-    { "type": "command", "command": "echo 'After tool'" }
-  ]
-}
-```
+`HookSettingsLoader` 只解析 matcher-group 格式。事件下直接平铺 hook 配置数组（无 `matcher`/`hooks` 包装）的旧格式会被跳过（反序列化后 `Hooks` 为空），不会自动包装为 `matcher=""`。
 
 ### 6.3 Matcher 语法
 
@@ -447,15 +435,9 @@ OneCode 运行时
 
 > **注意**：matcher 字段名因事件而异（如 PreToolUse 为 `tool_name`，SessionStart 为 `source`）。详见 [事件清单](#4-事件清单)。无 matcher 的事件（UserPromptSubmit / Stop）使用 `""` 或 `"*"`。
 
-### 6.4 策略开关（settings.json）
+### 6.4 策略控制
 
-Hook 策略开关在 `settings.json` 中配置（以 `hooks` 开头的键会被白名单接受）：
-
-| 键 | 类型 | 默认值 | 作用 |
-|----|------|--------|------|
-| `hooks.disableAll` | `bool` | `false` | 禁用所有 hook |
-| `hooks.allowManagedOnly` | `bool` | `false` | 仅允许系统级 hook（优先级 0-99） |
-| `hooks.strictPluginOnly` | `bool` | `false` | 严格插件模式，仅允许插件 hook |
+当前没有 `hooks.*` 策略开关配置项。唯一的策略控制是**工作区信任**：Hook 仅在当前工作目录位于 `settings.json` 的 `trustedDirectories` 列表（含子目录）中时才会触发（见 [§10.1](#101-工作区信任)）。
 
 ---
 
@@ -465,10 +447,10 @@ Hook 策略开关在 `settings.json` 中配置（以 `hooks` 开头的键会被�
 
 | 子命令 | 语法 | 说明 |
 |--------|------|------|
-| 无参数 | `/hooks` | 概览：持久 hook 数 + 策略状态 + 配置文件路径 |
+| 无参数 | `/hooks` | 概览：持久 hook 数 + 工作区信任状态 + 配置文件路径 |
 | `list` / `ls` | `/hooks list` | 完整 hook 列表（按 source 分组：Managed / User / Project / Plugin） |
 | `events` | `/hooks events` | 可用 hook 事件列表（含 matcher 字段） |
-| `status` | `/hooks status` | Hook 策略状态（工作区信任 / 禁用 / managed-only / strict-plugin） |
+| `status` | `/hooks status` | Hook 策略状态（工作区信任） |
 
 `/hooks` 概览示例：
 
@@ -491,17 +473,15 @@ Subcommands: /hooks list | /hooks events | /hooks status
 ```text
 User hooks:
   PreToolUse:
-    ✗[100] Command    config:PreToolUse:Command:abc123
-             command: echo 'About to run Bash'
+    [100] Command    config:PreToolUse:Command:abc123
+           command: echo 'About to run Bash'
   PostToolUse:
-   [100] Http       config:PostToolUse:Http:def456
+    [100] Http       config:PostToolUse:Http:def456
 
 Project hooks:
   Stop:
-   [200] Notification config:Stop:Notification:ghi789
+    [200] Notification config:Stop:Notification:ghi789
 ```
-
-> `✗` 表示该 hook 被策略过滤（如 `allowManagedOnly` 模式下用户级 hook 被禁用）。
 
 ### 7.2 典型场景示例
 
@@ -731,7 +711,7 @@ public class MyPlugin
 
 | 优先级范围 | 来源 | 说明 |
 |-----------|------|------|
-| `0-99` | Managed（系统内置） | 系统级 hook，`allowManagedOnly` 模式下仍允许 |
+| `0-99` | Managed（系统内置） | 系统级 hook |
 | `100-199` | User（用户级） | `~/.onecode/hooks.json` 加载，默认 priority 100 |
 | `200-299` | Project（项目级） | `<cwd>/.onecode/hooks.json` 加载，默认 priority 200 |
 | `300+` | Plugin（插件） | 插件运行时注册 |
@@ -740,12 +720,12 @@ public class MyPlugin
 
 同一事件下多个匹配的 hook 按 `priority` **升序**串行执行（数值越小越先执行）。执行结果通过 `HookResultAggregator` 聚合：
 
-| 字段类型 | 聚合策略 |
+| 字段 | 聚合策略 |
 |---------|---------|
-| 布尔字段（`PreventContinuation` / `Retry`） | OR（任一为 true 则结果为 true） |
-| 列表字段（`BlockingErrors` / `AdditionalContexts`） | 累加 |
-| 字符串字段（`Message` / `StopReason` / `InitialUserMessage`） | last-write-wins |
-| `UpdatedInput` / `UpdatedMcpToolOutput` | last-write-wins |
+| `PreventContinuation`（布尔） | OR（任一为 true 则结果为 true） |
+| `BlockingErrors` / `AdditionalContexts`（列表） | 累加 |
+| `Message` / `SystemMessage`（字符串） | last-write-wins（`Message` 为空时回退 `SystemMessage`） |
+| `UpdatedInput` | last-write-wins |
 
 ### 9.3 Once Hook
 
@@ -763,17 +743,13 @@ Hook 仅在**受信任工作区**中触发。`HookPolicyService.IsCurrentWorkspa
 
 ### 10.2 策略开关
 
-| 开关 | 行为 |
-|------|------|
-| `hooks.disableAll = true` | 全局禁用所有 hook，`FireAsync` 直接返回空结果 |
-| `hooks.allowManagedOnly = true` | 仅允许 priority < 100 的系统级 hook，过滤用户级与项目级 |
-| `hooks.strictPluginOnly = true` | 严格插件模式（预留，当前仅展示状态） |
+当前没有 `disableAll` / `allowManagedOnly` / `strictPluginOnly` 等策略开关（设计曾规划于 ADR 0005，未实现）。工作区信任（§10.1）是唯一的策略门控。
 
 ### 10.3 异常处理策略
 
 | 场景 | 策略 | 说明 |
 |------|------|------|
-| Pre-hook（PreToolUse）异常 | **fail-closed** | 异常转为 `ToolResult.Error` + `ctx.Terminate`，阻止工具执行 |
+| Pre-hook（PreToolUse）异常 | **fail-closed** | 异常转为 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性） |
 | Post-hook（PostToolUse）异常 | **fail-soft** | 仅记日志，保留原工具结果返回 |
 | 单个 hook 执行器异常 | 隔离 | 异常被吞掉记 Warning，其他 hook 继续执行 |
 | `OperationCanceledException` | 透传 | 保留取消信号，不吞掉 |
@@ -910,12 +886,9 @@ services.AddHttpClient<DingTalkNotificationProvider>();
 
 1. **运行 `/hooks status`** 检查策略状态：
    - `Workspace trusted: NO` → 工作区未受信任，需在 `settings.json` 的 `TrustedDirectories` 中添加当前目录
-   - `All hooks disabled: YES` → `hooks.disableAll` 被设为 true
-   - `Managed-only mode: YES` → 仅允许 priority < 100 的 hook
 
 2. **运行 `/hooks list`** 确认 hook 已注册：
-   - 未出现 → 检查 `hooks.json` 路径与 JSON 语法
-   - 出现但带 `✗` 标记 → 被策略过滤（见上一步）
+   - 未出现 → 检查 `hooks.json` 路径与 JSON 语法（注意：只支持 matcher-group 格式，见 §6.2）
 
 3. **检查 matcher**：
    - 运行 `/hooks events` 确认事件的 matcher 字段名
@@ -939,7 +912,7 @@ Hook 执行相关日志通过 `ILogger` 输出，关键日志类别：
 
 | 日志类别 | 关键消息 |
 |---------|---------|
-| `HookExecutionService` | `Hook execution skipped: hooks globally disabled` / `workspace not trusted` |
+| `HookExecutionService` | `Hook execution skipped: workspace not trusted` |
 | `HookExecutionService` | `Hook '{Name}' execution error` |
 | `CommandHookExecutor` | `Command hook execution failed` / `Command hook timed out` |
 | `HttpHookExecutor` | `HTTP hook timed out` / `HTTP hook execution failed` |

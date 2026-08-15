@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
@@ -160,6 +161,7 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             new TaskService(),
+            Substitute.For<IClarificationQuestionGenerator>(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
         var host = new ControlledBuildAttemptHost(
             durableHost,

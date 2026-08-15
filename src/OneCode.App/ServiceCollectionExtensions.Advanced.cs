@@ -32,6 +32,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<Core.Coordinator.ITeamRunStore>(_ =>
             new JsonTeamRunStore(Path.Combine(PathsHelper.GetUserConfigDir(), "team-runs")));
         services.AddSingleton<TeamRunStateMachine>();
+        services.AddSingleton<IClarificationQuestionGenerator, ClarificationQuestionGenerator>();
         services.AddSingleton<TeamRequirementService>();
         services.AddSingleton<ITeamQualityGateValidator, TeamChangeScopeQualityGateValidator>();
         services.AddSingleton<ITeamQualityGateValidator, TeamWorkspaceCleanlinessQualityGateValidator>();

@@ -24,6 +24,10 @@ internal sealed class ChatTextEditor : View
     // _app.Invoke) replaces the content with the collapsed summary.
     // Restored by ResumeAfterPaste() after the summary is set.
     private bool _pasteSuppressed;
+    // KeyDownEvent may set e.Handled, but Terminal.Gui can still propagate the
+    // key to this wrapper (value-type Key). Remember consumption so OnKeyDown
+    // does not bubble into ReplShell and double-dispatch interaction keys.
+    private bool _keyDownConsumedByOwner;
 
     public event EventHandler<Key>? KeyDownEvent;
     public event EventHandler? ContentsChanged;
@@ -88,54 +92,53 @@ internal sealed class ChatTextEditor : View
 
         _editor.KeyDown += (_, e) =>
         {
+            _keyDownConsumedByOwner = false;
+
             // Intercept scroll keys and question navigation BEFORE Editor processes
             // them — Editor's internal bindings would otherwise consume them.
             if (!_suppressEvents && IsQuestionNavigationKey(e))
             {
                 KeyDownEvent?.Invoke(this, e);
                 e.Handled = true;
-                return;
             }
-
-            // Intercept scroll keys (PageUp/PageDown/Ctrl+PgUp/Ctrl+PgDn) BEFORE
-            // Editor processes them — Editor's internal OnKeyDown may consume
-            // them for cursor movement, preventing KeyDownEvent from firing.
-            if (!_suppressEvents && IsScrollKey(e))
+            else if (!_suppressEvents && IsScrollKey(e))
             {
+                // Intercept scroll keys (PageUp/PageDown/Ctrl+PgUp/Ctrl+PgDn) BEFORE
+                // Editor processes them — Editor's internal OnKeyDown may consume
+                // them for cursor movement, preventing KeyDownEvent from firing.
                 KeyDownEvent?.Invoke(this, e);
                 e.Handled = true;
-                return;
             }
-
-            // Intercept Esc BEFORE anything else — Editor's internal OnKeyDown
-            // may consume it (cancel-selection) and prevent KeyDownEvent from
-            // reaching ChatInputView. Strip modifiers: terminals often report Esc
-            // with Meta/Alt set, so `e == Key.Esc` alone misses those events.
-            if (e.NoShift.NoCtrl.NoAlt == Key.Esc && !_suppressEvents)
+            else if (e.NoShift.NoCtrl.NoAlt == Key.Esc && !_suppressEvents)
             {
+                // Intercept Esc BEFORE anything else — Editor's internal OnKeyDown
+                // may consume it (cancel-selection) and prevent KeyDownEvent from
+                // reaching ChatInputView. Strip modifiers: terminals often report Esc
+                // with Meta/Alt set, so `e == Key.Esc` alone misses those events.
                 KeyDownEvent?.Invoke(this, e);
                 e.Handled = true;
-                return;
             }
-
-            // ConPTY fallback: without kitty keyboard protocol, Shift+Enter is
-            // encoded by the terminal as ESC+\r, which Terminal.Gui decodes as
-            // Ctrl+Alt+M (ESC = Alt, \r = Ctrl+M = 0x0D). This encoding is
-            // unambiguous, so we treat it as deterministic Shift+Enter.
-            // For bare Key.Enter (some terminals strip the ESC prefix), fall
-            // back to GetAsyncKeyState to distinguish from plain Enter.
-            if (!_suppressEvents &&
+            else if (!_suppressEvents &&
                 !_editor.ReadOnly &&
                 !e.IsShift &&
                 ShouldHandleAsShiftEnter(e))
             {
+                // ConPTY fallback: without kitty keyboard protocol, Shift+Enter is
+                // encoded by the terminal as ESC+\r, which Terminal.Gui decodes as
+                // Ctrl+Alt+M (ESC = Alt, \r = Ctrl+M = 0x0D). This encoding is
+                // unambiguous, so we treat it as deterministic Shift+Enter.
+                // For bare Key.Enter (some terminals strip the ESC prefix), fall
+                // back to GetAsyncKeyState to distinguish from plain Enter.
                 InsertTextAtCursor("\n");
                 e.Handled = true;
-                return;
+            }
+            else if (!_suppressEvents)
+            {
+                KeyDownEvent?.Invoke(this, e);
             }
 
-            if (!_suppressEvents)
-                KeyDownEvent?.Invoke(this, e);
+            if (e.Handled)
+                _keyDownConsumedByOwner = true;
         };
         _editor.Document.TextChanged += (_, _) => OnDocumentChanged();
         // Conventional editor caret: a single blinking vertical bar (DECSCUSR Ps=5),
@@ -255,6 +258,9 @@ internal sealed class ChatTextEditor : View
 
     public new void SetFocus() => _editor.SetFocus();
 
+    /// <summary>True when the inner Editor currently has keyboard focus.</summary>
+    internal bool HasEditorFocus => _editor.HasFocus;
+
     public new void SetNeedsDraw()
     {
         _editor.SetNeedsDraw();
@@ -273,6 +279,12 @@ internal sealed class ChatTextEditor : View
     // the key and triggering an unwanted action).
     protected override bool OnKeyDown(Key e)
     {
+        if (_keyDownConsumedByOwner)
+        {
+            _keyDownConsumedByOwner = false;
+            return true;
+        }
+
         if (!_editor.ReadOnly &&
             !e.IsShift &&
             ShouldHandleAsShiftEnter(e))

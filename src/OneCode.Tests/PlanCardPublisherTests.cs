@@ -67,29 +67,18 @@ public sealed class PlanCardPublisherTests
         phases.Should().AllBeEquivalentTo(PlanCardPhase.Draft);
     }
 
-    [Fact]
-    public void Publish_DraftPhase_ForwardsDraftToSubscriber()
+    [Theory]
+    [InlineData(PlanCardPhase.Draft)]
+    [InlineData(PlanCardPhase.PendingApproval)]
+    public void Publish_ForwardsPhaseToSubscriber(PlanCardPhase phase)
     {
-        // SavePlan 发布 Draft——TUI 仅展示卡片，不弹决策面板
+        // SavePlan 发布 Draft（TUI 仅展示卡片）；SubmitPlan 发布 PendingApproval（弹出 InlineSelector 决策面板）
         var sut = new PlanCardPublisher();
         PlanCardPhase? receivedPhase = null;
-        sut.PlanCreated += (_, _, phase) => receivedPhase = phase;
+        sut.PlanCreated += (_, _, p) => receivedPhase = p;
 
-        sut.Publish("Draft plan", [new PlanStep("Step")], PlanCardPhase.Draft);
+        sut.Publish("A plan", [new PlanStep("Step")], phase);
 
-        receivedPhase.Should().Be(PlanCardPhase.Draft);
-    }
-
-    [Fact]
-    public void Publish_PendingApprovalPhase_ForwardsPendingApprovalToSubscriber()
-    {
-        // SubmitPlan 发布 PendingApproval——TUI 弹出 InlineSelector 决策面板
-        var sut = new PlanCardPublisher();
-        PlanCardPhase? receivedPhase = null;
-        sut.PlanCreated += (_, _, phase) => receivedPhase = phase;
-
-        sut.Publish("Final plan", [new PlanStep("Step")], PlanCardPhase.PendingApproval);
-
-        receivedPhase.Should().Be(PlanCardPhase.PendingApproval);
+        receivedPhase.Should().Be(phase);
     }
 }
