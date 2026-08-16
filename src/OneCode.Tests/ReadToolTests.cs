@@ -1,5 +1,4 @@
 using NSubstitute;
-using OneCode.App.Services.Cache;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
@@ -40,8 +39,8 @@ public sealed class ReadToolTests : IDisposable
         return wd;
     }
 
-    private ReadTool CreateTool(string? workingDir = null, FileContentCache? cache = null, IReadOnlyList<string>? additionalDirs = null)
-        => new(cache!, CreateWd(workingDir, additionalDirs), ssh: null!);
+    private ReadTool CreateTool(string? workingDir = null, IReadOnlyList<string>? additionalDirs = null)
+        => new(CreateWd(workingDir, additionalDirs), ssh: null!);
 
     private string WriteFile(string relativeName, string content)
     {
@@ -348,42 +347,5 @@ public sealed class ReadToolTests : IDisposable
         // Lines 1-9 should be padded to width 2 (since max line number 12 has 2 digits)
         result.Content.Should().Contain(" 1→ line1");
         result.Content.Should().Contain("12→ line12");
-    }
-
-    // Cache dedup
-
-    [Fact]
-    public async Task ReadAsync_WithCache_FirstReadReturnsActualContent()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        WriteFile("cached.txt", "cached content");
-        var cache = new FileContentCache();
-        var tool = CreateTool(cache: cache);
-
-        var result = await tool.ReadAsync("cached.txt", ct: ct);
-
-        result.Content.Should().NotStartWith("Error:");
-        result.Content.Should().Contain("cached content");
-        result.Content.Should().NotBe(FileContentCache.FileUnchangedStub);
-    }
-
-    [Fact]
-    public async Task ReadAsync_WithCache_DifferentOffsetOnSecondRead_ReturnsContent()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        WriteFile("paged.txt", "line1\nline2\nline3\nline4\nline5");
-        var cache = new FileContentCache();
-        var tool = CreateTool(cache: cache);
-
-        // First read with offset=1, limit=2
-        var first = await tool.ReadAsync("paged.txt", offset: 1, limit: 2, ct: ct);
-        first.Content.Should().Contain("line1");
-
-        // Second read with different offset → must return real content, not dedup stub
-        var second = await tool.ReadAsync("paged.txt", offset: 3, limit: 2, ct: ct);
-
-        second.Content.Should().NotBe(FileContentCache.FileUnchangedStub);
-        second.Content.Should().Contain("line3");
-        second.Content.Should().Contain("line4");
     }
 }

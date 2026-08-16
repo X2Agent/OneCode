@@ -96,7 +96,7 @@ public sealed class EditToolTests : IDisposable
         var file = Write("notify.cs", "var x = 1;");
         var notifier = Substitute.For<ILspNotifier>();
 
-        var tool = new EditTool(notifier, null!, CreateWd(), ssh: null!);
+        var tool = new EditTool(notifier, CreateWd(), ssh: null!);
         var result = await tool.EditAsync(file, "var x = 1;", "var y = 2;", ct: TestContext.Current.CancellationToken);
 
         // Business output: the edit must have succeeded and the file must be modified
@@ -111,7 +111,7 @@ public sealed class EditToolTests : IDisposable
         var file = Write("no-notify.cs", "var x = 1;");
         var notifier = Substitute.For<ILspNotifier>();
 
-        var tool = new EditTool(notifier, null!, CreateWd(), ssh: null!);
+        var tool = new EditTool(notifier, CreateWd(), ssh: null!);
         var result = await tool.EditAsync(file, "MISSING", "x", ct: TestContext.Current.CancellationToken);
 
         // Business output: the edit must have failed and the file must be unchanged
@@ -138,7 +138,7 @@ public sealed class EditToolTests : IDisposable
 
     private async Task<ToolResult> RunEditAsync(string path, string oldStr, string newStr)
     {
-        var tool = new EditTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new EditTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
         return await tool.EditAsync(path, oldStr, newStr, ct: TestContext.Current.CancellationToken);
     }
 }
@@ -239,7 +239,7 @@ public sealed class EditInsertModeTests : IDisposable
     private async Task<ToolResult> ExecAsync(string path, string oldStr, string newStr,
         string mode = "replace", bool dryRun = false)
     {
-        var tool = new EditTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new EditTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
         return await tool.EditAsync(path, oldStr, newStr, mode: mode, dryRun: dryRun, ct: TestContext.Current.CancellationToken);
     }
 }

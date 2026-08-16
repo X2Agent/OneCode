@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using OneCode.App.Services.Cache;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Remote;
 using OneCode.Infrastructure.Text;
@@ -23,14 +22,12 @@ public sealed class WriteTool
     private const int MaxContentLength = 10_000_000; // 10 MB
 
     private readonly ILspNotifier _notifier;
-    private readonly IFileContentCache _cache;
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly SshRemoteService _ssh;
 
-    public WriteTool(ILspNotifier notifier, IFileContentCache cache, IWorkingDirectoryAccessor wd, SshRemoteService ssh)
+    public WriteTool(ILspNotifier notifier, IWorkingDirectoryAccessor wd, SshRemoteService ssh)
     {
         _notifier = notifier;
-        _cache = cache;
         _wd = wd;
         _ssh = ssh;
     }
@@ -96,7 +93,7 @@ public sealed class WriteTool
             await FileEncodingHelper.WriteWithEncodingAsync(fullPath, finalContent, encoding, ct);
 
             var message = await FileWritePipeline.CompleteWriteAsync(
-                fullPath, finalContent, _notifier, _cache,
+                fullPath, finalContent, _notifier,
                 $"Successfully wrote {finalContent.Length} characters to {fullPath}", ct).ConfigureAwait(false);
             return ToolResult.Success(message);
         }

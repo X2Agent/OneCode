@@ -1,3 +1,4 @@
+using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
@@ -8,7 +9,8 @@ public sealed class TeamRunApplicationService(
     ITeamRunStore store,
     TeamRunStateMachine stateMachine,
     TeamQualityGateRunner qualityGateRunner,
-    DeliveryReportBuilder deliveryReportBuilder)
+    DeliveryReportBuilder deliveryReportBuilder,
+    IWorkspaceFingerprintProvider? fingerprintProvider = null)
 {
     public async Task<TeamRun> BeginClarificationAsync(
         TeamRunId runId,
@@ -296,14 +298,111 @@ public sealed class TeamRunApplicationService(
                 }
                 : task)
             .ToList();
+        // C2: Succeeded 任务落库时记录工作区指纹，恢复世代用它与当前指纹比对，
+        // 检测已完成任务的文件改动是否已被回滚/篡改。工作区不可读时保守跳过（保持原值）。
+        var lastTaskFingerprint = run.LastTaskFingerprint;
+        if (taskStatus == TeamTaskStatus.Succeeded && fingerprintProvider is not null)
+        {
+            try
+            {
+                lastTaskFingerprint = await fingerprintProvider.ComputeAsync(run.WorkingDirectory, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or DirectoryNotFoundException or UnauthorizedAccessException)
+            {
+            }
+        }
         var updated = run with
         {
             TaskGraph = new TeamTaskGraph(tasks),
             Failure = taskStatus == TeamTaskStatus.Failed ? failure : run.Failure,
+            LastTaskFingerprint = lastTaskFingerprint,
             Version = checked(run.Version + 1),
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
+        return updated;
+    }
+
+    /// <summary>
+    /// 恢复前的已完成任务对账（C2）：调用方须先执行 ledger reconcile（回滚上一世代未提交的
+    /// 文件副作用），再调用本方法比对指纹。不一致说明 Succeeded 任务的改动已不在盘，
+    /// 将其降级为待执行（Status=null）以便新世代重跑，防止"聚合记 Succeeded、文件已回滚"的静默丢失。
+    /// </summary>
+    public async Task<TeamRun> ReconcileSucceededTasksAsync(TeamRun run, CancellationToken ct = default)
+    {
+        if (fingerprintProvider is null
+            || run.TaskGraph is null
+            || run.LastTaskFingerprint is not { } expectedFingerprint)
+        {
+            return run;
+        }
+        if (!run.TaskGraph.Tasks.Any(task => task.Status == TeamTaskStatus.Succeeded))
+            return run;
+
+        string currentFingerprint;
+        try
+        {
+            currentFingerprint = await fingerprintProvider.ComputeAsync(run.WorkingDirectory, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or DirectoryNotFoundException or UnauthorizedAccessException)
+        {
+            // 工作区不可读：保守跳过校验，维持既有恢复语义。
+            return run;
+        }
+
+        if (string.Equals(currentFingerprint, expectedFingerprint, StringComparison.Ordinal))
+            return run;
+
+        var tasks = run.TaskGraph.Tasks
+            .Select(task => task.Status == TeamTaskStatus.Succeeded
+                ? task with { Status = null }
+                : task)
+            .ToList();
+        var updated = run with
+        {
+            TaskGraph = new TeamTaskGraph(tasks),
+            LastTaskFingerprint = null,
+            Version = checked(run.Version + 1),
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
+        return updated;
+    }
+
+    /// <summary>
+    /// 用户取消（H1）：把运行中的 TeamRun 落为 Cancelled 终态。非终态任务标记 Cancelled；
+    /// Succeeded 任务保留为历史事实，交付报告以 committed:false 记录改动未保留
+    /// （取消路径的 run 级文件事务已整体回滚）。
+    /// </summary>
+    public async Task<TeamRun> CancelAsync(TeamRunId runId, string summary, CancellationToken ct = default)
+    {
+        var current = await store.LoadAsync(runId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"TeamRun '{runId}' was not found.");
+        if (TeamRunStateMachine.IsTerminal(current.Status))
+            return current;
+
+        var tasks = current.TaskGraph?.Tasks
+            .Select(task => task.Status is null
+                ? task with { Status = TeamTaskStatus.Cancelled }
+                : task)
+            .ToList();
+        var updated = current with
+        {
+            TaskGraph = tasks is null ? null : new TeamTaskGraph(tasks),
+        };
+        if (updated.TaskGraph is not null)
+        {
+            updated = updated with
+            {
+                Delivery = deliveryReportBuilder.Build(updated, committed: false, summary),
+            };
+        }
+        updated = stateMachine.Transition(
+            updated,
+            TeamRunPhase.Completed,
+            TeamRunStatus.Cancelled,
+            DateTimeOffset.UtcNow);
+        await SaveOrThrowAsync(updated, current.Version, ct).ConfigureAwait(false);
         return updated;
     }
 

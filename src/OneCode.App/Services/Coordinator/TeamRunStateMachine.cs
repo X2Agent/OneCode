@@ -56,7 +56,7 @@ public sealed class TeamRunStateMachine
         }
     }
 
-    private static bool IsTerminal(TeamRunStatus status)
+    public static bool IsTerminal(TeamRunStatus status)
         => status is TeamRunStatus.Succeeded
             or TeamRunStatus.Failed
             or TeamRunStatus.Cancelled

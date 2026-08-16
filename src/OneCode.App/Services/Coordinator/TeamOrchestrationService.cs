@@ -411,6 +411,16 @@ public sealed class TeamOrchestrationService
             "Resuming team session {Session} as a new execution generation (run {RunId})",
             sessionId, teamRun.Id);
 
+        // C2: 恢复前先回滚上一世代 ledger 未提交的文件副作用，再校验 Succeeded 任务的
+        // 改动是否仍在盘；不一致则降级重跑。顺序关键：若先比对指纹，崩溃后文件仍在盘
+        // 会误判一致，随后 reconcile 又回滚 → 已完成工作静默丢失。BindAsync 内的
+        // reconcile 对已回滚的 ledger 是幂等 no-op。
+        if (_operationLedger is not null)
+        {
+            await _operationLedger.ReconcileRunAsync($"team/{teamRun.Id}", ct).ConfigureAwait(false);
+        }
+        teamRun = await _teamRunService.ReconcileSucceededTasksAsync(teamRun, ct).ConfigureAwait(false);
+
         var (fileChanges, observedSink) = CreateObservedSink(eventSink);
 
         try
@@ -599,27 +609,66 @@ public sealed class TeamOrchestrationService
             imagePaths,
             static () => new EditTransaction(),
             _operationLedger);
-        var workflowResult = await _taskWorkflowHost.RunNextAsync(
-            teamRun, config, modelId, runtime,
-            new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
-        var result = BuildTeamResult(teamRun.TeamName, workflowResult.Outcomes);
-        var bound = runtime.BoundRun;
-        teamRun = await _teamRunService.CompleteExecutionAsync(
-            bound, result, runtime.Transaction, fileChanges,
-            runtime.FencingToken, ct, _operationLedger, runtime.RunOperationId).ConfigureAwait(false);
-        await _taskWorkflowHost.CompleteBusinessAsync(
-            teamRun.Id, runtime.FencingToken,
-            teamRun.Status == TeamRunStatus.Succeeded
-                ? OneCode.Core.Workflows.WorkflowRunState.Completed
-                : OneCode.Core.Workflows.WorkflowRunState.Failed,
-            ct).ConfigureAwait(false);
-        return result with
+        try
         {
-            RunId = teamRun.Id,
-            Status = teamRun.Status,
-            Delivery = teamRun.Delivery,
-            HadFailures = teamRun.Status != TeamRunStatus.Succeeded,
-        };
+            var workflowResult = await _taskWorkflowHost.RunNextAsync(
+                teamRun, config, modelId, runtime,
+                new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
+            var result = BuildTeamResult(teamRun.TeamName, workflowResult.Outcomes);
+            var bound = runtime.BoundRun;
+            teamRun = await _teamRunService.CompleteExecutionAsync(
+                bound, result, runtime.Transaction, fileChanges,
+                runtime.FencingToken, ct, _operationLedger, runtime.RunOperationId).ConfigureAwait(false);
+            await _taskWorkflowHost.CompleteBusinessAsync(
+                teamRun.Id, runtime.FencingToken,
+                teamRun.Status == TeamRunStatus.Succeeded
+                    ? OneCode.Core.Workflows.WorkflowRunState.Completed
+                    : OneCode.Core.Workflows.WorkflowRunState.Failed,
+                ct).ConfigureAwait(false);
+            return result with
+            {
+                RunId = teamRun.Id,
+                Status = teamRun.Status,
+                Delivery = teamRun.Delivery,
+                HadFailures = teamRun.Status != TeamRunStatus.Succeeded,
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // H1: 用户取消必须落库 Cancelled 终态（CancellationToken.None），
+            // 否则聚合永远停在 Running，恢复列表把已取消的 run 当"进行中"。
+            await CancelRunAsync(teamRun.Id, runtime, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 取消落库：先 reconcile ledger（回滚未提交副作用，与内存事务回滚一致），
+    /// 再持久化 Cancelled 终态；lease 已取得时同步关闭 workflow 记录。
+    /// 任何落库失败仅记日志，不掩盖取消本身。
+    /// </summary>
+    private async Task CancelRunAsync(
+        TeamRunId runId,
+        TeamTaskWorkflowRuntime runtime,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (_operationLedger is not null)
+                await _operationLedger.ReconcileRunAsync($"team/{runId}", ct).ConfigureAwait(false);
+            await _teamRunService.CancelAsync(runId, "Team execution was cancelled by the user.", ct).ConfigureAwait(false);
+            if (runtime.IsBound)
+            {
+                await _taskWorkflowHost.CompleteBusinessAsync(
+                    runId, runtime.FencingToken,
+                    OneCode.Core.Workflows.WorkflowRunState.Cancelled,
+                    ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to persist cancellation for TeamRun {RunId}", runId);
+        }
     }
 
     /// <summary>

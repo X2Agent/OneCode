@@ -19,7 +19,7 @@ public sealed class DryRunTests : IDisposable
     public async Task Edit_DryRun_ReturnsDiff_WithoutModifyingFile()
     {
         var file = Write("a.cs", "var x = 1;\nvar y = 2;\n");
-        var tool = new EditTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new EditTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
 
         var result = await tool.EditAsync(file, "var x = 1;", "var x = 99;", dryRun: true, ct: TestContext.Current.CancellationToken);
 
@@ -33,7 +33,7 @@ public sealed class DryRunTests : IDisposable
     public async Task Write_DryRun_ReturnsDiff_WithoutModifyingFile()
     {
         var file = Write("b.cs", "line1\nline2\n");
-        var tool = new WriteTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new WriteTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
 
         var result = await tool.WriteAsync(file, "line1\nlineX\n", dryRun: true, ct: TestContext.Current.CancellationToken);
 
@@ -47,7 +47,7 @@ public sealed class DryRunTests : IDisposable
     public async Task Write_DryRun_NewFile_ReturnsAllInsertedLines()
     {
         var file = Path.Combine(_tmpDir, "new.cs");
-        var tool = new WriteTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new WriteTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
 
         var result = await tool.WriteAsync(file, "namespace X {}", dryRun: true, ct: TestContext.Current.CancellationToken);
 

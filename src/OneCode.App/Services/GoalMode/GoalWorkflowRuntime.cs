@@ -83,15 +83,17 @@ internal sealed class GoalWorkflowRuntime(
         };
         if (result.UsedFallback)
         {
-            var failed = run with
+            // H2: 分解失败回退为单目标继续执行（与 DecomposeWithFallbackAsync 的设计语义一致，
+            // 等价于 Build 模式"不分解直接执行"）。预算、迭代上限与硬验证门仍然生效；
+            // 分解失败原因已由 Decomposer LogWarning 留痕。
+            var fallback = run with
             {
                 Plan = plan,
                 Budget = budget,
-                State = GoalRunState.Failed,
-                FailureSummary = result.Error
-                    ?? "Goal decomposition failed; execution was blocked because no approved tool/path policy was available.",
+                State = GoalRunState.Executing,
+                FailureSummary = null,
             };
-            await SaveAsync(failed, ct).ConfigureAwait(false);
+            await SaveAsync(fallback, ct).ConfigureAwait(false);
                 return ToWorkflowState(_run!, currentIndex: 0, hasReplanned: _run!.HasReplanned);
         }
 
@@ -227,9 +229,13 @@ internal sealed class GoalWorkflowRuntime(
                 transaction,
                 context.EventWriter,
                 ct).ConfigureAwait(false);
-            var evidence = ToEvidence(execution, transaction.GetModifiedFiles());
-            if (execution.Status != GoalStatus.Completed)
+            // H4: 失败路径先回滚再构造证据——回执不得记录已回滚的文件，否则
+            // GoalCompletionService 的 change-scope 门禁会按"声称改过、实际已还原"的
+            // 路径误杀整 run。
+            var rolledBack = execution.Status != GoalStatus.Completed;
+            if (rolledBack)
                 transaction.Rollback();
+            var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
             GoalStepReceipt receipt;
             try
             {
@@ -472,9 +478,11 @@ internal sealed class GoalWorkflowRuntime(
 
     private static GoalStepExecutionEvidence ToEvidence(
         SubGoalExecution execution,
-        IReadOnlyList<string> fallbackChangedFiles)
+        IReadOnlyList<string> fallbackChangedFiles,
+        bool rolledBack = false)
     {
         var source = execution.Evidence;
+        // rolledBack: 文件改动已整体还原，即使内部 agent 证据带文件列表，回执也记录为空。
         return new GoalStepExecutionEvidence(
             execution.GoalId,
             ToStepState(execution.Status),
@@ -483,7 +491,7 @@ internal sealed class GoalWorkflowRuntime(
             execution.OutputTokens,
             execution.AgentOutput,
             execution.Evaluation,
-            source?.ChangedFiles ?? fallbackChangedFiles,
+            rolledBack ? [] : source?.ChangedFiles ?? fallbackChangedFiles,
             source?.ToolExecutions.Select(item => new GoalToolEvidence(item.ToolName, item.IsError, item.Result)).ToArray() ?? [],
             source?.Validations.Select(item => new GoalGateEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray() ?? [],
             source?.Diagnostics ?? []);

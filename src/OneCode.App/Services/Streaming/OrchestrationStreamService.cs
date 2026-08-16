@@ -173,6 +173,11 @@ public sealed class OrchestrationStreamService(
             yield return evt;
         }
 
+        // 用户取消：跳过 missing-output 友好报错与终态投影（消费端以 OCE 结束，
+        // TUI 显示 "(cancelled)"），避免把取消误报为配置错误。
+        if (ct.IsCancellationRequested)
+            yield break;
+
         // (no output) 检测：如果整个流程没有产生任何中间事件，且最终输出为 "(no output)" 或空，
         // 说明 MAF 工作流未产生任何 Agent 响应——通常是 ChatClient 配置问题（如 API key 无效）
         // 或团队成员 Prompt 加载失败。给出友好提示而非静默完成。
@@ -362,6 +367,10 @@ public sealed class OrchestrationStreamService(
             yield return evt;
         }
 
+        // 用户取消：跳过恢复结果投影（消费端以 OCE 结束，TUI 显示 "(cancelled)"）。
+        if (ct.IsCancellationRequested)
+            yield break;
+
         var progressState = teamResult?.HadFailures == true
             ? ModeProgressState.Failed
             : ModeProgressState.Completed;
@@ -397,6 +406,11 @@ public sealed class OrchestrationStreamService(
             try
             {
                 await orchestrationRunner(evt => channel.Writer.TryWrite(evt), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // 用户取消不是错误：不产生 Error 事件，通道正常完成；消费端通过已
+                // 取消的 token 以 OCE 结束迭代，由 TUI 显示 "(cancelled)"。
             }
             catch (Exception ex)
             {

@@ -141,7 +141,7 @@ public sealed class PathTraversalTests
         var workDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workDir);
-        var tool = new ReadTool(cache: null!, wd, ssh: null!);
+        var tool = new ReadTool(wd, ssh: null!);
         try
         {
             var result = await tool.ReadAsync("../../../etc/passwd", ct: TestContext.Current.CancellationToken);
@@ -157,7 +157,7 @@ public sealed class PathTraversalTests
         var workDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workDir);
-        var tool = new ReadTool(cache: null!, wd, ssh: null!);
+        var tool = new ReadTool(wd, ssh: null!);
         try
         {
             var outsidePath = Path.Combine(_tempDir, "outside", "file.txt");
@@ -176,7 +176,7 @@ public sealed class PathTraversalTests
         var workDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workDir);
-        var tool = new ReadTool(cache: null!, wd, ssh: null!);
+        var tool = new ReadTool(wd, ssh: null!);
         try
         {
             // Path is inside working dir (passes traversal check) but file does not exist
@@ -194,7 +194,7 @@ public sealed class PathTraversalTests
         var workDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workDir);
-        var tool = new ReadTool(cache: null!, wd, ssh: null!);
+        var tool = new ReadTool(wd, ssh: null!);
         try
         {
             var filePath = Path.Combine(workDir, "hello.txt");
@@ -445,7 +445,7 @@ public sealed class PathTraversalTests
         var outsideDir = Path.Combine(_tempDir, "outside");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, cache: null!, wd, ssh: null!);
+        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, wd, ssh: null!);
         try
         {
             var result = await tool.WriteAsync(traversalPath, "malicious content", ct: TestContext.Current.CancellationToken);
@@ -469,7 +469,7 @@ public sealed class PathTraversalTests
         var outsideDir = Path.Combine(_tempDir, "outside");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, cache: null!, wd, ssh: null!);
+        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, wd, ssh: null!);
         try
         {
             var outsideFile = Path.Combine(outsideDir, "absolute-escape.txt");
@@ -491,7 +491,7 @@ public sealed class PathTraversalTests
         var projectDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, cache: null!, wd, ssh: null!);
+        var tool = new WriteTool(notifier: NoOpLspNotifier.Instance, wd, ssh: null!);
         try
         {
             var result = await tool.WriteAsync("subdir/legit.txt", "safe content", ct: TestContext.Current.CancellationToken);
@@ -521,7 +521,7 @@ public sealed class PathTraversalTests
 
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new EditTool(notifier: NoOpLspNotifier.Instance, cache: null!, wd, ssh: null!);
+        var tool = new EditTool(notifier: NoOpLspNotifier.Instance, wd, ssh: null!);
         try
         {
             var result = await tool.EditAsync(traversalPath, "original", "modified", ct: TestContext.Current.CancellationToken);
@@ -547,7 +547,7 @@ public sealed class PathTraversalTests
 
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new EditTool(notifier: NoOpLspNotifier.Instance, cache: null!, wd, ssh: null!);
+        var tool = new EditTool(notifier: NoOpLspNotifier.Instance, wd, ssh: null!);
         try
         {
             var result = await tool.EditAsync(outsideFile, "untouched", "hacked", ct: TestContext.Current.CancellationToken);

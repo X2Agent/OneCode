@@ -2,7 +2,6 @@ using OneCode.Core.Domain;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using OneCode.App.Services.Cache;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
@@ -151,7 +150,6 @@ public sealed class CompactServiceTests
             new CompactSessionDependencies(
                 sessionManager,
                 sessionManager,
-                new FileContentCache(),
                 Substitute.For<IModelManager>(),
                 new OneCode.Infrastructure.TokenEstimator()),
             new CompactPromptBuilder(new PromptManager()),

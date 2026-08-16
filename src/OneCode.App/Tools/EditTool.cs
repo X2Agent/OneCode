@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using OneCode.App.Services.Cache;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Remote;
 using OneCode.Infrastructure.Text;
@@ -18,26 +17,22 @@ namespace OneCode.App.Tools;
 /// <remarks>
 /// 可选依赖（保留可空）：
 /// - <c>notifier</c>（构造参数）：LSP 通知器；生产环境由 DI 注入 <see cref="LspNotifier"/>
-/// - <see cref="_cache"/>：写后缓存；缺失时不更新缓存，仅影响下次 Read 的缓存命中
 /// - <see cref="_ssh"/>：SSH 远程编辑；仅在配置远程连接时非空，缺失时走本地文件系统
 /// </remarks>
 public sealed class EditTool
 {
     private readonly ILspNotifier _notifier;
-    private readonly IFileContentCache _cache;
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly SshRemoteService _ssh;
     private readonly ILogger<EditTool>? _logger;
 
     public EditTool(
         ILspNotifier notifier,
-        IFileContentCache cache,
         IWorkingDirectoryAccessor wd,
         SshRemoteService ssh,
         ILogger<EditTool>? logger = null)
     {
         _notifier = notifier;
-        _cache = cache;
         _wd = wd;
         _ssh = ssh;
         _logger = logger;
@@ -137,7 +132,7 @@ public sealed class EditTool
             await FileEncodingHelper.WriteWithEncodingAsync(fullPath, newContent, encoding, ct);
 
             var message = await FileWritePipeline.CompleteWriteAsync(
-                fullPath, newContent, _notifier, _cache,
+                fullPath, newContent, _notifier,
                 $"File updated: {fullPath}", ct).ConfigureAwait(false);
             return ToolResult.Success(message);
         }

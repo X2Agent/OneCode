@@ -10,6 +10,23 @@ using TeamRunResult = OneCode.Core.Coordinator.TeamRunResult;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
+/// Task-level execution seam consumed by <see cref="TeamTaskWorkflowRuntime"/>.
+/// Extracted so the runtime's out-of-scope attribution (C1) can be unit-tested
+/// without building real MAF agents.
+/// </summary>
+internal interface ITeamTaskWorkflowRunner
+{
+    Task<TeamRunResult> RunTaskAsync(
+        TeamConfig config,
+        TeamTaskDefinition task,
+        EditTransaction transaction,
+        string cwd,
+        Action<OrchestrationEvent>? eventSink,
+        CancellationToken ct,
+        IReadOnlyList<string>? imagePaths = null);
+}
+
+/// <summary>
 /// Workflow runner extracted from TeamOrchestrationService.
 ///
 /// 职责：基于 MAF 的两种团队协调模式构建并执行工作流：
@@ -32,7 +49,7 @@ namespace OneCode.App.Services.Coordinator;
 internal sealed class TeamWorkflowRunner(
     TeamAgentFactory agentFactory,
     ILogger<TeamWorkflowRunner> logger,
-    InProcessExecutionEnvironment? executionEnvironment = null)
+    InProcessExecutionEnvironment? executionEnvironment = null) : ITeamTaskWorkflowRunner
 {
     /// <summary>
     /// 暴露 AgentFactory 供外部复用（_rolePromptCache 需共享）。

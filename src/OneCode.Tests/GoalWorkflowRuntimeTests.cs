@@ -134,6 +134,66 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         persisted.TerminalReason.Should().BeNull();
     }
 
+    [Fact]
+    public async Task PlanFallback_ContinuesWithSingleGoalExecution()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "fallback-runs"));
+        var run = await CreateClaimedRunAsync(store);
+        var planning = new FakePlanningService { UsedFallback = true, Error = "model unavailable" };
+        var runtime = CreateRuntime(store, planning, new FakeStepExecutionService(CompletedExecution(1)), new FakeWorkspaceService());
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+
+        var planned = await runtime.PlanAsync(
+            new GoalWorkflowInput(run.Id, run.Goal, "model", "tools"),
+            TestContext.Current.CancellationToken);
+
+        planned.Plan.Should().ContainSingle();
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.State.Should().Be(GoalRunState.Executing);
+        persisted.FailureSummary.Should().BeNull();
+        persisted.Plan.Should().ContainSingle().Which.State.Should().Be(GoalStepState.Pending);
+    }
+
+    [Fact]
+    public async Task FailedStep_RecordsRolledBackEvidenceWithoutChangedFiles()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "h4-runs"));
+        var step = Snapshot(1);
+        var run = await CreateClaimedRunAsync(store, [step], GoalRunState.Executing);
+        var failedExecution = new SubGoalExecution(
+            1,
+            GoalStatus.Failed,
+            2,
+            10,
+            5,
+            "partial",
+            "acceptance not met",
+            new SubGoalEvidence(
+                "partial",
+                [Path.Combine(_root, "outside", "file.cs")],
+                [],
+                [new GoalValidationEvidence("test", false, false, "failed")],
+                []));
+        var workspace = new FakeWorkspaceService();
+        var runtime = CreateRuntime(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(failedExecution),
+            workspace);
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
+
+        await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+
+        // H4: 失败步骤的文件改动已回滚，回执不得再声称改过文件（否则 change-scope 门禁误杀）。
+        workspace.LastRecordedEvidence!.ChangedFiles.Should().BeEmpty();
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.Executions.Should().ContainSingle()
+            .Which.ChangedFiles.Should().BeEmpty();
+        persisted.Plan.Should().ContainSingle()
+            .Which.State.Should().Be(GoalStepState.Failed);
+    }
+
     private GoalWorkflowRuntime CreateRuntime(
         IGoalRunStore store,
         IGoalPlanningService planning,
@@ -258,6 +318,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
     private sealed class FakePlanningService : IGoalPlanningService
     {
         public int DecomposeCalls { get; private set; }
+        public bool UsedFallback { get; set; }
+        public string? Error { get; set; }
 
         public Task<(GoalPlan Plan, long InputTokens, long OutputTokens, string? Error, bool UsedFallback)>
             DecomposeWithFallbackAsync(string goal, string? modelId, CancellationToken ct)
@@ -267,8 +329,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
                 new GoalPlan { Goals = [ToGoalItem(Snapshot(1))] },
                 3L,
                 2L,
-                (string?)null,
-                false));
+                Error,
+                UsedFallback));
         }
 
         public Task<(List<GoalItem> RemainingGoals, long InputTokens, long OutputTokens)?> ReplanAsync(
@@ -328,6 +390,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         private GoalStepExecutionEvidence? _receipt = replay;
         public int FindCalls { get; private set; }
         public int RecordCalls { get; private set; }
+        public GoalStepExecutionEvidence? LastRecordedEvidence { get; private set; }
 
         public Task<GoalWorkspaceSnapshot> PrepareAsync(GoalRun run, CancellationToken ct = default)
             => throw new NotSupportedException();
@@ -352,6 +415,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         {
             RecordCalls++;
             _receipt = evidence;
+            LastRecordedEvidence = evidence;
             return Task.FromResult(new GoalStepReceipt(
                 "operation",
                 evidence.GoalId,

@@ -42,6 +42,59 @@ internal sealed class GoalDecomposer : IGoalPlanningService
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>
+    /// H3: 从模型输出中提取首个配对的 JSON 对象（深度扫描，正确处理字符串字面量与转义）。
+    /// 兼容 markdown 代码围栏（```json ... ```）与前后杂文本。无配对块返回 null。
+    /// </summary>
+    internal static string? ExtractJsonBlock(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        var start = text.IndexOf('{');
+        if (start < 0)
+            return null;
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var index = start; index < text.Length; index++)
+        {
+            var current = text[index];
+            if (inString)
+            {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') inString = false;
+                continue;
+            }
+            if (current == '"')
+            {
+                inString = true;
+                continue;
+            }
+            if (current == '{') depth++;
+            else if (current == '}' && --depth == 0)
+                return text[start..(index + 1)];
+        }
+        return null;
+    }
+
+    /// <summary>H3: 围栏剥离 + 反序列化；JsonException 一律按"解析失败"返回 null，由上层回退。</summary>
+    private static GoalPlan? TryDeserializePlan(string? text)
+    {
+        var json = ExtractJsonBlock(text);
+        if (json is null)
+            return null;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<GoalPlan>(json, JsonOptions);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     public GoalDecomposer(
         IChatClient chatClient,
         ILogger<GoalDecomposer> logger,
@@ -142,8 +195,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
             var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-replanner", replanPrompt, ct).ConfigureAwait(false);
 
-            var json = response.Text ?? "";
-            var newPlan = System.Text.Json.JsonSerializer.Deserialize<GoalPlan>(json, JsonOptions);
+            var newPlan = TryDeserializePlan(response.Text);
 
             if (newPlan?.Goals is null || newPlan.Goals.Count == 0)
             {
@@ -163,7 +215,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
 
             return (replannedGoals, inputTokens, outputTokens);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Replanning failed, continuing with original remaining goals");
             return null;
@@ -199,8 +251,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
             var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-sub-decomposer", parent.Description, ct).ConfigureAwait(false);
 
-            var json = response.Text ?? "";
-            var newPlan = System.Text.Json.JsonSerializer.Deserialize<GoalPlan>(json, JsonOptions);
+            var newPlan = TryDeserializePlan(response.Text);
 
             if (newPlan?.Goals is null || newPlan.Goals.Count == 0)
             {
@@ -219,7 +270,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
 
             return (subGoals, inputTokens, outputTokens);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Sub-goal decomposition failed for parent #{Id}", parent.Id);
             return null;
@@ -245,12 +296,11 @@ internal sealed class GoalDecomposer : IGoalPlanningService
             var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-decomposer", goal, ct).ConfigureAwait(false);
 
-            var json = response.Text ?? "";
-            var plan = System.Text.Json.JsonSerializer.Deserialize<GoalPlan>(json, JsonOptions);
+            var plan = TryDeserializePlan(response.Text);
 
             return (plan ?? new GoalPlan(), inputTokens, outputTokens, Error: null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Goal decomposition failed");
             return (new GoalPlan(), 0, 0, Error: ex.Message);

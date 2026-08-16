@@ -112,7 +112,7 @@ public sealed class WriteToolTests : IDisposable
         var file = Path.Combine(_tmpDir, "notify.cs");
         var notifier = Substitute.For<ILspNotifier>();
 
-        var tool = new WriteTool(notifier, null!, CreateWd(), ssh: null!);
+        var tool = new WriteTool(notifier, CreateWd(), ssh: null!);
         var result = await tool.WriteAsync(file, "class X {}", ct: TestContext.Current.CancellationToken);
 
         // Business output: the write must have succeeded and the file must exist
@@ -143,7 +143,7 @@ public sealed class WriteToolTests : IDisposable
 
     private async Task<ToolResult> RunWriteAsync(string path, string content)
     {
-        var tool = new WriteTool(NoOpLspNotifier.Instance, null!, CreateWd(), ssh: null!);
+        var tool = new WriteTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
         return await tool.WriteAsync(path, content, ct: TestContext.Current.CancellationToken);
     }
 }
@@ -184,7 +184,7 @@ public sealed class WriteToolValidationTests : IDisposable
     {
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(_tmpDir);
-        var tool = new WriteTool(NoOpLspNotifier.Instance, null!, wd, ssh: null!);
+        var tool = new WriteTool(NoOpLspNotifier.Instance, wd, ssh: null!);
         return await tool.WriteAsync(path, content, ct: TestContext.Current.CancellationToken);
     }
 }

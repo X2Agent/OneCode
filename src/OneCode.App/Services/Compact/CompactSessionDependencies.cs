@@ -1,4 +1,3 @@
-using OneCode.App.Services.Cache;
 using OneCode.App.Session;
 using OneCode.Core;
 using OneCode.Core.Models;
@@ -9,6 +8,5 @@ namespace OneCode.App.Services.Compact;
 public sealed record CompactSessionDependencies(
     ISessionConversationAccess SessionAccess,
     ISessionManager SessionManager,
-    IFileContentCache ReadCache,
     IModelManager ModelManager,
     ITokenEstimator TokenEstimator);

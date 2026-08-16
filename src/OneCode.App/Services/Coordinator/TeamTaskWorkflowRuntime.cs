@@ -14,7 +14,7 @@ namespace OneCode.App.Services.Coordinator;
 /// </summary>
 internal sealed class TeamTaskWorkflowRuntime(
     TeamRunApplicationService runService,
-    TeamWorkflowRunner workflowRunner,
+    ITeamTaskWorkflowRunner workflowRunner,
     TeamConfig config,
     string workingDirectory,
     Action<OrchestrationEvent>? eventSink,
@@ -27,6 +27,9 @@ internal sealed class TeamTaskWorkflowRuntime(
     private EditTransaction? _transaction;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private string? _runOperationId;
+
+    /// <summary>Whether <see cref="BindAsync"/> has bound this runtime to a claimed run.</summary>
+    public bool IsBound => _run is not null;
 
     /// <summary>The run-scoped shared transaction; created during <see cref="BindAsync"/>.</summary>
     public EditTransaction Transaction
@@ -80,6 +83,10 @@ internal sealed class TeamTaskWorkflowRuntime(
             _executionGate.Release();
         }
 
+        // C1: run 级共享事务的快照跨任务累积；以本任务开始前的版本为界，
+        // 越界检查只归属本任务新增的改动，前序任务的合法写入不再被误判。
+        var changeVersion = Transaction.CaptureChangeVersion();
+
         TeamRunResult result;
         try
         {
@@ -100,7 +107,7 @@ internal sealed class TeamTaskWorkflowRuntime(
             throw;
         }
 
-        var outOfScope = FindOutOfScopeChanges(task);
+        var outOfScope = FindOutOfScopeChanges(task, changeVersion);
         if (outOfScope.Count > 0)
         {
             Transaction.Rollback();
@@ -127,7 +134,7 @@ internal sealed class TeamTaskWorkflowRuntime(
         return result;
     }
 
-    private IReadOnlyList<string> FindOutOfScopeChanges(TeamTaskDefinition task)
+    private IReadOnlyList<string> FindOutOfScopeChanges(TeamTaskDefinition task, long changeVersion)
     {
         if (task.AllowedPaths is not { Count: > 0 })
             return [];
@@ -138,7 +145,7 @@ internal sealed class TeamTaskWorkflowRuntime(
                 : Path.Combine(workingDirectory, path)))
             .Select(EnsureTrailingSeparator)
             .ToArray();
-        return Transaction.GetModifiedFiles()
+        return Transaction.GetModifiedFilesSince(changeVersion)
             .Select(Path.GetFullPath)
             .Where(path => !roots.Any(root =>
                 path.StartsWith(root, StringComparison.OrdinalIgnoreCase)

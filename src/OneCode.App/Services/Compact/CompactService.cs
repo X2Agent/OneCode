@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using OneCode.App.Services.Cache;
 using OneCode.App.Session;
 using OneCode.Core;
 using OneCode.Core.Models;
@@ -35,7 +34,6 @@ public sealed class CompactService(
 {
     private ISessionConversationAccess sessionAccess => session.SessionAccess;
     private ISessionManager sessionManager => session.SessionManager;
-    private IFileContentCache readCache => session.ReadCache;
     private IModelManager modelManager => session.ModelManager;
     private ITokenEstimator tokenEstimator => session.TokenEstimator;
     /// <summary>
@@ -141,8 +139,6 @@ public sealed class CompactService(
 
         await sessionManager.SaveAsync(ct);
         progress?.Report(new CompactProgress("Saving compacted conversation", 95));
-
-        readCache.Clear();
 
         await FirePostCompactAsync(session, formattedSummary, ct).ConfigureAwait(false);
 

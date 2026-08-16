@@ -34,7 +34,7 @@ public sealed class NoOpLspNotifier : ILspNotifier
 
 /// <summary>
 /// Post-write pipeline shared by EditTool and WriteTool.
-/// Handles cache update → LSP notification → diagnostics collection.
+/// Handles LSP notification → diagnostics collection.
 /// </summary>
 public static class FileWritePipeline
 {
@@ -42,11 +42,9 @@ public static class FileWritePipeline
         string fullPath,
         string content,
         ILspNotifier notifier,
-        Services.Cache.IFileContentCache? cache,
         string successMessage,
         CancellationToken ct)
     {
-        cache?.SetAfterWrite(fullPath, content);
         await notifier.NotifyFileUpdatedAsync(fullPath, ct).ConfigureAwait(false);
         var diagSummary = await notifier.GetDiagnosticsSummaryAsync(fullPath, ct).ConfigureAwait(false);
         return diagSummary is null ? successMessage : $"{successMessage}\n\n{diagSummary}";

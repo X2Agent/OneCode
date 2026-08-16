@@ -206,6 +206,15 @@ public sealed record TeamRun
     /// </summary>
     public long? WorkflowFencingToken { get; init; }
 
+    /// <summary>
+    /// 最后一个 Succeeded 任务落库时的工作区指纹（Build 模式 CommitWorkspaceFingerprint 的同款机制）。
+    /// 恢复新世代时先回滚 ledger 未提交副作用，再比对当前指纹；不一致说明已完成任务的
+    /// 文件改动已不在盘（崩溃后被 reconcile 回滚 / 工作区被外部篡改），
+    /// Succeeded 任务必须降级重跑，防止聚合声称完成而文件静默丢失。
+    /// 为 null 表示无指纹记录（旧数据 / provider 不可用），恢复时跳过校验。
+    /// </summary>
+    public string? LastTaskFingerprint { get; init; }
+
     public long Version { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }

@@ -44,7 +44,13 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<ITeamQualityGateValidator, TeamAcceptanceCriteriaQualityGateValidator>();
         services.AddSingleton<TeamQualityGateRunner>();
         services.AddSingleton<DeliveryReportBuilder>();
-        services.AddSingleton<TeamRunApplicationService>();
+        // C2: 注入工作区指纹 provider（可选），供 Succeeded 任务落库记录指纹与恢复世代对账。
+        services.AddSingleton(sp => new TeamRunApplicationService(
+            sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
+            sp.GetRequiredService<TeamRunStateMachine>(),
+            sp.GetRequiredService<TeamQualityGateRunner>(),
+            sp.GetRequiredService<DeliveryReportBuilder>(),
+            sp.GetService<OneCode.Core.Build.IWorkspaceFingerprintProvider>()));
         // Team M5：将批准 TaskGraph 通过共享 MAF Durable Workflow Host 编排（Fan-out/Fan-in Barrier）。
         services.AddSingleton<TeamTaskWorkflowCompiler>();
         services.AddSingleton<TeamApprovalWorkflowCompiler>();

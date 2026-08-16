@@ -2,7 +2,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
 using OneCode.App.Services;
-using OneCode.App.Services.Cache;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Mcp;
@@ -27,8 +26,6 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<IBrowserPageRenderer, McpBrowserGateway>();
 
         services.AddSingleton<TaskContextProvider>();
-        services.AddSingleton<FileContentCache>();
-        services.AddSingleton<IFileContentCache>(sp => sp.GetRequiredService<FileContentCache>());
 
         services.AddSingleton<ToolMetadataRegistry>();
         // Composition root owns IServiceProvider capture in Lazy — ToolCatalog itself does not.

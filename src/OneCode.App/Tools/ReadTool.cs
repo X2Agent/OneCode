@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text;
-using OneCode.App.Services.Cache;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Remote;
 
@@ -8,7 +7,7 @@ namespace OneCode.App.Tools;
 
 /// <summary>
 /// Reads a file from the local filesystem with optional offset/limit and line numbers.
-/// Supports binary detection, file cache dedup, and large-file streaming.
+/// Supports binary detection and large-file streaming.
 /// </summary>
 public sealed class ReadTool
 {
@@ -17,19 +16,17 @@ public sealed class ReadTool
     private const int LargeFileLineThreshold = 400;
     private const int DefaultReadLimit = 400;
 
-    private readonly IFileContentCache _cache;
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly SshRemoteService _ssh;
 
-    public ReadTool(IFileContentCache cache, IWorkingDirectoryAccessor wd, SshRemoteService ssh)
-        => (_cache, _wd, _ssh) = (cache, wd, ssh);
+    public ReadTool(IWorkingDirectoryAccessor wd, SshRemoteService ssh)
+        => (_wd, _ssh) = (wd, ssh);
 
     [Description("Read a text file from the local filesystem, returning content with line numbers. " +
                  "Supports offset/limit pagination for large files and streaming for files exceeding 400 lines. " +
                  "Binary files (detected by NUL byte probe of the first 512 bytes) are rejected with a suggestion to use a binary tool. " +
                  "Path safety: must resolve within the working directory or AdditionalWorkingDirectories; symlink escape attacks are blocked. " +
                  "Sensitive credential files (~/.ssh/id_rsa, ~/.aws/credentials, .env, ~/.kube/config) are hard-blocked by FileSystemInvariant. " +
-                 "Cache: when FileContentCache is configured, repeated reads of unchanged content return a dedup stub to save tokens. " +
                  "Output is truncated at 20,000 chars; large files emit a 'use offset and limit' hint. " +
                  "SSH: when an SSH remote is connected, reads are performed remotely.")]
     public async Task<ToolResult> ReadAsync(
@@ -51,11 +48,6 @@ public sealed class ReadTool
                 return ToolResult.Error($"Error: {resolveResult.Error}");
             var fullPath = resolveResult.Value;
 
-            if (_cache != null && _cache.TryDedupRead(fullPath, offset, limit))
-            {
-                return ToolResult.Success(FileContentCache.FileUnchangedStub);
-            }
-
             if (!File.Exists(fullPath))
                 return ToolResult.Error($"Error: File not found: {fullPath}");
 
@@ -75,9 +67,6 @@ public sealed class ReadTool
                 content = (lastNewline > 0 ? truncated[..lastNewline] : truncated)
                           + $"\n[Output truncated at {MaxResultSizeChars} chars]";
             }
-
-            if (_cache != null)
-                _cache.SetAfterRead(fullPath, content, offset, limit);
 
             return ToolResult.Success(FormatResult(fullPath, offset, selectedLines.Length, totalLineCount, content, limit));
         }
