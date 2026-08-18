@@ -6,7 +6,7 @@ namespace OneCode.App.Commands;
 public sealed class FilesCommand(ISessionManager sessionManager, ILogger<FilesCommand>? logger = null) : Command
 {
     public override string Name => "files";
-    public override string Description => "Show files changed in conversation";
+    public override string Description => "Show files referenced in conversation";
     public override CommandCategory Category => CommandCategory.Builtin;
 
     public override Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
@@ -38,9 +38,9 @@ public sealed class FilesCommand(ISessionManager sessionManager, ILogger<FilesCo
         }
 
         if (files.Count == 0)
-            return Task.FromResult(CommandResult.Text("No files changed in this conversation."));
+            return Task.FromResult(CommandResult.Text("No files referenced in this conversation."));
 
-        var sb = new StringBuilder($"Files modified ({files.Count}):\n");
+        var sb = new StringBuilder($"Files referenced ({files.Count}):\n");
         foreach (var f in files.OrderBy(f => f))
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {f}");
         return Task.FromResult(CommandResult.Text(sb.ToString().TrimEnd()));

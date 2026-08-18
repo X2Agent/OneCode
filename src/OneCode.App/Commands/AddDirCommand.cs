@@ -7,10 +7,11 @@ namespace OneCode.App.Commands;
 /// /add-dir 命令——添加额外工作目录。
 ///
 /// 两种模式：
-/// - <c>/add-dir &lt;path&gt;</c>：仅当前会话生效（内存），不持久化。
+/// - <c>/add-dir &lt;path&gt;</c>：写入 Session 作用域（内存），仅当前进程生效，不持久化。
 /// - <c>/add-dir &lt;path&gt; --persist</c>：写入项目级 <c>.onecode/settings.json</c>，仅对此项目生效。
 ///
-/// <c>--persist</c> 写入项目级配置文件，彻底隔离不同项目的额外目录。
+/// 两种模式统一经 <c>ApplyAsync</c> 生效——<c>Effective.AllowedDirectories</c> 的 getter
+/// 每次返回新副本（<c>AppSettings.GetStringList</c>），直接 mutate 打不到真实状态上。
 /// </summary>
 public sealed class AddDirCommand(IConfigManager config) : Command
 {
@@ -19,15 +20,14 @@ public sealed class AddDirCommand(IConfigManager config) : Command
     public override CommandCategory Category => CommandCategory.Builtin;
     public override string? ArgumentHint => "<path> [--persist]";
 
-    private List<string> AllowedDirs => config.Current.Effective.AllowedDirectories;
-
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
         if (args.Length == 0)
         {
-            if (AllowedDirs.Count == 0) return CommandResult.Text("No additional directories added.");
+            var dirs = config.Current.Effective.AllowedDirectories;
+            if (dirs.Count == 0) return CommandResult.Text("No additional directories added.");
             var sb = new StringBuilder("Additional directories:\n");
-            foreach (var d in AllowedDirs) sb.AppendLine(CultureInfo.InvariantCulture, $"  {d}");
+            foreach (var d in dirs) sb.AppendLine(CultureInfo.InvariantCulture, $"  {d}");
             return CommandResult.Text(sb.ToString().TrimEnd());
         }
 
@@ -35,22 +35,20 @@ public sealed class AddDirCommand(IConfigManager config) : Command
         if (!Directory.Exists(path))
             return CommandResult.Error($"Directory not found: {path}");
 
-        if (!AllowedDirs.Contains(path))
-            AllowedDirs.Add(path);
+        var current = config.Current.Effective.AllowedDirectories;
+        var merged = current.Contains(path) ? current : [.. current, path];
+        var persist = args.Contains("--persist");
 
-        if (args.Contains("--persist"))
-        {
-            // 写入项目级 .onecode/settings.json，而非全局 ~/.onecode/settings.json。
-            // 项目级 allowedDirectories 会覆盖全局同名键，确保项目间隔离。
-            var dirsArray = AllowedDirs.ToArray();
-            var result = await config.ApplyAsync(
-                ConfigPatch.Set(ConfigScope.Project, "allowedDirectories", dirsArray),
-                ct).ConfigureAwait(false);
-            if (!result.Saved)
-                return CommandResult.Error(result.Error ?? "Failed to persist the additional directory.");
-            return CommandResult.Text($"Added directory (persisted to project config): {path}");
-        }
+        // 会话级走 Session 作用域（内存层，不落盘）；--persist 写项目级 settings.json。
+        var scope = persist ? ConfigScope.Project : ConfigScope.Session;
+        var result = await config.ApplyAsync(
+            ConfigPatch.Set(scope, "allowedDirectories", merged.ToArray()),
+            ct).ConfigureAwait(false);
+        if (!result.Saved)
+            return CommandResult.Error(result.Error ?? "Failed to add the additional directory.");
 
-        return CommandResult.Text($"Added directory (session only): {path}");
+        return CommandResult.Text(persist
+            ? $"Added directory (persisted to project config): {path}"
+            : $"Added directory (session only): {path}");
     }
 }

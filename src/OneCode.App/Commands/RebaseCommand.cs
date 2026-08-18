@@ -50,7 +50,7 @@ public sealed class RebaseCommand(IGitHelper gitHelper) : Command
             ? "\n\nConflicts detected. Resolve them, then run `git rebase --continue` (or `git rebase --abort` to cancel)."
             : "";
 
-        return CommandResult.Text(
+        return CommandResult.Error(
             $"git rebase {target} failed:{hint}\n{combined.ToString().TrimEnd()}");
     }
 }

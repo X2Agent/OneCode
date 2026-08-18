@@ -10,6 +10,18 @@ public sealed partial class OneCodeToplevel
     // Query loop (background task, UI updates via Invoke)
 
     /// <summary>
+    /// Ends streaming after cancellation. Skips "(cancelled)" when Esc already
+    /// showed the interrupt message in <see cref="OnInterruptRequested"/>.
+    /// </summary>
+    private void EndQueryAfterCancellation()
+    {
+        _shell.Transcript.EndStreaming();
+        if (!_userInterruptNotified)
+            _shell.Transcript.AddSystem("(cancelled)");
+        _userInterruptNotified = false;
+    }
+
+    /// <summary>
     /// Streams a command prompt (from PromptResult commands like /review) through
     /// the normal TuiEvent pipeline. Shows spinner, tool calls, and streaming text
     /// — the same UX as a regular user query, but with the prompt content supplied
@@ -37,7 +49,7 @@ public sealed partial class OneCodeToplevel
                 _shell.Transcript.AddUserMessage(userText);
             _shell.Transcript.BeginStreaming();
             _shell.ChatInput.SetBusy(true);
-            _shell.SetAgentBusy(true);
+            _shell.SetAgentBusy(true, GetProgressLabel(userText));
         });
 
         try
@@ -50,11 +62,7 @@ public sealed partial class OneCodeToplevel
         }
         catch (OperationCanceledException)
         {
-            Invoke(() =>
-            {
-                _shell.Transcript.EndStreaming();
-                _shell.Transcript.AddSystem("(cancelled)");
-            });
+            Invoke(EndQueryAfterCancellation);
         }
         catch (Exception ex)
         {
@@ -100,11 +108,7 @@ public sealed partial class OneCodeToplevel
         }
         catch (OperationCanceledException)
         {
-            Invoke(() =>
-            {
-                _shell.Transcript.EndStreaming();
-                _shell.Transcript.AddSystem("(cancelled)");
-            });
+            Invoke(EndQueryAfterCancellation);
         }
         catch (Exception ex)
         {
@@ -161,11 +165,7 @@ public sealed partial class OneCodeToplevel
         }
         catch (OperationCanceledException)
         {
-            Invoke(() =>
-            {
-                _shell.Transcript.EndStreaming();
-                _shell.Transcript.AddSystem("(cancelled)");
-            });
+            Invoke(EndQueryAfterCancellation);
         }
         catch (Exception ex)
         {

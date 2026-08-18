@@ -237,7 +237,6 @@ public sealed class BackgroundRunToolTests : IDisposable
         var taskService = CreateTaskService(taskId);
         var sut = CreateSut(taskService);
 
-        // Child directory required: SafeResolve rejects cwd equal to the working-dir root.
         var result = await sut.RunAsync(command, description, cwd: "run", ct: ct);
 
         result.IsError.Should().BeFalse();

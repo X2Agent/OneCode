@@ -1,6 +1,6 @@
 using CoreConstants = OneCode.Core.Constants;
 using OneCode.App.Session;
-using OneCode.Infrastructure;
+using OneCode.Core.IO;
 
 namespace OneCode.App.Commands;
 
@@ -27,7 +27,7 @@ public sealed class ExportCommand(ISessionManager sessionManager) : Command
         outputPath ??= $"conversation-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
 
         var resolvedPath = Path.GetFullPath(outputPath);
-        if (!PathsHelper.IsWithinDirectory(resolvedPath, Directory.GetCurrentDirectory()))
+        if (!PathBoundary.IsWithinDirectory(resolvedPath, Directory.GetCurrentDirectory()))
             return CommandResult.Error("Output path must be within the current working directory.");
 
         await File.WriteAllTextAsync(resolvedPath, content, ct).ConfigureAwait(false);

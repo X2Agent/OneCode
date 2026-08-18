@@ -120,6 +120,74 @@ public sealed class EditToolTests : IDisposable
         await notifier.DidNotReceive().NotifyFileUpdatedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    // replaceAll
+
+    [Fact]
+    public async Task Edit_ReplaceAll_MultipleOccurrences_ReplacesAllWithCount()
+    {
+        var file = Write("multi.cs", "int x = OLD; int y = OLD; int z = OLD;");
+        var result = await RunEditAsync(file, "OLD", "NEW", replaceAll: true);
+
+        result.Content.Should().NotStartWith("Error");
+        result.Content.Should().Contain("3 occurrences replaced");
+        (await File.ReadAllTextAsync(file)).Should().Be("int x = NEW; int y = NEW; int z = NEW;");
+    }
+
+    [Fact]
+    public async Task Edit_ReplaceAll_ZeroOccurrences_StillErrors()
+    {
+        var file = Write("multi.cs", "int x = 1;");
+        var result = await RunEditAsync(file, "MISSING", "NEW", replaceAll: true);
+
+        result.Content.Should().Contain("Could not find");
+        (await File.ReadAllTextAsync(file)).Should().Be("int x = 1;");
+    }
+
+    [Fact]
+    public async Task Edit_ReplaceAll_DryRun_ShowsDiffWithoutWriting()
+    {
+        var file = Write("multi.cs", "a OLD b OLD c");
+        var result = await RunEditAsync(file, "OLD", "NEW", replaceAll: true, dryRun: true);
+
+        result.Content.Should().Contain("+++");
+        result.Content.Should().NotContain("occurrence");
+        (await File.ReadAllTextAsync(file)).Should().Be("a OLD b OLD c",
+            "dry_run must not modify the file");
+    }
+
+    [Fact]
+    public async Task Edit_ReplaceAll_WithInsertMode_ReturnsError()
+    {
+        var file = Write("multi.cs", "a OLD b");
+        var tool = new EditTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
+        var result = await tool.EditAsync(file, "OLD", "X", mode: "insert_after", replaceAll: true, ct: TestContext.Current.CancellationToken);
+
+        result.Content.Should().Contain("replaceAll is only valid with mode='replace'");
+        (await File.ReadAllTextAsync(file)).Should().Be("a OLD b");
+    }
+
+    [Fact]
+    public async Task Edit_ReplaceAll_PreservesCrlfLineEndings()
+    {
+        var file = Write("crlf-multi.cs", "row OLD\r\nrow OLD\r\nrow keep");
+        var result = await RunEditAsync(file, "OLD", "NEW", replaceAll: true);
+
+        result.Content.Should().NotStartWith("Error");
+        var text = await File.ReadAllTextAsync(file);
+        text.Should().Contain("row NEW\r\nrow NEW\r\n");
+        text.Should().NotContain("NEW\n");
+    }
+
+    [Fact]
+    public async Task Edit_ReplaceAll_SingleOccurrence_ReportsOneReplacement()
+    {
+        var file = Write("single.cs", "only one OLD here");
+        var result = await RunEditAsync(file, "OLD", "NEW", replaceAll: true);
+
+        result.Content.Should().Contain("1 occurrence replaced");
+        (await File.ReadAllTextAsync(file)).Should().Be("only one NEW here");
+    }
+
     // Helpers
 
     private string Write(string name, string content)
@@ -136,10 +204,10 @@ public sealed class EditToolTests : IDisposable
         return wd;
     }
 
-    private async Task<ToolResult> RunEditAsync(string path, string oldStr, string newStr)
+    private async Task<ToolResult> RunEditAsync(string path, string oldStr, string newStr, bool replaceAll = false, bool dryRun = false)
     {
         var tool = new EditTool(NoOpLspNotifier.Instance, CreateWd(), ssh: null!);
-        return await tool.EditAsync(path, oldStr, newStr, ct: TestContext.Current.CancellationToken);
+        return await tool.EditAsync(path, oldStr, newStr, replaceAll: replaceAll, dryRun: dryRun, ct: TestContext.Current.CancellationToken);
     }
 }
 

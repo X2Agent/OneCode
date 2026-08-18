@@ -23,9 +23,7 @@ public abstract class Command : ICommand
     public virtual string? ArgumentHint => null;
     public virtual string? ProgressMessage => null;
     public virtual bool Immediate => false;
-    public virtual bool IsSensitive => false;
     public virtual CommandSource Source => CommandSource.Builtin;
-    public virtual string? UserFacingName => null;
 
     /// <summary>
     /// 加载并渲染 prompt 模板。返回 null 表示模板不存在。

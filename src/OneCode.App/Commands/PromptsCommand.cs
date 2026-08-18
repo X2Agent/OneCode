@@ -1,4 +1,5 @@
 using System.Text;
+using OneCode.Core.IO;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Abstractions;
@@ -85,7 +86,7 @@ public sealed class PromptsCommand(
         foreach (var dir in GetPromptDirs())
         {
             var path = Path.Combine(dir, normalized.Replace('/', Path.DirectorySeparatorChar) + PromptExtension);
-            if (!PathsHelper.IsWithinDirectory(path, dir))
+            if (!PathBoundary.IsWithinDirectory(path, dir))
                 return CommandResult.Error($"Invalid prompt name '{name}'.");
 
             content = await fileSystem.ReadTextFileAsync(path, ct).ConfigureAwait(false);

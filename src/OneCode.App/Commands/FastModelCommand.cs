@@ -13,7 +13,7 @@ public sealed class FastModelCommand(IConfigManager config) : Command
     public override string Name => "fastmodel";
     public override string Description => "View or set the fast model (lightweight tasks)";
     public override CommandCategory Category => CommandCategory.Builtin;
-    public override string? ArgumentHint => "[<id>|off]";
+    public override string? ArgumentHint => "[<id>|off|none]";
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {

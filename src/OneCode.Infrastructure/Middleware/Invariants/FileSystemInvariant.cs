@@ -74,12 +74,6 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
         "Tail",
     };
 
-    /// <summary>删除文件类工具集合（视为写入）。</summary>
-    private static readonly HashSet<string> DeleteFileTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "DeleteFile",
-    };
-
     public ValueTask<InvariantCheckResult> CheckAsync(
         string toolName,
         IReadOnlyDictionary<string, object?> parameters,
@@ -87,8 +81,8 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
     {
         // 写入类工具：拦截所有 ProtectedWriteSegments + .git
         // 读取类工具：仅拦截 SensitiveReadPathSequences（防止凭证泄露）
-        // Write/Edit 统一引用 ToolNames.FileEditTools，DeleteFile 单独保留
-        var isWriteTool = ToolNames.IsFileEditTool(toolName) || DeleteFileTools.Contains(toolName);
+        // Write/Edit/Delete 统一引用 ToolNames 类别查询（元数据驱动）
+        var isWriteTool = ToolNames.IsFileEditTool(toolName) || ToolNames.IsInCategory(toolName, ToolCategory.FileDelete);
         var isReadTool = ReadTools.Contains(toolName);
         if (!isWriteTool && !isReadTool)
             return new(InvariantCheckResult.Allow);

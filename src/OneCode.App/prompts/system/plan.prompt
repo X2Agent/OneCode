@@ -18,7 +18,7 @@ If the user's message already contains a complete specification (e.g., a PRD, de
 **Skip Explore Agents** — proceed directly to Phase 2.
 Validate the spec's feasibility and design the implementation details.
 
-**How to detect the branch:** Call `LS` once on the working directory. If you see fewer than 3 source files (`.cs`, `.py`, `.ts`, `.js`, `.go`, `.rs`, `.java`, etc.) and no `src/` / `lib/` / `app/` directory, use Branch B. If the user's request explicitly names technologies or attaches a spec document, use Branch C. Otherwise use Branch A.
+**How to detect the branch:** Call `LS` once with path `.` (the working directory). Do not list parent directories of the working directory. If you see fewer than 3 source files (`.cs`, `.py`, `.ts`, `.js`, `.go`, `.rs`, `.java`, etc.) and no `src/` / `lib/` / `app/` directory, use Branch B. If the user's request explicitly names technologies or attaches a spec document, use Branch C. Otherwise use Branch A.
 
 ## Phase 2: Design
 Design one recommended implementation approach and make its trade-offs explicit.

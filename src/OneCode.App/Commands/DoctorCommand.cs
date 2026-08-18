@@ -32,8 +32,7 @@ public sealed class DoctorCommand(
     IGitHelper gitHelper,
     IFileSystem fileSystem,
     IMcpConnectionManager mcpConnectionManager,
-    ILspServerManager lspServerManager,
-    ILogger<DoctorCommand>? logger = null) : Command
+    ILspServerManager lspServerManager) : Command
 {
     public override string Name => "doctor";
     public override string Description => "Diagnose environment, config, MCP & LSP health";

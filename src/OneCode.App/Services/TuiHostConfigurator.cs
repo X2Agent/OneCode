@@ -67,7 +67,8 @@ public sealed class TuiHostConfigurator(
                         .Select(c => new SlashCommandEntry(
                             c.Name,
                             c.Description,
-                            c.Source))
+                            c.Source,
+                            c.ArgumentHint))
                         .ToList();
                     updateCommandsUi?.Invoke(updated);
                 }
@@ -89,7 +90,8 @@ public sealed class TuiHostConfigurator(
                         .Select(c => new SlashCommandEntry(
                             c.Name,
                             c.Description,
-                            c.Source))
+                            c.Source,
+                            c.ArgumentHint))
                         .ToList();
                     updateCommandsUi?.Invoke(updated);
                 }

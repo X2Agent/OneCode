@@ -1,3 +1,4 @@
+using OneCode.Core.IO;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 
@@ -75,12 +76,8 @@ public sealed class TrustService
 
         foreach (var trustedDir in trusted)
         {
-            var normalizedTrusted = PathsHelper.NormalizePath(trustedDir);
-            if (normalizedCwd.Equals(normalizedTrusted, PathComparison)
-                || normalizedCwd.StartsWith(normalizedTrusted + Path.DirectorySeparatorChar, PathComparison))
-            {
+            if (PathBoundary.IsWithinDirectory(normalizedCwd, trustedDir, PathComparison))
                 return true;
-            }
         }
 
         return false;
@@ -155,10 +152,7 @@ public sealed class TrustService
             return;
 
         trusted.RemoveAll(existing =>
-        {
-            var normalizedExisting = PathsHelper.NormalizePath(existing);
-            return normalizedExisting.StartsWith(normalized + Path.DirectorySeparatorChar, PathComparison);
-        });
+            PathBoundary.IsWithinDirectory(existing, normalized, PathComparison));
 
         trusted.Add(normalized);
         var result = await _configManager.ApplyAsync(

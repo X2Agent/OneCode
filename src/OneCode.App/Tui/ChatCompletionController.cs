@@ -5,7 +5,11 @@ namespace OneCode.App.Tui;
 /// 携带 <see cref="Source"/> 以支持分组显示（Claude Code 风格）：
 /// 输入 / 时补全列表按来源分组，用分隔行区分。
 /// </summary>
-public sealed record SlashCommandEntry(string Name, string Description, CommandSource Source = CommandSource.Builtin);
+public sealed record SlashCommandEntry(
+    string Name,
+    string Description,
+    CommandSource Source = CommandSource.Builtin,
+    string? ArgumentHint = null);
 
 /// <summary>
 /// Manages command and file-path completion for <see cref="ChatInputView"/>.
@@ -82,7 +86,8 @@ internal sealed class ChatCompletionController
             : _allCommands
                 .Where(c =>
                     c.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase) ||
-                    c.Description.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    c.Description.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    (c.ArgumentHint?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
                 .ToList();
 
         if (matched.Count == 0)
@@ -147,13 +152,17 @@ internal sealed class ChatCompletionController
 
             var cmdPart = $"/{CompletionTextMetrics.PadRightDisplay(entry.Name, nameWidth)}";
 
-            if (descAvailable <= 0 || CompletionTextMetrics.DisplayWidth(entry.Description) <= descAvailable)
+            // 参数提示（ArgumentHint）以「·」分隔追加在描述后，随描述一起参与换行布局。
+            var hintSuffix = string.IsNullOrEmpty(entry.ArgumentHint) ? string.Empty : $" · {entry.ArgumentHint}";
+            var fullDesc = entry.Description + hintSuffix;
+
+            if (descAvailable <= 0 || CompletionTextMetrics.DisplayWidth(fullDesc) <= descAvailable)
             {
-                displayItems.Add($"{cmdPart} {entry.Description}");
+                displayItems.Add($"{cmdPart} {fullDesc}");
                 continue;
             }
 
-            var descLines = CompletionTextMetrics.WordWrap(entry.Description, descAvailable);
+            var descLines = CompletionTextMetrics.WordWrap(fullDesc, descAvailable);
             displayItems.Add($"{cmdPart} {descLines[0]}");
             for (var j = 1; j < descLines.Count; j++)
             {

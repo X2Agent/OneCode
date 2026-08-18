@@ -211,4 +211,17 @@ public sealed class LsToolTests : IDisposable
         result.Content.Should().Contain("build.dll");
         result.Content.Should().Contain("bin/");
     }
+
+    [Fact]
+    public async Task ListAsync_OmittedPath_ListsWorkingDirectory()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        File.WriteAllText(Path.Combine(_projectDir, "root.txt"), "x");
+        var tool = new LSTool(CreateWd());
+
+        var result = await tool.ListAsync(ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("root.txt");
+    }
 }

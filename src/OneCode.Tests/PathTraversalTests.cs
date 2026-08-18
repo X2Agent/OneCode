@@ -30,9 +30,6 @@ public sealed class PathTraversalTests
         // Create a subdirectory "outside" sibling to test escapes via ../
         Directory.CreateDirectory(Path.Combine(_tempDir, "project"));
         Directory.CreateDirectory(Path.Combine(_tempDir, "outside"));
-        // A subdir inside the project for positive-path tests (avoids passing the
-        // working-dir root itself, which IsWithinDirectory treats as "not within"
-        // due to its strict trailing-separator comparison).
         Directory.CreateDirectory(Path.Combine(_tempDir, "project", "subdir"));
     }
 
@@ -276,8 +273,6 @@ public sealed class PathTraversalTests
         var tool = new GrepTool(processRunner, fileSystem, wd);
         try
         {
-            // Use "subdir" (a real subdirectory) rather than "." to avoid the
-            // working-dir-root edge case in IsWithinDirectory's strict comparison.
             var result = await tool.SearchAsync("Hello", path: "subdir", ct: TestContext.Current.CancellationToken);
 
             result.Content.Should().NotStartWith("Error:");
@@ -334,9 +329,6 @@ public sealed class PathTraversalTests
     public async Task GlobTool_InsideWorkingDir_FindsFiles()
     {
         var projectDir = Path.Combine(_tempDir, "project");
-        // Place files in the pre-created "subdir" so we can pass "subdir" as the
-        // search path (which resolves strictly inside the working dir, avoiding the
-        // working-dir-root edge case in IsWithinDirectory's strict comparison).
         await File.WriteAllTextAsync(Path.Combine(projectDir, "subdir", "a.cs"), "x", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(projectDir, "subdir", "b.cs"), "x", TestContext.Current.CancellationToken);
         var wd = Substitute.For<IWorkingDirectoryAccessor>();

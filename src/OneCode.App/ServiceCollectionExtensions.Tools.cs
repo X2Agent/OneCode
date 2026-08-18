@@ -73,6 +73,11 @@ public static partial class ServiceCollectionExtensions
             category: ToolCategory.FileEdit | ToolCategory.FileWrite);
         services.AddTool<EditTool>("Edit", nameof(EditTool.EditAsync), ToolRisk.Destructive, concurrency: false, searchHint: "search-replace edit a file",
             category: ToolCategory.FileEdit | ToolCategory.FileWrite);
+        // Delete is deliberately NOT FileEdit/FileWrite: FileEditContract requires the file to
+        // exist post-edit, and FileWrite would auto-approve under AcceptEdits — deletion is
+        // irreversible and always requires explicit approval (FileDelete feeds FileSystemInvariant).
+        services.AddTool<DeleteTool>("Delete", nameof(DeleteTool.DeleteAsync), ToolRisk.Destructive, concurrency: false, searchHint: "delete a file or directory",
+            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["delete", "remove"], category: ToolCategory.FileDelete);
         services.AddTool<LSTool>("LS", nameof(LSTool.ListAsync), ToolRisk.ReadOnly, searchHint: "list directory contents");
         services.AddTool<GlobTool>("Glob", nameof(GlobTool.GlobAsync), ToolRisk.ReadOnly, searchHint: "glob pattern file search");
         services.AddTool<GrepTool>("Grep", nameof(GrepTool.SearchAsync), ToolRisk.ReadOnly, searchHint: "regex content search (ripgrep)");

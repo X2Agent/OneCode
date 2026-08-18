@@ -48,6 +48,12 @@ public enum ToolCategory
     FileWrite = 2,
     /// <summary>Plan 模式下允许的工具（超出 ReadOnly 范围）</summary>
     PlanAllowed = 4,
+    /// <summary>
+    /// 删除文件/目录的工具（如 Delete）。不参与 FileEditContract（后置条件要求文件存在）
+    /// 与 EditTransaction 快照回滚；Layer-0 安全不变量（FileSystemInvariant）按此类别
+    /// 将删除视为写入类操作，拦截敏感路径与 symlink 越狱。
+    /// </summary>
+    FileDelete = 8,
 }
 
 /// <summary>

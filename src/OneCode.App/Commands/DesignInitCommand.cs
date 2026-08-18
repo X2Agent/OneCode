@@ -23,13 +23,22 @@ public sealed class DesignInitCommand(
     public override string? ArgumentHint => "[url] [--force] [--no-llm] [--output <path>]";
     public override string? ProgressMessage => "initializing DESIGN.md";
 
-    private static readonly string[] AllowedTools =
-    [
-        "Read(*)", "Glob(*)", "Grep(*)",
-        "WebFetch(*)",
-        "mcp__playwright__*",
-        "Write(DESIGN.md)",
-    ];
+    /// <summary>
+    /// 构建 LLM 模式的工具白名单（以 command restriction 追加进 system prompt）。
+    /// --output 允许自定义输出路径，Write 白名单必须落在实际目标路径上，
+    /// 否则 LLM 只会按指令写 DESIGN.md，--output 指定的路径写不进（B9）。
+    /// </summary>
+    private static string[] BuildAllowedTools(string designPath)
+    {
+        var rel = Path.GetRelativePath(Directory.GetCurrentDirectory(), designPath).Replace('\\', '/');
+        return
+        [
+            "Read(*)", "Glob(*)", "Grep(*)",
+            "WebFetch(*)",
+            "mcp__playwright__*",
+            $"Write({rel})",
+        ];
+    }
 
     private static readonly string[] FrontendExtensions =
         [".html", ".htm", ".css", ".scss", ".sass", ".less", ".vue", ".tsx", ".jsx", ".svelte", ".astro"];
@@ -105,7 +114,7 @@ public sealed class DesignInitCommand(
         var prompt = await LoadPromptAsync(promptManager, "system/design-init", variables, ct).ConfigureAwait(false);
         if (prompt is null)
             return CommandResult.Error("Prompt 'system/design-init' is not available. Verify prompts/system/design-init.prompt exists.");
-        return CommandResult.Prompt(prompt, AllowedTools);
+        return CommandResult.Prompt(prompt, BuildAllowedTools(designPath));
     }
 
     private sealed record DesignInitContext(
@@ -114,7 +123,8 @@ public sealed class DesignInitCommand(
         string FrontendFileSummary,
         string FrameworkHints,
         string? ExistingDesignMd,
-        bool ForceOverwrite);
+        bool ForceOverwrite,
+        string OutputPath);
 
     private async Task<DesignInitContext> CollectContextAsync(
         string cwd, string designPath, string? url, CancellationToken ct)
@@ -136,7 +146,8 @@ public sealed class DesignInitCommand(
             FrontendFileSummary: frontendFiles,
             FrameworkHints: frameworks,
             ExistingDesignMd: existing,
-            ForceOverwrite: File.Exists(designPath));
+            ForceOverwrite: File.Exists(designPath),
+            OutputPath: designPath);
     }
 
     private static Dictionary<string, string> BuildVariables(DesignInitContext ctx)
@@ -158,6 +169,7 @@ public sealed class DesignInitCommand(
             ["frameworkHints"] = ctx.FrameworkHints,
             ["existingDesignMdSection"] = existingSection,
             ["forceOverwrite"] = ctx.ForceOverwrite.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
+            ["outputPath"] = Path.GetRelativePath(ctx.WorkingDirectory, ctx.OutputPath).Replace('\\', '/'),
         };
     }
 

@@ -1,5 +1,6 @@
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Coordinator;
+using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Agent;
 
@@ -115,7 +116,7 @@ public sealed class TeamChangeScopeQualityGateValidator : ITeamQualityGateValida
         var violations = context.ModifiedFiles
             .Select(path => Normalize(context.WorkingDirectory, path))
             .Where(path => allowed.Length == 0
-                || !allowed.Any(root => IsUnder(path, root)))
+                || !allowed.Any(root => PathBoundary.IsWithinDirectory(path, root)))
             .ToArray();
         var passed = violations.Length == 0;
         return Task.FromResult(new QualityGateResult(
@@ -132,11 +133,6 @@ public sealed class TeamChangeScopeQualityGateValidator : ITeamQualityGateValida
 
     private static string Normalize(string root, string path)
         => Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
-
-    private static bool IsUnder(string path, string root)
-        => string.Equals(path, root, StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
-                StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class TeamWorkspaceCleanlinessQualityGateValidator : ITeamQualityGateValidator

@@ -408,6 +408,49 @@ public sealed class CommandPromptTests : IDisposable
         await gitHelper.DidNotReceive().RunAsync(Arg.Any<string[]>(), ct);
     }
 
+    // B8 — --severity all 与 warning 的指令文案必须不同（command-audit P2-12/B8）
+    [Fact]
+    public async Task ReviewCommand_SeverityAll_DiffersFromWarning()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var gitHelper = Substitute.For<IGitHelper>();
+        gitHelper.RunAsync(Arg.Any<string[]>(), ct)
+            .Returns(new GitCommandResult(true, "diff content", ""));
+        gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
+            .Returns("main", "log", "hash1");
+
+        var pm = CreatePromptManager("system/review", "S: {{severityScope}}");
+        var cache = () => new ReviewCacheService(NullLogger<ReviewCacheService>.Instance);
+
+        var warningSut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), cache());
+        var warningResult = await warningSut.ExecuteAsync(["--severity", "warning"], ct);
+        var warningText = warningResult.As<CommandResult.PromptResult>().Content;
+
+        var allSut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), cache());
+        var allResult = await allSut.ExecuteAsync([], ct); // 默认 all
+        var allText = allResult.As<CommandResult.PromptResult>().Content;
+
+        allText.Should().NotBe(warningText);
+        allText.Should().Contain("minor/style issues");
+    }
+
+    // B9 — /design-init --output 必须落到实际输出路径的白名单与 prompt 变量（command-audit P2-12/B9）
+    [Fact]
+    public async Task DesignInitCommand_OutputFlag_AllowedToolsTargetsOutputPath()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fs = new TestFileSystem();
+        var settings = new AppSettings { ApiKey = "sk-test" };
+        var pm = CreatePromptManager("system/design-init", "Write to: {{outputPath}}");
+
+        var sut = new DesignInitCommand(fs, CreateConfigManager(settings), pm);
+        var result = await sut.ExecuteAsync(["--output", "docs/design.md"], ct);
+
+        var prompt = result.Should().BeOfType<CommandResult.PromptResult>().Subject;
+        prompt.Content.Should().Contain("Write to: docs/design.md");
+        prompt.AllowedTools.Should().Contain("Write(docs/design.md)");
+    }
+
     // Helpers
 
     private static PromptManager CreatePromptManager(string name, string template)

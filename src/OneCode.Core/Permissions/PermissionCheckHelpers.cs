@@ -1,3 +1,4 @@
+using OneCode.Core.IO;
 using OneCode.Core.Tools;
 
 namespace OneCode.Core.Permissions;
@@ -295,16 +296,18 @@ public static class PermissionCheckHelpers
             try
             {
                 var fullPath = Path.GetFullPath(pathStr, workingDir);
-                var inBase = IsStrictlyWithinDirectory(fullPath, workingDir);
+                var inBase = PathBoundary.IsWithinDirectory(fullPath, workingDir);
 
                 if (!inBase && context.AdditionalWorkingDirectories.Count > 0)
                 {
                     inBase = context.AdditionalWorkingDirectories.Values.Any(awd =>
-                        IsStrictlyWithinDirectory(fullPath, awd.Path));
+                        PathBoundary.IsWithinDirectory(fullPath, awd.Path));
                 }
 
                 if (!inBase)
-                    return PermissionCheckResult.Deny($"Path '{pathStr}' is outside the working directory. Use /add-dir <path> to grant access.");
+                    return PermissionCheckResult.Deny(
+                        $"Path '{pathStr}' is outside the working directory '{workingDir}'. " +
+                        "Use a path inside that directory (for example '.'), or /add-dir to grant access to additional roots.");
             }
             catch (ArgumentException)
             {
@@ -342,14 +345,5 @@ public static class PermissionCheckHelpers
         if (inputStr == null) return false;
 
         return PermissionRuleParser.GlobMatch(rule.InputPattern, inputStr);
-    }
-
-    private static bool IsStrictlyWithinDirectory(string fullPath, string baseDir)
-    {
-        var baseFull = Path.GetFullPath(baseDir);
-        if (!baseFull.EndsWith(Path.DirectorySeparatorChar))
-            baseFull += Path.DirectorySeparatorChar;
-
-        return fullPath.StartsWith(baseFull, StringComparison.OrdinalIgnoreCase);
     }
 }

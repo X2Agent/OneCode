@@ -55,24 +55,6 @@ public sealed class PathsHelperTests
         expanded.Should().Be(expected);
     }
 
-    [Fact]
-    public void IsWithinDirectory_PathInsideDir_ReturnsTrue()
-    {
-        var dir = Path.GetTempPath();
-        var path = Path.Combine(dir, "sub", "file.txt");
-
-        PathsHelper.IsWithinDirectory(path, dir).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsWithinDirectory_PathOutsideDir_ReturnsFalse()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "sandbox");
-        var path = Path.GetTempPath();
-
-        PathsHelper.IsWithinDirectory(path, dir).Should().BeFalse();
-    }
-
     // SafeResolve with additional directories (/add-dir)
 
     [Fact]

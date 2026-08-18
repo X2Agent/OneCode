@@ -32,15 +32,7 @@ public interface ICommand
     /// <summary>如果为 true，则绕过 query 队列立即执行</summary>
     bool Immediate => false;
 
-    bool IsSensitive => false;
-
     CommandSource Source => CommandSource.Builtin;
-
-    /// <summary>
-    /// 用户可见名称。在 UI 中显示的名称，可与内部 Name 不同（如本地化名称）。
-    /// null 表示使用 <see cref="Name"/>。
-    /// </summary>
-    string? UserFacingName => null;
 }
 
 /// <summary>

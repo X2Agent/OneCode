@@ -186,7 +186,7 @@ public sealed class CheckpointResumeIntegrationTests
         var goalStore = await CreateGoalStoreWithSessions(sessionId);
         var sessionManager = Substitute.For<OneCode.App.Session.ISessionManager>();
         sessionManager.ForegroundConversation.Returns((OneCode.Core.Domain.Conversation?)null);
-        var cmd = new CheckpointCommand(sessionManager, goalStore, teamService: null, teamRunStore: null);
+        var cmd = new CheckpointCommand(sessionManager, goalStore, teamRunStore: null);
 
         var result = await cmd.ExecuteAsync(new[] { "resume", sessionId }, TestContext.Current.CancellationToken);
 
@@ -202,7 +202,7 @@ public sealed class CheckpointResumeIntegrationTests
     {
         var sessionManager = Substitute.For<OneCode.App.Session.ISessionManager>();
         sessionManager.ForegroundConversation.Returns((OneCode.Core.Domain.Conversation?)null);
-        return new CheckpointCommand(sessionManager, goalRunStore, teamService: null, teamRunStore);
+        return new CheckpointCommand(sessionManager, goalRunStore, teamRunStore);
     }
 
     private static Task<IGoalRunStore> CreateGoalStoreWithSessions(params string[] sessionIds)

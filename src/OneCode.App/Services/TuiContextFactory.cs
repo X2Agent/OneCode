@@ -48,6 +48,7 @@ public sealed class TuiContextFactory(
             ExecuteCommand: (text, token) => streaming.SlashCommands.ExecuteCommandAsync(session, text, token),
             IsExitRequested: () => streaming.SlashCommands.IsExitRequested,
             IsImmediateCommand: input => catalog.CommandRegistry.Find(input) is { Immediate: true },
+            GetProgressMessage: input => catalog.CommandRegistry.Find(input)?.ProgressMessage,
             TryResolvePromptCommand: (text, token) => streaming.SlashCommands.TryResolvePromptCommandAsync(session, text, token),
             StreamCommandPrompt: (prompt, tools, token) => streaming.QueryStream.StreamCommandPromptAsync(session, prompt, tools, token),
             StreamResumeWorkflow: (sessionId, kind, token) => streaming.QueryStream.StreamResumeWorkflowAsync(session, sessionId, kind, token),

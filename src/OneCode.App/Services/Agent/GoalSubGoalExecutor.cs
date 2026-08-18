@@ -6,6 +6,7 @@ using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
+using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
@@ -489,7 +490,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return _diagnosticRegistry.GetAllDiagnostics()
             .Where(d => d.Severity == LspDiagnosticSeverity.Error)
-            .Where(d => IsPathUnderRoot(d.FilePath, workingDirectory))
+            .Where(d => PathBoundary.IsWithinDirectory(d.FilePath, workingDirectory))
             .Where(d => changed.Contains(Path.GetFullPath(d.FilePath)))
             .Select(d => d.Summary)
             .ToList();
@@ -505,8 +506,8 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             .ToList();
         return changedFiles
             .Select(Path.GetFullPath)
-            .Where(path => !IsPathUnderRoot(path, workingDirectory)
-                || allowedRoots.Count > 0 && !allowedRoots.Any(root => IsPathUnderRoot(path, root)))
+            .Where(path => !PathBoundary.IsWithinDirectory(path, workingDirectory)
+                || allowedRoots.Count > 0 && !allowedRoots.Any(root => PathBoundary.IsWithinDirectory(path, root)))
             .Select(path => Path.GetRelativePath(workingDirectory, path))
             .ToList();
     }
@@ -514,17 +515,9 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     private static string ResolveWorkspacePath(string workingDirectory, string path)
     {
         var resolved = Path.GetFullPath(path, workingDirectory);
-        if (!IsPathUnderRoot(resolved, workingDirectory))
+        if (!PathBoundary.IsWithinDirectory(resolved, workingDirectory))
             throw new InvalidOperationException($"Declared Goal path '{path}' is outside the working directory.");
         return resolved;
-    }
-
-    private static bool IsPathUnderRoot(string path, string root)
-    {
-        var fullPath = Path.GetFullPath(path);
-        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        return fullPath.Equals(fullRoot, StringComparison.OrdinalIgnoreCase)
-            || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FormatEvidenceForJudge(SubGoalEvidence evidence)

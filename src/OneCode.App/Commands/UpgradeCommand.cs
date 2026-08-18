@@ -3,6 +3,10 @@ using OneCode.App.Services.Setup;
 
 namespace OneCode.App.Commands;
 
+/// <summary>
+/// 检查并安装 OneCode 更新。
+/// 无参数（默认 / --check）：只检查是否有新版本；--apply / -y / --yes：执行自动升级。
+/// </summary>
 public sealed class UpgradeCommand(
     ReleaseNotesService releaseNotesService,
     UpgradeService upgradeService) : Command
@@ -10,7 +14,7 @@ public sealed class UpgradeCommand(
     public override string Name => "upgrade";
     public override string Description => "检查并安装 OneCode 更新";
     public override CommandCategory Category => CommandCategory.Builtin;
-    public override string? ArgumentHint => "[--apply|-y] [--check|-c]";
+    public override string? ArgumentHint => "[--apply|-y|--yes]";
 
     private static readonly ProductRepo Repo = ProductInfo.Default.Repository;
 

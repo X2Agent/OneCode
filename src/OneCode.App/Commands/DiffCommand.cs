@@ -2,8 +2,9 @@ namespace OneCode.App.Commands;
 
 /// <summary>
 /// /diff — Git 变更审查。
-/// 无参数时在 TUI 中弹出 ReviewOverlay 图形化文件列表；
-/// 带 --staged 或 file-path 参数时输出原始 git diff 文本。
+/// TUI 路径：裸 /diff 由 <c>OneCodeToplevel</c> 拦截并弹出 ReviewOverlay 图形化文件列表；
+/// 本命令负责带 --staged 或 file-path 参数时的原始 git diff 文本输出，
+/// 并作为非 TUI 宿主的兜底。
 /// </summary>
 public sealed class DiffCommand(IGitHelper gitHelper) : Command
 {

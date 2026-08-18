@@ -39,7 +39,7 @@ public sealed class InteractiveBootstrapService(
         var slashCommands = discovery.CommandRegistry.GetAll()
             .Select(c => new SlashCommandEntry(
                 c.Name, c.Description,
-                c.Source))
+                c.Source, c.ArgumentHint))
             .ToList();
 
         var initialMode = session.PermissionMode.CurrentMode == PermissionMode.Plan

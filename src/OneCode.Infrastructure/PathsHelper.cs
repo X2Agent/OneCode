@@ -1,3 +1,4 @@
+using OneCode.Core.IO;
 using OneCode.Core.Results;
 using OneCode.Infrastructure.Config;
 using CoreConstants = OneCode.Core.Constants;
@@ -120,30 +121,6 @@ public static class PathsHelper
     }
 
     /// <summary>
-    /// Checks if a path is within a given base directory (prevents traversal).
-    /// Uses strict boundary comparison to prevent prefix-spoofing attacks
-    /// (e.g., C:\App vs C:\Application).
-    /// </summary>
-    public static bool IsWithinDirectory(string path, string baseDir)
-    {
-        var full = Path.GetFullPath(path);
-        var baseFull = Path.GetFullPath(baseDir);
-
-        // Ensure base ends with separator for strict prefix matching
-        if (!baseFull.EndsWith(Path.DirectorySeparatorChar))
-            baseFull += Path.DirectorySeparatorChar;
-
-        // Strict check: full must start with baseFull (including trailing separator)
-        // This prevents C:\App from matching C:\Application
-        if (!full.StartsWith(baseFull, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        // full is exactly baseFull (without trailing separator) — the base directory itself
-        // This case is already handled by the StartsWith check above since baseFull ends with separator
-        return true;
-    }
-
-    /// <summary>
     /// Safely resolves a path and validates it's within the working directory.
     /// Rejects paths that fall inside platform-sensitive directories when the path
     /// is outside the working directory (explicit absolute-path access to protected
@@ -165,7 +142,7 @@ public static class PathsHelper
     {
         var resolved = Resolve(path, workingDir);
 
-        if (IsWithinDirectory(resolved, workingDir))
+        if (PathBoundary.IsWithinDirectory(resolved, workingDir))
             return Result<string>.Success(resolved);
 
         if (additionalDirs is not null)
@@ -176,7 +153,7 @@ public static class PathsHelper
                     continue;
                 try
                 {
-                    if (IsWithinDirectory(resolved, dir))
+                    if (PathBoundary.IsWithinDirectory(resolved, dir))
                         return Result<string>.Success(resolved);
                 }
                 catch (ArgumentException) { /* skip invalid dir entries */ }
@@ -189,6 +166,8 @@ public static class PathsHelper
                 $"Access denied: '{path}' is inside a protected system directory. " +
                 "Move your project to a non-sensitive location.");
 
-        return Result<string>.Failure($"Path '{path}' is outside the working directory. Use /add-dir <path> to grant access.");
+        return Result<string>.Failure(
+            $"Path '{path}' is outside the working directory '{workingDir}'. " +
+            "Use a path inside that directory (for example '.'), or /add-dir to grant access to additional roots.");
     }
 }

@@ -39,6 +39,10 @@ public static class ToolNames
     public static bool IsPlanAllowedTool(string? toolName)
         => Registry.IsInCategory(toolName, ToolCategory.PlanAllowed);
 
+    /// <summary>按分类查询工具（通用入口，供安全不变量等基础设施按需扩展类别）。</summary>
+    public static bool IsInCategory(string? toolName, ToolCategory category)
+        => Registry.IsInCategory(toolName, category);
+
     /// <summary>只读工具集合（快照）。</summary>
     public static IReadOnlySet<string> ReadOnlyTools => Registry.GetReadOnlyToolNames();
 

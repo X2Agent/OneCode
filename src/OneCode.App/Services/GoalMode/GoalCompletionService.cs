@@ -2,6 +2,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Build;
 using OneCode.Core.Goals;
+using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.GoalMode;
@@ -71,7 +72,7 @@ internal sealed class GoalCompletionService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var scopeErrors = changedFiles
-            .Where(path => !IsPathUnderRoot(path, workspace.IsolatedPath))
+            .Where(path => !PathBoundary.IsWithinDirectory(path, workspace.IsolatedPath))
             .ToArray();
         report.Add(new GoalGateEvidence(
             "change-scope",
@@ -224,17 +225,9 @@ internal sealed class GoalCompletionService(
         return diagnosticRegistry.GetAllDiagnostics()
             .Where(diagnostic => diagnostic.Severity == LspDiagnosticSeverity.Error)
             .Where(diagnostic => changed.Contains(Path.GetFullPath(diagnostic.FilePath)))
-            .Where(diagnostic => IsPathUnderRoot(diagnostic.FilePath, workingDirectory))
+            .Where(diagnostic => PathBoundary.IsWithinDirectory(diagnostic.FilePath, workingDirectory))
             .Select(diagnostic => diagnostic.Summary)
             .ToArray();
-    }
-
-    private static bool IsPathUnderRoot(string path, string root)
-    {
-        var fullPath = Path.GetFullPath(path);
-        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        return fullPath.Equals(fullRoot, StringComparison.OrdinalIgnoreCase)
-            || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static GoalItem ToGoalItem(GoalStepSnapshot item) => new()

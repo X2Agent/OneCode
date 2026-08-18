@@ -33,14 +33,14 @@ public static int Main(string[] args)
    └── 参数 → CliInvocation 强类型描述
    └── --dump-system-prompt → 创建 DI 容器，组装系统 prompt 并打印后退出
 
-3. ClaudeCodeApp 执行
+3. OneCodeApp 执行
    └── REPL / auth / mcp / skills
 ```
 
 - Fast-path 检测在 DI 容器初始化之前执行，不得依赖任何服务（实现见 `CliModeDetector`）
 - `--dump-system-prompt` 需要完整 DI（PromptConfigBuilder / Memory / Context），因此在 FullCli 路径中处理，不走 Fast-path
 - `CliInvocation` 是纯数据 record，不包含逻辑
-- `ClaudeCodeApp` 负责构建 DI 容器并执行
+- `OneCodeApp` 负责构建 DI 容器并执行
 
 ### System.CommandLine 用法
 

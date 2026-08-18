@@ -39,25 +39,31 @@ public sealed class EditTool
     }
 
     [Description("Perform a search-and-replace edit on a file. Safer than Write for targeted modifications because it preserves surrounding content. " +
-                 "Uniqueness contract: oldString MUST appear exactly once in the file — the call errors on 0 matches (typo/whitespace mismatch) or >1 matches (provide more context to disambiguate). " +
+                 "Uniqueness contract: by default oldString MUST appear exactly once in the file — the call errors on 0 matches (typo/whitespace mismatch) or >1 matches (provide more context to disambiguate). " +
+                 "Set replaceAll=true to replace EVERY occurrence instead (still errors on 0 matches) and get the replaced count back; replaceAll is only valid with mode='replace'. " +
                  "Three modes: 'replace' (default, swap oldString with newString), 'insert_after' (insert newString after the anchor without removing it), 'insert_before' (insert before the anchor). " +
                  "Encoding preservation: the file's original BOM/encoding (UTF-8 BOM, UTF-16 LE/BE) and line-ending style (CRLF/LF) are detected and preserved; caller-supplied \\n is normalized to match. " +
                  "Path safety: must resolve within the working directory; .git/ and sensitive paths are hard-blocked by FileSystemInvariant. " +
                  "LSP integration: after a successful edit, the LSP server is notified and a diagnostics summary is returned. " +
                  "dryRun=true returns a unified diff preview without touching disk. " +
-                 "Tip: include enough surrounding lines in oldString to guarantee uniqueness; avoid matching on whitespace-only strings.")]
+                 "Tip: include enough surrounding lines in oldString to guarantee uniqueness; use replaceAll for renames/bulk replacements instead of one call per occurrence.")]
     public async Task<ToolResult> EditAsync(
         [Description("Absolute or relative path of the file to edit. Must already exist; use Write to create new files.")] string filePath,
-        [Description("The text to search for. Must appear EXACTLY once in the file (errors on 0 or >1 matches). Include enough surrounding lines to be unique. Whitespace and indentation must match exactly.")] string oldString,
+        [Description("The text to search for. By default must appear EXACTLY once in the file (errors on 0 or >1 matches); with replaceAll=true every occurrence is replaced. Include enough surrounding lines to be unique. Whitespace and indentation must match exactly.")] string oldString,
         [Description("The replacement text (for mode='replace') or the text to insert (for insert_after / insert_before modes). May be empty to delete the anchor.")] string newString,
-        [Description("Edit mode: 'replace' (default, swap oldString -> newString), 'insert_after' (insert newString after the anchor, keep anchor), 'insert_before' (insert newString before the anchor, keep anchor).")] string mode = "replace",
+        [Description("Edit mode: 'replace' (default, swap oldString -> newString), 'insert_after' (insert newString after the anchor, keep anchor), 'insert_before' (insert before the anchor, keep anchor).")] string mode = "replace",
+        [Description("When true, replace every occurrence of oldString instead of requiring a unique match. Only valid with mode='replace'; errors on 0 occurrences.")] bool replaceAll = false,
         [Description("When true, return a unified diff preview without modifying the file. Use to verify the change before committing.")] bool dryRun = false,
         CancellationToken ct = default)
     {
         try
         {
+            if (replaceAll && mode is not "replace")
+                return ToolResult.Error("Error: replaceAll is only valid with mode='replace'. " +
+                       "Combining replaceAll with insert_after/insert_before is ambiguous and not supported.");
+
             if (_ssh is { IsConnected: true } ssh)
-                return await EditRemoteAsync(ssh, filePath, oldString, newString, mode, dryRun, ct).ConfigureAwait(false);
+                return await EditRemoteAsync(ssh, filePath, oldString, newString, mode, replaceAll, dryRun, ct).ConfigureAwait(false);
 
             var resolved = PathsHelper.SafeResolve(filePath, _wd.WorkingDirectory, _wd.AdditionalDirectories);
             if (!resolved.IsSuccess)
@@ -80,7 +86,7 @@ public sealed class EditTool
             var searchFor = FileEncodingHelper.NormalizeLineEndings(oldString, lineEndingStyle);
             var insertText = FileEncodingHelper.NormalizeLineEndings(newString, lineEndingStyle);
 
-            // Count occurrences — require exactly 1 for safety
+            // Count occurrences — require exactly 1 unless replaceAll replaces every match
             var count = CountOccurrences(content, searchFor);
             if (count == 0)
             {
@@ -98,30 +104,14 @@ public sealed class EditTool
                 case 0:
                     return ToolResult.Error($"Error: Could not find the specified text in {fullPath}. " +
                            "Make sure oldString matches the file content exactly (including whitespace).");
-                case > 1:
+                case > 1 when !replaceAll:
                     return ToolResult.Error($"Error: Found {count} occurrences of oldString in {fullPath}. " +
-                           "Please provide a more specific (unique) oldString.");
+                           "Please provide a more specific (unique) oldString, or set replaceAll=true to replace every occurrence.");
             }
 
-            var idx = content.IndexOf(searchFor, StringComparison.Ordinal);
-            string newContent = mode switch
-            {
-                "insert_after" => string.Concat(
-                    content.AsSpan(0, idx + searchFor.Length),
-                    insertText,
-                    content.AsSpan(idx + searchFor.Length)),
-
-                "insert_before" => string.Concat(
-                    content.AsSpan(0, idx),
-                    insertText,
-                    content.AsSpan(idx)),
-
-                // "replace" (default)
-                _ => string.Concat(
-                    content.AsSpan(0, idx),
-                    insertText,
-                    content.AsSpan(idx + searchFor.Length))
-            };
+            var newContent = replaceAll
+                ? content.Replace(searchFor, insertText, StringComparison.Ordinal)
+                : ReplaceSingle(content, searchFor, insertText, mode);
 
             if (dryRun)
             {
@@ -131,9 +121,12 @@ public sealed class EditTool
 
             await FileEncodingHelper.WriteWithEncodingAsync(fullPath, newContent, encoding, ct);
 
+            var successMessage = replaceAll
+                ? $"File updated: {fullPath} ({count} {(count == 1 ? "occurrence" : "occurrences")} replaced)"
+                : $"File updated: {fullPath}";
             var message = await FileWritePipeline.CompleteWriteAsync(
                 fullPath, newContent, _notifier,
-                $"File updated: {fullPath}", ct).ConfigureAwait(false);
+                successMessage, ct).ConfigureAwait(false);
             return ToolResult.Success(message);
         }
         catch (Exception ex)
@@ -148,6 +141,7 @@ public sealed class EditTool
         string oldString,
         string newString,
         string mode,
+        bool replaceAll,
         bool dryRun,
         CancellationToken ct)
     {
@@ -158,22 +152,35 @@ public sealed class EditTool
         var count = CountOccurrences(content, oldString);
         if (count == 0)
             return ToolResult.Error($"Error: Could not find the specified text in ssh:{filePath}.");
-        if (count > 1)
-            return ToolResult.Error($"Error: Found {count} occurrences of oldString in ssh:{filePath}. Please provide a more specific oldString.");
+        if (count > 1 && !replaceAll)
+            return ToolResult.Error($"Error: Found {count} occurrences of oldString in ssh:{filePath}. Please provide a more specific oldString, or set replaceAll=true.");
 
-        var idx = content.IndexOf(oldString, StringComparison.Ordinal);
-        var newContent = mode switch
-        {
-            "insert_after" => string.Concat(content.AsSpan(0, idx + oldString.Length), newString, content.AsSpan(idx + oldString.Length)),
-            "insert_before" => string.Concat(content.AsSpan(0, idx), newString, content.AsSpan(idx)),
-            _ => string.Concat(content.AsSpan(0, idx), newString, content.AsSpan(idx + oldString.Length)),
-        };
+        var newContent = replaceAll
+            ? content.Replace(oldString, newString, StringComparison.Ordinal)
+            : ReplaceSingle(content, oldString, newString, mode);
 
         if (dryRun)
             return ToolResult.Success(UnifiedDiff.Compute(content, newContent, filePath));
 
         var ok = await ssh.WriteFileAsync(filePath, newContent, ct).ConfigureAwait(false);
-        return ok ? ToolResult.Success($"File updated: ssh:{filePath}") : ToolResult.Error($"Error writing ssh:{filePath}");
+        if (!ok)
+            return ToolResult.Error($"Error writing ssh:{filePath}");
+        var successMessage = replaceAll
+            ? $"File updated: ssh:{filePath} ({count} {(count == 1 ? "occurrence" : "occurrences")} replaced)"
+            : $"File updated: ssh:{filePath}";
+        return ToolResult.Success(successMessage);
+    }
+
+    /// <summary>单锚点编辑：按 mode 定位唯一锚点构造新内容（replace / insert_after / insert_before）。</summary>
+    private static string ReplaceSingle(string content, string oldString, string newString, string mode)
+    {
+        var idx = content.IndexOf(oldString, StringComparison.Ordinal);
+        return mode switch
+        {
+            "insert_after" => string.Concat(content.AsSpan(0, idx + oldString.Length), newString, content.AsSpan(idx + oldString.Length)),
+            "insert_before" => string.Concat(content.AsSpan(0, idx), newString, content.AsSpan(idx)),
+            _ => string.Concat(content.AsSpan(0, idx), newString, content.AsSpan(idx + oldString.Length)),
+        };
     }
 
     private static int CountOccurrences(string text, string pattern)

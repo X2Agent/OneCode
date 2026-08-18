@@ -31,9 +31,7 @@ namespace OneCode.App.Commands;
 public sealed class CheckpointCommand(
     ISessionManager sessionManager,
     IGoalRunStore? goalRunStore,
-    ITeamOrchestrationService? teamService,
-    ITeamRunStore? teamRunStore = null,
-    ILogger<CheckpointCommand>? logger = null) : Command
+    ITeamRunStore? teamRunStore = null) : Command
 {
     private const string MetadataKey = "checkpoints";
 

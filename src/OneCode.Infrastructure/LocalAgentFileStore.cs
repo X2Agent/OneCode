@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
+using OneCode.Core.IO;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Abstractions;
 
@@ -294,14 +295,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
             resolved = Path.GetFullPath(Path.Combine(_workingDirectory, expanded));
         }
 
-        // Validate path is within allowed directories.
-        // IsWithinDirectory returns false when the path IS the base directory itself
-        // (because the base has a trailing separator but the path doesn't),
-        // so we also compare normalized paths directly.
-        var normalizedResolved = PathsHelper.NormalizePath(resolved);
-
-        if (PathsHelper.IsWithinDirectory(resolved, _workingDirectory)
-            || string.Equals(normalizedResolved, PathsHelper.NormalizePath(_workingDirectory), StringComparison.OrdinalIgnoreCase))
+        if (PathBoundary.IsWithinDirectory(resolved, _workingDirectory))
             return resolved;
 
         if (_additionalDirectories is not null)
@@ -312,8 +306,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
                     continue;
                 try
                 {
-                    if (PathsHelper.IsWithinDirectory(resolved, dir)
-                        || string.Equals(normalizedResolved, PathsHelper.NormalizePath(dir), StringComparison.OrdinalIgnoreCase))
+                    if (PathBoundary.IsWithinDirectory(resolved, dir))
                         return resolved;
                 }
                 catch (ArgumentException) { /* skip invalid dir entries */ }

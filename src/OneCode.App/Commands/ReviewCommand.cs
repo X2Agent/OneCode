@@ -174,7 +174,7 @@ public sealed class ReviewCommand(
         {
             "critical" => "Report only **Functional Issues** (bugs that cause errors, crashes, or data loss if left unfixed). Every finding must include file path + line number + code snippet as evidence.",
             "warning" => "Report both **Functional Issues** (will cause errors/data loss if unfixed) and **Design Suggestions** (works correctly but could be improved). Every finding must include file path + line number + code snippet as evidence.",
-            _ => "Report both **Functional Issues** (will cause errors/data loss if unfixed) and **Design Suggestions** (works correctly but could be improved). Every finding must include file path + line number + code snippet as evidence.",
+            _ => "Report ALL findings with their severity: **Functional Issues** (will cause errors/data loss if unfixed), **Design Suggestions** (works correctly but could be improved), and minor/style issues (naming, consistency, readability, dead code). Do not omit low-severity findings. Every finding must include file path + line number + code snippet as evidence.",
         };
 
         var editInstruction = noEdit

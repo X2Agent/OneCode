@@ -1,4 +1,4 @@
-using OneCode.Infrastructure;
+using OneCode.Core.IO;
 using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Services.Hooks;
@@ -20,15 +20,10 @@ public sealed class HookPolicyService
         var cwd = Path.GetFullPath(Directory.GetCurrentDirectory());
         var trusted = _configManager.Current.Effective.TrustedDirectories;
 
-        var normalizedCwd = PathsHelper.NormalizePath(cwd);
         foreach (var trustedDir in trusted)
         {
-            var normalizedTrusted = PathsHelper.NormalizePath(trustedDir);
-            if (normalizedCwd.Equals(normalizedTrusted, PathComparison)
-                || normalizedCwd.StartsWith(normalizedTrusted + Path.DirectorySeparatorChar, PathComparison))
-            {
+            if (PathBoundary.IsWithinDirectory(cwd, trustedDir, PathComparison))
                 return true;
-            }
         }
         return false;
     }

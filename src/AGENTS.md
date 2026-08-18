@@ -34,7 +34,7 @@
 
 ## 项目背景
 
-`src` 下的 `OneCode.slnx` 是基于 .NET 10 的完整重写实现，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。
+`src` 下的 `OneCode.slnx` 是基于 .NET 10 的 CLI AI 编程助手实现，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。
 
 | 维度 | 选型 |
 |------|------|

@@ -19,11 +19,11 @@ public sealed class LSTool
                  "Path safety: must resolve within the working directory or additional directories. " +
                  "Output is a plain-text table sorted alphabetically; entries that fail stat (e.g. due to permissions) appear with a '?' prefix.")]
     public Task<ToolResult> ListAsync(
-        [Description("Directory to list. Relative paths resolve against the working directory. Must exist and be within the working directory.")] string path,
+        [Description("Directory to list. Omit or pass '.' for the working directory. Relative paths resolve against the working directory. Must exist and be within the working directory.")] string? path = null,
         [Description("Show hidden and generated files. Default false (filters dotfiles, hidden attrs, bin/obj/node_modules, and generated extensions). Set true to see everything.")] bool all = false,
         CancellationToken ct = default)
     {
-        var resolveResult = PathsHelper.SafeResolve(path, _wd.WorkingDirectory, _wd.AdditionalDirectories);
+        var resolveResult = PathsHelper.SafeResolve(path ?? ".", _wd.WorkingDirectory, _wd.AdditionalDirectories);
         if (!resolveResult.IsSuccess)
             return Task.FromResult(ToolResult.Error($"Error: {resolveResult.Error}"));
         var fullPath = resolveResult.Value;

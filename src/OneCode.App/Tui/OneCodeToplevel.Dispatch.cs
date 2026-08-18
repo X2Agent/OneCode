@@ -90,6 +90,19 @@ public sealed partial class OneCodeToplevel
         _ = HandleSubmitAsync(text, images.Count > 0 ? images : null, _queryCts.Token);
     }
 
+    /// <summary>
+    /// 解析命令执行时的忙碌状态标签：优先使用命令声明的 <see cref="ICommand.ProgressMessage"/>，
+    /// 未声明时回退到「执行 /{name}」。
+    /// </summary>
+    private string GetProgressLabel(string text)
+    {
+        var message = _ctx.GetProgressMessage?.Invoke(text);
+        if (!string.IsNullOrWhiteSpace(message))
+            return message;
+        var name = text.TrimStart('/').Split(' ')[0];
+        return $"执行 /{name}";
+    }
+
     private async Task HandleImmediateCommandAsync(string text)
     {
         // /find is Immediate so it runs here (not HandleSubmitCoreAsync). Scroll
@@ -102,9 +115,19 @@ public sealed partial class OneCodeToplevel
         if (TryHandleDiffOverlay(text))
             return;
 
+        // Bare /session — open the resume chooser in-process. SessionCommand is
+        // Immediate, so HandleSubmitCoreAsync's bare-/session interception is
+        // unreachable from the TUI; mirror it here (same contract as bare /config's
+        // overlay path). Subcommands (list/new/switch/close) still run below.
+        if (text.Trim().Equals("/session", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleSessionChooserAsync(_ctx.ExternalCancellation).ConfigureAwait(false);
+            return;
+        }
+
         // User message already shown by OnUserSubmitted before this method runs.
         // /find and /diff (no args) are handled above and return early.
-        var progressLabel = $"执行 /{text.TrimStart('/').Split(' ')[0]}";
+        var progressLabel = GetProgressLabel(text);
         Invoke(() => { _shell.ChatInput.SetBusy(true); _shell.Transcript.BeginStreaming(); _shell.SetAgentBusy(true, progressLabel); });
         try
         {
@@ -142,6 +165,7 @@ public sealed partial class OneCodeToplevel
     {
         if (_isQueryRunning)
         {
+            _userInterruptNotified = true;
             _queryCts.Cancel();
             var queueCount = _ctx.InputQueue?.Count ?? 0;
             if (queueCount > 0)
@@ -288,7 +312,7 @@ public sealed partial class OneCodeToplevel
 
             // All other commands → local handler.
             // User message is already shown by OnUserSubmitted (AddUserMessageDirect).
-            var progressLabel = $"执行 /{text.TrimStart('/').Split(' ')[0]}";
+            var progressLabel = GetProgressLabel(text);
             Invoke(() => { _shell.ChatInput.SetBusy(true); _shell.Transcript.BeginStreaming(); _shell.SetAgentBusy(true, progressLabel); });
             string? result;
             try

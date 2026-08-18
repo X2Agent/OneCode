@@ -16,6 +16,7 @@ public sealed record TuiQueryServices(
     Func<string, CancellationToken, Task<string?>> ExecuteCommand,
     Func<bool>? IsExitRequested = null,
     Func<string, bool>? IsImmediateCommand = null,
+    Func<string, string?>? GetProgressMessage = null,
     Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand = null,
     Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt = null,
     Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow = null,
@@ -81,6 +82,7 @@ public sealed record TuiContext(
     public Func<string, CancellationToken, Task<string?>> ExecuteCommand => Query.ExecuteCommand;
     public Func<bool>? IsExitRequested => Query.IsExitRequested;
     public Func<string, bool>? IsImmediateCommand => Query.IsImmediateCommand;
+    public Func<string, string?>? GetProgressMessage => Query.GetProgressMessage;
     public Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand => Query.TryResolvePromptCommand;
     public Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt => Query.StreamCommandPrompt;
     public Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow => Query.StreamResumeWorkflow;

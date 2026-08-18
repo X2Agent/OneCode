@@ -30,6 +30,11 @@ public sealed partial class OneCodeToplevel : Window
     /// to avoid double-rendering.
     /// </summary>
     private bool _userMessageShown;
+    /// <summary>
+    /// Set when Esc/chat:killAgents already wrote the Chinese interrupt line;
+    /// suppresses duplicate "(cancelled)" from query OCE handlers.
+    /// </summary>
+    private bool _userInterruptNotified;
     private int _inputTokens;
     private int _outputTokens;
     private int _cacheReadTokens;

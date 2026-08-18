@@ -24,15 +24,12 @@ public sealed class ConfigCommand(
         return args[0].ToLowerInvariant() switch
         {
             "get" when args.Length == 2 => GetConfig(args[1]),
-            "set" when args.Length >= 4 => await SetConfigAsync(
-                ParseScope(args[1]),
-                args[2],
-                string.Join(" ", args[3..]),
-                ct).ConfigureAwait(false),
-            "remove" when args.Length == 3 => await RemoveConfigAsync(
-                ParseScope(args[1]),
-                args[2],
-                ct).ConfigureAwait(false),
+            "set" when args.Length >= 4 => ParseScope(args[1]) is { } setScope
+                ? await SetConfigAsync(setScope, args[2], string.Join(" ", args[3..]), ct).ConfigureAwait(false)
+                : InvalidScopeError(args[1]),
+            "remove" when args.Length == 3 => ParseScope(args[1]) is { } removeScope
+                ? await RemoveConfigAsync(removeScope, args[2], ct).ConfigureAwait(false)
+                : InvalidScopeError(args[1]),
             _ => CommandResult.Error(
                 "Usage: /config [list|get <key>|set <user|project|session> <key> <value>|remove <user|project|session> <key>]")
         };
@@ -143,13 +140,16 @@ public sealed class ConfigCommand(
         }
     }
 
-    private static ConfigScope ParseScope(string value) => value.ToLowerInvariant() switch
+    private static ConfigScope? ParseScope(string value) => value.ToLowerInvariant() switch
     {
         "user" => ConfigScope.User,
         "project" => ConfigScope.Project,
         "session" => ConfigScope.Session,
-        _ => throw new ArgumentException($"Unknown configuration scope '{value}'. Valid scopes: user, project, session."),
+        _ => null,
     };
+
+    private static CommandResult InvalidScopeError(string value) => CommandResult.Error(
+        $"Unknown configuration scope '{value}'. Valid scopes: user, project, session.");
 
     private static string BuildApplyMessage(
         string action,

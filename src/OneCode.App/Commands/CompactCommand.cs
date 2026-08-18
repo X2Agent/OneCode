@@ -7,6 +7,7 @@ public sealed class CompactCommand(CompactService compactService) : Command
     public override string Name => "compact";
     public override string Description => "Clear history but keep a summary";
     public override CommandCategory Category => CommandCategory.Builtin;
+    public override string? ArgumentHint => "[--from <index>] [--up-to <index>] [instructions]";
     public override string? ProgressMessage => "Compacting conversation...";
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
