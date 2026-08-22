@@ -1,11 +1,8 @@
 namespace OneCode.App.Tui;
 
-// 纯数据模型，从 MessageListView 提取。
-// LineEntry 为内部存储结构；FormattedLine/ToolLineTag/ToolDetailLineTag/
-// CodeBlockCopyTag/LineSegment 为跨文件引用的公共类型。
-
 /// <summary>
-/// 单行渲染条目：文本 + 颜色 + 可选分段 + 可选背景 + 可选元数据标签。
+/// 共享的单行渲染数据模型：<see cref="FormattedLine"/> 及其颜色分段
+/// <see cref="LineSegment"/>，以及为工具/思考/错误行附带交互元数据的各类 Tag。
 /// </summary>
 internal readonly record struct LineEntry(
     string Text,
@@ -83,12 +80,6 @@ public sealed record ThinkingLineTag(string Content, bool IsExpanded);
 
 /// <summary>Marker tag for lines inserted below an expanded thinking summary.</summary>
 public sealed record ThinkingDetailLineTag;
-
-/// <summary>
-/// Metadata attached to a fenced code block's header line. Clicking the
-/// tagged line copies <see cref="Code"/> to the clipboard.
-/// </summary>
-public sealed record CodeBlockCopyTag(string Code);
 
 /// <summary>错误行标记——可折叠的错误详情。Content 为完整错误文本。</summary>
 public sealed record ErrorLineTag(string Content, bool IsExpanded);

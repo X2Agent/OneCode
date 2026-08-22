@@ -66,6 +66,41 @@ public sealed class WebFetchToolSsrfTests
         WebFetchTool.IsPrivateOrLocalAddressPublic(address).Should().BeFalse();
     }
 
+    [Fact]
+    public void FindUnsafeResolvedAddress_PublicThenLoopback_ReturnsLoopback()
+    {
+        var addresses = new[] { IPAddress.Parse("1.1.1.1"), IPAddress.Parse("127.0.0.1") };
+
+        WebFetchTool.FindUnsafeResolvedAddress(addresses).Should().Be(IPAddress.Parse("127.0.0.1"));
+    }
+
+    [Fact]
+    public void FindUnsafeResolvedAddress_AllPublic_ReturnsNull()
+    {
+        var addresses = new[] { IPAddress.Parse("1.1.1.1"), IPAddress.Parse("8.8.8.8") };
+
+        WebFetchTool.FindUnsafeResolvedAddress(addresses).Should().BeNull();
+    }
+
+    [Fact]
+    public void FindUnsafeResolvedAddress_MappedMetadataIpv6_ReturnsAddress()
+    {
+        var mapped = IPAddress.Parse("::ffff:169.254.169.254");
+
+        WebFetchTool.FindUnsafeResolvedAddress([mapped]).Should().Be(mapped);
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:10808", "https://github.com/", null, true)]
+    [InlineData(null, "https://github.com/", null, false)]
+    [InlineData("http://127.0.0.1:10808", "https://github.com/", "*", false)]
+    [InlineData("http://127.0.0.1:10808", "https://github.com/", ".github.com", false)]
+    [InlineData("http://127.0.0.1:10808", "https://api.example.com/", ".example.com", false)]
+    public void ResolvesViaProxy_DecidesFromProxyAndNoProxy(string? proxyUrl, string url, string? noProxyList, bool expected)
+    {
+        WebFetchTool.ResolvesViaProxy(proxyUrl, url, noProxyList).Should().Be(expected);
+    }
+
     [Theory]
     [InlineData("http://10.0.0.1/")]
     [InlineData("http://172.16.0.1/")]

@@ -30,8 +30,6 @@ internal sealed class StreamingTranscriptState
     public int BuildRunStatusLineCount { get; set; }
     public int ModeProgressLineIndex { get; set; } = -1;
     public int ModeProgressLineCount { get; set; }
-    public int ActivePlanCardLineIndex { get; set; } = -1;
-    public int ActivePlanCardLineCount { get; set; }
     public int ThinkingSummaryLineIndex { get; set; } = -1;
     public int ThinkingBlockLineCount { get; set; }
     public long ThinkingStartTick { get; set; }
@@ -82,8 +80,6 @@ internal sealed class StreamingTranscriptState
         PendingLines = null;
         PreviewLineCount = 0;
         TrailingModeBannerLineCount = 0;
-        ActivePlanCardLineIndex = -1;
-        ActivePlanCardLineCount = 0;
         RebuildTimer = null;
         RebuildPending = false;
         ResetTurnState(clearSeenTools: true);

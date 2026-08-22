@@ -72,6 +72,8 @@ public sealed class SessionStoreTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var conv1 = CreateConversation("Session 1");
         var conv2 = CreateConversation("Session 2");
+        conv1.Messages.Add(new UserMessage("m1", "Hello", DateTimeOffset.UtcNow));
+        conv2.Messages.Add(new UserMessage("m2", "World", DateTimeOffset.UtcNow));
         await _sut.SaveAsync(conv1, ct);
         await _sut.SaveAsync(conv2, ct);
 
@@ -86,6 +88,38 @@ public sealed class SessionStoreTests : IDisposable
     {
         var sessions = await _sut.ListAsync(TestContext.Current.CancellationToken);
         sessions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListAsync_HeaderOnly_ReadsAccurateMessageCountWithoutLoadingMessages()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conv = CreateConversation();
+        conv.Metadata["mode"] = "plan";
+        conv.Messages.Add(new UserMessage("m1", "Hello", DateTimeOffset.UtcNow));
+        conv.Messages.Add(new AssistantMessage("m2", [new TextBlock("Hi")], DateTimeOffset.UtcNow));
+        conv.Messages.Add(new AssistantMessage("m3", [new TextBlock("Again")], DateTimeOffset.UtcNow));
+        await _sut.SaveAsync(conv, ct);
+
+        var sessions = await _sut.ListAsync(ct);
+
+        var summary = sessions.Should().ContainSingle(s => s.Id == conv.Id).Subject;
+        summary.MessageCount.Should().Be(3);
+        summary.Mode.Should().Be("plan");
+    }
+
+    [Fact]
+    public async Task ListAsync_LegacyNormalMode_NormalizesToBuild()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conv = CreateConversation();
+        conv.Metadata["mode"] = "normal";
+        conv.Messages.Add(new UserMessage("m1", "Hello", DateTimeOffset.UtcNow));
+        await _sut.SaveAsync(conv, ct);
+
+        var sessions = await _sut.ListAsync(ct);
+
+        sessions.Single(s => s.Id == conv.Id).Mode.Should().Be("build");
     }
 
     // LoadAsync — non-existent
@@ -134,24 +168,6 @@ public sealed class SessionStoreTests : IDisposable
 
         var loaded = await _sut.LoadAsync(conv.Id, ct);
         loaded.Should().BeNull();
-    }
-
-    // ListSessionsAsync
-
-    [Fact]
-    public async Task ListSessionsAsync_WithLimit_RespectsLimit()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        for (var i = 0; i < 5; i++)
-        {
-            var conv = CreateConversation($"Conv {i}");
-            conv.Messages.Add(new UserMessage($"m{i}", $"User message {i}", DateTimeOffset.UtcNow));
-            await _sut.SaveAsync(conv, ct);
-        }
-
-        var sessions = await _sut.ListSessionsAsync(limit: 3, ct: ct);
-
-        sessions.Count.Should().BeLessThanOrEqualTo(3);
     }
 
     // Helpers

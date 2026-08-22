@@ -206,6 +206,17 @@ public sealed record TuiApprovalRequest(
 public sealed record TuiLspDiagnosticsChanged : TuiEvent;
 
 /// <summary>
+/// GOAL 预算警告 — 消耗比例跨越 70%（Early/黄）或 90%（Late/橙）阈值时发布。
+/// 仅在警告级别发生变化时发布一次，TUI 据此渲染横幅。
+/// </summary>
+public sealed record TuiGoalBudgetWarning(
+    OneCode.Core.Goals.GoalBudgetWarningLevel Level,
+    int TotalAttempts,
+    long TotalTokens,
+    TimeSpan? Elapsed,
+    decimal EstimatedCostUsd) : TuiEvent;
+
+/// <summary>
 /// 用户提问请求事件 — AskUserQuestionTool 需要与用户交互时触发。
 /// TUI 可通过 <see cref="ResponseSource"/> 回传用户的回答。
 /// 支持预定义选项（单选）或自由文本输入。

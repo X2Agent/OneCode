@@ -2,17 +2,6 @@ using OneCode.Core.Domain;
 
 namespace OneCode.Core.PlanMode;
 
-public sealed record SavePlanDraftCommand(
-    string CommandId,
-    SessionId SessionId,
-    long ExpectedWorkflowVersion,
-    string Title,
-    string Markdown,
-    IReadOnlyList<PlanStepDefinition> Steps,
-    IReadOnlyList<string> Risks,
-    IReadOnlyList<string> Assumptions,
-    string? ActiveRunId = null);
-
 public sealed record SubmitPlanCommand(
     string CommandId,
     SessionId SessionId,

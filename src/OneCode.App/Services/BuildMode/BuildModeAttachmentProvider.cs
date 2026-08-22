@@ -6,14 +6,15 @@ namespace OneCode.App.Services.BuildMode;
 /// <summary>
 /// Build 模式增量提醒提供者——基于 MAF <see cref="AIContextProvider"/> 实现。
 ///
-/// 职责分工（与 MAF 原生能力的协作）：
-/// - <b>Turn 1 完整指令</b>：由 MAF 原生 <c>AgentModeProvider.Instructions</c> 承载
-///   （在 <c>MainAgentRunner.CreateAgentModeProviderAsync</c> 中从 build.prompt 加载）。
-///   AgentModeProvider 是 MAF 原生的模式感知机制，支持 DefaultMode/Modes/Instructions。
-/// - <b>增量提醒（本类负责）</b>：MAF 的 AgentModeProvider 不支持每轮动态更新 Instructions，
-///   本类补充这一能力，防止 LLM 在长对话中偏离编码约束。
+/// 职责分工（与 ModeInstructionProvider 的协作）：
+/// - <b>每轮完整指令</b>：由 <c>ModeInstructionProvider</c> 承载
+///   （在 <c>MainModeContextProviderBuilder.CreateModeInstructionProviderAsync</c> 中从 build.prompt 加载）。
+///   ModeInstructionProvider 是 OneCode 自有的模式指令注入器，替代原 MAF AgentModeProvider
+///   （后者附带 mode_get/mode_set 工具，与宿主驱动的模式架构冲突）。
+/// - <b>增量提醒（本类负责）</b>：本类补充模式相关动态状态提醒，
+///   防止 LLM 在长对话中偏离编码约束。
 ///
-/// 注入策略（仅在第 2 轮及之后触发，Turn 1 由 AgentModeProvider 负责）：
+/// 注入策略（仅在第 2 轮及之后触发，Turn 1 完整指令已由 ModeInstructionProvider 注入）：
 /// - Turn 2-4：注入简短提醒（sparse reminder），强调"先读再改、最小化变更、验证改动"。
 /// - Turn 5/10/15…：再次注入完整工作流指令（full reminder），刷新 LLM 的方法论记忆。
 /// - 其他 turn：简短提醒。

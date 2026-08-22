@@ -57,8 +57,9 @@ public sealed class SessionCommand(ISessionManager sessionManager) : Command
         {
             var active = sessionManager.ForegroundConversation?.Id == s.Id ? " *" : "";
             var background = sessionManager.BackgroundSessions.Any(b => b.Conversation.Id == s.Id) ? " [bg]" : "";
+            var mode = s.Mode ?? "build";
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Id}{active}{background}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"    {s.Name}  ({s.MessageCount} msgs, {s.LastActivityAt:yyyy-MM-dd HH:mm})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"    {s.Name}  ({mode}, {s.MessageCount} msgs, {s.LastActivityAt:yyyy-MM-dd HH:mm})");
         }
         if (sessions.Count > 20)
             sb.AppendLine(CultureInfo.InvariantCulture, $"  ... and {sessions.Count - 20} more. Use /session switch <id> to switch.");

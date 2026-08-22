@@ -1,3 +1,5 @@
+using OneCode.Core.Text;
+
 namespace OneCode.App.Tui;
 
 /// <summary>
@@ -77,18 +79,46 @@ internal sealed class ChatCompletionController
         (CommandSource.Dynamic,  "动态"),
     ];
 
+    /// <summary>
+    /// 模糊匹配阈值——与 <c>CommandRegistry.Suggest</c> 的 "Did you mean" 判定一致。
+    /// </summary>
+    private const double FuzzyMatchThreshold = 0.7;
+
+    /// <summary>
+    /// 触发模糊匹配的最小查询长度。短查询（1~2 字符）的 JaroWinkler 分数普遍偏高，
+    /// 模糊匹配会把大量无关命令混入菜单，重新引入噪音；拼写纠错只在较长输入时有意义。
+    /// </summary>
+    private const int MinFuzzyQueryLength = 3;
+
     public void UpdateCompletionList(string prefix)
     {
         var query = prefix.TrimStart('/').ToLowerInvariant();
 
-        var matched = query.Length == 0
-            ? _allCommands.ToList()
-            : _allCommands
-                .Where(c =>
-                    c.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase) ||
-                    c.Description.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    (c.ArgumentHint?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+        List<SlashCommandEntry> matched;
+        if (query.Length == 0)
+        {
+            matched = _allCommands.ToList();
+        }
+        else
+        {
+            // 前缀命中优先（保持注册顺序），再用 JaroWinkler 容忍拼写错误
+            // （如 "keyband" → "keybindings"）。描述/参数提示不参与匹配。
+            var prefixMatches = _allCommands
+                .Where(c => c.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            var fuzzyMatches = query.Length >= MinFuzzyQueryLength
+                ? _allCommands
+                    .Where(c => !c.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => (Command: c, Score: StringDistance.JaroWinkler(c.Name, query)))
+                    .Where(x => x.Score > FuzzyMatchThreshold)
+                    .OrderByDescending(x => x.Score)
+                    .Select(x => x.Command)
+                    .ToList()
+                : [];
+
+            matched = [.. prefixMatches, .. fuzzyMatches];
+        }
 
         if (matched.Count == 0)
         {

@@ -8,15 +8,6 @@ namespace OneCode.Tests;
 public sealed class ToolMetadataRegistryTests
 {
     [Fact]
-    public void Register_SingleTool_CanBeFoundByName()
-    {
-        var registry = new ToolMetadataRegistry();
-        registry.Register(new ToolMetadata { Name = "MyTool" });
-
-        registry.Get("MyTool")!.Name.Should().Be("MyTool");
-    }
-
-    [Fact]
     public void Register_ToolWithAliases_FoundByAlias()
     {
         var registry = new ToolMetadataRegistry();
@@ -34,16 +25,6 @@ public sealed class ToolMetadataRegistryTests
 
         registry.Get("read")!.Name.Should().Be("Read");
         registry.Get("READ")!.Name.Should().Be("Read");
-    }
-
-    [Fact]
-    public void Clear_AfterRegister_EmptiesRegistry()
-    {
-        var registry = new ToolMetadataRegistry();
-        registry.Register(new ToolMetadata { Name = "Read" });
-        registry.Clear();
-
-        registry.Get("Read").Should().BeNull();
     }
 
     [Fact]

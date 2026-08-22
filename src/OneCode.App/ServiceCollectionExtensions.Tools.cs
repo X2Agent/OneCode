@@ -122,13 +122,14 @@ public static partial class ServiceCollectionExtensions
         services.AddTool<ExitWorktreeTool>("ExitWorktree", nameof(ExitWorktreeTool.ExitAsync), ToolRisk.Destructive, concurrency: false, searchHint: "exit a git worktree",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["worktree"]);
 
-        // Plan authoring tools are available only inside the Plan capability boundary.
-        // SubmitPlan closes immediately in FinalizingPlanRun; approval is a persisted command.
+        // Plan authoring tool is available only inside the Plan capability boundary.
+        // SubmitPlan persists the final plan and closes immediately in FinalizingPlanRun;
+        // approval is a persisted command. PlanExclusive: excluded from Build runs — the
+        // approved-plan Build run must not re-plan via SubmitPlan (ToolCapabilityResolver
+        // enforces this boundary).
         services.AddSingleton<PlanCardPublisher>();
-        services.AddTool<CreatePlanTool>("SavePlan", nameof(CreatePlanTool.SavePlanAsync), ToolRisk.Safe, searchHint: "save plan draft without exiting plan mode",
-            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan"], category: ToolCategory.PlanAllowed);
-        services.AddTool<CreatePlanTool>("SubmitPlan", nameof(CreatePlanTool.SubmitPlanAsync), ToolRisk.Safe, searchHint: "submit finalized plan for persisted user approval",
-            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed);
+        services.AddTool<CreatePlanTool>("SubmitPlan", nameof(CreatePlanTool.SubmitPlanAsync), ToolRisk.Safe, searchHint: "write and submit the finalized plan for persisted user approval",
+            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed | ToolCategory.PlanExclusive);
 
         // Approved Build runs must persist structured progress and verification evidence.
         services.AddTool<PlanExecutionTool>("UpdatePlanStep", nameof(PlanExecutionTool.UpdatePlanStepAsync), ToolRisk.Safe,

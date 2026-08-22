@@ -8,8 +8,8 @@ using OneCode.Core.PlanMode;
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// Plan Mode 下 LLM 使用的规划工具——拆分为两个独立工具：
-/// <see cref="SavePlanAsync"/>（Phase 4 草稿迭代）和 <see cref="SubmitPlanAsync"/>（Phase 5 提交审批）。
+/// Plan Mode 下 LLM 使用的规划工具：一次性编写并提交最终计划
+/// （<see cref="SubmitPlanAsync"/>），集中执行安全扫描、质量门槛并进入用户审批。
 /// </summary>
 /// <remarks>
 /// Plan revisions and approval state are persisted by <see cref="IPlanWorkflowApplicationService"/>.
@@ -19,65 +19,11 @@ public sealed class CreatePlanTool(
     IPlanModeService planMode,
     PlanCardPublisher planCardPublisher,
     ISessionConversationAccess sessionManager,
-    IPlanWorkflowApplicationService planWorkflow)
+    IPlanWorkflowApplicationService planWorkflow,
+    IPlanAggregateStore aggregateStore)
 {
-
     /// <summary>
-    /// Phase 4：保存 plan 草稿（不退出 Plan 模式）。
-    ///
-    /// LLM 可多次调用此工具迭代修订 plan，每次调用覆盖同一会话的 plan 文件
-    /// 并发布 Draft 状态的 plan card（仅展示，不弹决策面板）。
-    /// </summary>
-    [Description("Save the plan draft to the plan file without exiting plan mode. Use this during Phase 4 to iteratively refine the plan. The plan card is shown in DRAFT state — the user cannot approve/reject yet. Call SubmitPlan when the plan is finalized.")]
-    public async Task<ToolResult> SavePlanAsync(
-        [Description("The plan content in markdown format.")] string content,
-        [Description("Optional structured steps for the plan card UI.")] PlanStepDto[]? steps = null,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-            return ToolResult.Error("Plan content cannot be empty.");
-
-        var sessionId = sessionManager.ForegroundConversation?.Id;
-        if (sessionId is null)
-            return ToolResult.Error("SavePlan requires an active conversation session.");
-
-        if (steps is not { Length: > 0 })
-            return ToolResult.Error("SavePlan requires at least one structured step.");
-
-        try
-        {
-            var definitions = steps.Select(ToDefinition).ToArray();
-            var current = await planWorkflow.GetAsync(sessionId.Value, ct).ConfigureAwait(false);
-            var result = await planWorkflow.SaveDraftAsync(new SavePlanDraftCommand(
-                Guid.NewGuid().ToString("N"),
-                sessionId.Value,
-                current?.Version ?? -1,
-                DeriveTitle(content),
-                content,
-                definitions,
-                [],
-                [],
-                OneCodeAgentRunContext.CurrentRunId), ct).ConfigureAwait(false);
-            planCardPublisher.Publish(result.Workflow);
-            return ToolResult.JsonSuccess(new
-            {
-                status = "plan_saved",
-                phase = "draft",
-                planId = result.Workflow.Id.ToString(),
-                revision = result.Revision.Revision,
-                workflowVersion = result.Workflow.Version,
-                contentHash = result.Revision.ContentHash,
-                message = "Plan draft persisted as a versioned revision. Continue refining or call SubmitPlan when ready.",
-            });
-        }
-        catch (Exception ex) when (ex is PlanValidationException or PlanTransitionException)
-        {
-            return ToolResult.Error(ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Phase 5：提交最终 plan，持久化 Submitted revision，并立即返回。
+    /// 提交最终 plan：持久化 Submitted revision，并立即返回。
     /// 审批仅在当前 Plan Run 完整持久化且协议校验通过后开放。
     /// </summary>
     [Description("Submit the finalized plan for user review. Requires structured steps, runs safety and quality validation, persists an immutable submitted revision, and returns immediately. Approval becomes available only after the current Plan run closes successfully.")]
@@ -92,7 +38,7 @@ public sealed class CreatePlanTool(
         if (!planMode.IsInPlanMode)
         {
             return ToolResult.Error(
-                "SubmitPlan requires plan mode. Enter plan mode first, then SavePlan/SubmitPlan.");
+                "SubmitPlan requires plan mode. Enter plan mode first, then call SubmitPlan.");
         }
 
         // 安全约束（项目硬约束）：Plan 模式退出前必须扫描 plan 内容，检测破坏性命令
@@ -111,7 +57,7 @@ public sealed class CreatePlanTool(
         }
 
         // 机制级质量门槛：SubmitPlan 时强制校验 plan 内容质量，防止 LLM 跳过 Phase 1-3
-        // 调研直接提交空泛 plan 退出。这是"指令级防御"（prompt 要求 5 阶段）之外的
+        // 调研直接提交空泛 plan 退出。这是"指令级防御"（prompt 要求 4 阶段）之外的
         // "机制级防御"——即使 LLM 被 injection 误导提前退出，质量门槛也会拒绝并要求补充。
         var qualityFailures = PlanContentQualityGate.Validate(content);
         if (qualityFailures.Count > 0)
@@ -180,6 +126,8 @@ public sealed class CreatePlanTool(
             revision = submission.Revision.Revision,
             workflowVersion = submission.Workflow.Version,
             contentHash = submission.Revision.ContentHash,
+            planFilePath = aggregateStore.GetRevisionMarkdownPath(
+                submission.Workflow.SessionId, submission.Workflow.Id, submission.Revision.Revision),
             message = "Plan submitted. Approval will become available after the Plan run closes successfully.",
         });
     }
@@ -363,7 +311,7 @@ internal sealed record PlanScanResult(bool IsSuspicious, IReadOnlyList<string> M
 /// 机制级质量门槛——SubmitPlan 时强制校验 plan 内容质量。
 ///
 /// <para>
-/// plan.prompt 的 Phase 4/5 指令是"指令级防御"（软约束），
+/// plan.prompt 的 Phase 4（定稿并提交）指令是"指令级防御"（软约束），
 /// LLM 可能被 injection 误导或误判阶段，在未完成 Phase 1-3 调研时提前退出。
 /// 本类提供"机制级防御"（硬约束）：退出前强制校验 plan 内容满足最低质量门槛，
 /// 不满足则拒绝退出并返回具体的失败原因，指导 LLM 补充。
@@ -518,9 +466,7 @@ internal static class PlanContentQualityGate
 
 
 /// <summary>
-/// DTO for structured plan steps passed to <see cref="CreatePlanTool.SavePlanAsync"/> /
-/// <see cref="CreatePlanTool.SubmitPlanAsync"/>. Mirrors <see cref="PlanStep"/> but lives
-/// at the tool boundary so the LLM-facing schema is JSON-friendly.
+/// DTO for structured plan steps passed to <see cref="CreatePlanTool.SubmitPlanAsync"/>.
 /// </summary>
 public sealed class PlanStepDto
 {

@@ -396,7 +396,8 @@ in PLAN mode always contains a plan card.
 - Background: bg-elevated
 - Border: DarkGray (default) → Cyan (focused)
 - Steps: numbered list, each tagged with an assigned agent color
-- Actions: `[✓ Approve (a)]` `[✗ Reject (r)]` `[… Modify (s)]`
+- PendingApproval 阶段由对话流内 InlineSelector 决策面板提供
+  批准 / 输入修改意见 / 拒绝 选择（↑↓ + Enter 确认、Esc 取消）
 
 After approval, steps are progressively marked as completed (green check).
 

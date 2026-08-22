@@ -487,7 +487,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
 
         var changed = changedFiles
             .Select(Path.GetFullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .ToHashSet(Core.IO.PathComparer.Default);
         return _diagnosticRegistry.GetAllDiagnostics()
             .Where(d => d.Severity == LspDiagnosticSeverity.Error)
             .Where(d => PathBoundary.IsWithinDirectory(d.FilePath, workingDirectory))

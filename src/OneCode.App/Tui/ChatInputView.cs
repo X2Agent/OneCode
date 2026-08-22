@@ -102,6 +102,12 @@ public sealed partial class ChatInputView : View
     public event Action? CycleTeamRequested;
 
     /// <summary>
+    /// 切换右侧计划侧边栏（Ctrl+G）。有活动计划时可收起/展开，
+    /// 让对话区临时回到全宽。
+    /// </summary>
+    public event Action? TogglePlanPanelRequested;
+
+    /// <summary>
     /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。
     /// 交互接管期间的按键交由会话统一处理（见 <see cref="IInteractionSession"/>）。
     /// </summary>

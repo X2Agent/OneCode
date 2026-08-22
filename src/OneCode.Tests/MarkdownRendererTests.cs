@@ -33,6 +33,47 @@ public sealed class MarkdownRendererTests
         lines.Should().Contain(l => l.Text.Contains("└─"));
     }
 
+    // 代码块头部不再渲染 [ copy ] 按钮——窄面板中它挤占代码列宽，且点击复制
+    // 在侧边栏场景不可用。回归防护：确保 copy 标签彻底移除。
+    [Fact]
+    public void Render_FencedCodeBlock_HasNoCopyButton()
+    {
+        var md = "```csharp\nvar x = 1;\n```";
+        var lines = MarkdownRenderer.Render(md);
+
+        lines.Should().NotContain(l => l.Text.Contains("copy"));
+        lines.Should().NotContain(l => l.Tag != null,
+            "代码块头部不再挂载点击交互标签");
+    }
+
+    // 窄面板（<60 列）中表格改用记录式渲染：每行一条记录、列名前缀、值换行不截断
+    //（回归场景：42-50 列侧边栏中网格表格被等比压缩，每列只剩省略号）
+    [Fact]
+    public void Render_Table_NarrowWidth_RendersAsRecordsWithoutTruncation()
+    {
+        var md = "| 步骤 | 说明 |\n| --- | --- |\n| 扫描 | 使用 Grep 检索调用点 |\n| 改写 | 更新渲染管线 |";
+        var lines = MarkdownRenderer.Render(md, viewWidth: 48);
+        var text = string.Join("\n", lines.Select(l => l.Text));
+
+        text.Should().Contain("步骤 │ 扫描", "记录式渲染：列名前缀 + 单元格值");
+        text.Should().Contain("使用 Grep 检索调用点");
+        text.Should().NotContain("…",
+            "记录式渲染按宽度换行而非截断，不出现省略号");
+        text.Should().NotContain("│ 扫描 │",
+            "窄屏不再渲染网格行");
+    }
+
+    // 宽屏（对话流）保持网格表格渲染
+    [Fact]
+    public void Render_Table_WideWidth_RendersGridRow()
+    {
+        var md = "| 步骤 | 说明 |\n| --- | --- |\n| 扫描 | 检索调用点 |";
+        var lines = MarkdownRenderer.Render(md, viewWidth: 100);
+
+        lines.Should().Contain(l => l.Text.Contains("│ 扫描"),
+            "宽屏保持网格表格");
+    }
+
     [Fact]
     public void Render_CodeBlockWithoutLang_ReturnsCodeWithBorder()
     {

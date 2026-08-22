@@ -13,16 +13,13 @@ public sealed partial class ChatTranscriptView
         {
             // 非流式状态下收到 thinking delta — 作为独立标记行追加，不静默丢弃。
             // 正常流程不应走到这里，但防御性处理避免内容丢失。
-            _renderer.CurrentWidth = ContentWidth;
             var charCount = thought?.Length ?? 0;
-            _messageView.AppendLines(new[]
+            var marker = FormattedLine.FromSegments(new[]
             {
-                FormattedLine.FromSegments(new[]
-                {
-                    new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
-                    new LineSegment($"{TuiGlyphs.Collapsed} Thought ({charCount} chars)", TuiPalette.FgMuted),
-                })
+                new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
+                new LineSegment($"{TuiGlyphs.Collapsed} Thought ({charCount} chars)", TuiPalette.FgMuted),
             });
+            AppendCommittedBlock(_ => new[] { marker }, withSpacing: false);
             return;
         }
 
@@ -156,7 +153,6 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        _renderer.CurrentWidth = ContentWidth;
         var trm = new ToolResultMessage(
             Id: Guid.NewGuid().ToString("N"),
             ToolUseId: toolId,
@@ -165,8 +161,7 @@ public sealed partial class ChatTranscriptView
             IsError: isError,
             Timestamp: DateTimeOffset.UtcNow);
 
-        var lines = _renderer.RenderMessage(trm);
-        AppendWithSpacing(lines);
+        AppendCommittedBlock(RenderMessageJournalEntry(trm));
 
         _stream.TextBuffer.Clear();
         _stream.Assistant = null;
@@ -184,15 +179,46 @@ public sealed partial class ChatTranscriptView
         RebuildStreamingPreview();
     }
 
+    /// <summary>
+    /// TEAM 成员发言块：说话人行 + 最多 3 行预览（折叠式呈现）。
+    /// 完整内容仍保留在 Delivery 证据中，主对话不被长文本刷屏。
+    /// </summary>
+    public void AddTeamSpeech(string agentName, string content)
+    {
+        const int PreviewLineCount = 3;
+        var speechLines = (content ?? string.Empty)
+            .Replace("\r\n", "\n")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var lines = new List<FormattedLine>
+        {
+            FormattedLine.FromSegments(new[]
+            {
+                new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
+                new LineSegment($"{TuiGlyphs.Collapsed} {agentName}", TuiPalette.FgMuted),
+            }),
+        };
+        foreach (var line in speechLines.Take(PreviewLineCount))
+            lines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}  {line}", TuiPalette.FgSecondary));
+        if (speechLines.Length > PreviewLineCount)
+            lines.Add(FormattedLine.FromSegments(new[]
+            {
+                new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
+                new LineSegment($"… 共 {speechLines.Length} 行，完整内容见交付报告", TuiPalette.FgMuted),
+            }));
+
+        AppendCommittedBlock(_ => lines, withSpacing: false);
+    }
+
     public void UpdateBuildRunStatus(TuiBuildRunState state)
     {
-        var lines = ChatBlockRenderers.RenderBuildRunPanel(state, ContentWidth);
         if (!_stream.IsStreaming)
         {
-            AddFormattedLines(lines);
+            AppendCommittedBlock(width => ChatBlockRenderers.RenderBuildRunPanel(state, width));
             return;
         }
 
+        var lines = ChatBlockRenderers.RenderBuildRunPanel(state, ContentWidth);
         if (_stream.BuildRunStatusLineIndex >= 0)
         {
             var oldCount = _stream.BuildRunStatusLineCount;
@@ -212,18 +238,23 @@ public sealed partial class ChatTranscriptView
         RebuildStreamingPreview();
     }
 
-    public void AddBuildDeliveryCard(OneCode.Core.Build.BuildRunResult result) =>
-        AddFormattedLines(ChatBlockRenderers.RenderBuildDeliveryCard(result, ContentWidth));
+    public void AddBuildDeliveryCard(OneCode.Core.Build.BuildRunResult result)
+    {
+        if (_stream.IsStreaming)
+            AddFormattedLines(ChatBlockRenderers.RenderBuildDeliveryCard(result, ContentWidth));
+        else
+            AppendCommittedBlock(width => ChatBlockRenderers.RenderBuildDeliveryCard(result, width));
+    }
 
     public void UpdateModeProgress(TuiModeProgress progress)
     {
-        var lines = ChatBlockRenderers.RenderModeProgress(progress, ContentWidth);
         if (!_stream.IsStreaming)
         {
-            AddFormattedLines(lines);
+            AppendCommittedBlock(width => ChatBlockRenderers.RenderModeProgress(progress, width));
             return;
         }
 
+        var lines = ChatBlockRenderers.RenderModeProgress(progress, ContentWidth);
         if (_stream.ModeProgressLineIndex >= 0)
         {
             var oldCount = _stream.ModeProgressLineCount;
@@ -248,7 +279,7 @@ public sealed partial class ChatTranscriptView
     /// <summary>
     /// 文件修改 Diff 展示 — 接入 ChatBlockRenderers.RenderDiffBlock。
     /// EditTransactionMiddleware 检测到 Write/Edit 后发射 TuiFileChange 事件，
-    /// 此方法渲染 +N/-M 行的 Diff 块。
+    /// 此方法渲染 +N/-M 行的 Diff 块。Diff 行与宽度无关，日志条目直接持有渲染结果。
     /// </summary>
     public void AddFileChange(string fileName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
     {
@@ -259,21 +290,17 @@ public sealed partial class ChatTranscriptView
             fileName, addedLines, removedLines,
             addedSummary: addedLines.Count,
             removedSummary: removedLines.Count);
-        AddFormattedLines(lines);
+        if (_stream.IsStreaming)
+            AddFormattedLines(lines);
+        else
+            AppendCommittedBlock(_ => lines);
     }
 
+    /// <summary>流式期间追加状态行（宽度相关块由提交时的日志条目负责重渲）。</summary>
     private void AddFormattedLines(IReadOnlyList<FormattedLine> lines)
     {
-        if (_stream.IsStreaming)
-        {
-            foreach (var line in lines)
-                _stream.StatusLines.Add(line);
-            RebuildStreamingPreview();
-        }
-        else
-        {
-            _renderer.CurrentWidth = ContentWidth;
-            AppendWithSpacing(lines);
-        }
+        foreach (var line in lines)
+            _stream.StatusLines.Add(line);
+        RebuildStreamingPreview();
     }
 }

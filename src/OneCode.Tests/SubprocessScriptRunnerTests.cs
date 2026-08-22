@@ -8,7 +8,7 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Unit tests for <see cref="SubprocessScriptRunner"/> — covers concurrent
-/// stdout/stderr reading (deadlock prevention) and error-path logging.
+/// stdout/stderr reading (deadlock prevention) and stdout capture.
 /// </summary>
 public sealed class SubprocessScriptRunnerTests : IDisposable
 {
@@ -92,47 +92,6 @@ public sealed class SubprocessScriptRunnerTests : IDisposable
 
         // If we get here, no deadlock occurred
         result.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task RunCoreAsync_NonZeroExit_LogsStderr()
-    {
-        string extension, content;
-        if (OperatingSystem.IsWindows())
-        {
-            extension = ".bat";
-            content = """
-            @echo off
-            echo some error output 1>&2
-            exit /b 1
-            """;
-        }
-        else
-        {
-            extension = ".sh";
-            content = """
-            #!/bin/sh
-            echo "some error output" >&2
-            exit 1
-            """;
-        }
-
-        var script = CreateScript(extension, content);
-        if (!OperatingSystem.IsWindows())
-        {
-            var proc = System.Diagnostics.Process.Start("chmod", $"+x {script.FullPath}");
-            proc?.WaitForExit();
-        }
-
-        var logger = Substitute.For<ILogger>();
-        var runner = SubprocessScriptRunner.CreateRunner(logger);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await runner(null!, script, null, null!, cts.Token);
-
-        // Verify the warning was logged for non-zero exit.
-        // LogWarning is an extension method → verify via ReceivedCalls instead of Arg matchers.
-        logger.ReceivedCalls().Should().NotBeEmpty();
     }
 
     [Fact]

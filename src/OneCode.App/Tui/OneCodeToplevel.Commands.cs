@@ -1,10 +1,12 @@
 using System.Text.RegularExpressions;
+using OneCode.Core.Keybindings;
 
 namespace OneCode.App.Tui;
 
 /// <summary>
 /// In-transcript immediate commands for <see cref="OneCodeToplevel"/>:
-/// /find（关键词 / 正则 / next 搜索跳转）与 /diff（变更审查 overlay）。
+/// /find（关键词 / 正则 / next 搜索跳转）、/diff（变更审查 overlay）
+/// 与 /keybindings list（快捷键查看 overlay）。
 /// 由 <c>HandleImmediateCommandAsync</c> 在 UI 线程内调用，不经查询队列。
 /// </summary>
 public sealed partial class OneCodeToplevel
@@ -101,6 +103,34 @@ public sealed partial class OneCodeToplevel
         {
             _shell.Transcript.AddSystem("打开变更审查");
             _ = _shell.ShowReviewOverlayAsync();
+        });
+        return true;
+    }
+
+    /// <summary>
+    /// Handles /keybindings list by opening the keybindings overlay.
+    /// Returns true when the input was a /keybindings list command.
+    /// </summary>
+    private bool TryHandleKeybindingsListOverlay(string text)
+    {
+        if (!text.StartsWith('/')) return false;
+        var trimmed = text.TrimStart('/');
+        var spaceIdx = trimmed.IndexOf(' ');
+        var name = (spaceIdx < 0 ? trimmed : trimmed[..spaceIdx]).ToLowerInvariant();
+        if (name != "keybindings") return false;
+
+        // 裸 /keybindings（查看）与 /keybindings list 都弹 overlay；
+        // open/reset 等编辑类子命令仍走 KeybindingsCommand 文本路径。
+        var subcommand = spaceIdx < 0 ? string.Empty : trimmed[(spaceIdx + 1)..].Trim().ToLowerInvariant();
+        if (subcommand is not ("list" or "")) return false;
+
+        Invoke(() =>
+        {
+            var merged = _ctx.KeyResolver?.Bindings
+                ?? [.. KeybindingDefaults.GetDefaultParsedBindings()];
+            var views = KeybindingViewBuilder.Build(merged);
+            var warnings = _ctx.GetKeybindingWarnings?.Invoke() ?? [];
+            _shell.ShowKeybindingsOverlay(new KeybindingsOverlay(views, warnings));
         });
         return true;
     }

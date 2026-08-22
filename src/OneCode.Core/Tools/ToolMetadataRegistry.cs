@@ -54,6 +54,11 @@ public enum ToolCategory
     /// 将删除视为写入类操作，拦截敏感路径与 symlink 越狱。
     /// </summary>
     FileDelete = 8,
+    /// <summary>
+    /// 仅 Plan 模式可见的工具（如 SubmitPlan）。非 Plan 模式（含批准计划后的
+    /// Build run）从工具集中排除——Build run 的 LLM 误调用规划工具会污染工作流状态。
+    /// </summary>
+    PlanExclusive = 16,
 }
 
 /// <summary>

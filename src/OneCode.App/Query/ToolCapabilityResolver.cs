@@ -22,7 +22,16 @@ public sealed class ToolCapabilityResolver(IToolCatalog catalog) : IToolCapabili
             .ToImmutableHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (mode != WorkingMode.Plan)
-            return ToolCapabilitySet.CreateUnrestricted(visibleNames);
+        {
+            // Plan-exclusive tool (SubmitPlan) must not leak into Build runs —
+            // an approved-plan Build run that calls SubmitPlan would corrupt the workflow
+            // state machine (and weak models routinely miscall it with missing arguments).
+            var nonPlanNames = visibleNames
+                .Where(name => catalog.Metadata.Get(name) is not { } metadata
+                    || (metadata.Category & ToolCategory.PlanExclusive) == 0)
+                .ToImmutableHashSet(StringComparer.OrdinalIgnoreCase);
+            return ToolCapabilitySet.CreateUnrestricted(nonPlanNames);
+        }
 
         var allowed = visibleNames
             .Where(name =>

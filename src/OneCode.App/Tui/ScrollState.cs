@@ -117,6 +117,18 @@ internal sealed class ScrollState
     /// <summary>由行变更方法调用：当 AutoScroll 为 true 时标记需要滚动到底部。</summary>
     public void RequestScrollToBottomIfAutoScroll() => _needsScrollToBottom = _autoScroll;
 
+    /// <summary>
+    /// 整体重渲后恢复滚动位置：重渲不改变 AutoScroll 语义，
+    /// 仅将偏移钳制到新行数范围内（重换行后行数会变化）。
+    /// </summary>
+    internal void RestoreOffset(int preferredOffset)
+    {
+        var visibleLines = Math.Max(1, _getViewportHeight());
+        var maxOffset = Math.Max(0, _getLineCount() - visibleLines);
+        _scrollOffset = Math.Clamp(preferredOffset, 0, maxOffset);
+        _needsScrollToBottom = false;
+    }
+
     /// <summary>重置所有滚动状态（用于 Clear）。</summary>
     public void Reset()
     {

@@ -161,7 +161,10 @@ public sealed partial class OneCodeToplevel : Window
     {
         var inTeamMode = (_ctx.ModeController?.Mode ?? WorkingMode.Build) == WorkingMode.Team;
         var teamName = inTeamMode ? _ctx.GetActiveTeam?.Invoke() : null;
-        _shell.AgentStatusBar.SetActiveTeam(teamName);
+        var resolvedMode = inTeamMode && teamName is not null
+            ? _ctx.GetTeamModeLabel?.Invoke(teamName)
+            : null;
+        _shell.AgentStatusBar.SetActiveTeam(teamName, resolvedMode);
     }
 
     /// <summary>
@@ -193,11 +196,12 @@ public sealed partial class OneCodeToplevel : Window
         string title,
         IReadOnlyList<PlanStep> steps,
         PlanCardPhase phase,
-        string? markdown = null)
+        string? markdown = null,
+        string? documentPath = null)
     {
         _app.Invoke(() =>
         {
-            _shell.ShowPlanCard(title, steps, phase, markdown);
+            _shell.ShowPlanCard(title, steps, phase, markdown, documentPath);
         });
     }
 

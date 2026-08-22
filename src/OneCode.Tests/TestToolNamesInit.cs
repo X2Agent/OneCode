@@ -43,7 +43,7 @@ internal static class TestToolNamesInit
         });
 
         // Plan-allowed tools (beyond read-only)
-        foreach (var name in new[] { "SavePlan", "SubmitPlan", "Task", "Agent", "ParallelAgents" })
+        foreach (var name in new[] { "SubmitPlan", "Task", "Agent", "ParallelAgents" })
         {
             registry.Register(new ToolMetadata
             {

@@ -39,7 +39,6 @@ public enum PlanRunKind
 
 public enum PlanRevisionStatus
 {
-    Draft,
     Submitted,
     Superseded,
     Approved,

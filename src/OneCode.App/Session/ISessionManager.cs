@@ -27,6 +27,7 @@ public interface ISessionManager : ISessionConversationAccess, ISessionWorkingDi
 
     Task<Conversation> EnsureActiveSessionAsync(ConversationOptions options, CancellationToken ct = default);
     Task<Conversation> CreateAsync(ConversationOptions options, CancellationToken ct = default);
+    void SetForegroundMode(string mode);
     Task<Conversation?> ResumeAsync(string conversationId, CancellationToken ct = default);
     Task CloseAsync(CancellationToken ct = default);
     Task<Conversation?> SwitchToSessionAsync(string conversationId, CancellationToken ct = default);

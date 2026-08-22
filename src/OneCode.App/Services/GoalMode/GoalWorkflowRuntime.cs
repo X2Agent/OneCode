@@ -1,4 +1,6 @@
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Cost;
@@ -25,7 +27,8 @@ internal sealed class GoalWorkflowRuntimeFactory(
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
     ICostTracker costTracker,
-    OneCode.Core.Workflows.IOperationLedger? operationLedger = null) : IGoalWorkflowRuntimeFactory
+    OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
+    ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntimeFactory
 {
     public IGoalWorkflowRuntime Create(GoalWorkflowRuntimeContext context)
         => new GoalWorkflowRuntime(
@@ -35,9 +38,13 @@ internal sealed class GoalWorkflowRuntimeFactory(
             workspaceService,
             completionService,
             costTracker,
-            context with { Ledger = context.Ledger ?? operationLedger });
+            context with { Ledger = context.Ledger ?? operationLedger },
+            logger);
 }
 
+// 并发契约（F-11）：本类依赖 Workflow 引擎对 Executor 的串行调度保证——同一 GoalRun 的
+// Plan/ExecuteNext/Complete 永不并发执行。_run 仅是 fenced 持久化副本的内存缓存，所有写路径
+// 都经 SaveFencedAsync(fencing token) 兜底，跨世代（fencing token 变化）的脏写会被拒绝。
 internal sealed class GoalWorkflowRuntime(
     IGoalPlanningService decomposer,
     IGoalStepExecutionService subGoalExecutor,
@@ -45,23 +52,32 @@ internal sealed class GoalWorkflowRuntime(
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
     ICostTracker costTracker,
-    GoalWorkflowRuntimeContext context) : IGoalWorkflowRuntime
+    GoalWorkflowRuntimeContext context,
+    ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntime
 {
     private const int MaxRecursiveDecompositionDepth = 3;
     private readonly GoalBudget _budget = context.Options.Budget ?? new GoalBudget();
     private GoalRun? _run;
     private long _fencingToken;
-    private decimal _costBaselineUsd;
+    private GoalBudgetWarningLevel? _lastWarningLevel;
 
-    public Task BindAsync(GoalRun run, long fencingToken, CancellationToken ct)
+    public async Task BindAsync(GoalRun run, long fencingToken, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (run.WorkflowFencingToken != fencingToken || fencingToken <= 0)
             throw new InvalidOperationException("Goal runtime received a stale fencing token.");
         _run = run;
         _fencingToken = fencingToken;
-        _costBaselineUsd = costTracker.GetTotalCost() - run.Budget.EstimatedCostUsd;
-        return Task.CompletedTask;
+        // Fix-2/N-02：成本基线只允许建立一次并随 Run 持久化。
+        // - 首次 Bind：基线 = 当前进程累计成本（此时 EstimatedCostUsd 尚未入账，差值恒等）。
+        // - resume 重新 Bind：CostBaselineUsd 已持久化，直接沿用，禁止二次减 EstimatedCostUsd。
+        // - 旧版本快照（无 CostBaselineUsd 字段）：按旧公式换算一次后持久化，后续走快照路径。
+        if (run.Budget.CostBaselineUsd == 0m)
+        {
+            var baseline = Math.Max(0m, costTracker.GetTotalCost() - run.Budget.EstimatedCostUsd);
+            await SaveAsync(run with { Budget = run.Budget with { CostBaselineUsd = baseline } }, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     public async Task<GoalWorkflowState> PlanAsync(GoalWorkflowInput input, CancellationToken ct)
@@ -114,11 +130,17 @@ internal sealed class GoalWorkflowRuntime(
         if (state.CurrentIndex < 0 || state.CurrentIndex >= state.Plan.Count)
             throw new InvalidOperationException("Goal workflow cursor is outside the current plan.");
 
-        var usage = BuildBudgetUsage(run.Budget);
+        // Fix-7：墙钟只累计运行区间（Paused / 进程离线时间不计入），并回写到本次状态流转。
+        var budget = RollForwardWallClock(run.Budget);
+        state = state with { Budget = budget };
+        var usage = BuildBudgetUsage(budget);
+        // Fix-6：EvaluateWarning 已存在但从未发布——级别变化时推送 TUI 预警（黄/橙）。
+        PublishBudgetWarning(usage);
         if (_budget.ShouldForceTerminate(usage))
         {
             var paused = run with
             {
+                Budget = budget,
                 State = GoalRunState.Paused,
                 TerminalReason = OneCode.Core.Build.BuildTerminalReason.BudgetExceeded,
                 FailureSummary = "Goal execution budget was exhausted.",
@@ -128,8 +150,8 @@ internal sealed class GoalWorkflowRuntime(
         }
 
         var step = state.Plan[state.CurrentIndex];
-        if (state.CurrentIndex > 0
-            && _budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalSubGoalExecutor.MaxAttemptsPerSubGoal)
+        // Fix-7/N-01：守卫不依赖游标位置——resume 到 index 0 时同样受剩余尝试额度约束。
+        if (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalSubGoalExecutor.MaxAttemptsPerSubGoal)
         {
             var skippedEvidence = new GoalStepExecutionEvidence(
                 step.Id,
@@ -159,35 +181,51 @@ internal sealed class GoalWorkflowRuntime(
         if (existingReceipt is not null)
             return await ApplyEvidenceAsync(state, existingReceipt.Evidence, ct).ConfigureAwait(false);
 
-        if (step.NeedsFurtherDecomposition && step.Depth < MaxRecursiveDecompositionDepth)
+        if (step.NeedsFurtherDecomposition)
         {
-            var parent = ToGoalItem(step);
-            var nextId = state.Plan.Count == 0 ? 1 : state.Plan.Max(item => item.Id) + 1;
-            var decomposition = await decomposer.DecomposeSubGoalAsync(
-                parent,
-                nextId,
-                context.Options.ModelId,
-                ct).ConfigureAwait(false);
-            if (decomposition is { SubGoals.Count: > 0 })
+            if (step.Depth < MaxRecursiveDecompositionDepth)
             {
-                var expanded = state.Plan.ToList();
-                expanded[state.CurrentIndex] = step with { State = GoalStepState.Skipped };
-                expanded.InsertRange(state.CurrentIndex + 1, decomposition.Value.SubGoals.Select(ToSnapshot));
-                var expandedBudget = state.Budget with
+                var parent = ToGoalItem(step);
+                var nextId = state.Plan.Count == 0 ? 1 : state.Plan.Max(item => item.Id) + 1;
+                var decomposition = await decomposer.DecomposeSubGoalAsync(
+                    parent,
+                    nextId,
+                    context.Options.ModelId,
+                    ct).ConfigureAwait(false);
+                if (decomposition is { SubGoals.Count: > 0 })
                 {
-                    TotalInputTokens = state.Budget.TotalInputTokens + decomposition.Value.InputTokens,
-                    TotalOutputTokens = state.Budget.TotalOutputTokens + decomposition.Value.OutputTokens,
-                    EstimatedCostUsd = CurrentExecutionCost(),
-                };
-                var expandedState = state with
-                {
-                    Plan = expanded,
-                    Budget = expandedBudget,
-                    CurrentIndex = state.CurrentIndex + 1,
-                };
-                await SaveStateAsync(expandedState, ct).ConfigureAwait(false);
-                return expandedState;
+                    var expanded = state.Plan.ToList();
+                    expanded[state.CurrentIndex] = step with { State = GoalStepState.Skipped };
+                    expanded.InsertRange(state.CurrentIndex + 1, decomposition.Value.SubGoals.Select(ToSnapshot));
+                    var expandedBudget = state.Budget with
+                    {
+                        TotalInputTokens = state.Budget.TotalInputTokens + decomposition.Value.InputTokens,
+                        TotalOutputTokens = state.Budget.TotalOutputTokens + decomposition.Value.OutputTokens,
+                        EstimatedCostUsd = CurrentExecutionCost(),
+                    };
+                    var expandedState = state with
+                    {
+                        Plan = expanded,
+                        Budget = expandedBudget,
+                        CurrentIndex = state.CurrentIndex + 1,
+                    };
+                    await SaveStateAsync(expandedState, ct).ConfigureAwait(false);
+                    return expandedState;
+                }
+                // Fix-5/F-06：子目标分解失败回退直执行必须留痕，不得静默降级。
+                logger?.LogWarning(
+                    "subgoal decompose fallback, step #{Id}: decomposition returned no sub-goals; executing undecomposed.",
+                    step.Id);
             }
+            else
+            {
+                // Fix-5/F-05：达到递归拆分深度上限后不得静默执行欠拆分目标。
+                logger?.LogWarning(
+                    "goal step #{Id} reached max recursive decomposition depth ({Depth}); executing without further decomposition.",
+                    step.Id,
+                    MaxRecursiveDecompositionDepth);
+            }
+            step = step with { DecompositionFallback = true };
         }
 
         var currentGoal = ToGoalItem(step with { State = GoalStepState.InProgress });
@@ -235,6 +273,8 @@ internal sealed class GoalWorkflowRuntime(
             var rolledBack = execution.Status != GoalStatus.Completed;
             if (rolledBack)
                 transaction.Rollback();
+            if (step.DecompositionFallback)
+                execution = execution with { Evaluation = $"{execution.Evaluation} [decomposition-fallback]" };
             var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
             GoalStepReceipt receipt;
             try
@@ -245,7 +285,7 @@ internal sealed class GoalWorkflowRuntime(
                     _fencingToken,
                     ct).ConfigureAwait(false);
             }
-            catch
+            catch (Exception receiptEx)
             {
                 var reconciled = await workspaceService.FindStepReceiptAsync(
                     run,
@@ -254,8 +294,19 @@ internal sealed class GoalWorkflowRuntime(
                     CancellationToken.None).ConfigureAwait(false);
                 if (reconciled is null)
                 {
-                    transaction.Rollback();
-                    throw;
+                    // Fix-8/F-12：rollback 次生异常不得吞掉原始异常。
+                    try
+                    {
+                        transaction.Rollback();
+                    }
+                    catch (Exception rollbackEx)
+                    {
+                        logger?.LogError(
+                            rollbackEx,
+                            "Rollback failed after step receipt failure for goal step #{Id}.",
+                            evidence.GoalId);
+                    }
+                    ExceptionDispatchInfo.Capture(receiptEx).Throw();
                 }
                 receipt = reconciled;
             }
@@ -304,19 +355,32 @@ internal sealed class GoalWorkflowRuntime(
         }
         catch (OperationCanceledException)
         {
-            transaction.Rollback();
+            SafeRollback(transaction);
             // Cancellation is an interruption. Keep the GoalRun Executing so the
             // next workflow generation can reacquire it and retry the unfinished step.
             throw;
         }
         catch (Exception ex)
         {
-            transaction.Rollback();
+            SafeRollback(transaction);
             await SaveTerminalAsync(
                 GoalRunState.Failed,
                 OneCode.Core.Build.BuildTerminalReason.AgentException,
                 ex.Message).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private void SafeRollback(EditTransaction transaction)
+    {
+        // Fix-8：终态异常路径中 rollback 失败只记录次生异常，保留原始异常向上传播。
+        try
+        {
+            transaction.Rollback();
+        }
+        catch (Exception rollbackEx)
+        {
+            logger?.LogError(rollbackEx, "Goal step transaction rollback failed; original exception is preserved.");
         }
     }
 
@@ -353,9 +417,11 @@ internal sealed class GoalWorkflowRuntime(
             .ToArray();
         var budget = state.Budget with
         {
-            TotalAttempts = state.Budget.TotalAttempts + evidence.Attempts - (previous?.Attempts ?? 0),
-            TotalInputTokens = state.Budget.TotalInputTokens + evidence.InputTokens - (previous?.InputTokens ?? 0),
-            TotalOutputTokens = state.Budget.TotalOutputTokens + evidence.OutputTokens - (previous?.OutputTokens ?? 0),
+            // Fix-2/F-02：差值公式加下限保护——budget-skip 等场景下新证据计数为 0 时，
+            // 不得对旧证据做负扣减导致预算消耗回退。
+            TotalAttempts = state.Budget.TotalAttempts + Math.Max(0, evidence.Attempts - (previous?.Attempts ?? 0)),
+            TotalInputTokens = state.Budget.TotalInputTokens + Math.Max(0, evidence.InputTokens - (previous?.InputTokens ?? 0)),
+            TotalOutputTokens = state.Budget.TotalOutputTokens + Math.Max(0, evidence.OutputTokens - (previous?.OutputTokens ?? 0)),
             EstimatedCostUsd = CurrentExecutionCost(),
         };
         var next = state with
@@ -414,14 +480,51 @@ internal sealed class GoalWorkflowRuntime(
     }
 
     private decimal CurrentExecutionCost()
-        => Math.Max(0m, costTracker.GetTotalCost() - _costBaselineUsd);
+        // Fix-2：以持久化的 CostBaselineUsd 快照为基线，不再依赖实例字段（resume 安全）。
+        => Math.Max(0m, costTracker.GetTotalCost() - (_run?.Budget.CostBaselineUsd ?? 0m));
+
+    private static GoalBudgetSnapshot RollForwardWallClock(GoalBudgetSnapshot budget)
+    {
+        // Fix-7：墙钟语义 = 仅累计运行区间。LastActivityAt 是上次活动时间戳，
+        // Paused / 进程离线期间的时间不计入；首次调用只打点不累计。
+        var now = DateTimeOffset.UtcNow;
+        if (budget.LastActivityAt is not { } last)
+            return budget with { LastActivityAt = now };
+        return budget with
+        {
+            AccumulatedElapsed = budget.AccumulatedElapsed + (now - last),
+            LastActivityAt = now,
+        };
+    }
 
     private static GoalBudgetUsage BuildBudgetUsage(GoalBudgetSnapshot budget)
         => new(
             budget.TotalAttempts,
             budget.TotalInputTokens + budget.TotalOutputTokens,
-            DateTimeOffset.UtcNow - budget.StartedAt,
+            ResolveElapsed(budget),
             budget.EstimatedCostUsd);
+
+    private static TimeSpan? ResolveElapsed(GoalBudgetSnapshot budget)
+        // 旧版本快照兼容：无累加墙钟时回退到"自 StartedAt 起的总墙钟"。
+        => budget.LastActivityAt is null && budget.AccumulatedElapsed == TimeSpan.Zero
+            ? DateTimeOffset.UtcNow - budget.StartedAt
+            : budget.AccumulatedElapsed;
+
+    private void PublishBudgetWarning(GoalBudgetUsage usage)
+    {
+        var level = _budget.EvaluateWarning(usage);
+        if (level == _lastWarningLevel)
+            return;
+        _lastWarningLevel = level;
+        if (level is null)
+            return;
+        context.EventWriter.TryWrite(new TuiGoalBudgetWarning(
+            level.Value,
+            usage.TotalAttempts,
+            usage.TotalTokens,
+            usage.Elapsed,
+            usage.EstimatedCostUsd));
+    }
 
     private static int FindNextIndex(IReadOnlyList<GoalStepSnapshot> plan)
     {

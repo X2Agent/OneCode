@@ -90,8 +90,8 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
 }
 
 /// <summary>Display entry for a resumable session.</summary>
-public sealed record SessionEntry(string Id, string Name, string Model, int MessageCount, DateTimeOffset LastActivity)
+public sealed record SessionEntry(string Id, string Name, string Model, string Mode, int MessageCount, DateTimeOffset LastActivity)
 {
     public string DisplayText =>
-        $"{Name,-30} {Model,-20} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
+        $"{Name,-28} {Model,-18} {Mode,-6} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
 }

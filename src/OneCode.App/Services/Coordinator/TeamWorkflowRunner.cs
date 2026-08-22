@@ -114,26 +114,44 @@ internal sealed class TeamWorkflowRunner(
         IReadOnlyList<string>? taskAllowedTools = null)
     {
         var maxTurns = config.MaxTurns;
-
-        // Build agents sequentially — BuildAgentAsync may load coordinator prompt (shared cache)
+        var roundsRun = 0;
+        var activity = new GroupChatActivityTracker();
+        Action<OrchestrationEvent>? trackedSink = eventSink is null
+            ? null
+            : evt =>
+            {
+                // 发言（TextDelta）与工具活动都计入，避免纯工具轮被误判为共识。
+                if (evt is OrchestrationEvent.TextDelta or OrchestrationEvent.ToolStart)
+                    activity.OnActivity();
+                eventSink(evt);
+            };
         var agents = new AIAgent[config.Members.Count];
         for (int i = 0; i < config.Members.Count; i++)
             agents[i] = await agentFactory.BuildAgentAsync(
-                    config.Members[i], transaction, cwd, eventSink, taskAllowedTools)
+                    config.Members[i], transaction, cwd, trackedSink, taskAllowedTools)
                 .ConfigureAwait(false);
 
-        var roundsRun = 0;
+        // 共识提前终止：预算过半后，若两次检查间无任何新发言/工具活动，判定讨论已收敛。
+        // 只提前、不延后——maxTurns 仍是硬上限。保守阈值避免对纯工具轮误判。
+        var consensusMinRounds = Math.Max(2, maxTurns / 2);
         var workflow = AgentWorkflowBuilder.CreateGroupChatBuilderWith(
                 agentList => new RoundRobinGroupChatManager(
                     agentList,
-                    (_, _, _) => ValueTask.FromResult(roundsRun++ >= maxTurns)))
+                    (_, _, _) =>
+                    {
+                        if (roundsRun++ >= maxTurns)
+                            return ValueTask.FromResult(true);
+                        return ValueTask.FromResult(
+                            roundsRun > consensusMinRounds && activity.HasSettled());
+                    }))
             .AddParticipants(agents)
             .WithName(config.TeamName)
             .Build();
 
         var inputMessage = BuildInputMessage(goal, imagePaths);
         var (result, sessionId) = await ExecuteWorkflowAsync(
-            workflow, inputMessage, config.TeamName, "GroupChat", maxTurns, eventSink, ct)
+            // R-1：workflow 层事件也走 trackedSink，与 agent pipeline 层共用同一活动统计源。
+            workflow, inputMessage, config.TeamName, "GroupChat", maxTurns, trackedSink, ct)
             .ConfigureAwait(false);
 
         logger.LogInformation(
@@ -311,5 +329,33 @@ internal sealed class TeamWorkflowRunner(
         }
 
         return new ChatMessage(ChatRole.User, contents);
+    }
+}
+
+/// <summary>
+/// GroupChat 共识终止的活动计数器：统计成员发言与工具活动总数，
+/// 两次终止检查之间计数无增长即判定讨论已收敛。
+/// </summary>
+internal sealed class GroupChatActivityTracker
+{
+    private readonly object _gate = new();
+    private long _total;
+    private long _seenAtLastCheck;
+
+    public void OnActivity()
+    {
+        lock (_gate) _total++;
+    }
+
+    /// <summary>自上次检查无新活动返回 true；从未有过活动时不允许判收敛。</summary>
+    public bool HasSettled()
+    {
+        lock (_gate)
+        {
+            if (_total == 0) return false;
+            var settled = _total == _seenAtLastCheck;
+            _seenAtLastCheck = _total;
+            return settled;
+        }
     }
 }

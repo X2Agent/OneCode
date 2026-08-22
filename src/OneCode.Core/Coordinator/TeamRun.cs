@@ -215,6 +215,13 @@ public sealed record TeamRun
     /// </summary>
     public string? LastTaskFingerprint { get; init; }
 
+    /// <summary>
+    /// 本次 Run 实际生效的编排模式（含 TUI overrideMode 覆盖后的结果）。
+    /// Resume 用它重建 config，避免用户覆盖策略后崩溃恢复时静默回退到 YAML 默认模板模式。
+    /// null 表示旧数据或未记录——恢复时按 YAML 默认处理（向后兼容）。
+    /// </summary>
+    public TeamOrchestrationMode? EffectiveMode { get; init; }
+
     public long Version { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }

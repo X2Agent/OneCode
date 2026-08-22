@@ -23,8 +23,8 @@ public sealed class ConvLine
     public IReadOnlyList<LineSegment>? Segments { get; }
 
     /// <summary>
-    /// Optional metadata tag (e.g. <see cref="CodeBlockCopyTag"/>) attached
-    /// to this line for click interaction.
+    /// Optional metadata tag attached to this line for click interaction
+    /// (e.g. tool-line expand/collapse).
     /// </summary>
     public object? Tag { get; }
 

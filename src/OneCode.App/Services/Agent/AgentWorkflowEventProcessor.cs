@@ -90,6 +90,16 @@ internal static class AgentWorkflowEventProcessor
                     // 标记发生失败，外层据此跳过 transaction.Commit()
                     hadFailures = true;
                     break;
+
+                case WorkflowErrorEvent errorEvt:
+                    // Workflow 级异常必须显式上报：此前该事件被静默丢弃，
+                    // 表现为 turns=0、"(no output)"、日志无任何错误（误导为 API 配置问题）。
+                    var exMessage = errorEvt.Exception?.Message ?? errorEvt.ToString();
+                    logger.LogError(errorEvt.Exception, failureLogMessage, failureLogArgs.Append(exMessage).ToArray());
+                    eventSink?.Invoke(new OrchestrationEvent.Error(
+                        $"Team workflow failed: {exMessage}"));
+                    hadFailures = true;
+                    break;
             }
         }
 

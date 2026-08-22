@@ -48,6 +48,7 @@ public sealed partial class WebFetchTool
     [Description("Fetch content from a URL and return it as markdown, then apply a prompt to extract specific information. " +
                  "Use this to read web pages, documentation, or API responses. HTML is converted to markdown (headings, links, lists, code blocks preserved); other content types are returned as-is. " +
                  "SSRF protection: localhost, private IPs (10.x, 172.16-31.x, 192.168.x, 169.254.x), .internal/.local/.localhost hostnames, and IPv6 loopback/link-local are hard-blocked. " +
+                 "Hostnames are resolved before the request; any private/loopback DNS record is rejected (DNS rebinding). The HTTP client still uses the system/env proxy, so local proxies are not treated as the fetch target. " +
                  "Cross-host redirects return a redirect notice instead of following automatically — call WebFetch again with the redirected URL. " +
                  "JavaScript-rendered pages: when Playwright MCP is connected, WebFetch falls back to browser_navigate + browser_snapshot; otherwise the HTTP HTML→Markdown result is returned. " +
                  "Caching: successful fetches are cached for 15 minutes (max 50MB total); identical URLs return cached content within TTL. " +
@@ -69,6 +70,12 @@ public sealed partial class WebFetchTool
         if (_cache.TryGet(url, out var cachedContent))
         {
             return ApplyPromptAndReturn(cachedContent, prompt, start);
+        }
+
+        var dnsBlock = await GetDnsRebindingBlockReasonAsync(url, ct).ConfigureAwait(false);
+        if (dnsBlock is not null)
+        {
+            return ToolResult.Error(dnsBlock);
         }
 
         try

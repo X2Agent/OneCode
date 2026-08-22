@@ -184,12 +184,29 @@ public sealed partial class MessageListView : View
     /// Replaces the live streaming preview window and restores tool/thinking
     /// expansion the user already opened so a thinking delta cannot collapse it.
     /// </summary>
+    /// <remarks>
+    /// An active tail region (inline selector / wizard) can be appended while the
+    /// run is finalizing — the plan-approval selector pops exactly then, before
+    /// EndStreaming commits the preview. The preview window extends to the list end,
+    /// so committing it would swallow the selector lines; they are detached and
+    /// re-appended so the interaction survives the final commit.
+    /// </remarks>
     public void ReplaceStreamingPreview(IEnumerable<FormattedLine>? addLines)
     {
         if (_streamingPreviewStart < 0)
             _streamingPreviewStart = _lines.Count;
 
         var start = Math.Min(_streamingPreviewStart, _lines.Count);
+        // Detach the tail region when it sits inside the preview window.
+        // A tail region above the preview start is left untouched (not our window).
+        List<LineEntry>? tailLines = null;
+        if (_tailRegionStart is >= 0 and var tailStart
+            && tailStart >= start && tailStart <= _lines.Count)
+        {
+            tailLines = _lines.GetRange(tailStart, _lines.Count - tailStart);
+            _lines.RemoveRange(tailStart, _lines.Count - tailStart);
+        }
+
         var toolSnapshots = new List<(string Name, string? Args, bool IsExpanded)>();
         bool? thinkingExpanded = null;
         for (var i = start; i < _lines.Count; i++)
@@ -210,6 +227,13 @@ public sealed partial class MessageListView : View
         }
 
         RestorePreviewExpansions(start, toolSnapshots, thinkingExpanded);
+
+        if (tailLines is not null)
+        {
+            _tailRegionStart = _lines.Count;
+            _lines.AddRange(tailLines);
+        }
+
         _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
     }
@@ -231,6 +255,118 @@ public sealed partial class MessageListView : View
                 return true;
             default:
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// 用新宽度的整体重渲结果替换全部已提交行。宽度变化（侧边栏拖拽/终端
+    /// resize）后旧行的换行不再匹配视口，必须按新宽度重渲——但行内交互
+    /// 状态不属于可重渲内容，需要先快照再恢复：
+    /// 尾部交互区域（内联选择器/向导）原样回贴、流式预览窗口由调用方按新
+    /// 宽度重建、工具/思考展开状态按出现顺序重放、滚动位置按原偏移钳制。
+    /// </summary>
+    internal void RerenderAll(
+        Func<IReadOnlyList<FormattedLine>> rebuildCommitted,
+        IReadOnlyList<FormattedLine>? previewLines)
+    {
+        // —— 快照：展开状态与尾部区域必须跨重建存活 ——
+        var autoScroll = _scroll.AutoScroll;
+        var previousOffset = _scroll.ScrollOffset;
+        var tailLines = _tailRegionStart is >= 0 and var tailStart
+            ? _lines.GetRange(tailStart, _lines.Count - tailStart)
+            : null;
+        var toolStates = new List<(string Name, string? Args, bool IsExpanded)>();
+        var thinkingStates = new List<(string Content, bool IsExpanded)>();
+        foreach (var entry in _lines)
+        {
+            switch (entry.Tag)
+            {
+                case ToolLineTag tool:
+                    toolStates.Add((tool.Name, tool.Args, tool.IsExpanded));
+                    break;
+                case ThinkingLineTag thinking:
+                    thinkingStates.Add((thinking.Content, thinking.IsExpanded));
+                    break;
+            }
+        }
+
+        // —— 重建：已提交行 → 流式预览窗口 → 尾部交互区域 ——
+        _lines.Clear();
+        _tailRegionStart = -1;
+        _streamingPreviewStart = -1;
+        foreach (var line in rebuildCommitted())
+            _lines.Add(new LineEntry(line.FullText, line.Color, line.Segments, line.Bg, line.Tag));
+
+        if (previewLines is not null)
+        {
+            _streamingPreviewStart = _lines.Count;
+            foreach (var line in previewLines)
+                _lines.Add(new LineEntry(line.FullText, line.Color, line.Segments, line.Bg, line.Tag));
+        }
+
+        if (tailLines is not null)
+        {
+            _tailRegionStart = _lines.Count;
+            _lines.AddRange(tailLines);
+        }
+
+        ReapplyExpansionStates(toolStates, thinkingStates);
+
+        // —— 滚动恢复：跟随底部则贴底，否则钳制原偏移 ——
+        if (autoScroll)
+            _scroll.RequestScrollToBottomIfAutoScroll();
+        else
+            _scroll.RestoreOffset(previousOffset);
+
+        // 行索引整体变化，搜索高亮随之失效。
+        SetSearchHighlight(null, null);
+        SetNeedsDraw();
+    }
+
+    /// <summary>
+    /// 按出现顺序将快照的展开状态重放到重渲后的行上。重渲会把工具行还原为
+    /// 折叠态（渲染器默认），快照里用户已展开的行需要重新展开——展开细节行
+    /// 由 tag 源数据按当前宽度重建（<see cref="ToggleToolExpansion"/>）。
+    /// </summary>
+    private void ReapplyExpansionStates(
+        IReadOnlyList<(string Name, string? Args, bool IsExpanded)> toolStates,
+        IReadOnlyList<(string Content, bool IsExpanded)> thinkingStates)
+    {
+        var toolIdx = 0;
+        var thinkingIdx = 0;
+        for (var i = 0; i < _lines.Count; i++)
+        {
+            switch (_lines[i].Tag)
+            {
+                case ToolLineTag tool:
+                    if (toolIdx < toolStates.Count)
+                    {
+                        var want = toolStates[toolIdx++];
+                        if (want.IsExpanded && !tool.IsExpanded
+                            && string.Equals(want.Name, tool.Name, StringComparison.Ordinal))
+                        {
+                            ToggleToolExpansion(i, tool);
+                        }
+                    }
+                    i += CountToolDetailLinesAfter(i);
+                    break;
+                case ThinkingLineTag thinking:
+                    if (thinkingIdx < thinkingStates.Count)
+                    {
+                        var want = thinkingStates[thinkingIdx++];
+                        if (want.IsExpanded && !thinking.IsExpanded
+                            && string.Equals(want.Content, thinking.Content, StringComparison.Ordinal))
+                        {
+                            InsertThinkingDetails(i, thinking with { IsExpanded = true });
+                        }
+                        else if (!want.IsExpanded && thinking.IsExpanded)
+                        {
+                            ToggleThinkingExpansion(i, thinking);
+                        }
+                    }
+                    i += CountThinkingDetailLinesAfter(i);
+                    break;
+            }
         }
     }
 
@@ -320,20 +456,12 @@ public sealed partial class MessageListView : View
             return true;
         }
 
-        // Tool line click-to-expand/collapse OR code-block copy icon click
+        // Tool line click-to-expand/collapse
         if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
         {
             var clickedLineIdx = mouse.Position.Value.Y + _scroll.ScrollOffset;
             if (clickedLineIdx >= 0 && clickedLineIdx < _lines.Count)
             {
-                // Code block copy: clicking the header line of a fenced code
-                // block copies the code content to the clipboard.
-                if (_lines[clickedLineIdx].Tag is CodeBlockCopyTag codeTag)
-                {
-                    if (_clipboard is not null)
-                        _ = _clipboard.TryCopyTextAsync(codeTag.Code);
-                    return true;
-                }
                 if (_lines[clickedLineIdx].Tag is ToolLineTag tag)
                 {
                     ToggleToolExpansion(clickedLineIdx, tag);

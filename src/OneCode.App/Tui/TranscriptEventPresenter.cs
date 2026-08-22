@@ -46,10 +46,9 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                     $"正在协调 {from} 与 {to}…"));
                 return true;
 
-            case TuiAgentMessage { AgentName: var agent }:
-                transcript.UpdateModeProgress(new TuiModeProgress(
-                    WorkingMode.Team,
-                    $"{agent} 已完成阶段工作…"));
+            case TuiAgentMessage { AgentName: var agent, Content: var content }:
+                // TEAM 讨论内容直达主对话（折叠预览块），不再压缩成一行进度。
+                transcript.AddTeamSpeech(agent, content);
                 return true;
 
             case TuiTeamProgress { Header: var header }:
@@ -71,6 +70,17 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
 
             case TuiCompactSuggested { Message: var message }:
                 transcript.AddStreamingNotice($"💡 {message}", TuiPalette.Warning);
+                return true;
+
+            case TuiGoalBudgetWarning warning:
+                // Fix-6：GOAL 预算预警横幅——Early(70%) 黄色，Late(90%) 橙色。
+                var color = warning.Level == OneCode.Core.Goals.GoalBudgetWarningLevel.Late
+                    ? TuiPalette.AgentOrange
+                    : TuiPalette.AgentYellow;
+                var label = warning.Level == OneCode.Core.Goals.GoalBudgetWarningLevel.Late ? "橙色预警" : "黄色预警";
+                transcript.AddStreamingNotice(
+                    $"⚠ GOAL 预算{label}：已消耗 attempts={warning.TotalAttempts}, tokens={warning.TotalTokens}, cost=${warning.EstimatedCostUsd:0.####}",
+                    color);
                 return true;
 
             default:

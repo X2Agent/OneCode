@@ -43,7 +43,9 @@ public sealed record GoalStepSnapshot(
     IReadOnlyList<string> AllowedPaths,
     bool RequiresBuild,
     bool RequiresTests,
-    bool Optional);
+    bool Optional,
+    // Fix-5：子目标分解失败回退直执行，或深度上限后未再拆分即执行时置位，供 TUI 卡片与事后审计。
+    bool DecompositionFallback = false);
 
 public sealed record GoalStepExecutionEvidence(
     int GoalId,
@@ -67,7 +69,13 @@ public sealed record GoalBudgetSnapshot(
     long TotalInputTokens,
     long TotalOutputTokens,
     decimal EstimatedCostUsd,
-    DateTimeOffset StartedAt);
+    DateTimeOffset StartedAt,
+    // Fix-2/N-02：Bind 时记录一次的进程级成本基线；resume 沿用持久化值，禁止二次减 EstimatedCostUsd。0 表示尚未建立。
+    decimal CostBaselineUsd = 0m,
+    // Fix-7：仅累计运行区间的墙钟（Paused/离线时间不计入）。零值且无 LastActivityAt 时回退 UtcNow-StartedAt 兼容旧快照。
+    TimeSpan AccumulatedElapsed = default,
+    // 上次活动时间戳，用于增量累计 AccumulatedElapsed。
+    DateTimeOffset? LastActivityAt = null);
 
 public sealed record GoalStepReceipt(
     string OperationId,

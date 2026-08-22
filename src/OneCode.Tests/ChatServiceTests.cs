@@ -16,6 +16,7 @@ using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
+using OneCode.Core.PlanMode;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 using OneCode.Core.Tasks;
@@ -619,6 +620,114 @@ public sealed class ChatServiceTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    /// <summary>
+    /// Plan-mode interactive run bridge: SubmitPlan (executed inside the agent run)
+    /// persists FinalizingPlanRun; when the run stream completes, the engine must
+    /// transition the workflow to AwaitingApproval and publish it — this is the
+    /// event that pops the approval InlineSelector in the TUI.
+    /// </summary>
+    [Fact]
+    public async Task StreamQueryAsync_PlanRunWithSubmittedPlan_TransitionsToAwaitingApprovalOnCompletion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "onecode-plan-bridge-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new PlanAggregateStore(root);
+            var workflowService = new PlanWorkflowApplicationService(store);
+            var publisher = new PlanCardPublisher();
+            var publishedStates = new List<PlanWorkflowState>();
+            publisher.WorkflowChanged += workflow => publishedStates.Add(workflow.State);
+
+            var conversation = new Conversation { Id = SessionId.NewId(), WorkingDirectory = root };
+            var sessionManager = Substitute.For<ISessionManager>();
+            sessionManager.ForegroundConversation.Returns(conversation);
+            sessionManager.WorkingDirectory.Returns(root);
+            sessionManager.GetChatHistory(conversation.Id).Returns(new List<ChatMessage>());
+
+            var planMode = Substitute.For<IPlanModeService>();
+            planMode.IsInPlanMode.Returns(true);
+            var createPlanTool = new CreatePlanTool(planMode, publisher, sessionManager, workflowService, store);
+
+            string? capturedRunId = null;
+            bool? submitFailed = null;
+            var runner = Substitute.For<IMainAgentRunner>();
+            runner.RunStreamingAsync(
+                    Arg.Any<MainAgentRunOptions>(),
+                    Arg.Do<ChannelWriter<object>>(writer =>
+                    {
+                        writer.TryWrite(new AgentResponseUpdate { Contents = { new TextContent("计划卡片已就绪") } });
+                        writer.Complete();
+                    }),
+                    Arg.Any<CancellationToken>())
+                .Returns(async _ =>
+                {
+                    // Simulate the LLM calling SubmitPlan inside the agent run —
+                    // OneCodeAgentRunContext.CurrentRunId must be set by the engine here.
+                    capturedRunId = OneCodeAgentRunContext.CurrentRunId;
+                    var result = await createPlanTool.SubmitPlanAsync(CreatePlanBridgeMarkdown(), [CreatePlanBridgeStep()]);
+                    submitFailed = result.IsError;
+                    return new MainAgentRunResult(Text: "done", TotalInputTokens: 0, TotalOutputTokens: 0, TurnCount: 1);
+                });
+
+            var toolMetadata = new ToolMetadataRegistry();
+            var toolCatalog = new ToolCatalog(new Lazy<List<AIFunction>>(() => []), toolMetadata, mcpConnectionManager: null);
+            var configManager = TestConfigManager.Create();
+            configManager.Current.Returns(ConfigSnapshot.FromEffective(new AppSettings()));
+            var sut = new ChatService(
+                Substitute.For<ILogger<ChatService>>(),
+                runner,
+                toolCatalog,
+                Substitute.For<IHookExecutionService>(),
+                new ChatSessionDependencies(
+                    sessionManager,
+                    new SessionToolSetManager(toolCatalog, toolMetadata),
+                    new ToolCapabilityResolver(toolCatalog),
+                    configManager,
+                    PlanWorkflow: workflowService,
+                    PlanCardPublisher: publisher),
+                new ChatObservabilityDependencies(
+                    Substitute.For<ITokenUsageTracker>(),
+                    new TokenBreakdownEstimator(TestSupport.TestTokenEstimators.Default),
+                    Substitute.For<INotifierService>()));
+
+            await foreach (var _ in sut.StreamQueryAsync(
+                "请规划重构方案", "system", "model1",
+                ct: TestContext.Current.CancellationToken,
+                workingMode: WorkingMode.Plan))
+            {
+            }
+
+            capturedRunId.Should().NotBeNull("SubmitPlan must execute inside the engine's activation context");
+            submitFailed.Should().BeFalse("SubmitPlan should succeed in plan mode with a valid plan");
+
+            var workflow = await workflowService.GetAsync(conversation.Id, TestContext.Current.CancellationToken);
+            workflow!.State.Should().Be(PlanWorkflowState.AwaitingApproval,
+                "run completion must open approval (FinalizingPlanRun → AwaitingApproval)");
+            publishedStates.Should().Contain(PlanWorkflowState.AwaitingApproval,
+                "the AwaitingApproval workflow must be published so the TUI pops the approval selector");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static string CreatePlanBridgeMarkdown() =>
+        "# Plan Bridge Workflow\n\n## Context\nUpdate src/OneCode.App/Tools/CreatePlanTool.cs using the persisted workflow.\n\n## Approach\nStore immutable revisions and execute approved structured steps.\n\n## Verification\nRun dotnet build and dotnet test.";
+
+    private static PlanStepDto CreatePlanBridgeStep() => new()
+    {
+        Id = "bridge-workflow",
+        Title = "Bridge workflow",
+        Description = "Bridge the workflow and immutable revision.",
+        Files = ["src/OneCode.App/Tools/CreatePlanTool.cs"],
+        AcceptanceCriteria = ["Workflow restores after restart."],
+        DependsOn = [],
+        Risk = "Low",
+    };
 
     // Helpers
 

@@ -2,62 +2,15 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Services.PlanMode;
-using OneCode.App.Tools;
 using OneCode.Core.Lsp;
 using OneCode.Core.Product;
 using OneCode.Core.Tasks;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Mcp;
-using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Sockets;
 
 namespace OneCode.App;
-
-internal static partial class SsrfSafeConnect
-{
-    /// <summary>
-    /// DNS rebinding protection: inspects the actual IP address being connected to
-    /// and blocks private/loopback/link-local addresses. This catches cases where
-    /// a hostname passes <see cref="WebFetchTool.ValidateUrl"/> but resolves to a
-    /// private IP at connection time.
-    /// </summary>
-    public static async ValueTask<Stream> SsrfSafeConnectAsync(
-        SocketsHttpConnectionContext context,
-        CancellationToken cancellationToken)
-    {
-        // Resolve all IP addresses for the host
-        var addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken)
-            .ConfigureAwait(false);
-
-        // Filter out private/local addresses
-        foreach (var address in addresses)
-        {
-            if (WebFetchTool.IsPrivateOrLocalAddressPublic(address))
-                throw new HttpRequestException(
-                    $"SSRF protection: refusing to connect to private address {address} for host '{context.DnsEndPoint.Host}'");
-        }
-
-        // Connect to the first allowed address
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp)
-        {
-            NoDelay = true,
-        };
-
-        try
-        {
-            await socket.ConnectAsync(addresses, context.DnsEndPoint.Port, cancellationToken)
-                .ConfigureAwait(false);
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
-    }
-}
 
 public static partial class ServiceCollectionExtensions
 {
@@ -131,22 +84,8 @@ public static partial class ServiceCollectionExtensions
         })
         .ConfigurePrimaryHttpMessageHandler(() =>
         {
-            // Use SocketsHttpHandler to enable ConnectCallback for DNS rebinding protection.
-            // DNS rebinding: a hostname resolves to a public IP initially (passing ValidateUrl),
-            // but the actual TCP connection resolves to a private IP. ConnectCallback inspects
-            // the real IP being connected to and blocks private addresses.
-            var handler = new SocketsHttpHandler
-            {
-                AllowAutoRedirect = false,
-                ConnectCallback = SsrfSafeConnect.SsrfSafeConnectAsync,
-            };
-            // Apply proxy settings to SocketsHttpHandler (same properties as HttpClientHandler)
-            var proxyUrl = OneCode.Infrastructure.ProxyConfigService.GetProxyUrl();
-            if (!string.IsNullOrWhiteSpace(proxyUrl))
-            {
-                handler.Proxy = OneCode.Infrastructure.ProxyConfigService.CreateProxy(proxyUrl);
-                handler.UseProxy = true;
-            }
+            var handler = CreateProxyAwareHandler();
+            handler.AllowAutoRedirect = false;
             return handler;
         })
         .AddHttpMessageHandler<VcrDelegatingHandler>();

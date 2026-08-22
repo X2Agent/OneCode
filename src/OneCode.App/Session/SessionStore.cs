@@ -108,10 +108,10 @@ public sealed class SessionStore : ISessionStore
         }
     }
 
-    public async Task<IReadOnlyList<Conversation>> ListAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default)
     {
         var sessionFiles = Directory.GetFiles(_sessionsDir, "*.jsonl");
-        List<Conversation> conversations = [];
+        List<ConversationSummary> summaries = [];
 
         foreach (var file in sessionFiles)
         {
@@ -128,18 +128,19 @@ public sealed class SessionStore : ISessionStore
                 var header = TryParseHeader(firstLine);
                 if (header != null)
                 {
-                    conversations.Add(header.ToConversation());
+                    summaries.Add(header.ToSummary());
                 }
                 else
                 {
+                    // Legacy format without a session_header line.
                     var stat = new FileInfo(file);
-                    conversations.Add(new Conversation
-                    {
-                        Id = SessionId.TryParse(sessionId) ?? SessionId.NewId(),
-                        Name = Truncate(ExtractField(firstLine, "first_prompt") ?? "Untitled", 60),
-                        LastActivityAt = stat.LastWriteTime,
-                        CreatedAt = stat.CreationTime,
-                    });
+                    summaries.Add(new ConversationSummary(
+                        Id: SessionId.TryParse(sessionId) ?? SessionId.NewId(),
+                        Name: Truncate(ExtractField(firstLine, "first_prompt") ?? "Untitled", 60),
+                        Model: string.Empty,
+                        MessageCount: 0,
+                        CreatedAt: stat.CreationTime,
+                        LastActivityAt: stat.LastWriteTime));
                 }
             }
             catch (Exception ex)
@@ -148,49 +149,7 @@ public sealed class SessionStore : ISessionStore
             }
         }
 
-        return conversations;
-    }
-
-    public async Task<IReadOnlyList<SessionSummary>> ListSessionsAsync(
-        int? limit = null,
-        int? offset = null,
-        CancellationToken ct = default)
-    {
-        var sessionFiles = Directory.GetFiles(_sessionsDir, "*.jsonl");
-        List<SessionCandidate> candidates = [];
-
-        foreach (var file in sessionFiles)
-        {
-            var sessionId = Path.GetFileNameWithoutExtension(file);
-            if (!SessionId.TryParse(sessionId).HasValue)
-                continue;
-
-            var stat = new FileInfo(file);
-            candidates.Add(new SessionCandidate(sessionId, file, stat.LastWriteTime, stat.Length));
-        }
-
-        candidates.Sort((a, b) => b.LastModified.CompareTo(a.LastModified));
-
-        List<SessionSummary> sessions = [];
-        var skip = offset ?? 0;
-        var limitVal = limit ?? int.MaxValue;
-        var read = 0;
-        var skipped = 0;
-
-        foreach (var candidate in candidates)
-        {
-            if (skipped < skip) { skipped++; continue; }
-            if (read >= limitVal) break;
-
-            var summary = await ReadSessionSummaryAsync(candidate.FilePath, ct);
-            if (summary != null)
-            {
-                sessions.Add(summary);
-                read++;
-            }
-        }
-
-        return sessions;
+        return summaries;
     }
 
     public async Task<SessionResume?> LoadForResumeAsync(SessionId sessionId, CancellationToken ct = default)
@@ -329,42 +288,6 @@ public sealed class SessionStore : ISessionStore
         return null;
     }
 
-    private async Task<SessionSummary?> ReadSessionSummaryAsync(string file, CancellationToken ct)
-    {
-        try
-        {
-            var stat = new FileInfo(file);
-            var sessionId = SessionId.TryParse(Path.GetFileNameWithoutExtension(file)) ?? SessionId.NewId();
-
-            var firstLine = await ReadFirstLineAsync(file, ct);
-            if (string.IsNullOrEmpty(firstLine))
-                return null;
-
-            if (firstLine.Contains("\"is_sidechain\":true", StringComparison.Ordinal))
-                return null;
-
-            var lastLines = await ReadLastLinesAsync(file, 10, ct);
-            var title = ExtractField(lastLines, "custom_title")
-                ?? ExtractField(lastLines, "ai_title")
-                ?? ExtractField(firstLine, "first_prompt");
-
-            if (string.IsNullOrEmpty(title))
-                return null;
-
-            return new SessionSummary(
-                Id: sessionId,
-                Title: Truncate(title, 80),
-                MessageCount: 0,
-                LastActivityAt: stat.LastWriteTime,
-                FirstMessage: ExtractField(firstLine, "first_prompt"));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to read session summary from {File}", file);
-            return null;
-        }
-    }
-
     private string? ExtractField(string line, string fieldName)
     {
         try
@@ -392,25 +315,6 @@ public sealed class SessionStore : ISessionStore
             FileShare.ReadWrite);
         using var reader = new StreamReader(stream);
         return await reader.ReadLineAsync(ct);
-    }
-
-    private static async Task<string> ReadLastLinesAsync(string file, int count, CancellationToken ct)
-    {
-        using var stream = new FileStream(
-            file,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite);
-        List<string> lines = [];
-        using var reader = new StreamReader(stream);
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct)) != null)
-        {
-            lines.Add(line);
-            if (lines.Count > count)
-                lines.RemoveAt(0);
-        }
-        return string.Join("\n", lines);
     }
 
     private static async Task<List<string>> ReadAllLinesAsync(string file, CancellationToken ct)
@@ -448,12 +352,6 @@ public enum InterruptionState
     InterruptedTurn
 }
 
-internal sealed record SessionCandidate(
-    string SessionId,
-    string FilePath,
-    DateTimeOffset LastModified,
-    long Size);
-
 internal sealed record SessionHeaderRecord(
     SessionId Id,
     string Name,
@@ -468,6 +366,41 @@ internal sealed record SessionHeaderRecord(
     Dictionary<string, object>? Metadata)
 {
     public string Type { get; init; } = "session_header";
+
+    /// <summary>
+    /// Header-level summary for listing. <see cref="MessageCount"/> is the count
+    /// persisted at the last save — no message lines are read.
+    /// </summary>
+    public ConversationSummary ToSummary() => new(
+        Id,
+        Name,
+        Model,
+        MessageCount,
+        CreatedAt,
+        LastActivityAt,
+        Mode: NormalizeMode(Metadata),
+        TotalUsage: TotalUsage);
+
+    /// <summary>
+    /// Metadata values deserialize as <see cref="JsonElement"/> boxes; the legacy
+    /// value "normal" maps to "build".
+    /// </summary>
+    private static string? NormalizeMode(Dictionary<string, object>? metadata)
+    {
+        if (metadata is null || !metadata.TryGetValue("mode", out var value))
+            return null;
+
+        var mode = value switch
+        {
+            string s => s,
+            JsonElement { ValueKind: JsonValueKind.String } je => je.GetString(),
+            _ => null,
+        };
+        if (string.IsNullOrEmpty(mode))
+            return null;
+
+        return mode == "normal" ? "build" : mode.ToLowerInvariant();
+    }
 
     public Conversation ToConversation()
     {

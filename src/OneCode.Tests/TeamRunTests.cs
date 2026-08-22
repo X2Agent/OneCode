@@ -245,6 +245,80 @@ public sealed class TeamRequirementServiceTests
             QualityGateKind.AcceptanceCriteria,
         ]);
     }
+
+    [Fact]
+    public async Task CreateImplementationPlan_ReadOnlyTeam_CreatesDiscussionPlanWithoutBuildGates()
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+        var analysis = await sut.AnalyzeAsync(
+            """
+            评审当前仓库的架构分层是否合理并给出改进建议
+            Clarification response:
+            无补充，直接评审。
+            """,
+            TestContext.Current.CancellationToken);
+        var config = new TeamConfig(
+            "code-review",
+            "(builtin)",
+            [
+                new TeamMember("code-review-reviewer", "reviewer", null,
+                    ["Read", "Grep", "Glob", "LS", "SymbolSearch"]),
+                new TeamMember("code-review-architect", "architect", null,
+                    ["Read", "Grep", "Glob", "LS", "SymbolSearch"]),
+            ],
+            MaxTurns: 15,
+            Mode: TeamOrchestrationMode.GroupChat);
+
+        var plan = sut.CreateImplementationPlan(analysis, config);
+
+        plan.Tasks.Should().HaveCount(2);
+        plan.Tasks.Select(task => task.Id).Should().Equal("analysis", "review-synthesis");
+        plan.Tasks.Should().OnlyContain(task => task.ToolPolicy == TeamToolPolicy.ReadOnly);
+        plan.Tasks.Should().NotContain(task => task.Title.StartsWith("Implement:"));
+        plan.Tasks.Single(task => task.Id == "review-synthesis")
+            .AssigneeRole.Should().Be("reviewer");
+        plan.RequiredGates
+            .Where(gate => gate.Kind is QualityGateKind.Build or QualityGateKind.UnitTest)
+            .Should().BeEmpty();
+        plan.RequiredGates.Should().Contain(gate => gate.Kind == QualityGateKind.AcceptanceCriteria);
+    }
+
+    [Fact]
+    public async Task CreateImplementationPlan_ReadOnlyTeamWithWebAccess_IncludesWebTools()
+    {
+        var generator = Substitute.For<IClarificationQuestionGenerator>();
+        var sut = new TeamRequirementService(
+            new OneCode.App.Services.BuildMode.RequirementAssessmentService(),
+            generator);
+        var analysis = await sut.AnalyzeAsync(
+            """
+            对比 A 与 B 两个框架的取舍
+            Clarification response:
+            无补充，直接对比。
+            """,
+            TestContext.Current.CancellationToken);
+        var config = new TeamConfig(
+            "research",
+            "(builtin)",
+            [
+                new TeamMember("research-planner", "planner", null,
+                    ["Read", "WebSearch", "WebFetch"]),
+            ],
+            MaxTurns: 25,
+            Mode: TeamOrchestrationMode.GroupChat);
+
+        var plan = sut.CreateImplementationPlan(analysis, config);
+
+        plan.Tasks.Should().HaveCount(2);
+        plan.Tasks.Should().OnlyContain(task =>
+            task.RequiredTools!.Contains("WebSearch") && task.RequiredTools.Contains("WebFetch"));
+        plan.RequiredGates
+            .Where(gate => gate.Kind is QualityGateKind.Build or QualityGateKind.UnitTest)
+            .Should().BeEmpty();
+    }
 }
 
 public sealed class TeamQualityGateRunnerTests

@@ -1,31 +1,31 @@
-using OneCode.App.Services.PlanMode;
-using OneCode.App.Tui;
 using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Commands;
 
 /// <summary>
-/// /permissions — view or change the tool-execution permission mode.
-/// Updates <see cref="IPermissionModeProvider"/> (what the agent pipeline reads),
-/// persists to settings, keeps plan-mode state in sync via <see cref="IPlanModeService"/>,
-/// and syncs <see cref="WorkingModeController"/> so the UI reflects the runtime mode.
+/// /permissions — view or change the Build-mode tool-execution permission level.
+///
+/// 职责收拢后只做两件事：
+/// 1. 持久化到 settings（ConfigManager）；
+/// 2. 推送运行时 <see cref="IPermissionModeProvider"/>。
+///
+/// 工作模式（PLAN/TEAM/GOAL）与权限的联动由 <see cref="Services.WorkingModeBridge"/>
+/// 统一桥接——本命令不再操作 WorkingModeController / IPlanModeService。
+/// 此处设置的 Auto/DontAsk/Bubble/BypassPermissions 属于 CLI 高级档位，
+/// WorkingModeBridge 会保护它们不被后续模式切换静默覆盖。
 /// </summary>
 public sealed class PermissionsCommand(
-    IAppStateAccessor appState,
     IPermissionModeProvider modeProvider,
-    IConfigManager config,
-    IPlanModeService planMode,
-    WorkingModeController modeController) : Command
+    IConfigManager config) : Command
 {
     public override string Name => "permissions";
-    public override string Description => "Manage tool execution permission modes (how strictly to review tool calls)";
+    public override string Description => "Manage tool execution permission levels (how strictly to review tool calls)";
     public override CommandCategory Category => CommandCategory.Builtin;
     public override string? ArgumentHint => "[mode]";
 
     private static new readonly Dictionary<string, PermissionMode> Aliases = new(StringComparer.OrdinalIgnoreCase)
     {
         ["default"] = PermissionMode.Default,
-        ["plan"] = PermissionMode.Plan,
         ["auto"] = PermissionMode.Auto,
         ["acceptedits"] = PermissionMode.AcceptEdits,
         ["accept-edits"] = PermissionMode.AcceptEdits,
@@ -41,7 +41,7 @@ public sealed class PermissionsCommand(
     };
 
     private const string ValidModesHelp =
-        "default, plan, auto, acceptEdits, bypassPermissions, dontAsk, bubble";
+        "default, auto, acceptEdits, bypassPermissions, dontAsk, bubble";
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
@@ -55,36 +55,14 @@ public sealed class PermissionsCommand(
             return CommandResult.Error(
                 $"Unknown permission mode: '{args[0]}'\nValid: {ValidModesHelp}");
 
-        // Set the requested mode before changing the UI controller. WorkingModeBridge
-        // observes that event and must see the same authoritative permission state.
         var result = await config.ApplyAsync(
             ConfigPatch.Set(ConfigScope.User, OneCode.Core.Constants.ConfigKeys.PermissionMode, nm.ToString()),
             ct).ConfigureAwait(false);
         if (!result.Saved)
             return CommandResult.Error(result.Error ?? "Failed to save permission mode.");
 
-        SyncPlanModeState(nm);
         modeProvider.SetCurrentMode(nm);
 
-        // Sync WorkingModeController so the UI reflects the permission mode.
-        if (nm == PermissionMode.Plan)
-            modeController.Mode = WorkingMode.Plan;
-        else if (modeController.Mode == WorkingMode.Plan)
-            modeController.Mode = WorkingMode.Build;
-
-        appState.Update(s => s with
-        {
-            ToolPermissionContext = s.ToolPermissionContext with { Mode = nm }
-        });
-
         return CommandResult.Text($"Permission mode changed to: {nm}");
-    }
-
-    private void SyncPlanModeState(PermissionMode mode)
-    {
-        if (mode == PermissionMode.Plan)
-            planMode.EnterPlanMode();
-        else if (planMode.IsInPlanMode)
-            planMode.ExitPlanMode();
     }
 }

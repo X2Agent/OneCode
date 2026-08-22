@@ -3,13 +3,14 @@ using OneCode.Core.Keybindings;
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Main REPL shell — three-layer layout:
+/// Main REPL shell — three-layer layout with an optional right plan sidebar:
 ///
 /// <code>
-/// │                                                        │
-/// │  Chat — sole main view (scrollable)                    │  Dim.Fill()
-/// │  NO sidebar, NO bottom panel (design-spec §2)          │
-/// │                                                        │
+/// │                                        │               │
+/// │  Chat — sole main view (scrollable)    │  PlanSidebar  │  Dim.Fill()
+/// │  (sidebar auto-shrinks the chat width  │  (auto, 42col │  when a plan
+/// │   when a plan exists; Ctrl+G toggles)  │   Ctrl+G)     │   exists)
+/// │                                        │               │
 /// │  (StatusBarTopGap — blank row)                         │  1 row
 /// ├─ AgentStatusBar ───────────────────────────────────────┤  1 row
 /// │  ⠋ 思考中 · Opus · $0.04 · Sandbox              BUILD │
@@ -34,6 +35,7 @@ public sealed partial class ReplShell : View
 
     private readonly View _contentZone;
     private readonly ChatTranscriptView _transcript;
+    private readonly PlanSidebarView _planSidebar;
     private readonly FrameView _completionOverlay;
     private bool _completionVisible;
 
@@ -125,7 +127,7 @@ public sealed partial class ReplShell : View
         // Activity transitions and model identity share one authoritative runtime component.
         _transcript.ActivityChanged += activity => _agentStatusBar.SetActivity(activity);
 
-        // content zone — full width, no separate thinking sidebar
+        // content zone — chat column plus the optional right plan sidebar
         _contentZone = new View
         {
             CanFocus = false,
@@ -141,6 +143,21 @@ public sealed partial class ReplShell : View
         _transcript.X = 1; _transcript.Y = 0;
         _transcript.Width = Dim.Fill() - 1; _transcript.Height = Dim.Fill();
 
+        // Plan sidebar — right-docked, hidden until a plan exists. When visible
+        // it shrinks the transcript width (ApplySidebarLayout). Ctrl+G toggles;
+        // the separator line is a mouse drag handle: during the drag only layout
+        // is refreshed (OnSidebarWidthChanged), the plan content and conversation
+        // list re-render on release (OnSidebarDragEnded).
+        _planSidebar = new PlanSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
+        {
+            Y = 0,
+            Height = Dim.Fill(),
+            Visible = false,
+        };
+        _planSidebar.X = Pos.AnchorEnd(_planSidebar.CurrentWidth);
+        _contentZone.Add(_planSidebar);
+        _chatInput.TogglePlanPanelRequested += TogglePlanSidebar;
+
         // overlay host (full-screen, on top)
         _overlayHost = new OverlayHost(this)
         {
@@ -155,9 +172,8 @@ public sealed partial class ReplShell : View
         _completionOverlay = _chatInput.CompletionFrame;
         _chatInput.CompletionStateChanged += OnCompletionStateChanged;
 
-        // assembly — NO sidebar, NO welcome view
-        // Thinking is rendered in ChatTranscriptView as one clickable summary.
-        // Do not add a top ThinkingPanel: it would duplicate the conversation thinking block.
+        // assembly — no welcome view; thinking renders as a clickable
+        // summary inside ChatTranscriptView, not a separate top panel.
         Add(_contentZone, _agentStatusBar, _chatInput, _sessionContextBar, _overlayHost);
 
         Width = Dim.Fill();
@@ -176,8 +192,64 @@ public sealed partial class ReplShell : View
     }
 
     // Plan card interaction (design-spec §4.2) lives in ReplShell.PlanCard.cs:
-    // PendingApproval 阶段弹出 InlineSelector，自动接管键盘（SetInteractionSuspended）。
-    // Draft 阶段仅展示卡片不弹决策面板。
+    // 计划内容渲染在右侧 PlanSidebarView；PendingApproval 阶段弹出 InlineSelector
+    // 决策面板（在对话流内），自动接管键盘（SetInteractionSuspended）。
+
+    /// <summary>Whether the right plan sidebar is currently visible.</summary>
+    internal bool IsPlanSidebarVisible => _planSidebar.Visible;
+
+    /// <summary>
+    /// Toggles the plan sidebar (Ctrl+G). Only meaningful while a plan exists —
+    /// lets the user reclaim full chat width without losing the plan content.
+    /// </summary>
+    internal void TogglePlanSidebar()
+    {
+        if (_activePlan is null)
+            return;
+        SetPlanSidebarVisible(!_planSidebar.Visible);
+    }
+
+    private void SetPlanSidebarVisible(bool visible)
+    {
+        if (_planSidebar.Visible == visible)
+            return;
+        _planSidebar.Visible = visible;
+        ApplySidebarLayout();
+        // 对话列宽度变化：旧换行不再匹配新视口，请求按新宽度整体重渲。
+        _transcript.RequestContentRerender();
+    }
+
+    /// <summary>
+    /// Sidebar separator drag callback (each width change during the drag) —
+    /// reflow the chat column only. Re-rendering content per mouse-move is
+    /// wasted work mid-drag (and resets the sidebar scroll position).
+    /// </summary>
+    private void OnSidebarWidthChanged() => ApplySidebarLayout();
+
+    /// <summary>
+    /// Drag release callback — re-render the plan content and the conversation
+    /// list once at the final width (line wrapping depends on it).
+    /// </summary>
+    private void OnSidebarDragEnded()
+    {
+        RenderActivePlanCard();
+        _transcript.RequestContentRerender();
+    }
+
+    /// <summary>
+    /// Recomputes the transcript width so the chat column yields space to the
+    /// sidebar when visible and reclaims it (minus the 1-col gutter) when not.
+    /// </summary>
+    private void ApplySidebarLayout()
+    {
+        _transcript.Width = _planSidebar.Visible
+            ? Dim.Fill() - _planSidebar.CurrentWidth - 1
+            : Dim.Fill() - 1;
+        _transcript.SetNeedsLayout();
+        _transcript.NotifyLayoutChanged();
+        SetNeedsLayout();
+        SetNeedsDraw();
+    }
 
     /// <summary>
     /// Detects terminal resize by comparing the current viewport with the last
@@ -194,8 +266,8 @@ public sealed partial class ReplShell : View
             // only sets a flag (does not execute layout synchronously), so
             // this is safe to call during the draw pass. The actual relayout
             // happens on the next main-loop iteration.
+            // (Plan sidebar content is fixed-width and does not re-render on resize.)
             RefreshLayout();
-            RenderActivePlanCard();
         }
         _lastShellWidth = vp.Width;
         _lastShellHeight = vp.Height;
@@ -236,6 +308,8 @@ public sealed partial class ReplShell : View
         // ChatTranscriptView detects resize on draw; nudge so welcome re-wraps to the new width.
         _transcript.NotifyLayoutChanged();
         _transcript.SetNeedsDraw();
+        // 终端宽度变化同样使旧换行失效，请求对话内容整体重渲。
+        _transcript.RequestContentRerender();
 
         if (_overlayHost.IsOverlayVisible)
             _overlayHost.RepositionAll();

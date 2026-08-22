@@ -436,11 +436,7 @@ public sealed class OrchestrationStreamService(
                         WorkingMode.Team,
                         $"正在协调 {coordination.FromName} 与 {coordination.ToName}…");
                     break;
-                case TuiAgentMessage message:
-                    yield return new TuiModeProgress(
-                        WorkingMode.Team,
-                        $"{message.AgentName} 已完成阶段工作…");
-                    break;
+
                 case TuiTextDelta:
                     break;
                 case TuiTeamProgress progress:

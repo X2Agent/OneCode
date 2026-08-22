@@ -39,7 +39,24 @@ public static class SafetyInvariantMiddleware
                     return ToolResult.Error(result.Reason ?? "[SAFETY] Operation blocked by safety invariant.");
             }
 
-            return await next(ctx, ct).ConfigureAwait(false);
+            try
+            {
+                return await next(ctx, ct).ConfigureAwait(false);
+            }
+            catch (ArgumentException ex)
+            {
+                // AIFunctionFactory 在参数绑定（marshalling）阶段抛出 ArgumentException
+                // （如缺少必需参数、参数类型不匹配）。本中间件是管线最外层，此处兜底把
+                // 错误作为 ToolResult 返回给 LLM 自愈重试，而不是让异常穿透中间件链
+                // 导致整个 agent run 崩溃。
+                logger.LogWarning(
+                    "Tool '{ToolName}' argument binding failed: {Message}",
+                    ctx.Function.Name,
+                    ex.Message);
+                return ToolResult.Error(
+                    $"[TOOL ERROR] Tool '{ctx.Function.Name}' was called with invalid arguments: {ex.Message} " +
+                    "Check the tool's required parameters and retry with correct arguments.");
+            }
         };
     }
 

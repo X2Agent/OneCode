@@ -4,7 +4,7 @@ namespace OneCode.App.Tui;
 /// 可复用的 Braille spinner 动画控制器。
 ///
 /// 封装帧索引推进与 <see cref="IApplication.AddTimeout"/> 调度逻辑，
-/// 供 <see cref="SpinnerView"/>、<see cref="AgentStatusBar"/> 等需要 spinner 动画的视图组合使用，
+/// 供 <see cref="AgentStatusBar"/> 等需要 spinner 动画的视图组合使用，
 /// 避免在多个 View 中重复实现 timeout/tick 代码。
 ///
 /// 线程安全：仅在 Terminal.Gui 主循环上调用。

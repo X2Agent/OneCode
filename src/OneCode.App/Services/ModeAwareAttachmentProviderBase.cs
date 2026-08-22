@@ -40,7 +40,7 @@ public abstract class ModeAwareAttachmentProviderBase : ReadOnlyAIContextProvide
         var convId = ToolActivationContext.CurrentConversationId ?? "default";
         var currentTurn = _turnCounts.AddOrUpdate(convId, 1, (_, count) => count + 1);
 
-        // Turn 1 的完整指令由 MAF AgentModeProvider.Instructions 负责，
+        // Turn 1 的完整指令由 ModeInstructionProvider 负责（每次 invocation 注入），
         // 此处跳过避免重复注入。
         if (currentTurn == 1) return new AIContext();
 

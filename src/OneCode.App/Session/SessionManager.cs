@@ -80,13 +80,15 @@ public sealed class SessionManager : ISessionManager
         if (ForegroundConversation is not null)
         {
             ForegroundConversation.WorkingDirectory = newCwd;
-            try { await _store.SaveAsync(ForegroundConversation, ct).ConfigureAwait(false); }
+            try { await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogWarning(ex, "SessionManager.ChangeWorkingDirectoryAsync save failed"); }
         }
     }
 
     /// <summary>
-    /// Create a new conversation.
+    /// Create a new conversation. Persistence is deferred: nothing is written to
+    /// disk until the first message lands (see <see cref="PersistAsync"/>), so
+    /// abandoned sessions leave no empty files behind.
     /// </summary>
     public async Task<Conversation> CreateAsync(
         ConversationOptions options,
@@ -102,14 +104,10 @@ public sealed class SessionManager : ISessionManager
             LastActivityAt = DateTimeOffset.UtcNow,
         };
 
-        conversation.Metadata["mode"] = "normal";
-
         ForegroundConversation = conversation;
         _sessionIdHolder.SetCurrent(conversation.Id);
 
         _tokenUsageTracker.Reset();
-
-        await _store.SaveAsync(conversation, ct);
 
         _logger.LogInformation(
             "Created conversation {Id} '{Name}' with model {Model}",
@@ -119,6 +117,25 @@ public sealed class SessionManager : ISessionManager
 
         return conversation;
     }
+
+    /// <summary>
+    /// Stamp the foreground conversation's working mode (build/plan/team/goal).
+    /// In-memory only — the value persists with the next transcript save.
+    /// </summary>
+    public void SetForegroundMode(string mode)
+    {
+        if (ForegroundConversation is not null)
+            ForegroundConversation.Metadata["mode"] = mode;
+    }
+
+    /// <summary>
+    /// Persist a conversation unless it is still empty — header-only session
+    /// files are never written proactively.
+    /// </summary>
+    private Task PersistAsync(Conversation conversation, CancellationToken ct) =>
+        conversation.Messages.Count == 0
+            ? Task.CompletedTask
+            : _store.SaveAsync(conversation, ct);
 
     /// <summary>
     /// Returns the foreground conversation, creating one when missing.
@@ -164,7 +181,7 @@ public sealed class SessionManager : ISessionManager
             Timestamp: DateTimeOffset.UtcNow));
 
         conversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        await PersistAsync(conversation, ct).ConfigureAwait(false);
     }
 
     /// <summary>Append an assistant turn to the foreground conversation and persist.</summary>
@@ -227,7 +244,7 @@ public sealed class SessionManager : ISessionManager
         }
 
         conversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        await PersistAsync(conversation, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -299,7 +316,7 @@ public sealed class SessionManager : ISessionManager
             conversation.LastActivityAt = DateTimeOffset.UtcNow;
             try
             {
-                await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+                await PersistAsync(conversation, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -372,7 +389,7 @@ public sealed class SessionManager : ISessionManager
                 _logger.LogInformation("Resumed session was in coordinator mode; continuing in normal mode.");
         }
 
-        await _store.SaveAsync(conversation, ct);
+        await PersistAsync(conversation, ct);
 
         _logger.LogInformation(
             "Resumed conversation {Id} with {Count} messages",
@@ -388,22 +405,15 @@ public sealed class SessionManager : ISessionManager
     /// </summary>
     public async Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default)
     {
-        var conversations = await _store.ListAsync(ct);
-        return conversations
+        var summaries = await _store.ListAsync(ct);
+        return summaries
             .OrderByDescending(s => s.LastActivityAt)
-            .Select(s => new ConversationSummary(
-                s.Id,
-                s.Name,
-                s.Model,
-                s.Messages.Count,
-                s.TotalUsage,
-                s.CreatedAt,
-                s.LastActivityAt))
             .ToList();
     }
 
     /// <summary>
-    /// Save the current conversation state.
+    /// Save the current conversation state. No-op while the conversation is
+    /// still empty (deferred persistence).
     /// </summary>
     public async Task SaveAsync(CancellationToken ct = default)
     {
@@ -411,7 +421,7 @@ public sealed class SessionManager : ISessionManager
             return;
 
         ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(ForegroundConversation, ct);
+        await PersistAsync(ForegroundConversation, ct);
     }
 
     /// <summary>
@@ -427,7 +437,7 @@ public sealed class SessionManager : ISessionManager
         ForegroundConversation.Status = ConversationStatus.Completed;
         ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
 
-        await _store.SaveAsync(ForegroundConversation, ct).ConfigureAwait(false);
+        await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Closed conversation {Id} - total usage: {Usage}",
@@ -471,7 +481,7 @@ public sealed class SessionManager : ISessionManager
             Timestamp: DateTimeOffset.UtcNow));
 
         conversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(conversation, ct);
+        await PersistAsync(conversation, ct);
 
         _logger.LogInformation("Continue conversation {Id} with message", conversation.Id);
         return conversation;
@@ -543,7 +553,7 @@ public sealed class SessionManager : ISessionManager
             ForegroundConversation.Status = ConversationStatus.Active;
             ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
             _tokenUsageTracker.Reset();
-            await _store.SaveAsync(ForegroundConversation, ct).ConfigureAwait(false);
+            await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false);
             await FireHookAsync(HookEvent.SessionStart, "switch", ForegroundConversation.Id, ct);
             return ForegroundConversation;
         }
@@ -585,7 +595,7 @@ public sealed class SessionManager : ISessionManager
 
         background.Conversation.Status = ConversationStatus.Completed;
         background.Conversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(background.Conversation, ct).ConfigureAwait(false);
+        await PersistAsync(background.Conversation, ct).ConfigureAwait(false);
         await _shellExecutorCleanup.ReleaseAsync(background.Conversation.Id).ConfigureAwait(false);
         _sessionToolSetManager.Remove(background.Conversation.Id.Value);
         _backgroundSessions.Remove(background);
@@ -610,7 +620,7 @@ public sealed class SessionManager : ISessionManager
         if (ForegroundConversation == null) return;
 
         ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
-        await _store.SaveAsync(ForegroundConversation, ct);
+        await PersistAsync(ForegroundConversation, ct);
 
         _logger.LogDebug(
             "Persisted transcript for conversation {Id} ({Count} messages)",
@@ -629,15 +639,3 @@ public sealed class SessionManager : ISessionManager
         await _hookExecutionService.FireAsync(payload, actualMatcherValue: source, ct: ct);
     }
 }
-
-/// <summary>
-/// Summary of a conversation for listing.
-/// </summary>
-public sealed record ConversationSummary(
-    SessionId Id,
-    string Name,
-    string Model,
-    int MessageCount,
-    TokenUsage TotalUsage,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset LastActivityAt);

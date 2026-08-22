@@ -17,9 +17,8 @@ using OneCode.Core.PlanMode;
 /// </para>
 ///
 /// <para>
-/// Registered as a singleton. <c>CreatePlanTool.SavePlanAsync</c> calls
-/// <see cref="Publish"/> with <see cref="PlanCardPhase.Draft"/>; <c>SubmitPlanAsync</c>
-/// calls it with <see cref="PlanCardPhase.PendingApproval"/>. The TUI host
+/// Registered as a singleton. <c>CreatePlanTool.SubmitPlanAsync</c> calls
+/// <see cref="Publish"/> with <see cref="PlanCardPhase.PendingApproval"/>. The TUI host
 /// subscribes via <see cref="PlanCreated"/> and renders a plan card through
 /// <see cref="ReplShell.ShowPlanCard"/>——PendingApproval 阶段额外弹出 InlineSelector
 /// 决策面板。
@@ -45,7 +44,7 @@ public sealed class PlanCardPublisher
 
     /// <summary>
     /// Notify subscribers that a new plan is available for review.
-    /// phase 决定 TUI 渲染行为：Draft 仅展示卡片；PendingApproval 弹出决策面板。
+    /// phase 决定 TUI 渲染行为：非 PendingApproval 仅展示卡片；PendingApproval 弹出决策面板。
     /// </summary>
     public void Publish(string title, IReadOnlyList<PlanStep> steps, PlanCardPhase phase)
     {

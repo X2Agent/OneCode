@@ -22,6 +22,7 @@ public static class OverlayLaunchers
             s.Id.ToString(),
             s.Name,
             s.Model,
+            s.Mode ?? "build",
             s.MessageCount,
             s.LastActivityAt)).ToList();
 

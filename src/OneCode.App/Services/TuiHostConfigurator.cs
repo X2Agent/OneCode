@@ -55,6 +55,14 @@ public sealed class TuiHostConfigurator(
             Action<IReadOnlyList<SlashCommandEntry>>? updateCommandsUi = null;
             updateCommandsUi = commands => app.Invoke(() => toplevel.ChatInput.UpdateCommands(commands));
 
+            // 工作模式切换时刷新斜杠命令列表，使依赖 ICommand.IsEnabled() 动态启用的命令
+            // （如仅在 BUILD 模式可用的 /permissions）能实时出现/消失。
+            session.ModeController.ModeChanged += (_, _) => updateCommandsUi(
+                commandSurface.CommandRegistry.GetAll()
+                    .Select(c => new SlashCommandEntry(
+                        c.Name, c.Description, c.Source, c.ArgumentHint))
+                    .ToList());
+
             // Skill file change hot-reload
             async void OnSkillsChanged()
             {
@@ -180,12 +188,20 @@ public sealed class TuiHostConfigurator(
             var steps = ProjectSteps(workflow, definitions);
             var title = revision?.Title
                 ?? (markdown is not null ? ExtractPlanTitle(markdown) : "实施计划");
+            // 计划 markdown 投影的持久化路径——显示在卡片上让用户能找到 plan 文档。
+            var displayedRevision = revision?.Revision ?? workflow.ApprovedSnapshot?.Revision;
+            var documentPath = displayedRevision is { } rev
+                ? overlay.PlanAggregateStore.GetRevisionMarkdownPath(workflow.SessionId, workflow.Id, rev)
+                : null;
 
             app.Invoke(() => toplevel.ShowPlanFromBackend(
                 title,
                 steps,
                 phase.Value,
-                phase == PlanCardPhase.PendingApproval ? markdown : null));
+                // 审批阶段渲染完整计划全文供用户审阅；
+                // 执行阶段不渲染全文（步骤列表 + 文档路径保持精简）。
+                phase is PlanCardPhase.PendingApproval ? markdown : null,
+                documentPath));
         }
         catch (Exception ex)
         {
@@ -279,7 +295,8 @@ public sealed class TuiHostConfigurator(
 
     private static PlanCardPhase? MapPlanCardPhase(PlanWorkflowState state) => state switch
     {
-        PlanWorkflowState.Planning => PlanCardPhase.Draft,
+        // 无已提交计划时不展示卡片（Planning 仅存在于提交之前的初始态）。
+        PlanWorkflowState.Planning => null,
         PlanWorkflowState.FinalizingPlanRun => PlanCardPhase.Finalizing,
         PlanWorkflowState.AwaitingApproval => PlanCardPhase.PendingApproval,
         PlanWorkflowState.StartingExecution => PlanCardPhase.StartingExecution,

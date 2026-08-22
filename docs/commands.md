@@ -12,7 +12,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 类别 | 说明 | 数量 |
 |---|---|---|
-| `Builtin` | 内置通用命令（配置、模式、工具等） | 23 |
+| `Builtin` | 内置通用命令（配置、模式、工具等） | 22 |
 | `Session` | 会话管理（记忆、检查点、导出、队列等） | 8 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
@@ -360,7 +360,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 **用法**：
 
 ```
-/permissions [mode]
+/permissions [mode]（仅 BUILD 模式下可见可用）
 ```
 
 **参数**：
@@ -447,20 +447,6 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 > **✅ 运行时立即生效**：`/think` 会同时更新内存中的 `AppState`（`ThinkingEnabled`/`EffortValue`/`ShowThinking`）和配置文件，当前会话的下一次 LLM 调用即按新设置计算 thinking 预算。
 >
 > 与 `/config set thinkingEnabled <value>` 的区别：`/config set` 也会同步更新运行时 `AppState`（当前会话生效），但 `/think` 提供 effort / show / hide 等更完整的校验与交互入口，仍是调整 thinking 设置的推荐方式。
-
----
-
-### /tools
-
-列出当前注册的所有 AI 工具。
-
-**用法**：
-
-```
-/tools
-```
-
-无参数。
 
 ---
 
@@ -1002,7 +988,7 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 
 ## 汇总统计
 
-- **总命令数**：42 个
+- **总命令数**：41 个
 - **隐藏命令**：`/gc-stats`
 - **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`
 - **带别名的命令**：

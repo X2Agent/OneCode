@@ -39,7 +39,7 @@ public sealed class TeamRequirementService(
         return ComposeResult(goal, intake, canProceed: false);
     }
 
-    public ImplementationPlan CreateImplementationPlan(RequirementAnalysisResult analysis)
+    internal ImplementationPlan CreateImplementationPlan(RequirementAnalysisResult analysis, TeamConfig? config = null)
     {
         if (!analysis.CanProceedWithoutClarification)
             throw new InvalidOperationException("Blocking requirement questions must be resolved before Team planning.");
@@ -48,9 +48,19 @@ public sealed class TeamRequirementService(
         var allowedPaths = analysis.Draft.InScope.Count > 0
             ? analysis.Draft.InScope
             : [];
+        // 能力驱动计划：按团队真实工具能力选择计划形态，消除"只读团队被塞进写流水线"的错配。
+        var readOnlyPlan = config is not null && !TeamCapabilityProfile.From(config).CanWriteFiles;
         var acceptance = analysis.Draft.AcceptanceCriteria.Count > 0
             ? analysis.Draft.AcceptanceCriteria
-            : ["The approved request is implemented without executor failures."];
+            : [readOnlyPlan
+                ? "Discussion produces a consolidated conclusion addressing the request."
+                : "The approved request is implemented without executor failures."];
+
+        if (readOnlyPlan)
+        {
+            return CreateReadOnlyDiscussionPlan(analysis, config!, goal, allowedPaths, acceptance);
+        }
+
         var tasks = new List<TeamTaskDefinition>
         {
             new(
@@ -125,7 +135,7 @@ public sealed class TeamRequirementService(
                 Blocking: true))
             .ToList();
         var draft = new RequirementBaseline(
-            ProductGoal: goal.Trim(),
+            ProductGoal: GetBaseGoal(goal),
             InScope: intake.InScope,
             OutOfScope: [],
             AcceptanceCriteria: intake.AcceptanceCriteria,
@@ -143,6 +153,76 @@ public sealed class TeamRequirementService(
             return false;
         var answer = goal[(index + ClarificationResponseMarker.Length)..];
         return !string.IsNullOrWhiteSpace(answer);
+    }
+
+    /// <summary>
+    /// Strips the appended clarification Q&A block from an effective goal so that
+    /// plan summaries, task titles and approval cards only show the original request.
+    /// The full effective goal (with answers) is still used for execution context.
+    /// </summary>
+    internal static string GetBaseGoal(string goal)
+    {
+        var index = goal.IndexOf(ClarificationResponseMarker, StringComparison.Ordinal);
+        var baseGoal = index < 0 ? goal : goal[..index].Trim();
+        return baseGoal.Length > 0 ? baseGoal : goal.Trim();
+    }
+
+    /// <summary>
+    /// 只读团队（如 code-review / research）的纯研讨计划：两任务、无 build/unit-test 门禁。
+    /// AssigneeRole 取团队成员的真实首个角色，不再虚构 planner/reviewer。
+    /// </summary>
+    private static ImplementationPlan CreateReadOnlyDiscussionPlan(
+        RequirementAnalysisResult analysis,
+        TeamConfig config,
+        string goal,
+        IReadOnlyList<string> allowedPaths,
+        IReadOnlyList<string> acceptance)
+    {
+        var profile = TeamCapabilityProfile.From(config);
+        var tools = profile.HasWebAccess
+            ? (IReadOnlyList<string>)["Read", "Grep", "Glob", "LS", "FindReferences", "WebSearch", "WebFetch"]
+            : (IReadOnlyList<string>)["Read", "Grep", "Glob", "LS", "FindReferences"];
+        var synthesizerRole = config.Members
+            .FirstOrDefault(member => !string.IsNullOrWhiteSpace(member.Role))?.Role ?? "reviewer";
+        return new ImplementationPlan(
+            Summary: $"Discuss and resolve the Team request: {goal}",
+            Tasks:
+            [
+                new(
+                    "analysis",
+                    $"Analyze: {Summarize(goal)}",
+                    TeamTaskKind.Analysis,
+                    synthesizerRole,
+                    [],
+                    ["The approved scope, key considerations and open questions are identified."],
+                    TeamToolPolicy.ReadOnly,
+                    RequiredTools: tools,
+                    AllowedPaths: allowedPaths,
+                    ExpectedOutputs: ["Analysis covering scope, considerations and open questions."],
+                    MaxAttempts: 3,
+                    RetryPolicy: TaskRetryPolicy.Default),
+                new(
+                    "review-synthesis",
+                    $"Synthesize: {Summarize(goal)}",
+                    TeamTaskKind.Review,
+                    synthesizerRole,
+                    ["analysis"],
+                    acceptance,
+                    TeamToolPolicy.ReadOnly,
+                    RequiredTools: tools,
+                    AllowedPaths: allowedPaths,
+                    RequiredGates: ["acceptance"],
+                    ExpectedOutputs: ["Consolidated conclusion addressing the request."],
+                    MaxAttempts: 3,
+                    RetryPolicy: TaskRetryPolicy.Default),
+            ],
+            RequiredGates:
+            [
+                new QualityGateDefinition("lsp-diagnostics", QualityGateKind.LspDiagnostics, Required: false, "Modified files have no LSP error diagnostics."),
+                new QualityGateDefinition("acceptance", QualityGateKind.AcceptanceCriteria, Required: true, "Required tasks must provide acceptance evidence."),
+            ],
+            Risks: [],
+            NonGoals: analysis.Draft.OutOfScope);
     }
 
     private static string Summarize(string goal)

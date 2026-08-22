@@ -1,20 +1,15 @@
 namespace OneCode.Infrastructure.Ai;
 
 /// <summary>
-/// Sanitizes JSON responses from OpenAI-compatible APIs that return null
-/// for array fields (e.g. tool_calls, annotations) instead of an empty array.
-/// The OpenAI .NET SDK calls EnumerateArray() on these fields, which throws
-/// InvalidOperationException when the element is Null.
+/// Sanitizes JSON and SSE responses from OpenAI-compatible APIs before the official
+/// OpenAI .NET SDK deserializes them. Common vendor mismatches:
+/// <list type="bullet">
+/// <item><c>tool_calls</c> / <c>annotations</c> sent as <c>null</c> instead of <c>[]</c></item>
+/// <item><c>finish_reason</c> sent as <c>""</c> or a vendor alias instead of an official enum value</item>
+/// </list>
 /// </summary>
-public sealed partial class OpenAiResponseSanitizingHandler : DelegatingHandler
+public sealed class OpenAiResponseSanitizingHandler : DelegatingHandler
 {
-    // Matches "tool_calls": null or "annotations": null (with any whitespace).
-    // These are the fields most commonly returned as null by third-party
-    // OpenAI-compatible providers (DeepSeek, Qwen, Moonshot, etc.)
-    // where the OpenAI SDK expects an array.
-    [GeneratedRegex(@"""(tool_calls|annotations)""\s*:\s*null\b")]
-    private static partial Regex NullArrayRegex();
-
     private readonly ILogger<OpenAiResponseSanitizingHandler>? _logger;
 
     /// <summary>
@@ -30,21 +25,43 @@ public sealed partial class OpenAiResponseSanitizingHandler : DelegatingHandler
         CancellationToken cancellationToken)
     {
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-        var mediaType = response.Content?.Headers?.ContentType?.MediaType;
-        if (mediaType != "application/json")
+        if (response.Content is null)
             return response;
 
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+
+        if (string.Equals(mediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            response.Content = new OpenAiSseSanitizingContent(response.Content);
+            return response;
+        }
+
+        if (!string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+            return response;
+
+        return await SanitizeJsonResponseAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HttpResponseMessage> SanitizeJsonResponseAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
         var body = await response.Content!.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        var sanitized = NullArrayRegex().Replace(body, @"""$1"":[]");
+        var sanitized = OpenAiResponseSanitizer.SanitizePayload(body);
 
         if (sanitized == body)
         {
-            // 诊断日志：响应中仍包含 null 字段但未被正则命中，帮助定位遗漏的数组字段
-            if (body.Contains("\":null"))
+            // Diagnostic: a remaining null field was not rewritten. Helps locate missed array fields.
+            // Debug level + truncated preview: the full body may be large and contain conversation content.
+            if (body.Contains("\":null", StringComparison.Ordinal))
             {
-                _logger?.LogWarning("Unsanitized null field in response: {Body}", body);
+                const int MaxLoggedBodyLength = 512;
+                var preview = body.Length <= MaxLoggedBodyLength
+                    ? body
+                    : string.Concat(body.AsSpan(0, MaxLoggedBodyLength), "…(truncated)");
+                _logger?.LogDebug("Unsanitized null field in response: {Body}", preview);
             }
+
             return response;
         }
 

@@ -194,6 +194,102 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             .Which.State.Should().Be(GoalStepState.Failed);
     }
 
+    [Fact]
+    public async Task ExecuteNext_FirstStep_SkipsWhenAttemptBudgetInsufficient()
+    {
+        // Fix-7/N-01：守卫不再依赖 CurrentIndex > 0——resume 到 index 0 时同样受剩余额度约束。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "first-step-guard"));
+        var step = Snapshot(1);
+        var run = await CreateClaimedRunAsync(store, [step], GoalRunState.Executing);
+        var steps = new FakeStepExecutionService(CompletedExecution(1));
+        var workspace = new FakeWorkspaceService();
+        var (runtime, _) = CreateRuntimeWithEvents(
+            store,
+            new FakePlanningService(),
+            steps,
+            workspace,
+            new GoalBudget { MaxSubGoalAttempts = 2 });
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
+
+        var result = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+
+        steps.ExecuteCalls.Should().Be(0, "the remaining attempt budget cannot safely start a sub-goal");
+        workspace.RecordCalls.Should().Be(1);
+        result.Plan.Should().ContainSingle().Which.State.Should().Be(GoalStepState.Skipped);
+        workspace.LastRecordedEvidence!.Validations.Should()
+            .Contain(gate => gate.Gate == "budget" && gate.Skipped);
+    }
+
+    [Fact]
+    public async Task ApplyEvidence_NeverNegativeDeltaFromStaleEvidence()
+    {
+        // Fix-2/F-02：旧证据 Attempts/Tokens > 0、新证据为 0 时，预算消耗不得回退。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "negative-delta"));
+        var step = Snapshot(1);
+        var previous = new GoalStepExecutionEvidence(
+            1, GoalStepState.Failed, 3, 30, 15, "old", "old-eval", [], [],
+            [new GoalGateEvidence("test", false, false, "failed")], []);
+        var replay = new GoalStepExecutionEvidence(
+            1, GoalStepState.Completed, 0, 0, 0, string.Empty, string.Empty, [], [], [], []);
+        var run = await CreateClaimedRunWithBudgetAsync(
+            store,
+            [step],
+            new GoalBudgetSnapshot(3, 30, 15, 0m, DateTimeOffset.UtcNow));
+        var runtime = CreateRuntime(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1)),
+            new FakeWorkspaceService(replay));
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(
+            run.Id,
+            [step],
+            [previous],
+            run.Budget,
+            0,
+            false,
+            GoalRunState.Executing);
+        await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.Budget.TotalAttempts.Should().Be(3, "a zero-attempt replacement must not subtract prior attempts");
+        persisted.Budget.TotalInputTokens.Should().Be(30);
+        persisted.Budget.TotalOutputTokens.Should().Be(15);
+    }
+
+    [Fact]
+    public async Task ExecuteNext_PublishesBudgetWarningOncePerLevelChange()
+    {
+        // Fix-6/N-03：EvaluateWarning 结果必须发布到 EventWriter，且级别不变时不重复发布。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "warning-events"));
+        var plan = new[] { Snapshot(1), Snapshot(2) };
+        // 14/20 = 70% → Early（黄色）。
+        var run = await CreateClaimedRunWithBudgetAsync(
+            store,
+            plan,
+            new GoalBudgetSnapshot(14, 0, 0, 0m, DateTimeOffset.UtcNow));
+        var (runtime, events) = CreateRuntimeWithEvents(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1)),
+            new FakeWorkspaceService());
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, plan, [], run.Budget, 0, false, GoalRunState.Executing);
+
+        var first = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+        await runtime.ExecuteNextAsync(first, TestContext.Current.CancellationToken);
+
+        var published = new List<TuiEvent>();
+        while (events.Reader.TryRead(out var evt))
+            published.Add(evt);
+        published.OfType<TuiGoalBudgetWarning>().Should().ContainSingle()
+            .Which.Level.Should().Be(GoalBudgetWarningLevel.Early);
+
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.Budget.LastActivityAt.Should().NotBeNull("wall clock tracking must stamp activity");
+    }
+
     private GoalWorkflowRuntime CreateRuntime(
         IGoalRunStore store,
         IGoalPlanningService planning,
@@ -219,6 +315,74 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
                 },
                 Channel.CreateUnbounded<TuiEvent>().Writer,
                 static () => new EditTransaction()));
+    }
+
+    private (GoalWorkflowRuntime Runtime, Channel<TuiEvent> Events) CreateRuntimeWithEvents(
+        IGoalRunStore store,
+        IGoalPlanningService planning,
+        IGoalStepExecutionService steps,
+        IGoalWorkspaceService workspace,
+        GoalBudget? budget = null)
+    {
+        var cost = Substitute.For<ICostTracker>();
+        cost.GetTotalCost().Returns(0m);
+        var events = Channel.CreateUnbounded<TuiEvent>();
+        var options = new GoalRunOptions
+        {
+            Goal = "goal",
+            WorkingDirectory = _root,
+            ModelId = "model",
+            Tools = new List<AITool>(),
+            Budget = budget,
+        };
+        var runtime = new GoalWorkflowRuntime(
+            planning,
+            steps,
+            store,
+            workspace,
+            new FakeCompletionService(store),
+            cost,
+            new GoalWorkflowRuntimeContext(
+                options,
+                events.Writer,
+                static () => new EditTransaction()));
+        return (runtime, events);
+    }
+
+    private async Task<GoalRun> CreateClaimedRunWithBudgetAsync(
+        IGoalRunStore store,
+        IReadOnlyList<GoalStepSnapshot> plan,
+        GoalBudgetSnapshot budget)
+    {
+        var run = new GoalRun
+        {
+            Id = GoalRunId.New(),
+            SessionId = SessionId.NewId(),
+            Goal = "goal",
+            WorkingDirectory = _root,
+            WorkspaceFingerprint = "fingerprint",
+            DefinitionHash = "definition",
+            State = GoalRunState.Executing,
+            Plan = plan,
+            Budget = budget,
+            Workspace = new GoalWorkspaceSnapshot(
+                "workspace",
+                _root,
+                _root,
+                "goal-branch",
+                "main",
+                "base",
+                "fingerprint",
+                DateTimeOffset.UtcNow),
+        };
+        await store.SaveAsync(run, 0, TestContext.Current.CancellationToken);
+        var saved = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken)
+            ?? throw new InvalidOperationException();
+        return await store.ClaimWorkflowAsync(
+            run.Id,
+            7,
+            saved.Version,
+            TestContext.Current.CancellationToken);
     }
 
     private async Task<GoalRun> CreateClaimedRunAsync(

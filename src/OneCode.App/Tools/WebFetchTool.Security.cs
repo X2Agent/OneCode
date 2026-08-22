@@ -1,4 +1,5 @@
 using System.Net;
+using OneCode.Infrastructure;
 
 namespace OneCode.App.Tools;
 
@@ -86,9 +87,88 @@ public sealed partial class WebFetchTool
     }
 
     /// <summary>
+    /// Resolves <paramref name="url"/> and rejects hosts that have any private/loopback
+    /// A/AAAA record. Done before HttpClient runs so DNS rebinding is caught without a
+    /// ConnectCallback (which would see the local HTTP proxy as the TCP target).
+    /// Literal IPs are skipped — <see cref="ValidateUrl"/> already classified them.
+    ///
+    /// Boundary note: when the URL is routed through an HTTP(S) proxy, the proxy resolves
+    /// the hostname server-side, so this client-side lookup is defense-in-depth rather than
+    /// the connection path. That means a host reachable only via the proxy's own DNS cannot
+    /// be verified here — a known architectural limit; <see cref="ValidateUrl"/> name-based
+    /// blocks remain the primary net.
+    /// </summary>
+    /// <returns>An error message to return to the model, or <c>null</c> when the host is safe.</returns>
+    private async Task<string?> GetDnsRebindingBlockReasonAsync(string url, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return null;
+
+        if (IPAddress.TryParse(uri.Host, out _))
+            return null;
+
+        // A proxied request's hostname is resolved by the proxy, not here, so a local
+        // DNS failure must not hard-block legitimate fetches. Only fail closed when the
+        // client would resolve and connect directly.
+        var viaProxy = ResolvesViaProxy(ProxyConfigService.GetProxyUrl(), url);
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(uri.Host, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (!viaProxy)
+            {
+                _logger.LogDebug(ex, "DNS lookup failed for WebFetch host {Host}", uri.Host);
+                return $"Could not resolve host '{uri.Host}'";
+            }
+
+            _logger.LogDebug(ex, "DNS lookup failed for proxied WebFetch host {Host}; allowing (proxy resolves hostname)", uri.Host);
+            return null;
+        }
+
+        if (addresses.Length == 0 && !viaProxy)
+            return $"Could not resolve host '{uri.Host}'";
+
+        var unsafeAddress = FindUnsafeResolvedAddress(addresses);
+        if (unsafeAddress is null)
+            return null;
+
+        return $"SSRF protection: host '{uri.Host}' resolved to private address {unsafeAddress}";
+    }
+
+    /// <summary>
+    /// True when a request to <paramref name="url"/> will be forwarded through a proxy, in
+    /// which case the hostname is resolved proxy-side and a local DNS failure is non-fatal.
+    /// Pure function (proxy URL and NO_PROXY passed in) so the policy can be unit-tested
+    /// without mutating process-wide environment variables.
+    /// </summary>
+    internal static bool ResolvesViaProxy(string? proxyUrl, string url, string? noProxyList = null)
+        => !string.IsNullOrWhiteSpace(proxyUrl)
+           && !ProxyConfigService.ShouldBypassProxy(url, noProxyList);
+
+    /// <summary>
+    /// Returns the first private/loopback/link-local address in <paramref name="addresses"/>,
+    /// or <c>null</c> when every record is public. Conservative: one private record is enough
+    /// to treat the hostname as unsafe (typical DNS-rebinding shape).
+    /// </summary>
+    internal static IPAddress? FindUnsafeResolvedAddress(IReadOnlyList<IPAddress> addresses)
+    {
+        foreach (var address in addresses)
+        {
+            if (IsPrivateOrLocalAddress(address))
+                return address;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Determines whether an IP address is private, loopback, link-local, or otherwise
     /// unsafe for outbound fetches. Covers IPv4 and IPv6 ranges to prevent SSRF attacks.
-    /// Exposed as internal for use by the SocketsHttpHandler ConnectCallback (DNS rebinding protection).
+    /// Exposed as internal so unit tests can cover the same private-range checks used by ValidateUrl.
     /// </summary>
     internal static bool IsPrivateOrLocalAddressPublic(IPAddress address)
     {

@@ -229,7 +229,8 @@ public sealed class TeamOrchestrationService
         // 覆盖 YAML 模板中 template 字段的默认值，使用户在 TUI 中切换策略能真正生效。
         if (overrideMode is { } mode)
         {
-            config = config with { Mode = mode };
+            // 覆盖为 Magentic 时补齐编排者，避免无 lead 团队拿 Members[0] 凑数（P2-8）。
+            config = TeamConfigLoader.EnsureOrchestrator(config with { Mode = mode });
         }
 
         _logger.LogInformation(
@@ -296,7 +297,7 @@ public sealed class TeamOrchestrationService
             }
         }
 
-        var plan = _requirementService.CreateImplementationPlan(analysis);
+        var plan = _requirementService.CreateImplementationPlan(analysis, config);
 
         // Persist the product run before creating the durable approval checkpoint.
         // Recovery must always have a TeamRun aggregate to bind to the workflow record.
@@ -324,6 +325,18 @@ public sealed class TeamOrchestrationService
 
         var teamRun = await _teamRunService.BeginApprovedExecutionAsync(
             runId, teamName, effectiveGoal, cwd, plan, ct, sessionId).ConfigureAwait(false);
+
+        // P2-9：持久化本次 Run 实际生效的编排模式。此时尚未 Claim fencing token，
+        // TrySaveAsync 可正常写入；失败仅告警——恢复时回退 YAML 默认模式。
+        if (teamRun.EffectiveMode != config.Mode)
+        {
+            var withMode = teamRun with { EffectiveMode = config.Mode };
+            if (await _teamRunStore.TrySaveAsync(withMode, teamRun.Version, ct).ConfigureAwait(false))
+                teamRun = withMode;
+            else
+                _logger.LogWarning(
+                    "Failed to persist effective orchestration mode for TeamRun '{RunId}'", runId);
+        }
 
         try
         {
@@ -367,6 +380,17 @@ public sealed class TeamOrchestrationService
             return TeamError(teamRun.TeamName, $"Team '{teamRun.TeamName}' not found.", eventSink);
         }
 
+        // P2-9：优先使用上次运行实际生效的编排模式，避免 override 后恢复静默回退 YAML 默认。
+        // 边界：澄清阶段（尚未开始执行）崩溃的 run 没有 EffectiveMode 记录，按 YAML 默认恢复——
+        // override 持久化发生在审批通过、开始执行时，这是可接受的设计边界（R-3）。
+        if (teamRun.EffectiveMode is { } effective && effective != config.Mode)
+        {
+            _logger.LogInformation(
+                "Restoring overridden orchestration mode {Mode} for TeamRun '{RunId}'",
+                effective, teamRun.Id);
+            config = TeamConfigLoader.EnsureOrchestrator(config with { Mode = effective });
+        }
+
         if (teamRun.Status == TeamRunStatus.WaitingForUser)
         {
             var modelId = _workflowRunner.AgentFactory.MainModelId ?? "team-model";
@@ -390,7 +414,7 @@ public sealed class TeamOrchestrationService
                 }
                 if (!analysis.CanProceedWithoutClarification)
                     return TeamError(teamRun.TeamName, "Team request remains ambiguous.", eventSink);
-                var clarifiedPlan = _requirementService.CreateImplementationPlan(analysis);
+                var clarifiedPlan = _requirementService.CreateImplementationPlan(analysis, config);
                 teamRun = await _teamRunService.PromoteClarificationToApprovalAsync(
                     teamRun.Id, clarifiedGoal, clarifiedPlan, ct).ConfigureAwait(false);
             }

@@ -98,9 +98,48 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*incomplete*");
+        // Deferred persistence: the empty conversation was never written to disk.
+        var reloaded = await _store.LoadAsync(conversation.Id, ct);
+        reloaded.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateAsync_EmptyConversation_DoesNotWriteSessionFile()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir), ct);
+
+        (await _store.LoadAsync(conversation.Id, ct)).Should().BeNull();
+        (await _manager.ListAsync(ct)).Should().NotContain(s => s.Id == conversation.Id);
+    }
+
+    [Fact]
+    public async Task AppendUserMessageAsync_FirstMessage_PersistsSessionFile()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir), ct);
+
+        await _manager.AppendUserMessageAsync("first real message", ct);
+
         var reloaded = await _store.LoadAsync(conversation.Id, ct);
         reloaded.Should().NotBeNull();
-        reloaded!.Messages.Should().BeEmpty();
+        reloaded!.Messages.OfType<UserMessage>()
+            .Should().ContainSingle(um => um.Content == "first real message");
+    }
+
+    [Fact]
+    public async Task SetForegroundMode_BeforeFirstSave_PersistsModeWithFirstMessage()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir), ct);
+        _manager.SetForegroundMode("plan");
+
+        await _manager.AppendUserMessageAsync("plan this", ct);
+
+        var reloaded = await _store.LoadAsync(conversation.Id, ct);
+        reloaded!.Metadata["mode"].ToString().Should().Be("plan");
+        (await _manager.ListAsync(ct))
+            .Single(s => s.Id == conversation.Id).Mode.Should().Be("plan");
     }
 
     [Fact]

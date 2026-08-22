@@ -58,7 +58,7 @@ src/
 │
 ├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（386 文件）
 │   ├── Tools/                  #   30+ 个工具（通过 AddTool<T> 注册）
-│   ├── Commands/               #   42 斜杠命令
+│   ├── Commands/               #   41 斜杠命令
 │   ├── Middleware/              #   MAF 中间件管道
 │   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 18 子模块）
 │   ├── Tui/                    #   Terminal.Gui v2 全屏界面
@@ -96,7 +96,7 @@ src/
 ┌──────────────────────────────▼──────────────────────────────────┐
 │  OneCode.App  (386 文件)                                        │
 │  工具实现 · 命令 · TUI · 服务组合 · MAF 集成中枢                  │
-│  30+ Tools · 42 Commands · MAF 中间件 · ServiceCollectionExtensions │
+│  30+ Tools · 41 Commands · MAF 中间件 · ServiceCollectionExtensions │
 └───────────┬─────────────────────────────────┬───────────────────┘
             │                                 │
 ┌───────────▼──────────┐          ┌───────────▼───────────────────┐
@@ -123,7 +123,7 @@ src/
 
 | # | 能力 | 完整度 | 关键实现 |
 |---|------|:------:|---------|
-| 1 | Plan Mode 规划优先模式 | 95% | `PlanModeService` + `SavePlan`/`SubmitPlan`/`UpdatePlanStep` 工具 |
+| 1 | Plan Mode 规划优先模式 | 95% | `PlanModeService` + `SubmitPlan`/`UpdatePlanStep` 工具 |
 | 2 | Subagents 并行子 Agent | 97% | `AgentTool` + `ParallelAgentsTool` + `ForkedAgentRunner` |
 | 3 | Skills 斜杠命令工作流 | 92% | `BundledSkills`（9 个内置）+ 文件/MCP 技能 |
 | 4 | Hooks 生命周期扩展 | 95% | 10 事件 × 3 执行器（Command / Notification / Http） |
@@ -277,7 +277,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 | 工具 | 功能 |
 |------|------|
-| SavePlan / SubmitPlan | 保存草稿 / 提交计划 |
+| SubmitPlan | 提交计划 |
 | UpdatePlanStep / CompletePlanExecution / CompletePlanVerification | 执行计划状态更新与验证 |
 
 ### Git Worktree
@@ -467,11 +467,11 @@ ChatClientAgent
 
 ## 斜杠命令
 
-42 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
+41 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
 
 ### Builtin 类别命令（23 个）
 
-`/add-dir` `/compact` `/config` `/copy` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/lsp` `/model` `/permissions` `/skills` `/team` `/think` `/tools` `/upgrade` `/version` `/prompts` `/cron`
+`/add-dir` `/compact` `/config` `/copy` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/lsp` `/model` `/permissions` `/skills` `/team` `/think` `/upgrade` `/version` `/prompts` `/cron`
 
 ### Session 类别命令（8 个）
 
@@ -520,7 +520,7 @@ ChatClientAgent
 
 | 文档 | 说明 |
 |------|------|
-| [docs/commands.md](docs/commands.md) | 全部 42 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
+| [docs/commands.md](docs/commands.md) | 全部 41 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
 | [docs/settings.md](docs/settings.md) | `settings.json` 全部合法配置项、默认值、优先级与环境变量说明 |
 | [docs/skills.md](docs/skills.md) | 9 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
 

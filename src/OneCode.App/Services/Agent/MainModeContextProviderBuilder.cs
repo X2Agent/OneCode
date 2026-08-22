@@ -31,7 +31,7 @@ public sealed class MainModeContextProviderBuilder(
         contextProviders.Add(buildModeAttachmentProvider);
         contextProviders.Add(planExecutionContextProvider);
         contextProviders.Add(new GoalContextProvider(modeProvider, goalContextState));
-        contextProviders.Add(await CreateAgentModeProviderAsync(workingMode, ct).ConfigureAwait(false));
+        contextProviders.Add(await CreateModeInstructionProviderAsync(workingMode, ct).ConfigureAwait(false));
 
         return contextProviders;
     }
@@ -47,7 +47,12 @@ public sealed class MainModeContextProviderBuilder(
         };
     }
 
-    private async Task<AgentModeProvider> CreateAgentModeProviderAsync(
+    /// <summary>
+    /// 构建模式指令注入 Provider——替代原 MAF <see cref="AgentModeProvider"/>。
+    /// 只保留指令注入职能（system/{mode} 提示词），不暴露 mode_get/mode_set 工具、
+    /// 不维护 MAF session state mode（OneCode 模式由宿主驱动，LLM 驱动切换会双轨不一致）。
+    /// </summary>
+    private async Task<ModeInstructionProvider> CreateModeInstructionProviderAsync(
         WorkingMode workingMode, CancellationToken ct)
     {
         var defaultMode = ResolveAgentMode(workingMode, modeProvider.CurrentMode);
@@ -66,17 +71,6 @@ public sealed class MainModeContextProviderBuilder(
             : await promptManager.GetPromptAsync(promptName, ct).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Mode prompt '{promptName}' not found in any PromptManager store.");
 
-        return new AgentModeProvider(new AgentModeProviderOptions
-        {
-            DefaultMode = defaultMode,
-            Modes =
-            [
-                new AgentModeProviderOptions.AgentMode("build", "Execute tasks directly with full access to all tools."),
-                new AgentModeProviderOptions.AgentMode("plan", "Plan first, then execute only after user approval. Only read-only tools are permitted."),
-                new AgentModeProviderOptions.AgentMode("team", "Multi-agent team coordination. Report back to the orchestrator."),
-                new AgentModeProviderOptions.AgentMode("goal", "Executing a specific sub-goal. Focus on meeting the success criteria."),
-            ],
-            Instructions = modeInstructions,
-        });
+        return new ModeInstructionProvider(modeInstructions);
     }
 }

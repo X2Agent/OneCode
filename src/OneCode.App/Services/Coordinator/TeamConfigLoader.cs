@@ -55,17 +55,30 @@ internal static class TeamConfigLoader
             members.Add(new TeamMember(agentId, w.Role, w.Instructions, w.AllowedTools));
         }
 
-        // Magentic 模式若无 lead/orchestrator，自动插入
-        if (mode == TeamOrchestrationMode.Magentic &&
-            !members.Any(m => m.Role is "lead" or "orchestrator"))
-        {
-            members.Insert(0, new TeamMember($"{teamName}-orchestrator", "orchestrator", template.Instructions));
-        }
-
         if (members.Count == 0)
             members.Add(new TeamMember($"{teamName}-lead", "lead", template.Instructions));
 
-        return new TeamConfig(teamName, "(builtin)", members, template.MaxRounds, mode);
+        return EnsureOrchestrator(
+            new TeamConfig(teamName, "(builtin)", members, template.MaxRounds, mode),
+            fallbackInstructions: template.Instructions);
+    }
+
+    /// <summary>
+    /// Magentic 模式若无 lead/orchestrator 成员则自动插入一个编排者。
+    /// 模板加载与 TUI overrideMode 覆盖两条路径共用此方法，
+    /// 保证任何切到 Magentic 的团队都有合格的编排者（P2-8 残缺团队修复）。
+    /// 插入的成员 SystemPrompt 为空——TeamAgentFactory 按 role 解析 system/coordinator prompt。
+    /// </summary>
+    public static TeamConfig EnsureOrchestrator(TeamConfig config, string? fallbackInstructions = null)
+    {
+        if (config.Mode != TeamOrchestrationMode.Magentic ||
+            config.Members.Any(m => m.Role is "lead" or "orchestrator"))
+            return config;
+
+        var members = config.Members.ToList();
+        members.Insert(0, new TeamMember(
+            $"{config.TeamName}-orchestrator", "orchestrator", fallbackInstructions));
+        return config with { Members = members };
     }
 
     /// <summary>从 YAML 文件加载团队配置。</summary>

@@ -115,6 +115,10 @@ public sealed partial class OneCodeToplevel
         if (TryHandleDiffOverlay(text))
             return;
 
+        // /keybindings list — open KeybindingsOverlay in-process.
+        if (TryHandleKeybindingsListOverlay(text))
+            return;
+
         // Bare /session — open the resume chooser in-process. SessionCommand is
         // Immediate, so HandleSubmitCoreAsync's bare-/session interception is
         // unreachable from the TUI; mirror it here (same contract as bare /config's

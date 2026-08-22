@@ -15,6 +15,7 @@ public sealed class AgentStatusBar : View
     private bool _modeFlash;
     private object? _modeFlashTimer;
     private string? _activeTeam;
+    private string? _resolvedTeamMode;
     private string _activity = "处理中";
     private string _model = "Opus";
     private string _cost = "$0.00";
@@ -76,15 +77,21 @@ public sealed class AgentStatusBar : View
     public string CurrentCost => _cost;
     public void SetSandboxMode(string s) { _sandbox = string.IsNullOrWhiteSpace(s) ? "Sandbox" : s; SetNeedsDraw(); }
 
-    public void SetActiveTeam(string? teamName)
+    /// <summary>
+    /// 更新团队标签。<paramref name="resolvedTeamMode"/> 为 Strategy=Config 时
+    /// YAML 实际解析出的模式（如 "Magentic"），用于透出 Config 背后的真实策略（P3-10）。
+    /// </summary>
+    public void SetActiveTeam(string? teamName, string? resolvedTeamMode = null)
     {
-        if (_activeTeam == teamName) return;
+        if (_activeTeam == teamName && _resolvedTeamMode == resolvedTeamMode) return;
         _activeTeam = teamName;
+        _resolvedTeamMode = resolvedTeamMode;
         SetNeedsDraw();
     }
 
-    internal static string GetStrategyLabel(TeamStrategy strategy) => strategy switch
+    internal static string GetStrategyLabel(TeamStrategy strategy, string? resolvedMode = null) => strategy switch
     {
+        TeamStrategy.Config when !string.IsNullOrWhiteSpace(resolvedMode) => $"Config({resolvedMode})",
         TeamStrategy.Config => "Config",
         TeamStrategy.Magentic => "Magentic",
         _ => "GroupChat",
@@ -176,7 +183,7 @@ public sealed class AgentStatusBar : View
     {
         var modeTag = _modeController.ModeTag;
         var strategyLabel = _modeController.ShowStrategyTag
-            ? $" \u00b7 {GetStrategyLabel(_modeController.Strategy)}"
+            ? $" \u00b7 {GetStrategyLabel(_modeController.Strategy, _resolvedTeamMode)}"
             : "";
         var teamLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_activeTeam)
             ? $" \u00b7 {_activeTeam}"

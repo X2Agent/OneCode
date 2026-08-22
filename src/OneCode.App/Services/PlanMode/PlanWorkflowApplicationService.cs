@@ -7,7 +7,6 @@ namespace OneCode.App.Services.PlanMode;
 public interface IPlanWorkflowApplicationService
 {
     Task<PlanWorkflow?> GetAsync(SessionId sessionId, CancellationToken ct = default);
-    Task<PlanRevisionResult> SaveDraftAsync(SavePlanDraftCommand command, CancellationToken ct = default);
     Task<PlanSubmissionResult> SubmitAsync(SubmitPlanCommand command, CancellationToken ct = default);
     Task<PlanTransitionResult> ApproveAsync(ApprovePlanCommand command, CancellationToken ct = default);
     Task<PlanTransitionResult> RejectAsync(RejectPlanCommand command, CancellationToken ct = default);
@@ -27,46 +26,6 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
 {
     public async Task<PlanWorkflow?> GetAsync(SessionId sessionId, CancellationToken ct = default)
         => (await aggregateStore.LoadAsync(sessionId, ct).ConfigureAwait(false))?.Workflow;
-
-    public async Task<PlanRevisionResult> SaveDraftAsync(
-        SavePlanDraftCommand command,
-        CancellationToken ct = default)
-    {
-        PlanStepValidator.Validate(command.Steps);
-        var existing = await aggregateStore.LoadAsync(command.SessionId, ct).ConfigureAwait(false);
-        if (existing?.Workflow.LastProcessedCommandId == command.CommandId)
-            return DuplicateRevisionResult(existing);
-
-        var current = existing?.Workflow;
-        ValidateExpectedVersion(current, command.ExpectedWorkflowVersion);
-        if (current is not null && current.State != PlanWorkflowState.Planning)
-            throw InvalidState(current, PlanWorkflowState.Planning);
-
-        var workflow = current ?? PlanWorkflow.Create(command.SessionId, command.ActiveRunId);
-        var revision = CreateRevision(
-            workflow,
-            command.Title,
-            command.Markdown,
-            command.Steps,
-            command.Risks,
-            command.Assumptions,
-            PlanRevisionStatus.Draft);
-        var updated = workflow with
-        {
-            LatestRevision = revision.Revision,
-            ActiveRunId = command.ActiveRunId ?? workflow.ActiveRunId,
-            ActiveRunKind = PlanRunKind.Planning,
-            LastProcessedCommandId = command.CommandId,
-            LastProcessedRevision = revision.Revision,
-            Version = workflow.Version + 1,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await aggregateStore.SaveAsync(
-            new PlanAggregate(updated, [.. (existing?.Revisions ?? []), revision]),
-            command.ExpectedWorkflowVersion,
-            ct).ConfigureAwait(false);
-        return new PlanRevisionResult(updated, revision);
-    }
 
     public async Task<PlanSubmissionResult> SubmitAsync(
         SubmitPlanCommand command,

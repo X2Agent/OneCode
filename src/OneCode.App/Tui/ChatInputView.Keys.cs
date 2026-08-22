@@ -177,6 +177,14 @@ public sealed partial class ChatInputView
             return;
         }
 
+        // Ctrl+G — 切换右侧计划侧边栏（有活动计划时可收起/展开）。
+        if (action == KeybindingDefaults.ActionChatTogglePlanPanel && !_completion.IsCompletionActive)
+        {
+            TogglePlanPanelRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+Right / Ctrl+Left — cycle through suggestions when placeholder is visible.
         if (e == Key.CursorRight.WithCtrl && _placeholderLabel.Visible)
         {

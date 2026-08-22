@@ -43,8 +43,8 @@
     <PackageVersion Include="Anthropic" Version="12.40.0" />
   </ItemGroup>
   <ItemGroup Label="Agent Framework">
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.18.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.18.0" />
     <!--
       Workflows.Declarative 评估结论：
       该包要求 ResponseAgentProvider（Azure AI Foundry），与本地 IChatClient 架构不兼容。

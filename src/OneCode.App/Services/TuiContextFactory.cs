@@ -44,6 +44,9 @@ public sealed class TuiContextFactory(
                 await session.SessionManager.EnsureActiveSessionAsync(
                     new ConversationOptions(Environment.CurrentDirectory, currentModelId), token)
                     .ConfigureAwait(false);
+                // Stamp the working mode the conversation actually runs in;
+                // persisted with the transcript on the first message save.
+                session.SessionManager.SetForegroundMode(session.ModeController.ModeTag.ToLowerInvariant());
             },
             ExecuteCommand: (text, token) => streaming.SlashCommands.ExecuteCommandAsync(session, text, token),
             IsExitRequested: () => streaming.SlashCommands.IsExitRequested,
@@ -96,6 +99,12 @@ public sealed class TuiContextFactory(
                 teamOrchestrationService.ActiveTeam = nextTeam;
                 return nextTeam;
             },
+            GetTeamModeLabel: mode => teamOrchestrationService.GetTeamMode(mode) switch
+            {
+                "magentic" => "Magentic",
+                "groupchat" => "GroupChat",
+                _ => null,
+            },
             GitHelper: gitHelper);
 
         var diagnostics = new TuiDiagnosticServices(
@@ -110,6 +119,7 @@ public sealed class TuiContextFactory(
             ModeController: session.ModeController,
             KeyResolver: keyResolver,
             KeyContextManager: keyContextManager,
+            GetKeybindingWarnings: () => tuiDeps.KeybindingLoader.CachedWarnings,
             TrustService: tuiDeps.TrustService,
             ImagePipeline: tuiDeps.ImagePipeline,
             RecordCost: () => tuiDeps.CostTracker.FormatCost(),

@@ -26,6 +26,14 @@ public sealed partial class ReplShell
         return ShowReviewOverlayCoreAsync();
     }
 
+    /// <summary>
+    /// 显示快捷键查看 overlay（/keybindings list）。数据由调用方备好，直接入栈。
+    /// </summary>
+    public void ShowKeybindingsOverlay(KeybindingsOverlay overlay)
+    {
+        ShowOverlay(overlay);
+    }
+
     private async Task ShowReviewOverlayCoreAsync()
     {
         IReadOnlyList<ReviewFileEntry> files = _gitHelper is null

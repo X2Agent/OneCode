@@ -1,5 +1,6 @@
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
+using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
@@ -88,12 +89,139 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         workspace.PublishCalls.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Complete_BudgetSkippedRequiredStep_PausesInsteadOfFails()
+    {
+        // Fix-1/F-03：预算耗尽跳过的必需步骤 → 终态 Paused（可续跑），而非 Failed。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "budget-pause"));
+        var skippedStep = new GoalStepSnapshot(
+            1, "step", "done", GoalStepState.Skipped, [], 0, false, [], [], false, false, false);
+        var skippedEvidence = new GoalStepExecutionEvidence(
+            1,
+            GoalStepState.Skipped,
+            0,
+            0,
+            0,
+            string.Empty,
+            "Skipped because the remaining attempt budget cannot safely execute another sub-goal.",
+            [],
+            [],
+            [new GoalGateEvidence("budget", false, true, "Insufficient remaining attempt budget.")],
+            []);
+        var run = await CreateClaimedRunAsync(
+            store,
+            GoalRunState.Executing,
+            stepOverride: skippedStep,
+            evidenceOverride: skippedEvidence);
+        var service = new GoalCompletionService(
+            store,
+            new CompletionWorkspaceService(),
+            new CompletionStepService(semanticPassed: true));
+
+        var paused = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
+
+        paused.State.Should().Be(GoalRunState.Paused);
+        paused.TerminalReason.Should().Be(BuildTerminalReason.BudgetExceeded);
+        paused.FinalValidation.Should().Contain(gate =>
+            gate.Gate == "state-integrity" && !gate.Passed && gate.Skipped);
+    }
+
+    [Fact]
+    public async Task Complete_StableDiagnosticError_FailsStaticDiagnosticsGate()
+    {
+        // Fix-3：诊断稳定后存在 Error → gate 正常判负（不因 quiescent 等待而漏杀）。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "diag-error"));
+        var changedFile = Path.Combine(_root, "code.cs");
+        var evidence = new GoalStepExecutionEvidence(
+            1, GoalStepState.Completed, 1, 10, 5, "done", "accepted",
+            [changedFile], [],
+            [new GoalGateEvidence("test", true, false, "passed")], []);
+        var run = await CreateClaimedRunAsync(
+            store,
+            GoalRunState.Validating,
+            evidenceOverride: evidence);
+        var registry = new LspDiagnosticRegistry();
+        PushError(registry, changedFile, "CS1002: ; expected");
+        var service = new GoalCompletionService(
+            store,
+            new CompletionWorkspaceService(),
+            new CompletionStepService(semanticPassed: true),
+            diagnosticRegistry: registry,
+            diagnosticQuietPeriod: TimeSpan.FromMilliseconds(50),
+            diagnosticTimeout: TimeSpan.FromSeconds(5));
+
+        var failed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
+
+        failed.State.Should().Be(GoalRunState.Failed);
+        failed.FinalValidation.Should().Contain(gate =>
+            gate.Gate == "static-diagnostics" && !gate.Passed && !gate.Skipped);
+    }
+
+    [Fact]
+    public async Task Complete_UnstableDiagnostics_SkipsGateInsteadOfFalseVerdict()
+    {
+        // Fix-3/F-08：诊断持续推送未稳定 → 超时后 gate 标记 Skipped，既不误杀也不假通过。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "diag-unstable"));
+        var changedFile = Path.Combine(_root, "unstable.cs");
+        var evidence = new GoalStepExecutionEvidence(
+            1, GoalStepState.Completed, 1, 10, 5, "done", "accepted",
+            [changedFile], [],
+            [new GoalGateEvidence("test", true, false, "passed")], []);
+        var run = await CreateClaimedRunAsync(
+            store,
+            GoalRunState.Validating,
+            evidenceOverride: evidence);
+        var registry = new LspDiagnosticRegistry();
+        using var source = new CancellationTokenSource();
+        var chatter = Task.Run(async () =>
+        {
+            var index = 0;
+            while (!source.IsCancellationRequested)
+            {
+                PushError(registry, changedFile, $"error-{index++}");
+                await Task.Delay(20, source.Token);
+            }
+        });
+        try
+        {
+            var service = new GoalCompletionService(
+                store,
+                new CompletionWorkspaceService(),
+                new CompletionStepService(semanticPassed: true),
+                diagnosticRegistry: registry,
+                diagnosticQuietPeriod: TimeSpan.FromMilliseconds(60),
+                diagnosticTimeout: TimeSpan.FromMilliseconds(300));
+
+            var completed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
+
+            completed.FinalValidation.Should().Contain(gate =>
+                gate.Gate == "static-diagnostics" && gate.Skipped);
+        }
+        finally
+        {
+            source.Cancel();
+            try { await chatter; } catch (OperationCanceledException) { }
+        }
+    }
+
+    private static void PushError(LspDiagnosticRegistry registry, string filePath, string message)
+    {
+        var payload = System.Text.Json.JsonSerializer.SerializeToElement(new
+        {
+            uri = new Uri(filePath).AbsoluteUri,
+            diagnostics = new object[] { new { severity = 1, message } },
+        });
+        registry.ProcessDiagnostics("test-server", payload);
+    }
+
     private async Task<GoalRun> CreateClaimedRunAsync(
         IGoalRunStore store,
         GoalRunState state,
-        bool validEvidence = true)
+        bool validEvidence = true,
+        GoalStepSnapshot? stepOverride = null,
+        GoalStepExecutionEvidence? evidenceOverride = null)
     {
-        var step = new GoalStepSnapshot(
+        var step = stepOverride ?? new GoalStepSnapshot(
             1,
             "step",
             "done",
@@ -106,7 +234,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
             false,
             false,
             false);
-        var evidence = new GoalStepExecutionEvidence(
+        var evidence = evidenceOverride ?? new GoalStepExecutionEvidence(
             1,
             GoalStepState.Completed,
             1,

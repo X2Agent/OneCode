@@ -40,7 +40,10 @@ public sealed partial class ChatTranscriptView
 
         var lines = ChatBlockRenderers.RenderLspDiagnosticsBlock(
             Path.GetFileName(filePath), matching);
-        AddFormattedLines(lines);
+        if (_stream.IsStreaming)
+            AddFormattedLines(lines);
+        else
+            AppendCommittedBlock(_ => lines);
     }
 
 }

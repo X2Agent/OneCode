@@ -196,14 +196,12 @@ public static partial class ChatBlockRenderers
         }).ToArray();
     }
 
-    /// <param name="showActionButtons">保留参数，当前始终为 false。</param>
     public static IReadOnlyList<FormattedLine> RenderPlanCard(
         string title,
         IReadOnlyList<PlanStep> steps,
         int viewWidth = 80,
-        bool showActionButtons = false,
-        bool showApprovalGuidance = false,
-        string? markdown = null)
+        string? markdown = null,
+        string? documentPath = null)
     {
         var list = new List<FormattedLine>
         {
@@ -211,7 +209,17 @@ public static partial class ChatBlockRenderers
             FormattedLine.WithBackground($"  \U0001f4cb  {title}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader),
             FormattedLine.Plain("", TuiPalette.BgPrimary),
         };
-        if (showApprovalGuidance && !string.IsNullOrWhiteSpace(markdown))
+        if (!string.IsNullOrWhiteSpace(documentPath))
+        {
+            const string pathPrefix = "  📄 计划文档: ";
+            var available = Math.Max(20, viewWidth - TextWidthHelper.GetDisplayWidth(pathPrefix));
+            foreach (var line in TextWidthHelper.WordWrapByWidth(documentPath, available))
+                list.Add(FormattedLine.Plain(pathPrefix + line, TuiPalette.FgMuted));
+            list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+        }
+        // 完整计划全文渲染，让用户在 LLM 迭代计划时即可审阅；执行阶段不传 markdown 保持精简。
+        // 辅助性说明（如操作引导）由 LLM 在对话流中提供，侧边栏只保留纯计划内容。
+        if (!string.IsNullOrWhiteSpace(markdown))
         {
             list.Add(FormattedLine.Plain("  完整计划", TuiPalette.ModePlanFg));
             foreach (var line in MarkdownRenderer.Render(markdown, Math.Max(20, viewWidth - 2)))
@@ -262,33 +270,6 @@ public static partial class ChatBlockRenderers
                 foreach (var line in TextWidthHelper.WordWrapByWidth(s.Content, available))
                     list.Add(FormattedLine.Plain(contentPrefix + line, TuiPalette.FgMuted));
             }
-        }
-        if (showApprovalGuidance)
-        {
-            list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            AddWrappedDetail(
-                list,
-                "在下方选择“批准并执行”即可切换到 Build 模式并开始执行。",
-                viewWidth,
-                TuiPalette.Success);
-            AddWrappedDetail(
-                list,
-                "如需调整，选择“输入修改意见”，然后在输入框中直接说明修改要求。",
-                viewWidth,
-                TuiPalette.FgSecondary);
-        }
-        if (showActionButtons)
-        {
-            list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            list.Add(FormattedLine.FromSegments(new[]
-            {
-                new LineSegment("  ", TuiPalette.BgPrimary),
-                new LineSegment($" {TuiGlyphs.Complete} 批准 (a) ", TuiPalette.Success, TuiPalette.BgTerminalHeader),
-                new LineSegment("  ", TuiPalette.BgPrimary),
-                new LineSegment($" {TuiGlyphs.Failed} 拒绝 (r) ", TuiPalette.Error, TuiPalette.BgTerminalHeader),
-                new LineSegment("  ", TuiPalette.BgPrimary),
-                new LineSegment($" {TuiGlyphs.Ellipsis} 修改步骤 (s) ", TuiPalette.FgSecondary, TuiPalette.BgTerminalHeader),
-            }));
         }
         return list;
     }

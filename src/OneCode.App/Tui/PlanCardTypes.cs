@@ -4,17 +4,11 @@ namespace OneCode.App.Tui;
 public enum PlanCardDecision { Approve, Reject, Edit }
 
 /// <summary>
-/// Plan card lifecycle phase — distinguishes draft plans (still being refined
-/// by the LLM via SavePlan) from plans awaiting user approval (submitted via SubmitPlan).
+/// Plan card lifecycle phase — tracks the plan from submission through user
+/// approval and execution.
 /// </summary>
 public enum PlanCardPhase
 {
-    /// <summary>
-    /// Phase 4 草稿——LLM 仍在通过 SavePlan 调用迭代修订计划。
-    /// 卡片仅展示，不弹出决策面板，用户无法提前决策。
-    /// </summary>
-    Draft,
-
     /// <summary>
     /// SubmitPlan 已返回，但当前 Plan Run 尚未完成持久化和协议校验。
     /// 仅展示提交中状态，不开放审批。
@@ -47,12 +41,12 @@ public enum PlanCardPhase
 
 /// <summary>
 /// Plan card 持久化快照——通过 <see cref="Conversation.Metadata"/> 跨会话恢复。
-/// 用于用户退出程序后重新打开会话时，恢复 plan card 的 Phase 状态（Draft/PendingApproval）
+/// 用于用户退出程序后重新打开会话时，恢复 plan card 的 Phase 状态
 /// 和内容，使 InlineSelector 决策面板能继续工作。
 /// </summary>
 /// <remarks>
 /// 设计说明：仅靠 plan.md 文件不足以恢复 PlanCardPhase 状态——plan.md 只含 plan 内容，
-/// 不知道当前是 Draft（用户不应看到决策面板）还是 PendingApproval（应弹决策面板）。
+/// 不知道当前是否处于 PendingApproval（应弹决策面板）。
 /// 通过 Conversation.Metadata 持久化 Phase 字段是必要补充。
 ///
 /// <para>
@@ -84,7 +78,7 @@ public static class PlanCardStateKeys
 {
     /// <summary>
     /// Conversation.Metadata key——值为序列化的 <see cref="PlanCardStateSnapshot"/> JSON 字符串。
-    /// 由 <c>CreatePlanTool.SavePlanAsync</c>（Draft）和 <c>SubmitPlanAsync</c>（PendingApproval）写入，
+    /// 由 <c>CreatePlanTool.SubmitPlanAsync</c>（PendingApproval）写入，
     /// 由 <c>TuiHostConfigurator.WireSessionModals</c> 在会话恢复时读取，
     /// 由 <c>TuiHostConfigurator.WirePlanCard</c> 在 Approve 决策时清除。
     /// </summary>
@@ -96,12 +90,16 @@ internal sealed class PlanCardState(
     string title,
     List<PlanStep> steps,
     PlanCardPhase phase,
-    string? markdown = null)
+    string? markdown = null,
+    string? documentPath = null)
 {
     public string Title { get; } = title;
     public List<PlanStep> Steps { get; } = steps;
     public PlanCardPhase Phase { get; } = phase;
     public string? Markdown { get; } = markdown;
+
+    /// <summary>Persisted markdown document path shown on the card so users can locate the plan file.</summary>
+    public string? DocumentPath { get; } = documentPath;
 }
 
 public enum PlanStepStatus { Pending = 0, Current = 1, Done = 2, }

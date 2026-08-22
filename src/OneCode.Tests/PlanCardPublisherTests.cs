@@ -44,7 +44,7 @@ public sealed class PlanCardPublisherTests
         // would crash the tool in headless/CI runs where no TUI is attached.
         var sut = new PlanCardPublisher();
 
-        var act = () => sut.Publish("title", Array.Empty<PlanStep>(), PlanCardPhase.Draft);
+        var act = () => sut.Publish("title", Array.Empty<PlanStep>(), PlanCardPhase.Finalizing);
 
         act.Should().NotThrow();
     }
@@ -59,20 +59,20 @@ public sealed class PlanCardPublisherTests
         sut.PlanCreated += (t, _, p) => { titles.Add(t); phases.Add(p); };
         sut.PlanCreated += (t, _, p) => { titles.Add(t); phases.Add(p); };
 
-        sut.Publish("Shared plan", steps, PlanCardPhase.Draft);
+        sut.Publish("Shared plan", steps, PlanCardPhase.Finalizing);
 
         titles.Should().HaveCount(2);
         titles[0].Should().Be("Shared plan");
         titles[1].Should().Be("Shared plan");
-        phases.Should().AllBeEquivalentTo(PlanCardPhase.Draft);
+        phases.Should().AllBeEquivalentTo(PlanCardPhase.Finalizing);
     }
 
     [Theory]
-    [InlineData(PlanCardPhase.Draft)]
+    [InlineData(PlanCardPhase.Finalizing)]
     [InlineData(PlanCardPhase.PendingApproval)]
     public void Publish_ForwardsPhaseToSubscriber(PlanCardPhase phase)
     {
-        // SavePlan 发布 Draft（TUI 仅展示卡片）；SubmitPlan 发布 PendingApproval（弹出 InlineSelector 决策面板）
+        // 非审批阶段仅展示卡片；PendingApproval 弹出 InlineSelector 决策面板
         var sut = new PlanCardPublisher();
         PlanCardPhase? receivedPhase = null;
         sut.PlanCreated += (_, _, p) => receivedPhase = p;

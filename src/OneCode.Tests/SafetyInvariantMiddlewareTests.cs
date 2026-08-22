@@ -170,4 +170,62 @@ public sealed class SafetyInvariantMiddlewareTests
         holder.Value.Should().BeTrue("所有 invariant Allow 时应执行工具");
         result.Should().Be("tool-result");
     }
+
+    // next 抛出 ArgumentException（AIFunctionFactory 参数绑定失败，如 LLM 调用工具时
+    // 缺少必需参数）→ 中间件兜底返回 ToolResult.Error 而不是让异常穿透中间件链
+    // 崩溃整个 agent run。LLM 收到错误后可修正参数重试。
+    [Fact]
+    public async Task NextThrowsArgumentException_ReturnsToolErrorInsteadOfThrowing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        invariant.CheckAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(InvariantCheckResult.Allow);
+
+        var middleware = SafetyInvariantMiddleware.Create(
+            new[] { invariant }, NullLogger.Instance);
+        var ctx = CreateContext("SubmitPlan");
+
+        var act = async () => await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => throw new ArgumentException(
+                "The arguments dictionary is missing a value for the required parameter 'content'. (Parameter 'arguments')"),
+            ct);
+
+        var result = await act();
+        result.Should().BeOfType<ToolResult>()
+            .Which.IsError.Should().BeTrue("参数绑定失败应转为可重试的工具错误");
+        result.Should().BeOfType<ToolResult>()
+            .Which.Content.Should().Contain("SubmitPlan")
+            .And.Contain("content",
+                "错误消息应包含工具名和缺失的参数名，指导 LLM 修正重试");
+    }
+
+    // 非 ArgumentException（如工具内部逻辑错误）不在此层兜底——保持原有异常传播契约
+    [Fact]
+    public async Task NextThrowsInvalidOperationException_StillPropagates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        invariant.CheckAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(InvariantCheckResult.Allow);
+
+        var middleware = SafetyInvariantMiddleware.Create(
+            new[] { invariant }, NullLogger.Instance);
+        var ctx = CreateContext("Read");
+
+        var act = () => middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => throw new InvalidOperationException("unexpected"),
+            ct).AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "仅兜底参数绑定（ArgumentException）；其他异常保持原有传播语义");
+    }
 }

@@ -4,7 +4,6 @@ using OneCode.Core.Build;
 using OneCode.Core.Goals;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
-
 namespace OneCode.App.Services.GoalMode;
 
 internal interface IGoalCompletionService
@@ -17,8 +16,14 @@ internal sealed class GoalCompletionService(
     IGoalWorkspaceService workspaceService,
     IGoalStepExecutionService stepExecutionService,
     IVerificationProvider? verificationProvider = null,
-    LspDiagnosticRegistry? diagnosticRegistry = null) : IGoalCompletionService
+    LspDiagnosticRegistry? diagnosticRegistry = null,
+    TimeSpan? diagnosticQuietPeriod = null,
+    TimeSpan? diagnosticTimeout = null) : IGoalCompletionService
 {
+    // Fix-3：读取诊断前等待 quiescent——连续 quietPeriod 无新 Error 视为稳定，上限 timeout。
+    private readonly TimeSpan _diagnosticQuietPeriod = diagnosticQuietPeriod ?? TimeSpan.FromSeconds(2);
+    private readonly TimeSpan _diagnosticTimeout = diagnosticTimeout ?? TimeSpan.FromSeconds(30);
+
     public async Task<GoalRun> CompleteAsync(GoalRun run, long fencingToken, CancellationToken ct)
     {
         ValidateFencing(run, fencingToken);
@@ -26,13 +31,42 @@ internal sealed class GoalCompletionService(
         ValidateFencing(current, fencingToken);
         if (current.IsTerminal)
             return current;
+        // Fix-1 最小改动路径：budget 终止的 Paused Run 已带终态语义，直接短路返回，
+        // 不允许落入下方 FailAsync 被误判为完整性失败。
+        if (current.State == GoalRunState.Paused)
+            return current;
         if (current.State is not (GoalRunState.Executing or GoalRunState.Validating or GoalRunState.Publishing))
             throw new InvalidOperationException($"GoalRun '{current.Id}' cannot complete from state '{current.State}'.");
+
+        var report = new List<GoalGateEvidence>();
+        // Fix-1/F-03：预算耗尽跳过的必需步骤不是完整性失败——保持 Paused 终态并输出汇总报告，
+        // 用户可追加预算后通过 /resume-goal 续跑，而不是被判 Failed。
+        var budgetSkipped = current.Plan
+            .Where(step => !step.Optional && IsBudgetSkipped(step, current.Executions))
+            .ToArray();
+        if (budgetSkipped.Length > 0)
+        {
+            report.Add(new GoalGateEvidence(
+                "state-integrity",
+                false,
+                true,
+                $"budget-exhausted: required sub-goals skipped due to exhausted budget: "
+                    + $"{string.Join(", ", budgetSkipped.Select(step => $"#{step.Id}"))}. "
+                    + "Run kept Paused; add budget and resume to continue."));
+            var paused = current with
+            {
+                State = GoalRunState.Paused,
+                TerminalReason = BuildTerminalReason.BudgetExceeded,
+                FailureSummary = "Goal execution paused: budget exhausted before completing required sub-goal(s).",
+                FinalValidation = report,
+            };
+            await SaveAsync(paused, fencingToken, ct).ConfigureAwait(false);
+            return await ReloadAsync(current.Id, ct).ConfigureAwait(false);
+        }
 
         if (current.State == GoalRunState.Publishing)
             return await PublishAsync(current, fencingToken, ct).ConfigureAwait(false);
 
-        var report = new List<GoalGateEvidence>();
         var incompleteRequired = current.Plan
             .Where(step => !step.Optional && !IsSatisfied(step))
             .ToArray();
@@ -69,7 +103,8 @@ internal sealed class GoalCompletionService(
         var changedFiles = current.Executions
             .SelectMany(execution => execution.ChangedFiles)
             .Select(path => Path.GetFullPath(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            // Fix-4/F-09：路径比较平台化——Windows 大小写不敏感，Unix 敏感。
+            .Distinct(PathComparer.Default)
             .ToArray();
         var scopeErrors = changedFiles
             .Where(path => !PathBoundary.IsWithinDirectory(path, workspace.IsolatedPath))
@@ -121,17 +156,37 @@ internal sealed class GoalCompletionService(
                 "No source changes or explicit build/test gates were required."));
         }
 
-        var diagnostics = GetDiagnostics(workspace.IsolatedPath, changedFiles);
-        report.Add(new GoalGateEvidence(
-            "static-diagnostics",
-            diagnostics.Count == 0,
-            diagnosticRegistry is null,
-            diagnosticRegistry is null
-                ? "LSP diagnostics unavailable; build/test evidence remains authoritative."
-                : diagnostics.Count == 0
-                    ? "No unresolved LSP errors were reported for changed files."
-                    : string.Join("; ", diagnostics)));
-        if (diagnostics.Count > 0)
+        // Fix-3/F-08：读取诊断前等待 quiescent，防止诊断异步推送未到位造成假阳性通过；
+        // 若在超时内仍未稳定，则将该 gate 标记 Skipped（与 registry 缺失同语义），
+        // 既不误杀也不假通过。
+        GoalGateEvidence diagnosticsGate;
+        if (diagnosticRegistry is null || changedFiles.Length == 0)
+        {
+            diagnosticsGate = new GoalGateEvidence(
+                "static-diagnostics",
+                true,
+                true,
+                "LSP diagnostics unavailable; build/test evidence remains authoritative.");
+        }
+        else
+        {
+            var changed = changedFiles.Select(Path.GetFullPath).ToHashSet(PathComparer.Default);
+            var stabilized = await WaitForDiagnosticQuiescenceAsync(changed, ct).ConfigureAwait(false);
+            var diagnostics = stabilized
+                ? FilterErrorDiagnostics(workspace.IsolatedPath, changed)
+                : [];
+            diagnosticsGate = new GoalGateEvidence(
+                "static-diagnostics",
+                diagnostics.Count == 0,
+                !stabilized,
+                !stabilized
+                    ? "LSP diagnostics did not stabilize before the timeout; gate skipped to avoid a false result."
+                    : diagnostics.Count == 0
+                        ? "No unresolved LSP errors were reported for changed files."
+                        : string.Join("; ", diagnostics));
+        }
+        report.Add(diagnosticsGate);
+        if (!diagnosticsGate.Passed && !diagnosticsGate.Skipped)
             return await FailAsync(current, fencingToken, report, "Goal static diagnostics failed.", ct).ConfigureAwait(false);
 
         var semantic = await stepExecutionService.EvaluateFinalGoalAsync(
@@ -215,19 +270,48 @@ internal sealed class GoalCompletionService(
         => await store.LoadByIdAsync(runId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"GoalRun '{runId}' was not found.");
 
-    private IReadOnlyList<string> GetDiagnostics(
-        string workingDirectory,
-        IReadOnlyList<string> changedFiles)
+    private async Task<bool> WaitForDiagnosticQuiescenceAsync(IReadOnlySet<string> changedFiles, CancellationToken ct)
     {
-        if (diagnosticRegistry is null || changedFiles.Count == 0)
-            return [];
-        var changed = changedFiles.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return diagnosticRegistry.GetAllDiagnostics()
+        var deadline = DateTimeOffset.UtcNow + _diagnosticTimeout;
+        var signature = DiagnosticsSignature(changedFiles);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(_diagnosticQuietPeriod, ct).ConfigureAwait(false);
+            var next = DiagnosticsSignature(changedFiles);
+            if (next == signature)
+                return true;
+            signature = next;
+        }
+        return false;
+    }
+
+    private IReadOnlyList<string> FilterErrorDiagnostics(string workingDirectory, IReadOnlySet<string> changedFiles)
+        => diagnosticRegistry!.GetAllDiagnostics()
             .Where(diagnostic => diagnostic.Severity == LspDiagnosticSeverity.Error)
-            .Where(diagnostic => changed.Contains(Path.GetFullPath(diagnostic.FilePath)))
+            .Where(diagnostic => changedFiles.Contains(Path.GetFullPath(diagnostic.FilePath)))
             .Where(diagnostic => PathBoundary.IsWithinDirectory(diagnostic.FilePath, workingDirectory))
             .Select(diagnostic => diagnostic.Summary)
             .ToArray();
+
+    private string DiagnosticsSignature(IReadOnlySet<string> changedFiles)
+        => string.Join("|", FilterUnscopedErrorDiagnostics(changedFiles)
+            .Select(diagnostic => diagnostic.Summary)
+            .OrderBy(static summary => summary, StringComparer.Ordinal));
+
+    private IReadOnlyList<LspDiagnostic> FilterUnscopedErrorDiagnostics(IReadOnlySet<string> changedFiles)
+        => diagnosticRegistry!.GetAllDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == LspDiagnosticSeverity.Error)
+            .Where(diagnostic => changedFiles.Contains(Path.GetFullPath(diagnostic.FilePath)))
+            .ToArray();
+
+    private static bool IsBudgetSkipped(GoalStepSnapshot step, IReadOnlyList<GoalStepExecutionEvidence> executions)
+    {
+        if (step.State != GoalStepState.Skipped)
+            return false;
+        var last = executions.LastOrDefault(evidence => evidence.GoalId == step.Id);
+        return last is not null
+            && last.State == GoalStepState.Skipped
+            && last.Validations.Any(gate => gate.Gate == "budget" && gate.Skipped);
     }
 
     private static GoalItem ToGoalItem(GoalStepSnapshot item) => new()
@@ -257,7 +341,16 @@ internal sealed class GoalCompletionService(
     private static SubGoalExecution ToSubGoalExecution(GoalStepExecutionEvidence evidence)
         => new(
             evidence.GoalId,
-            evidence.State == GoalStepState.Completed ? GoalStatus.Completed : GoalStatus.Failed,
+            // F-10：保留 Skipped/InProgress/Pending 保真映射，非 Completed 不再一律降级 Failed，
+            // 提升 final-semantic-review 的输入保真度。
+            evidence.State switch
+            {
+                GoalStepState.Completed => GoalStatus.Completed,
+                GoalStepState.Skipped => GoalStatus.Skipped,
+                GoalStepState.InProgress => GoalStatus.InProgress,
+                GoalStepState.Pending => GoalStatus.Pending,
+                _ => GoalStatus.Failed,
+            },
             evidence.Attempts,
             evidence.InputTokens,
             evidence.OutputTokens,

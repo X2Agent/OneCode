@@ -30,6 +30,7 @@ public sealed record TuiSessionServices(
     Func<string?>? GetActiveTeam = null,
     Func<IReadOnlyList<string>>? GetRegisteredTeams = null,
     Func<string?>? CycleTeam = null,
+    Func<string, string?>? GetTeamModeLabel = null,
     OneCode.Core.Commands.IGitHelper? GitHelper = null);
 
 /// <summary>LSP status and diagnostic subscriptions.</summary>
@@ -46,6 +47,7 @@ public sealed record TuiRuntimeServices(
     WorkingModeController? ModeController = null,
     KeybindingResolver? KeyResolver = null,
     KeybindingContextManager? KeyContextManager = null,
+    Func<IReadOnlyList<KeybindingWarning>>? GetKeybindingWarnings = null,
     TrustService? TrustService = null,
     ImagePipeline? ImagePipeline = null,
     Func<string>? RecordCost = null,
@@ -94,6 +96,7 @@ public sealed record TuiContext(
     public Func<string?>? GetActiveTeam => Session.GetActiveTeam;
     public Func<IReadOnlyList<string>>? GetRegisteredTeams => Session.GetRegisteredTeams;
     public Func<string?>? CycleTeam => Session.CycleTeam;
+    public Func<string, string?>? GetTeamModeLabel => Session.GetTeamModeLabel;
     public IGitHelper? GitHelper => Session.GitHelper;
 
     public Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus => Diagnostics.GetLspServerStatus;
@@ -106,6 +109,7 @@ public sealed record TuiContext(
     public WorkingModeController? ModeController => Runtime.ModeController;
     public KeybindingResolver? KeyResolver => Runtime.KeyResolver;
     public KeybindingContextManager? KeyContextManager => Runtime.KeyContextManager;
+    public Func<IReadOnlyList<KeybindingWarning>>? GetKeybindingWarnings => Runtime.GetKeybindingWarnings;
     public TrustService? TrustService => Runtime.TrustService;
     public ImagePipeline? ImagePipeline => Runtime.ImagePipeline;
     public Func<string>? RecordCost => Runtime.RecordCost;

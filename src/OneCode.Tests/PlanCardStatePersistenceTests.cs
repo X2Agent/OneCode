@@ -3,7 +3,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.App.Tools;
-using OneCode.App.Tui;
 using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 
@@ -15,21 +14,6 @@ public sealed class PlanCardStatePersistenceTests : IDisposable
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "OneCodePlanToolTests-" + Guid.NewGuid().ToString("N"));
-
-    [Fact]
-    public async Task SavePlanAsync_PersistsVersionedDraftWithoutLegacyMetadata()
-    {
-        var (sut, conversation, workflow) = BuildSut();
-
-        var result = await sut.SavePlanAsync(CreatePlanMarkdown(), [CreateStep()],
-            TestContext.Current.CancellationToken);
-
-        result.IsError.Should().BeFalse();
-        var restored = await workflow.GetAsync(conversation.Id, TestContext.Current.CancellationToken);
-        restored!.State.Should().Be(PlanWorkflowState.Planning);
-        restored.LatestRevision.Should().Be(1);
-        conversation.Metadata.Should().NotContainKey(PlanCardStateKeys.PlanCard);
-    }
 
     [Fact]
     public async Task SubmitPlanAsync_ReturnsWithoutWaitingAndPersistsFinalizingRun()
@@ -60,8 +44,9 @@ public sealed class PlanCardStatePersistenceTests : IDisposable
         sessions.ForegroundConversation.Returns(conversation);
         var mode = Substitute.For<IPlanModeService>();
         mode.IsInPlanMode.Returns(true);
-        var workflow = new PlanWorkflowApplicationService(new PlanAggregateStore(_root));
-        return (new CreatePlanTool(mode, new PlanCardPublisher(), sessions, workflow), conversation, workflow);
+        var store = new PlanAggregateStore(_root);
+        var workflow = new PlanWorkflowApplicationService(store);
+        return (new CreatePlanTool(mode, new PlanCardPublisher(), sessions, workflow, store), conversation, workflow);
     }
 
     private static string CreatePlanMarkdown() =>

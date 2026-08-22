@@ -39,6 +39,10 @@ public sealed partial class ChatTranscriptView
 
         if (_stream.PendingLines is { Count: > 0 } && _messageView.StreamingPreviewLineCount > 0)
         {
+            // 日志条目捕获不可变快照（StatusLines 副本 + 文本），ResetForNextTurn
+            // 会清空 _stream——闭包不能引用可变状态。
+            _committedJournal.Add(BuildCommittedStreamJournalEntry(
+                _stream.StatusLines.ToList(), _stream.TextBuffer.ToString()));
             var committedLines = BuildFinalCommittedLines();
             _messageView.ReplaceStreamingPreview(committedLines);
         }
@@ -71,6 +75,8 @@ public sealed partial class ChatTranscriptView
             // During streaming, the preview used plain word-wrap for performance;
             // now we render the complete text through the Markdown renderer so
             // code blocks, headings, lists, and tables display correctly.
+            _committedJournal.Add(BuildCommittedStreamJournalEntry(
+                _stream.StatusLines.ToList(), _stream.TextBuffer.ToString()));
             var finalLines = BuildFinalCommittedLines();
             _messageView.ReplaceStreamingPreview(finalLines);
         }
@@ -81,6 +87,7 @@ public sealed partial class ChatTranscriptView
             // still has uncommitted items (e.g., a TuiFileChange that arrived
             // after the first EndStreaming), append them directly so they are
             // not lost.
+            _committedJournal.Add(BuildCommittedStatusJournalEntry(_stream.StatusLines.ToList()));
             _renderer.CurrentWidth = ContentWidth;
             _messageView.AppendLines(_stream.StatusLines);
         }
@@ -138,35 +145,54 @@ public sealed partial class ChatTranscriptView
     // single rebuild on the next UI-loop iteration.
     private void RebuildStreamingPreview()
     {
-        _renderer.CurrentWidth = ContentWidth;
-        _stream.PendingLines = new List<FormattedLine>();
-
-        for (var i = 0; i < _stream.StatusLines.Count; i++)
-        {
-            _stream.PendingLines.Add(_stream.StatusLines[i]);
-            if (i < _stream.StatusLines.Count - 1
-                && _stream.StatusLines[i].Tag is not ThinkingDetailLineTag
-                && _stream.StatusLines[i + 1].Tag is not ThinkingDetailLineTag)
-            {
-                _stream.PendingLines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            }
-        }
-
-        // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
-        // incomplete paragraph (and any newly completed ones) on each rebuild.
-        var fullText = _stream.TextBuffer.ToString();
-        var wrapWidth = _renderer.CurrentWidth - ConversationRenderer.ContentIndent - 2;
-        UpdateStreamingWrapCache(fullText, wrapWidth);
-
-        if (_stream.WrappedTextLines.Count > 0 && _stream.PendingLines.Count > 0)
-            _stream.PendingLines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-        foreach (var line in _stream.WrappedTextLines)
-        {
-            _stream.PendingLines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{line}", TuiPalette.AssistantMessage));
-        }
-
+        _stream.PendingLines = BuildStreamingPreviewLines(ContentWidth);
         _messageView.ReplaceStreamingPreview(_stream.PendingLines);
         _stream.PreviewLineCount = _messageView.StreamingPreviewLineCount;
+    }
+
+    /// <summary>
+    /// 构建当前流式预览的行（状态行 + 间隔 + 按宽度换行的回复文本）。
+    /// 独立成方法供 token 到达时的常规重建与宽度变化后的整体重渲共用。
+    /// </summary>
+    private List<FormattedLine> BuildStreamingPreviewLines(int width)
+    {
+        var (prevMode, prevWidth) = (_renderer.CurrentMode, _renderer.CurrentWidth);
+        _renderer.CurrentWidth = width;
+        try
+        {
+            var pending = new List<FormattedLine>();
+
+            for (var i = 0; i < _stream.StatusLines.Count; i++)
+            {
+                pending.Add(_stream.StatusLines[i]);
+                if (i < _stream.StatusLines.Count - 1
+                    && _stream.StatusLines[i].Tag is not ThinkingDetailLineTag
+                    && _stream.StatusLines[i + 1].Tag is not ThinkingDetailLineTag)
+                {
+                    pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+                }
+            }
+
+            // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
+            // incomplete paragraph (and any newly completed ones) on each rebuild.
+            var fullText = _stream.TextBuffer.ToString();
+            var wrapWidth = width - ConversationRenderer.ContentIndent - 2;
+            UpdateStreamingWrapCache(fullText, wrapWidth);
+
+            if (_stream.WrappedTextLines.Count > 0 && pending.Count > 0)
+                pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+            foreach (var line in _stream.WrappedTextLines)
+            {
+                pending.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{line}", TuiPalette.AssistantMessage));
+            }
+
+            return pending;
+        }
+        finally
+        {
+            _renderer.CurrentMode = prevMode;
+            _renderer.CurrentWidth = prevWidth;
+        }
     }
 
     /// <summary>
@@ -264,25 +290,56 @@ public sealed partial class ChatTranscriptView
     /// with proper formatting and syntax highlighting.
     /// </summary>
     private IReadOnlyList<FormattedLine> BuildFinalCommittedLines()
+        => BuildCommittedStreamLines(_stream.StatusLines, _stream.TextBuffer.ToString(), ContentWidth);
+
+    /// <summary>
+    /// 为一段已提交流构造重渲日志条目：状态行按提交时的样子原样保留
+    /// （含展开 tag，宽度无关），回复文本按新宽度经 markdown 渲染器重渲。
+    /// </summary>
+    private Func<int, IReadOnlyList<FormattedLine>> BuildCommittedStreamJournalEntry(
+        IReadOnlyList<FormattedLine> statusLines, string text)
+        => width => BuildCommittedStreamLines(statusLines, text, width);
+
+    /// <summary>
+    /// 为一段仅含状态行（无回复文本）的已提交流构造重渲日志条目。
+    /// </summary>
+    private Func<int, IReadOnlyList<FormattedLine>> BuildCommittedStatusJournalEntry(
+        IReadOnlyList<FormattedLine> statusLines)
+        => _ => statusLines;
+
+    /// <summary>
+    /// 构建一段已提交流的最终行：状态行（含间隔空行）+ 回复文本的 markdown 渲染。
+    /// </summary>
+    private IReadOnlyList<FormattedLine> BuildCommittedStreamLines(
+        IReadOnlyList<FormattedLine> statusLines, string text, int width)
     {
         var lines = new List<FormattedLine>();
 
         // Preserve tool-call / thinking / notice lines with uniform spacing.
-        foreach (var line in _stream.StatusLines)
+        foreach (var line in statusLines)
         {
             lines.Add(line);
             lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
         }
-        if (_stream.StatusLines.Count > 0 && lines.Count > 0)
+        if (statusLines.Count > 0 && lines.Count > 0)
             lines.RemoveAt(lines.Count - 1);
 
         // Re-render the accumulated text through the Markdown renderer.
-        var text = _stream.TextBuffer.ToString();
         if (!string.IsNullOrWhiteSpace(text))
         {
             if (lines.Count > 0)
                 lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            _renderer.AppendAssistantText(lines, text);
+            var (prevMode, prevWidth) = (_renderer.CurrentMode, _renderer.CurrentWidth);
+            _renderer.CurrentWidth = width;
+            try
+            {
+                _renderer.AppendAssistantText(lines, text);
+            }
+            finally
+            {
+                _renderer.CurrentMode = prevMode;
+                _renderer.CurrentWidth = prevWidth;
+            }
         }
 
         return lines;

@@ -53,6 +53,9 @@ public static class KeybindingDefaults
     public const string ActionChatPageUp = "chat:pageUp";
     public const string ActionChatPageDown = "chat:pageDown";
 
+    // Plan 侧边栏开关（有活动计划时可收起/展开）
+    public const string ActionChatTogglePlanPanel = "chat:togglePlanPanel";
+
     // TEAM 模式专用：在 Magentic ↔ GroupChat 之间切换协作策略
     public const string ActionChatToggleStrategy = "chat:toggleStrategy";
 
@@ -74,6 +77,7 @@ public static class KeybindingDefaults
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
+        ActionChatTogglePlanPanel,
         ActionChatToggleStrategy, ActionChatCycleTeam,
         ActionAutocompletePrevious, ActionAutocompleteNext,
     ];
@@ -123,6 +127,9 @@ public static class KeybindingDefaults
             ["ctrl+pgdn"] = ActionChatScrollDown,
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
+
+            // Plan 侧边栏开关
+            ["ctrl+g"] = ActionChatTogglePlanPanel,
 
             // 在 TEAM 模式下切换 Magentic ↔ GroupChat 策略
             ["shift+tab"] = ActionChatToggleStrategy,

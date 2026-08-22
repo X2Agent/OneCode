@@ -16,21 +16,18 @@ internal static partial class MarkdownRenderer
     /// <summary>
     /// Renders a fenced code block with a beautified header bar:
     ///
-    ///   ┌─ csharp ─────────────── [ copy ] ─┐
-    ///   │ var x = 1;                         │
-    ///   │ var y = 2;                         │
-    ///   └────────────────────────────────────┘
+    ///   ┌─ csharp ─────────────────────┐
+    ///   │ var x = 1;                    │
+    ///   │ var y = 2;                    │
+    ///   └───────────────────────────────┘
     ///
-    /// The header line carries a <see cref="CodeBlockCopyTag"/> so clicking it
-    /// copies the code to the clipboard. The language label uses accent color,
-    /// the "copy" text uses a distinct info color, and the code body uses a
-    /// subtle background tint to visually separate it from surrounding text.
+    /// The language label uses accent color and the code body uses a subtle
+    /// background tint to visually separate it from surrounding text.
     /// </summary>
     private static void RenderFencedCode(FencedCodeBlock code, List<ConvLine> lines, int viewWidth)
     {
         var lang = code.Info ?? "";
         var codeLines = ExtractCodeLines(code);
-        var codeText = string.Join("\n", codeLines);
 
         // Calculate inner width (space for code text between borders)
         var maxCodeWidth = 0;
@@ -44,16 +41,9 @@ internal static partial class MarkdownRenderer
         //   indent(2) + │(1) + space(1) + code(innerWidth) + space(1) + │(1)
         var maxInner = Math.Max(10, viewWidth - 6);
 
-        // The copy button text: " [ copy ] " (10 chars display width)
-        const string copyLabel = "copy";
-        var headerCopyBtn = $" [ {copyLabel} ] ";
-
-        // Header minimum inner width must fit the copy button plus minimal border decoration.
-        // Layout: "  ┌─ " + [lang + " ─ "] + dashes + "[ copy ]" + " ─┐"
+        // Header minimum inner width fits the language label plus minimal dashes.
         var langDisplayWidth = TextWidthHelper.GetDisplayWidth(lang);
-        var headerMinInner = string.IsNullOrEmpty(lang)
-            ? TextWidthHelper.GetDisplayWidth(headerCopyBtn) + 2   // copy button + minimal dashes
-            : langDisplayWidth + 3 + TextWidthHelper.GetDisplayWidth(headerCopyBtn) + 2;
+        var headerMinInner = string.IsNullOrEmpty(lang) ? 2 : langDisplayWidth + 3;
 
         var innerWidth = Math.Max(maxCodeWidth, headerMinInner);
         if (innerWidth > maxInner) innerWidth = maxInner;
@@ -71,21 +61,19 @@ internal static partial class MarkdownRenderer
         var fixedDisplayWidth = TextWidthHelper.GetDisplayWidth(headerLeft)
                               + TextWidthHelper.GetDisplayWidth(headerLang)
                               + TextWidthHelper.GetDisplayWidth(headerLangSep)
-                              + TextWidthHelper.GetDisplayWidth(headerCopyBtn)
                               + TextWidthHelper.GetDisplayWidth(headerRight);
         var dashCount = Math.Max(0, totalWidth - fixedDisplayWidth);
         var dashes = new string(TuiGlyphs.BorderHorizontal[0], dashCount);
 
-        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerCopyBtn}{headerRight}";
+        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerRight}";
         var headerSegments = new List<LineSegment>
         {
             new(headerLeft, TuiPalette.Border),
             new(headerLang, TuiPalette.Accent),
             new(headerLangSep + dashes, TuiPalette.Border),
-            new(headerCopyBtn, TuiPalette.Info),
             new(headerRight, TuiPalette.Border),
         };
-        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments, new CodeBlockCopyTag(codeText)));
+        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
 
         // Code body lines
         foreach (var ln in codeLines)
@@ -194,6 +182,16 @@ internal static partial class MarkdownRenderer
 
         if (colCount == 0) return;
 
+        // 窄面板（如计划侧边栏）放不下网格列：等比压缩会把每列压到 4-5 列，
+        // 内容全是省略号。改用记录式渲染——每行一条记录（列名: 值 换行展示），
+        // 任意宽度都可读。宽屏（对话流）保持网格表格。
+        var headers = ExtractHeaders(table, colCount);
+        if (viewWidth < 60 || colCount * 8 + (colCount + 1) * 3 + 4 > viewWidth)
+        {
+            RenderTableAsRecords(table, headers, lines, viewWidth);
+            return;
+        }
+
         // Use display width (not char count) so CJK cells don't misalign columns.
         var colWidths = new int[colCount];
         foreach (TableRow? row in table)
@@ -252,12 +250,79 @@ internal static partial class MarkdownRenderer
 
     private static string ExtractTableCellText(Block cell)
     {
-        if (cell is ParagraphBlock para)
-            return ExtractInlineText(para.Inline);
+        // Markdig 的 TableCell 是 ContainerBlock——单元格内容是其子块
+        // （管道表格中通常是单个 ParagraphBlock），而非 cell 本身的 Inline。
+        // 旧实现直接在 cell 上取 Inline，永远返回空串（表格渲染全空的根因）。
+        if (cell is not ContainerBlock container)
+            return cell is LeafBlock leaf ? ExtractInlineText(leaf.Inline) : "";
 
-        var lines = new List<ConvLine>();
-        RenderBlock(cell, lines, indent: 0);
-        return string.Join(" ", lines.Select(l => l.Text));
+        var parts = new List<string>();
+        foreach (var sub in container)
+        {
+            var text = sub switch
+            {
+                ParagraphBlock para => ExtractInlineText(para.Inline),
+                LeafBlock leaf when leaf.Inline != null => ExtractInlineText(leaf.Inline),
+                _ => "",
+            };
+            if (!string.IsNullOrEmpty(text))
+                parts.Add(text);
+        }
+        return string.Join(" ", parts);
+    }
+
+    private static string[] ExtractHeaders(Table table, int colCount)
+    {
+        var headers = new string[colCount];
+        if (table.FirstOrDefault() is TableRow headerRow)
+        {
+            for (var i = 0; i < headerRow.Count && i < colCount; i++)
+                headers[i] = ExtractTableCellText(headerRow[i]);
+        }
+        for (var i = 0; i < colCount; i++)
+            headers[i] = string.IsNullOrWhiteSpace(headers[i]) ? $"列{i + 1}" : headers[i];
+        return headers;
+    }
+
+    /// <summary>
+    /// 记录式表格渲染（窄屏）：
+    ///
+    ///   ── 第 2 行 ──
+    ///   列A │ 值1（超宽自动换行，缩进对齐）
+    ///   列B │ 值2
+    ///
+    /// 首行视为表头。每个单元格值按剩余宽度换行，不截断。
+    /// </summary>
+    private static void RenderTableAsRecords(Table table, string[] headers, List<ConvLine> lines, int viewWidth)
+    {
+        var rowIndex = 0;
+        foreach (TableRow? row in table)
+        {
+            rowIndex++;
+            lines.Add(new ConvLine(LineRole.System, $"  ── 第 {rowIndex} 行 ──"));
+
+            for (var i = 0; i < headers.Length; i++)
+            {
+                var value = i < row.Count ? ExtractTableCellText(row[i]) : "";
+                // 布局："  " + header + " │ " + wrapped value。首行宽度 = 2 + header宽 + 3。
+                var label = $"{headers[i]} │ ";
+                var labelWidth = 2 + TextWidthHelper.GetDisplayWidth(label);
+                var available = Math.Max(10, viewWidth - labelWidth);
+                var wrapped = TextWidthHelper.WordWrapByWidth(value, maxWidth: available);
+
+                if (wrapped.Count == 0)
+                {
+                    lines.Add(new ConvLine(LineRole.System, $"  {label}"));
+                    continue;
+                }
+                for (var w = 0; w < wrapped.Count; w++)
+                {
+                    lines.Add(w == 0
+                        ? new ConvLine(LineRole.System, $"  {label}{wrapped[w]}")
+                        : new ConvLine(LineRole.System, $"  {new string(' ', TextWidthHelper.GetDisplayWidth(label))}{wrapped[w]}"));
+                }
+            }
+        }
     }
 
     private static void RenderList(ListBlock list, List<ConvLine> lines, int indent, int viewWidth = 80)

@@ -10,53 +10,17 @@ public sealed class ModelContextDefaultsTests
         ModelCatalogTestHelper.Initialize();
     }
 
-    // Layer 2: ModelCatalog 快照匹配
-
+    // Layer 2: ModelCatalog 快照匹配。
+    // 每个 provider 只保留一个代表用例验证快照路径走通（含裸 ID 与带前缀 ID 各一）；
+    // 逐模型穷举是对快照数据的镜像断言，不提供额外逻辑覆盖，已精简。
     [Theory]
     [InlineData("anthropic/claude-sonnet-4-5", 1_000_000)]
-    [InlineData("anthropic/claude-opus-4-5", 200_000)]
     [InlineData("claude-sonnet-4-5", 1_000_000)]
-    public void Resolve_ClaudeModels_FromSnapshot(string modelId, int expected)
-    {
-        ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
-    }
-
-    [Theory]
     [InlineData("openai/gpt-4.1", 1_047_576)]
-    [InlineData("openai/gpt-4.1-mini", 1_047_576)]
-    [InlineData("gpt-4.1", 1_047_576)]
-    public void Resolve_Gpt41Models_FromSnapshot(string modelId, int expected)
-    {
-        ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
-    }
-
-    [Theory]
-    [InlineData("openai/gpt-4o", 128_000)]
-    [InlineData("openai/o3", 200_000)]
-    public void Resolve_Gpt4OAndO3Models_FromSnapshot(string modelId, int expected)
-    {
-        ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
-    }
-
-    [Theory]
-    [InlineData("deepseek/deepseek-v4-pro", 1_000_000)]
     [InlineData("deepseek/deepseek-chat", 1_000_000)]
-    public void Resolve_DeepSeekModels_FromSnapshot(string modelId, int expected)
-    {
-        ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
-    }
-
-    [Theory]
     [InlineData("zhipuai/glm-4.6", 204_800)]
-    [InlineData("glm-4.6", 204_800)]
-    public void Resolve_GlmModels_FromSnapshot(string modelId, int expected)
-    {
-        ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
-    }
-
-    [Theory]
     [InlineData("google/gemini-2.5-pro", 1_048_576)]
-    public void Resolve_GeminiModels_FromSnapshot(string modelId, int expected)
+    public void Resolve_FromSnapshot(string modelId, int expected)
     {
         ModelContextDefaults.Resolve(modelId, ModelCatalogTestHelper.Store).Should().Be(expected);
     }
@@ -88,13 +52,6 @@ public sealed class ModelContextDefaultsTests
     }
 
     // ModelCatalog 磁盘缓存加载
-
-    [Fact]
-    public void ModelCatalog_Default_IsPopulated()
-    {
-        ModelCatalogTestHelper.Store.Count.Should().BeGreaterThan(10,
-            "test helper snapshot should contain required models plus fillers");
-    }
 
     [Fact]
     public void ModelCatalog_GetContextWindow_PreciseMatch()

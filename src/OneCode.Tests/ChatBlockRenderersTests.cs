@@ -321,44 +321,49 @@ public sealed class ChatBlockRenderersTests
             new("Inject ITuiInitializer", Assignee: "executor", Status: PlanStepStatus.Current),
             new("Update unit tests", Assignee: "reviewer", Status: PlanStepStatus.Pending),
         };
-        // showActionButtons: true 显式启用按钮栏——默认 false（仅 PendingApproval 阶段由
-        // InlineSelector 接管决策，按钮栏不再渲染，见 #3 修复）。
-        var lines = ChatBlockRenderers.RenderPlanCard("重构计划", steps, showActionButtons: true);
+        var lines = ChatBlockRenderers.RenderPlanCard("重构计划", steps);
         lines.Should().Contain(l => l.FullText.Contains("重构计划"));
-        lines.Last().FullText.Should().Contain("批准");
-        lines.Last().FullText.Should().Contain("拒绝");
         lines.Should().Contain(l => l.FullText.Contains("→ executor"));
         lines.Should().Contain(l => l.FullText.Contains("→ reviewer"));
     }
 
     [Fact]
-    public void RenderPlanCard_DefaultHidesActionButtons()
-    {
-        // 默认不渲染 a/r/s 按钮栏——决策入口改为 InlineSelector。
-        // 仅当显式传入 showActionButtons: true 时才渲染。
-        var lines = ChatBlockRenderers.RenderPlanCard("Plan",
-            new[] { new PlanStep("Step 1") });
-        lines.Should().NotContain(l => l.FullText.Contains("批准"));
-        lines.Should().NotContain(l => l.FullText.Contains("拒绝"));
-    }
-
-    [Fact]
-    public void RenderPlanCard_PendingApproval_ShowsFullPlanAndClearGuidance()
+    public void RenderPlanCard_PendingApproval_ShowsFullPlan()
     {
         var lines = ChatBlockRenderers.RenderPlanCard(
             "最终计划",
             [new PlanStep("修改渲染链路", "统一处理 Unicode")],
             viewWidth: 60,
-            showApprovalGuidance: true,
             markdown: "# 最终计划\n\n## 验证\n\n- 运行测试");
         var text = string.Join("\n", lines.Select(line => line.FullText));
 
         text.Should().Contain("完整计划");
         text.Should().Contain("验证");
         text.Should().Contain("运行测试");
-        text.Should().Contain("批准并执行");
-        text.Should().Contain("输入修改意见");
+        // 审批操作引导由对话流中的 InlineSelector 决策面板承担——侧边栏卡片
+        // 不再渲染"在下方选择…"提示（"下方"指对话流，出现在侧边栏是语义错位）。
+        text.Should().NotContain("在下方选择");
         lines.Should().OnlyContain(line => TextWidthHelper.GetDisplayWidth(line.FullText) <= 60);
+    }
+
+    // 提交/审批阶段渲染完整计划全文，但不含任何硬编码辅助说明——辅助性文字由
+    // LLM 在对话流中提供，侧边栏只保留纯计划内容（回归守卫：删除后若有人
+    // 重新在卡片里加入操作引导/提示文字，此测试会失败）。
+    [Fact]
+    public void RenderPlanCard_ShowsOnlyPlanContentWithoutAuxiliaryText()
+    {
+        var lines = ChatBlockRenderers.RenderPlanCard(
+            "草稿计划",
+            [new PlanStep("第一步")],
+            viewWidth: 60,
+            markdown: "# 草稿计划\n\n## 思路\n\n- 先扫描再改写");
+        var text = string.Join("\n", lines.Select(line => line.FullText));
+
+        text.Should().Contain("完整计划");
+        text.Should().Contain("先扫描再改写");
+        text.Should().NotContain("计划整理中");
+        text.Should().NotContain("输入修改意见");
+        text.Should().NotContain("批准并执行");
     }
 
     [Fact]

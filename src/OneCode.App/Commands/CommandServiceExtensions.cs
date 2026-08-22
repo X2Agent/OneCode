@@ -52,7 +52,6 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, QueueCommand>();
         s.AddSingleton<ICommand, ReviewCommand>();
         s.AddSingleton<ICommand, ThinkCommand>();
-        s.AddSingleton<ICommand, ToolsCommand>();
         s.AddSingleton<ICommand, UpgradeCommand>();
         s.AddSingleton<ICommand, VersionCommand>();
         s.AddSingleton<ICommand, PromptsCommand>();

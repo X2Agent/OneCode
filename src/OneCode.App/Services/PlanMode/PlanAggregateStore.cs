@@ -22,6 +22,13 @@ public interface IPlanAggregateStore
     Task<PlanAggregate?> LoadAsync(SessionId sessionId, CancellationToken ct = default);
     Task<IReadOnlyList<PlanWorkflow>> LoadRecoverableExecutionAsync(CancellationToken ct = default);
     Task SaveAsync(PlanAggregate aggregate, long expectedVersion, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the markdown projection path for a plan revision
+    /// (<c>{plansRoot}/{sessionId}/{planId}/revision-{revision:0000}.md</c>), written
+    /// by <see cref="SaveAsync"/>. Used to surface the document location to users.
+    /// </summary>
+    string GetRevisionMarkdownPath(SessionId sessionId, PlanWorkflowId planId, int revision);
 }
 
 /// <summary>
@@ -245,13 +252,18 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
 
     private async Task WriteMarkdownProjectionAsync(PlanAggregate aggregate, CancellationToken ct)
     {
-        var directory = Path.GetDirectoryName(GetAggregatePath(aggregate.Workflow.SessionId, aggregate.Workflow.Id))!;
         foreach (var revision in aggregate.Revisions)
         {
-            var path = Path.Combine(directory, $"revision-{revision.Revision:0000}.md");
+            var path = GetRevisionMarkdownPath(aggregate.Workflow.SessionId, aggregate.Workflow.Id, revision.Revision);
             await File.WriteAllTextAsync(path, revision.Markdown, ct).ConfigureAwait(false);
         }
     }
+
+    public string GetRevisionMarkdownPath(SessionId sessionId, PlanWorkflowId planId, int revision)
+        => Path.Combine(
+            GetSessionDirectory(sessionId),
+            planId.ToString(),
+            $"revision-{revision:0000}.md");
 
     private static async Task<FileStream> AcquireLeaseAsync(string lockPath, CancellationToken ct)
     {

@@ -192,7 +192,7 @@ public static class PermissionProfiles
             return PermissionCheckResult.Allow;
 
         return PermissionCheckResult.Deny(
-            $"Tool '{toolName}' is not permitted in plan mode. Only read-only tools, SavePlan/SubmitPlan, task management, sub-agent tools (Agent/ParallelAgents), AskUserQuestion, and AskUserQuestions are allowed.");
+            $"Tool '{toolName}' is not permitted in plan mode. Only read-only tools, SubmitPlan, task management, sub-agent tools (Agent/ParallelAgents), AskUserQuestion, and AskUserQuestions are allowed.");
     }
 
     private static PermissionCheckResult AllowWithPathValidation(

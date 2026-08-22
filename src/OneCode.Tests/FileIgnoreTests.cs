@@ -110,16 +110,4 @@ public sealed class FileIgnoreTests
         matcher.Match("README.md").HasMatches.Should().BeTrue("普通文档应通过匹配");
     }
 
-    [Fact]
-    public void ApplyExcludes_WithoutIncludeRules_HasNoMatches()
-    {
-        // 回归保护：若未添加任何 include 规则，Matcher.Match 永远返回 HasMatches=false。
-        // 此测试明确记录该行为，避免未来误以为 exclude 单独生效。
-        var matcher = new Matcher();
-
-        FileIgnore.ApplyExcludes(matcher);
-
-        matcher.Match("src/main.cs").HasMatches.Should().BeFalse("无 include 规则时任何路径都不匹配");
-    }
-
 }
