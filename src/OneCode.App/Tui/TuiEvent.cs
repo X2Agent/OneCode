@@ -34,7 +34,7 @@ public sealed record TuiThinkingDelta(string Text) : TuiEvent;
 /// 工具调用开始 — 含工具名称、唯一 ID 和操作目标。
 /// ToolInput 携带工具参数摘要（如文件路径、命令），start 阶段即可展示操作目标。
 /// </summary>
-public sealed record TuiToolStart(string ToolId, string Name, string? ToolInput = null) : TuiEvent;
+public sealed record TuiToolStart(string ToolId, string Name, string? ToolInput = null, string? AgentName = null) : TuiEvent;
 
 /// <summary>
 /// 工具调用完成 — 含结果/错误和原始输入。
@@ -42,7 +42,7 @@ public sealed record TuiToolStart(string ToolId, string Name, string? ToolInput 
 /// ToolId 用于与对应的 <see cref="TuiToolStart"/> 精确匹配，避免
 /// ContinueStreaming 清空状态后导致重复行。
 /// </summary>
-public sealed record TuiToolDone(string Name, bool IsError, string? Result = null, string? ToolInput = null, string ToolId = "") : TuiEvent;
+public sealed record TuiToolDone(string Name, bool IsError, string? Result = null, string? ToolInput = null, string ToolId = "", string? AgentName = null) : TuiEvent;
 
 /// <summary>
 /// 权限检查 — 当 QueryEngine 请求用户批准工具执行时触发。
@@ -114,11 +114,13 @@ public sealed record TuiAgentCoordination(string FromName, string? FromColor, st
 /// <summary>TEAM 模式下单个 agent 的消息输出。</summary>
 public sealed record TuiAgentMessage(string AgentName, string? AgentColor, string Content) : TuiEvent;
 
-/// <summary>TEAM 模式下任务分解进度更新。</summary>
+/// <summary>TEAM 模式下任务分解进度更新。TeamName 为结构化标识（优先消费），
+/// Header 仅供展示——不要从展示文案反解业务数据。</summary>
 public sealed record TuiTeamProgress(
     string Header,
     IReadOnlyList<(string Label, string Detail, string Status)> Tasks,
-    string? Footer = null) : TuiEvent;
+    string? Footer = null,
+    string? TeamName = null) : TuiEvent;
 
 /// <summary>Plan/Team/Goal 共用的轻量进度投影；主对话只渲染当前用户可理解阶段。</summary>
 public sealed record TuiModeProgress(
@@ -149,6 +151,10 @@ public sealed record TuiGoalResult(
     IReadOnlyList<string> SkippedGoals,
     string ValidationSummary) : TuiEvent;
 
+/// <summary>Goal 分解完成——子目标编号清单，presenter 渲染为一次性清单块（执行前让用户看到计划）。</summary>
+public sealed record TuiGoalPlan(IReadOnlyList<string> Steps) : TuiEvent;
+
+
 /// <summary>
 /// Team 计划审批通知事件（display-only）。审批决策通过 MAF RequestPort 持久化，
 /// 不再通过 TUI-side TaskCompletionSource 桥接。TUI 仅展示审批卡片。
@@ -159,17 +165,33 @@ public sealed record TuiTeamPlanApproval(
     IReadOnlyList<string> Tasks,
     IReadOnlyList<string> RequiredGates) : TuiEvent;
 
+/// <summary>用户在澄清/审批交互中给出的回答回显，TUI 写入会话记录。</summary>
+public sealed record TuiTeamUserResponse(string TeamName, string Response) : TuiEvent;
+
 /// <summary>TEAM 模式结构化交付报告。仅在 TeamRun 完成质量门禁和事务决策后发出。</summary>
 public sealed record TuiTeamDelivery(OneCode.Core.Coordinator.DeliveryReport Report) : TuiEvent;
 
 /// <summary>
 /// 文件修改事件 — EditTransactionMiddleware 检测到 Write/Edit 后发射。
 /// 携带增量 Diff（added/removed lines），TUI 通过 RenderDiffBlock 渲染。
+/// AgentName 为 TEAM 模式下执行修改的成员 ID，用于 diff 头归属标注；非 Team 路径为 null。
 /// </summary>
 public sealed record TuiFileChange(
     string FileName,
     IReadOnlyList<string> AddedLines,
-    IReadOnlyList<string> RemovedLines) : TuiEvent;
+    IReadOnlyList<string> RemovedLines,
+    string? AgentName = null) : TuiEvent;
+
+/// <summary>TEAM 模式任务级进度快照 — 进度面板数据源（源自 OrchestrationEvent.TeamTaskProgress）。</summary>
+public sealed record TuiTeamTaskProgress(
+    string TaskId,
+    string TaskTitle,
+    string AssigneeRole,
+    string? Status,
+    int CompletedTasks,
+    int TotalTasks,
+    int ActiveTasks = 0,
+    int BlockedTasks = 0) : TuiEvent;
 
 /// <summary>
 /// 下一步提示建议 — turn 完成后由规则引擎生成，TUI 在输入框显示为占位符。

@@ -48,6 +48,10 @@ public sealed class TeamRequirementService(
         var allowedPaths = analysis.Draft.InScope.Count > 0
             ? analysis.Draft.InScope
             : [];
+        // ParallelDag 团队（如多视角审查/并行调研）：每个成员是独立分支，最后聚合。
+        if (config is { Mode: TeamOrchestrationMode.ParallelDag })
+            return CreateParallelFanOutPlan(analysis, config, goal, allowedPaths);
+
         // 能力驱动计划：按团队真实工具能力选择计划形态，消除"只读团队被塞进写流水线"的错配。
         var readOnlyPlan = config is not null && !TeamCapabilityProfile.From(config).CanWriteFiles;
         var acceptance = analysis.Draft.AcceptanceCriteria.Count > 0
@@ -65,7 +69,7 @@ public sealed class TeamRequirementService(
         {
             new(
                 "analysis",
-                $"Analyze: {Summarize(goal)}",
+                "分析：明确范围、受影响文件与风险",
                 TeamTaskKind.Analysis,
                 "planner",
                 [],
@@ -78,7 +82,7 @@ public sealed class TeamRequirementService(
                 RetryPolicy: TaskRetryPolicy.Default),
             new(
                 "implementation",
-                $"Implement: {Summarize(goal)}",
+                "实现：按验收标准完成代码修改",
                 TeamTaskKind.Implementation,
                 "executor",
                 ["analysis"],
@@ -93,7 +97,7 @@ public sealed class TeamRequirementService(
                 RetryPolicy: null),
             new(
                 "validation",
-                $"Validate: {Summarize(goal)}",
+                "验证：对照验收标准确认交付",
                 TeamTaskKind.Acceptance,
                 "reviewer",
                 ["implementation"],
@@ -156,7 +160,7 @@ public sealed class TeamRequirementService(
     }
 
     /// <summary>
-    /// Strips the appended clarification Q&A block from an effective goal so that
+    /// Strips the appended clarification Q&amp;A block from an effective goal so that
     /// plan summaries, task titles and approval cards only show the original request.
     /// The full effective goal (with answers) is still used for execution context.
     /// </summary>
@@ -165,6 +169,70 @@ public sealed class TeamRequirementService(
         var index = goal.IndexOf(ClarificationResponseMarker, StringComparison.Ordinal);
         var baseGoal = index < 0 ? goal : goal[..index].Trim();
         return baseGoal.Length > 0 ? baseGoal : goal.Trim();
+    }
+
+    /// <summary>
+    /// ParallelDag 扇出计划：每个成员一个独立只读分支（无依赖，可并行），末尾聚合任务
+    /// 依赖全部分支，负责去重/排序/汇总。分支上下文彼此隔离——这是该模式的核心价值。
+    /// </summary>
+    private static ImplementationPlan CreateParallelFanOutPlan(
+        RequirementAnalysisResult analysis,
+        TeamConfig config,
+        string goal,
+        IReadOnlyList<string> allowedPaths)
+    {
+        var profile = TeamCapabilityProfile.From(config);
+        var branchTools = profile.HasWebAccess
+            ? (IReadOnlyList<string>)["Read", "Grep", "Glob", "LS", "FindReferences", "WebSearch", "WebFetch"]
+            : (IReadOnlyList<string>)["Read", "Grep", "Glob", "LS", "FindReferences"];
+
+        var members = config.Members.Count > 0
+            ? config.Members
+            : [new TeamMember($"{config.TeamName}-member", "member", null)];
+
+        var tasks = new List<TeamTaskDefinition>();
+        foreach (var member in members)
+        {
+            var role = !string.IsNullOrWhiteSpace(member.Role) ? member.Role! : member.AgentId;
+            tasks.Add(new TeamTaskDefinition(
+                $"branch-{member.AgentId}",
+                $"{role}：独立视角完成调研/审查",
+                TeamTaskKind.Analysis,
+                role,
+                [],
+                [$"The {role} perspective produces a self-contained conclusion with evidence."],
+                TeamToolPolicy.ReadOnly,
+                RequiredTools: branchTools,
+                AllowedPaths: allowedPaths,
+                ExpectedOutputs: [$"{role} 视角的结论与依据。"],
+                MaxAttempts: 2,
+                RetryPolicy: TaskRetryPolicy.Default));
+        }
+
+        // 聚合任务：依赖全部分支，机械汇总（去重/排序/分级）。
+        tasks.Add(new TeamTaskDefinition(
+            "aggregate",
+            "汇总：去重、按重要性排序并形成最终报告",
+            TeamTaskKind.Acceptance,
+            members[0].Role ?? members[0].AgentId,
+            tasks.Select(task => task.Id).ToList(),
+            ["The aggregate report merges all branch conclusions, deduplicated and ranked."],
+            TeamToolPolicy.ReadOnly,
+            RequiredTools: ["Read"],
+            AllowedPaths: allowedPaths,
+            ExpectedOutputs: ["最终汇总报告。"],
+            MaxAttempts: 3,
+            RetryPolicy: TaskRetryPolicy.Default));
+
+        return new ImplementationPlan(
+            Summary: $"Run parallel perspectives and aggregate results for: {goal}",
+            Tasks: tasks,
+            RequiredGates:
+            [
+                new QualityGateDefinition("acceptance", QualityGateKind.AcceptanceCriteria, Required: true, "Aggregate task must merge all branch outputs."),
+            ],
+            Risks: [],
+            NonGoals: analysis.Draft.OutOfScope);
     }
 
     /// <summary>

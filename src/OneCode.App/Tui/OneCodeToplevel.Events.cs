@@ -16,6 +16,9 @@ public sealed partial class OneCodeToplevel
     /// </summary>
     public void DispatchEvent(TuiEvent evt)
     {
+        // TEAM 侧边栏（纯显示状态板）先消费 Team 事件；非 Team 事件为 no-op。
+        _shell.UpdateTeamSidebar(evt);
+
         if (_transcriptPresenter.TryPresent(evt))
             return;
 
@@ -106,8 +109,14 @@ public sealed partial class OneCodeToplevel
                 break;
 
             case TuiError { Message: var msg }:
-                _shell.Transcript.EndStreaming();
-                _shell.Transcript.AddError(msg);
+                // TEAM/GOAL 编排中的成员级错误是中途事件：不能走 AddError
+                // （其内部会强制结束流式状态），否则后续工具事件落入 committed
+                // 路径，完整 JSON 平铺外显。查询运行中改为流式错误通知；
+                // 流式生命周期由查询循环的 finally 统一收尾。
+                if (_isQueryRunning)
+                    _shell.Transcript.AddStreamingNotice(msg, TuiPalette.Error);
+                else
+                    _shell.Transcript.AddError(msg);
                 break;
 
             case TuiTurnStarted { TurnNumber: var tn }:
@@ -126,6 +135,12 @@ public sealed partial class OneCodeToplevel
                 HandleTeamPlanApprovalNotification(approval);
                 break;
 
+            // 用户在澄清/审批交互中的回答回显 — 写入会话记录
+            case TuiTeamUserResponse { TeamName: var team, Response: var response }:
+                if (!string.IsNullOrWhiteSpace(response))
+                    _shell.Transcript.AddSystem($"你的回答：{response}");
+                break;
+
             case TuiTeamDelivery { Report: var report }:
                 _shell.Transcript.UpdateModeProgress(new TuiModeProgress(
                     WorkingMode.Team,
@@ -135,6 +150,13 @@ public sealed partial class OneCodeToplevel
                     report.Committed ? ModeProgressState.Completed : ModeProgressState.Failed));
                 if (!string.IsNullOrWhiteSpace(report.Summary))
                     _shell.Transcript.AddSystem(report.Summary);
+                // TEAM 归属汇总：列出修改过文件的成员（来自 FileChange.Contributors）。
+                var contributors = report.Changes.Files
+                    .SelectMany(f => f.Contributors ?? [])
+                    .Distinct()
+                    .ToList();
+                if (contributors.Count > 0)
+                    _shell.Transcript.AddSystem($"参与成员：{string.Join("、", contributors)}");
                 if (!report.Committed)
                 {
                     foreach (var gate in report.Gates.Where(g => g.Required && g.Status != QualityGateStatus.Passed))
@@ -196,10 +218,16 @@ public sealed partial class OneCodeToplevel
     /// </summary>
     private void HandleTeamPlanApprovalNotification(TuiTeamPlanApproval approval)
     {
-        var taskSummary = approval.Tasks.Count == 0
-            ? approval.Summary
-            : string.Join("；", approval.Tasks.Take(3)) + (approval.Tasks.Count > 3 ? "…" : string.Empty);
-        _shell.Transcript.AddSystem($"团队 {approval.TeamName} 计划审批中: {taskSummary}");
+        // 每个任务独立一行，避免多任务挤在一行难以阅读。
+        var taskLines = approval.Tasks.Take(3)
+            .Select((task, index) => $"  {index + 1}. {task}")
+            .ToList();
+        if (approval.Tasks.Count > 3)
+            taskLines.Add($"  … 共 {approval.Tasks.Count} 个任务");
+        var lines = new List<string> { $"团队 {approval.TeamName} 计划审批中：" };
+        lines.AddRange(taskLines.Count > 0 ? taskLines : [approval.Summary]);
+        foreach (var line in lines)
+            _shell.Transcript.AddSystem(line);
     }
 
     /// <summary>

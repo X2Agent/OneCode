@@ -90,7 +90,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
     {
         var resolved = ResolvePath(directory);
         if (!Directory.Exists(resolved))
-            return Task.FromResult<IReadOnlyList<FileStoreEntry>>(Array.Empty<FileStoreEntry>());
+            return Task.FromResult<IReadOnlyList<FileStoreEntry>>([]);
 
         try
         {
@@ -111,7 +111,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
         }
         catch (UnauthorizedAccessException)
         {
-            return Task.FromResult<IReadOnlyList<FileStoreEntry>>(Array.Empty<FileStoreEntry>());
+            return Task.FromResult<IReadOnlyList<FileStoreEntry>>([]);
         }
     }
 
@@ -124,7 +124,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
     {
         var resolved = ResolvePath(directory);
         if (!Directory.Exists(resolved))
-            return Array.Empty<FileSearchResult>();
+            return [];
 
         var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
 
@@ -146,7 +146,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
             }
             catch (UnauthorizedAccessException)
             {
-                return Array.Empty<FileSearchResult>();
+                return [];
             }
         }
 
@@ -221,7 +221,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
     {
         var resolved = ResolvePath(directory);
         if (!Directory.Exists(resolved))
-            return Array.Empty<string>();
+            return [];
 
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
 
@@ -236,7 +236,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
             matcher.AddInclude(addPattern);
         }
 
-        var exclude = excludeDirs ?? Array.Empty<string>();
+        var exclude = excludeDirs ?? [];
         foreach (var dir in exclude)
         {
             matcher.AddExclude($"**/{dir}/**");
@@ -254,7 +254,7 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
         }
         catch (UnauthorizedAccessException)
         {
-            return Array.Empty<string>();
+            return [];
         }
     }
 

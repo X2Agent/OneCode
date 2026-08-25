@@ -37,7 +37,7 @@ public sealed class GitInfo
             var changedLines = (await RunGitAsync(workingDir, "status --porcelain", ct))
                 ?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(l => l.Length >= 3)
-                .ToArray() ?? Array.Empty<string>();
+                .ToArray() ?? [];
             var isDirty = changedLines.Any(l => !l.StartsWith("??", StringComparison.Ordinal) && !l.StartsWith("!!", StringComparison.Ordinal));
             var uncommited = changedLines.Count(l => "MADR".Contains(l[0]));
             var untracked = changedLines.Count(l => l.StartsWith("??", StringComparison.Ordinal));

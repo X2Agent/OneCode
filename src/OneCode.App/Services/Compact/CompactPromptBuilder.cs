@@ -14,12 +14,6 @@ namespace OneCode.App.Services.Compact;
 /// </summary>
 public sealed partial class CompactPromptBuilder
 {
-    /// <summary>内置兜底——IPromptManager 无文件时仍可压缩（测试与缺文件启动）。</summary>
-    public const string FallbackCompactPrompt =
-        "Summarize the conversation so far into a concise briefing for continuing work. "
-        + "Preserve decisions, file paths, errors, and next steps. "
-        + "Respond with <analysis>...</analysis> then <summary>...</summary>.";
-
     // 预编译正则——消除 FormatSummary 中重复编译开销。
     // pattern 固定（非用户输入），无 ReDoS 风险，但 [GeneratedRegex] 在编译时生成源码，
     // 避免每次调用 Regex.Replace/Match 时重新编译正则树。
@@ -38,13 +32,17 @@ public sealed partial class CompactPromptBuilder
     }
 
     /// <summary>
-    /// 加载压缩摘要 prompt（<c>system/compact</c>）。文件缺失时返回内置兜底，供
-    /// 显式 <c>/compact</c> 与 MAF in-pipeline 压缩共用，避免两套 fallback 行为漂移。
+    /// 加载压缩摘要 prompt（<c>system/compact</c>）。显式 <c>/compact</c> 与 MAF in-pipeline 压缩共用。
+    /// prompt 经 csproj Content + EmbeddedResource 双重打包，生产环境必然存在；
+    /// 缺失属于打包损坏，fail-fast 抛出（与其他系统 prompt 策略一致），由调用方决定呈现方式。
     /// </summary>
     public async Task<string> GetSummarizationPromptAsync(CancellationToken ct)
     {
         var loaded = await _promptManager.GetPromptAsync("system/compact", ct).ConfigureAwait(false);
-        return string.IsNullOrWhiteSpace(loaded) ? FallbackCompactPrompt : loaded;
+        return !string.IsNullOrWhiteSpace(loaded)
+            ? loaded
+            : throw new InvalidOperationException(
+                "Prompt 'system/compact' is not available in any IPromptManager store.");
     }
 
     /// <summary>

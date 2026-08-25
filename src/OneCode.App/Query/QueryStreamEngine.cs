@@ -459,7 +459,7 @@ internal sealed partial class QueryStreamEngine
     {
         // 记录 token 使用量和分场景估算到 TokenUsageTracker
         var toolsForBreakdown = localTools.ToList();
-        var messagesForBreakdown = request.HistoryMessages ?? Array.Empty<ChatMessage>();
+        var messagesForBreakdown = request.HistoryMessages ?? [];
         var breakdown = _tokenBreakdownEstimator.Estimate(
             request.SystemPrompt, toolsForBreakdown, messagesForBreakdown, session.TotalInputTokens);
         _tokenUsageTracker.Record(finalUsage, breakdown);

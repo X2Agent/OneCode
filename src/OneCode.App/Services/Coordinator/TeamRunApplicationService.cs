@@ -48,7 +48,7 @@ public sealed class TeamRunApplicationService(
         ImplementationPlan plan,
         CancellationToken ct)
     {
-        ValidatePlan(plan);
+        TeamRunGuards.ValidatePlan(plan);
         var current = await store.LoadAsync(runId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"TeamRun '{runId}' was not found.");
         if (current.Phase != TeamRunPhase.Clarification
@@ -92,7 +92,7 @@ public sealed class TeamRunApplicationService(
         CancellationToken ct,
         SessionId? sessionId = null)
     {
-        ValidatePlan(plan);
+        TeamRunGuards.ValidatePlan(plan);
         var now = DateTimeOffset.UtcNow;
         var tasks = plan.Tasks
             .Select(task => new TeamTaskState(task, Status: null))
@@ -136,7 +136,7 @@ public sealed class TeamRunApplicationService(
         CancellationToken ct,
         SessionId? sessionId = null)
     {
-        ValidatePlan(plan);
+        TeamRunGuards.ValidatePlan(plan);
         var existing = await store.LoadAsync(runId, ct).ConfigureAwait(false);
         if (existing is not null)
         {
@@ -148,7 +148,7 @@ public sealed class TeamRunApplicationService(
                     $"TeamRun '{runId}' is not awaiting approval.");
             }
 
-            if (!PlansMatch(existing.Plan, plan))
+            if (!TeamRunGuards.PlansMatch(existing.Plan, plan))
                 throw new InvalidOperationException(
                     $"Approved plan for TeamRun '{runId}' does not match the persisted plan.");
 
@@ -199,9 +199,7 @@ public sealed class TeamRunApplicationService(
         return run;
     }
 
-    private static bool PlansMatch(ImplementationPlan left, ImplementationPlan right)
-        => JsonSerializer.Serialize(left) == JsonSerializer.Serialize(right);
-
+    
     public async Task<TeamRun> StartTaskAsync(
         TeamRun run,
         string taskId,
@@ -228,7 +226,7 @@ public sealed class TeamRunApplicationService(
         long? fencingToken,
         CancellationToken ct)
     {
-        RequireFence(run, fencingToken);
+        TeamRunGuards.RequireFence(run, fencingToken);
         // Task ordering and write-conflict guards are enforced by MAF DAG topology
         // (fan-out/fan-in/barrier edges) in TeamTaskWorkflowCompiler; this method only
         // records the business fact that a new attempt has begun. Status remains null
@@ -274,18 +272,18 @@ public sealed class TeamRunApplicationService(
         long? fencingToken,
         CancellationToken ct)
     {
-        RequireFence(run, fencingToken);
+        TeamRunGuards.RequireFence(run, fencingToken);
         var currentTask = run.TaskGraph!.Tasks.SingleOrDefault(task => task.Definition.Id == taskId)
             ?? throw new InvalidOperationException($"Team task '{taskId}' was not found.");
         if (currentTask.Status is not null)
             throw new InvalidOperationException($"Team task '{taskId}' already reached terminal status {currentTask.Status}.");
 
-        var failure = ResolveExecutionFailure(execution);
+        var failure = TeamRunGuards.ResolveExecutionFailure(execution);
         var taskStatus = failure is not null
             ? TeamTaskStatus.Failed
             : TeamTaskStatus.Succeeded;
         var errorFingerprint = failure is not null
-            ? ComputeErrorFingerprint(failure.Detail ?? failure.Title)
+            ? TeamRunGuards.ComputeErrorFingerprint(failure.Detail ?? failure.Title)
             : null;
         var tasks = run.TaskGraph!.Tasks
             .Select(task => task.Definition.Id == taskId
@@ -437,8 +435,8 @@ public sealed class TeamRunApplicationService(
         OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
         string? operationId = null)
     {
-        RequireFence(run, fencingToken);
-        var taskStatus = ResolveExecutionFailure(execution) is not null
+        TeamRunGuards.RequireFence(run, fencingToken);
+        var taskStatus = TeamRunGuards.ResolveExecutionFailure(execution) is not null
             || run.TaskGraph?.RequiredTasks.Any(task => task.Status != TeamTaskStatus.Succeeded) != false
             ? TeamTaskStatus.Failed
             : TeamTaskStatus.Succeeded;
@@ -448,7 +446,7 @@ public sealed class TeamRunApplicationService(
                 fileChanges,
                 fileChanges.Sum(f => f.AddedLines.Count),
                 fileChanges.Sum(f => f.RemovedLines.Count)),
-            Failure = ResolveExecutionFailure(execution),
+            Failure = TeamRunGuards.ResolveExecutionFailure(execution),
         };
 
         if (taskStatus != TeamTaskStatus.Succeeded)
@@ -564,38 +562,6 @@ public sealed class TeamRunApplicationService(
         return rolledBack;
     }
 
-    private static AgentProblemDetails? ResolveExecutionFailure(TeamRunResult execution)
-    {
-        if (execution.Error is not null)
-            return execution.Error;
-        if (execution.HadFailures)
-        {
-            return AgentProblemDetails.ToolExecutionFailed(
-                "Team workflow reported one or more agent failures.",
-                toolName: "TeamTaskExecution");
-        }
-        if (execution.MaxTurnsReached)
-        {
-            return AgentProblemDetails.ToolExecutionFailed(
-                "Team workflow reached its maximum turn limit before completing the task.",
-                toolName: "TeamTaskExecution");
-        }
-        if (execution.TurnsCompleted == 0
-            || string.IsNullOrWhiteSpace(execution.Output)
-            || string.Equals(execution.Output.Trim(), "(no output)", StringComparison.Ordinal))
-        {
-            return AgentProblemDetails.ToolExecutionFailed(
-                "Team workflow completed without any agent response.",
-                toolName: "TeamTaskExecution",
-                suggestedNextAction: "Check the ChatClient/model configuration and Team workflow logs.");
-        }
-        return null;
-    }
-
-    private static string ComputeErrorFingerprint(string error)
-        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(error))).ToLowerInvariant()[..16];
-
     private async Task<TeamRun> RequireRunAsync(
         TeamRunId runId,
         long fencingToken,
@@ -613,71 +579,10 @@ public sealed class TeamRunApplicationService(
         return run;
     }
 
-    private static void RequireFence(TeamRun run, long? fencingToken)
-    {
-        if (fencingToken is not { } token)
-            return;
-        if (run.WorkflowFencingToken != token)
-        {
-            throw new InvalidOperationException(
-                $"TeamRun '{run.Id}' fencing token mismatch: expected {run.WorkflowFencingToken?.ToString(CultureInfo.InvariantCulture) ?? "(none)"}, attempted {token}.");
-        }
-    }
 
     private async Task SaveOrThrowAsync(TeamRun run, long expectedVersion, CancellationToken ct)
     {
         if (!await store.TrySaveAsync(run, expectedVersion, ct).ConfigureAwait(false))
             throw new InvalidOperationException($"TeamRun '{run.Id}' version conflict while saving version {run.Version}.");
-    }
-
-    private static void ValidatePlan(ImplementationPlan plan)
-    {
-        if (plan.Tasks.Count == 0)
-            throw new InvalidOperationException("Team implementation plan must contain tasks.");
-        if (plan.RequiredGates.All(g => !g.Required))
-            throw new InvalidOperationException("Team implementation plan must contain a required quality gate.");
-        var ids = plan.Tasks.Select(t => t.Id).ToList();
-        if (ids.Count != ids.Distinct(StringComparer.Ordinal).Count())
-            throw new InvalidOperationException("Team task IDs must be unique.");
-        if (plan.Tasks.SelectMany(t => t.DependsOn).Any(id => !ids.Contains(id, StringComparer.Ordinal)))
-            throw new InvalidOperationException("Team task dependency references an unknown task.");
-        ValidateAcyclic(plan.Tasks);
-        if (plan.Tasks.Where(t => t.ToolPolicy == TeamToolPolicy.WriteAllowed)
-            .Any(t => t.AcceptanceCriteria.Count == 0))
-        {
-            throw new InvalidOperationException("Every Team write task requires acceptance criteria.");
-        }
-    }
-
-    private static void ValidateAcyclic(IReadOnlyList<TeamTaskDefinition> tasks)
-    {
-        var dependencies = tasks.ToDictionary(
-            task => task.Id,
-            task => task.DependsOn,
-            StringComparer.Ordinal);
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var task in tasks)
-        {
-            if (HasCycle(task.Id))
-                throw new InvalidOperationException("Team task graph contains a dependency cycle.");
-        }
-
-        bool HasCycle(string taskId)
-        {
-            if (visited.Contains(taskId))
-                return false;
-            if (!visiting.Add(taskId))
-                return true;
-            foreach (var dependency in dependencies[taskId])
-            {
-                if (HasCycle(dependency))
-                    return true;
-            }
-            visiting.Remove(taskId);
-            visited.Add(taskId);
-            return false;
-        }
     }
 }

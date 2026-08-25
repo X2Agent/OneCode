@@ -13,60 +13,6 @@ namespace OneCode.App.Services.BuildMode;
 public sealed partial class BuildRunCoordinator
 {
 
-    private BuildPlan LinkPlanTasks(BuildRun run, BuildPlan plan)
-    {
-        var linked = new Dictionary<string, TaskItem>(StringComparer.OrdinalIgnoreCase);
-        foreach (var planTask in TopologicalOrder(plan.Tasks))
-        {
-            var dependencies = planTask.DependsOn
-                .Select(id => linked[id].Id)
-                .ToArray();
-            linked[planTask.Id] = FindOrCreatePlanTask(run, planTask, dependencies);
-        }
-
-        return plan with
-        {
-            Tasks = plan.Tasks.Select(planTask => planTask with
-            {
-                Status = planTask.DependsOn.Count == 0
-                    ? BuildTaskStatus.InProgress
-                    : BuildTaskStatus.Pending,
-                Evidence = planTask.Evidence ?? [],
-                TaskItemId = linked[planTask.Id].Id,
-            }).ToArray(),
-        };
-    }
-
-    private TaskItem FindOrCreatePlanTask(
-        BuildRun run,
-        BuildPlanTask planTask,
-        IReadOnlyList<string> blockedBy)
-    {
-        var existing = taskService.ListTasks(
-                conversationId: run.ConversationId?.ToString(),
-                buildRunId: run.Id.ToString(),
-                exactScope: true)
-            .SingleOrDefault(task =>
-                task.Metadata?.ExtraProperties?.TryGetValue("BuildPlanTaskId", out var mappedId) == true
-                && string.Equals(mappedId, planTask.Id, StringComparison.Ordinal));
-        if (existing is not null)
-            return existing;
-
-        return taskService.CreateTask(
-            planTask.Title,
-            planTask.Description,
-            $"Executing {planTask.Title}",
-            status: blockedBy.Count == 0 ? TaskStatus.InProgress : TaskStatus.Pending,
-            blockedBy: blockedBy,
-            metadata: new TaskMetadata(
-                ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["BuildPlanTaskId"] = planTask.Id,
-                }),
-            conversationId: run.ConversationId?.ToString(),
-            buildRunId: run.Id.ToString());
-    }
-
     private static BuildPlan CreateQuickFixPlan(BuildScopeSnapshot scope)
         => new(
             "Execute the confirmed Build scope and produce deterministic validation evidence.",
@@ -102,7 +48,8 @@ public sealed partial class BuildRunCoordinator
         return ordered;
     }
 
-    private static bool PlansMatch(BuildPlan persisted, BuildPlan prescribed)
+    // internal：BuildResumePolicy（纯函数裁决器）复用同一计划比对规则
+    internal static bool PlansMatch(BuildPlan persisted, BuildPlan prescribed)
         => string.Equals(persisted.Summary, prescribed.Summary, StringComparison.Ordinal)
             && persisted.RequireExplicitTaskCompletion == prescribed.RequireExplicitTaskCompletion
             && persisted.Tasks.Select(TaskIdentity)
@@ -183,7 +130,7 @@ public sealed partial class BuildRunCoordinator
 
         var completedTasks = plan.Tasks.Select(planTask =>
         {
-            var taskItem = GetLinkedTask(run, planTask);
+            var taskItem = taskLinker.GetLinkedTask(run, planTask);
             if (plan.RequireExplicitTaskCompletion && taskItem.Status != TaskStatus.Completed)
             {
                 throw new InvalidOperationException(
@@ -191,13 +138,8 @@ public sealed partial class BuildRunCoordinator
             }
             if (!plan.RequireExplicitTaskCompletion && taskItem.Status != TaskStatus.Completed)
             {
-                if (!taskService.UpdateTask(taskItem.Id, status: TaskStatus.Completed))
-                {
-                    throw new InvalidOperationException(
-                        $"Linked task '{taskItem.Id}' for BuildPlan task '{planTask.Id}' could not be completed.");
-                }
-
-                taskItem = GetLinkedTask(run, planTask);
+                taskLinker.CompleteLinkedTask(run, planTask);
+                taskItem = taskLinker.GetLinkedTask(run, planTask);
             }
 
             var fileEvidence = run.ChangedFiles
@@ -347,92 +289,6 @@ public sealed partial class BuildRunCoordinator
             expected.Replace('\\', '/').TrimStart('.', '/'),
             changed.Replace('\\', '/').TrimStart('.', '/'),
             StringComparison.OrdinalIgnoreCase);
-
-    private TaskItem GetLinkedTask(BuildRun run, BuildPlanTask planTask)
-    {
-        if (string.IsNullOrWhiteSpace(planTask.TaskItemId))
-        {
-            throw new InvalidOperationException(
-                $"BuildPlan task '{planTask.Id}' has no persistent TaskItem mapping.");
-        }
-
-        var taskItem = taskService.GetTask(planTask.TaskItemId)
-            ?? throw new InvalidOperationException(
-                $"Persistent task '{planTask.TaskItemId}' for BuildPlan task '{planTask.Id}' was not found.");
-        var expectedConversationId = run.ConversationId?.ToString();
-        if (!string.Equals(taskItem.ConversationId, expectedConversationId, StringComparison.Ordinal)
-            || !string.Equals(taskItem.BuildRunId, run.Id.ToString(), StringComparison.Ordinal)
-            || taskItem.Metadata?.ExtraProperties?.TryGetValue("BuildPlanTaskId", out var mappedTaskId) != true
-            || !string.Equals(mappedTaskId, planTask.Id, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Persistent task '{taskItem.Id}' does not belong to BuildPlan task '{planTask.Id}' in BuildRun '{run.Id}'.");
-        }
-
-        return taskItem;
-    }
-
-    private BuildRun ResetLinkedTasksForRecovery(BuildRun run)
-    {
-        if (run.Plan is null)
-            return run;
-
-        var tasks = run.Plan.Tasks.Select(planTask =>
-        {
-            if (string.IsNullOrWhiteSpace(planTask.TaskItemId))
-                return planTask;
-
-            var taskItem = GetLinkedTask(run, planTask);
-            if (taskItem.Status == TaskStatus.Completed)
-            {
-                return planTask with
-                {
-                    Status = BuildTaskStatus.Completed,
-                    Evidence = planTask.Evidence ?? [],
-                };
-            }
-
-            var targetStatus = taskItem.BlockedBy.All(dependencyId =>
-                taskService.GetTask(dependencyId)?.Status == TaskStatus.Completed)
-                    ? TaskStatus.InProgress
-                    : TaskStatus.Pending;
-            var projected = taskService.ProjectTaskStatus(taskItem.Id, targetStatus);
-            if (!projected.Succeeded)
-            {
-                throw new InvalidOperationException(
-                    projected.Error
-                    ?? $"Persistent task '{taskItem.Id}' could not be reset for BuildRun recovery.");
-            }
-
-            return planTask with
-            {
-                Status = targetStatus == TaskStatus.InProgress
-                    ? BuildTaskStatus.InProgress
-                    : BuildTaskStatus.Pending,
-                Evidence = [],
-            };
-        }).ToArray();
-
-        return run with { Plan = run.Plan with { Tasks = tasks } };
-    }
-
-    private void MarkLinkedTasksTerminal(BuildRun run, TaskStatus status)
-    {
-        foreach (var planTask in run.Plan?.Tasks ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(planTask.TaskItemId))
-                continue;
-
-            var taskItem = taskService.GetTask(planTask.TaskItemId);
-            if (taskItem is null
-                || taskItem.Status is TaskStatus.Completed or TaskStatus.Failed or TaskStatus.Cancelled)
-            {
-                continue;
-            }
-
-            _ = taskService.UpdateTask(taskItem.Id, status: status);
-        }
-    }
 
     private static BuildDeliveryManifest CreateDeliveryManifest(BuildRun run) =>
         new(

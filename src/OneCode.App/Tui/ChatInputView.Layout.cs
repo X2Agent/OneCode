@@ -40,7 +40,6 @@ public sealed partial class ChatInputView
         _input.ContentsChanged += OnInputTextChanged;
 
         CycleModeRequested += () => _modeController.CycleMode();
-        ToggleStrategyRequested += () => _modeController.ToggleStrategy();
 
         // Fallback for terminals/drivers where IApplication.Paste doesn't fire
         // (e.g. ConPTY may strip bracketed-paste markers and deliver text as

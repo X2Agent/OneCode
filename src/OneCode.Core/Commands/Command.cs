@@ -17,7 +17,7 @@ public abstract class Command : ICommand
     // 元数据默认实现（可选重写）
 
     public virtual CommandCategory Category => CommandCategory.Builtin;
-    public virtual IReadOnlyList<string> Aliases => Array.Empty<string>();
+    public virtual IReadOnlyList<string> Aliases => [];
     public virtual bool IsHidden => false;
     public virtual bool IsEnabled() => true;
     public virtual string? ArgumentHint => null;
@@ -39,15 +39,5 @@ public abstract class Command : ICommand
         if (loaded is null)
             return null;
         return new OneCode.Core.Prompt.PromptTemplate(name, loaded).Render(variables);
-    }
-
-    /// <summary>
-    /// 解析 "--flag value" 形式的参数值；未提供时返回 null。
-    /// （统一 Review/DesignInit 两处字符级相同的私有实现。）
-    /// </summary>
-    protected static string? ParseFlag(string[] args, string flag)
-    {
-        var idx = Array.IndexOf(args, flag);
-        return idx >= 0 && idx + 1 < args.Length ? args[idx + 1] : null;
     }
 }

@@ -61,7 +61,7 @@ public sealed class TokenBreakdownEstimatorTests
         nullBreakdown.TotalEstimated.Should().Be(0);
         nullBreakdown.SystemPromptDetail.Should().BeNull();
 
-        var emptyBreakdown = sut.Estimate("", Array.Empty<AIFunction>(), Array.Empty<ChatMessage>());
+        var emptyBreakdown = sut.Estimate("", [], []);
         emptyBreakdown.SystemPrompt.Should().Be(0);
         emptyBreakdown.ToolsAndSkills.Should().Be(0);
         emptyBreakdown.Messages.Should().Be(0);

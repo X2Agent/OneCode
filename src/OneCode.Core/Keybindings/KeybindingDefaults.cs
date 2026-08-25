@@ -35,7 +35,6 @@ public static class KeybindingDefaults
 
     // App 级别动作
     public const string ActionAppExit = "app:exit";
-    public const string ActionAppCommandPalette = "app:commandPalette";
 
     // 历史导航
     public const string ActionHistoryPrevious = "history:previous";
@@ -56,10 +55,8 @@ public static class KeybindingDefaults
     // Plan 侧边栏开关（有活动计划时可收起/展开）
     public const string ActionChatTogglePlanPanel = "chat:togglePlanPanel";
 
-    // TEAM 模式专用：在 Magentic ↔ GroupChat 之间切换协作策略
-    public const string ActionChatToggleStrategy = "chat:toggleStrategy";
-
-    // TEAM 模式专用：循环切换已注册团队（feature-impl → code-review → research → ...）
+    // TEAM 模式专用：循环切换已注册团队（code-review → research → ...）
+    // 绑定 Shift+Tab（Tab 换模式、Shift+Tab 换模式内的团队）。
     public const string ActionChatCycleTeam = "chat:cycleTeam";
 
     // Autocomplete 菜单动作
@@ -71,14 +68,14 @@ public static class KeybindingDefaults
     /// </summary>
     public static readonly string[] AllActions =
     [
-        ActionAppExit, ActionAppCommandPalette,
+        ActionAppExit,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
         ActionChatCancel, ActionChatKillAgents,
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
         ActionChatTogglePlanPanel,
-        ActionChatToggleStrategy, ActionChatCycleTeam,
+        ActionChatCycleTeam,
         ActionAutocompletePrevious, ActionAutocompleteNext,
     ];
 
@@ -131,11 +128,9 @@ public static class KeybindingDefaults
             // Plan 侧边栏开关
             ["ctrl+g"] = ActionChatTogglePlanPanel,
 
-            // 在 TEAM 模式下切换 Magentic ↔ GroupChat 策略
-            ["shift+tab"] = ActionChatToggleStrategy,
-
-            // 在 TEAM 模式下循环切换已注册团队（Ctrl+Shift+T）
-            ["ctrl+shift+t"] = ActionChatCycleTeam,
+            // TEAM 模式下循环切换已注册团队（Shift+Tab）。
+            // 编排模式由 team.yaml 固定声明，运行期不可覆盖，无策略切换键。
+            ["shift+tab"] = ActionChatCycleTeam,
         }),
         new(ContextAutocomplete, new Dictionary<string, string?>
         {
@@ -164,7 +159,8 @@ public static class KeybindingDefaults
     ];
 
     /// <summary>
-    /// 终端保留快捷键（被终端/OS 拦截）。
+    /// 终端保留快捷键（被终端/OS 拦截）。仅适用于 Unix 终端信号；
+    /// Windows 控制台不发送 SIGTSTP/SIGQUIT，这些键可正常绑定。
     /// </summary>
     public static readonly ReservedShortcut[] TerminalReserved =
     [
@@ -193,7 +189,11 @@ public static class KeybindingDefaults
     {
         var reserved = new List<ReservedShortcut>();
         reserved.AddRange(NonRebindable);
-        reserved.AddRange(TerminalReserved);
+
+        if (!OperatingSystem.IsWindows())
+        {
+            reserved.AddRange(TerminalReserved);
+        }
 
         if (OperatingSystem.IsMacOS())
         {

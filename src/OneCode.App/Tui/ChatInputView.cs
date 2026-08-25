@@ -89,13 +89,7 @@ public sealed partial class ChatInputView : View
     public event Action? ImagePasteRejected;
 
     /// <summary>
-    /// 在 TEAM 模式下切换 Magentic ↔ GroupChat 策略（Shift+Tab）。
-    /// 由本视图直接桥接到 WorkingModeController.ToggleStrategy()。
-    /// </summary>
-    public event Action? ToggleStrategyRequested;
-
-    /// <summary>
-    /// 在 TEAM 模式下循环切换已注册团队（Ctrl+Shift+T）。
+    /// 在 TEAM 模式下循环切换已注册团队（Shift+Tab）。
     /// 调用方（OneCodeToplevel）将其桥接到 TuiContext.CycleTeam 回调，
     /// 并刷新 AgentStatusBar 显示的团队名。
     /// </summary>

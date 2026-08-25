@@ -84,7 +84,7 @@ public sealed class LspDiagnosticRegistry : IDisposable
         if (uri != null)
         {
             var key = $"{serverName}:{uri}";
-            return _diagnostics.TryGetValue(key, out var diags) ? diags : Array.Empty<LspDiagnostic>();
+            return _diagnostics.TryGetValue(key, out var diags) ? diags : [];
         }
 
         var prefix = $"{serverName}:";

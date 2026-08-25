@@ -62,9 +62,17 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, InsightsCommand>();
         s.AddSingleton<ICommand, MemoryCommand>();
         s.AddSingleton<ICommand, RenameCommand>();
-        s.AddSingleton<ICommand, CheckpointCommand>();
-        s.AddSingleton<ICommand, SessionCommand>();
         s.AddSingleton<ICommand, FindCommand>();
+
+        // SessionCommand 注入具体类型以委托 new/close 子命令，
+        // 因此具体注册 + ICommand 转发保证两个视角共享同一单例。
+        s.AddSingleton<NewCommand>();
+        s.AddSingleton<ICommand>(sp => sp.GetRequiredService<NewCommand>());
+        s.AddSingleton<CloseCommand>();
+        s.AddSingleton<ICommand>(sp => sp.GetRequiredService<CloseCommand>());
+        s.AddSingleton<ICommand, SessionCommand>();
+        s.AddSingleton<ICommand, CheckpointCommand>();
+        s.AddSingleton<ICommand, ResumeCommand>();
     }
 
     private static void AddDiagnosticCommands(IServiceCollection s)

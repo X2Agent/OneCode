@@ -281,7 +281,7 @@ public static class PermissionCheckHelpers
         }
         else
         {
-            pathValues = ExtractInputString(toolName, toolInput) is { } singlePath ? [singlePath] : Array.Empty<string>();
+            pathValues = ExtractInputString(toolName, toolInput) is { } singlePath ? [singlePath] : [];
         }
 
         var workingDir = string.IsNullOrWhiteSpace(context.WorkingDirectory)

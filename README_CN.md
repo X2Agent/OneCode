@@ -58,7 +58,7 @@ src/
 │
 ├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（386 文件）
 │   ├── Tools/                  #   30+ 个工具（通过 AddTool<T> 注册）
-│   ├── Commands/               #   41 斜杠命令
+│   ├── Commands/               #   44 斜杠命令
 │   ├── Middleware/              #   MAF 中间件管道
 │   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 18 子模块）
 │   ├── Tui/                    #   Terminal.Gui v2 全屏界面
@@ -351,7 +351,7 @@ ChatClientAgent
 |------|----------|----------|----------|
 | **BUILD** | 用户输入 → Agent 直接分析并执行 | 小改动、探索性任务、快速修复 | 绿色 |
 | **PLAN** | 用户输入 → Agent 生成计划卡片 → 用户批准 → 执行 | 复杂重构、多步骤任务 | 蓝色 |
-| **TEAM** | team.yaml 驱动多 Agent 协作（Magentic / GroupChat） | 方案评审、复杂多步协调 | 紫色 |
+| **TEAM** | team.yaml 驱动多 Agent 协作（模式由团队 YAML 固定声明：Magentic / GroupChat / ParallelDag，运行期不可覆盖，只能通过切换团队改变执行方式） | 方案评审、复杂多步协调 | 紫色 |
 | **GOAL** | Agent 自主分解目标、迭代执行、AI 验证完成度 | 开放式高层目标 | 青色 |
 
 **模式切换方式**：
@@ -467,15 +467,15 @@ ChatClientAgent
 
 ## 斜杠命令
 
-41 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
+44 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
 
-### Builtin 类别命令（23 个）
+### Builtin 类别命令（22 个）
 
-`/add-dir` `/compact` `/config` `/copy` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/lsp` `/model` `/permissions` `/skills` `/team` `/think` `/upgrade` `/version` `/prompts` `/cron`
+`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/team` `/think` `/upgrade` `/version`
 
-### Session 类别命令（8 个）
+### Session 类别命令（11 个）
 
-`/checkpoint` `/export` `/find` `/insights` `/memory` `/queue` `/rename` `/session`
+`/checkpoint` `/close` `/export` `/find` `/insights` `/memory` `/new` `/queue` `/rename` `/resume` `/session`
 
 ### Diagnostic 类别命令（3 个）
 
@@ -520,7 +520,7 @@ ChatClientAgent
 
 | 文档 | 说明 |
 |------|------|
-| [docs/commands.md](docs/commands.md) | 全部 41 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
+| [docs/commands.md](docs/commands.md) | 全部 44 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
 | [docs/settings.md](docs/settings.md) | `settings.json` 全部合法配置项、默认值、优先级与环境变量说明 |
 | [docs/skills.md](docs/skills.md) | 9 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
 

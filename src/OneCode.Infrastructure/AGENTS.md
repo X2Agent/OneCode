@@ -45,7 +45,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `System.ClientModel` | AI 客户端模型基类 |
 | `Anthropic` | Anthropic API SDK（`ChatClientFactory` 内部使用，App 层不直接引用） |
 | `Microsoft.Extensions.AI.OpenAI` | OpenAI 兼容客户端 SDK（`ChatClientFactory` 内部使用） |
-| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架（实验性 API，需 `#pragma warning disable MAAI001`） |
+| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架（实验性 API，需 `#pragma warning disable MAAI001`；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension） |
 | `Microsoft.Agents.AI.Hyperlight` + `Hyperlight.HyperlightSandbox.Api` + `Hyperlight.HyperlightSandbox.Guest.Python` | Hyperlight 沙箱（`HyperlightCodeActService` 内部使用） |
 
 ### 禁止的依赖

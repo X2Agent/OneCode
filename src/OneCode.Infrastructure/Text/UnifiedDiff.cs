@@ -49,10 +49,10 @@ public static class UnifiedDiff
             var mod = SplitLines(modified);
 
             if (orig.Length > MaxLines || mod.Length > MaxLines)
-                return (Array.Empty<string>(), Array.Empty<string>());
+                return ([], []);
 
             if (original == modified)
-                return (Array.Empty<string>(), Array.Empty<string>());
+                return ([], []);
 
             var edits = ComputeEdits(orig, mod);
             var added = new List<string>();
@@ -70,7 +70,7 @@ public static class UnifiedDiff
         }
         catch
         {
-            return (Array.Empty<string>(), Array.Empty<string>());
+            return ([], []);
         }
     }
 

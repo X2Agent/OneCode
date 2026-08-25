@@ -11,5 +11,5 @@ public interface IWorkingDirectoryAccessor
     /// pass the scope check performed by <c>PathsHelper.SafeResolve</c>.
     /// Default implementation returns an empty collection so consumers can omit it.
     /// </summary>
-    IReadOnlyList<string> AdditionalDirectories => Array.Empty<string>();
+    IReadOnlyList<string> AdditionalDirectories => [];
 }

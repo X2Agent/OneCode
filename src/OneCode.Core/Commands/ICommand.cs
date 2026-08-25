@@ -18,7 +18,7 @@ public interface ICommand
     CommandCategory Category => CommandCategory.Builtin;
 
     /// <summary>命令别名列表（不含前导 /）</summary>
-    IReadOnlyList<string> Aliases => Array.Empty<string>();
+    IReadOnlyList<string> Aliases => [];
 
     bool IsHidden => false;
 

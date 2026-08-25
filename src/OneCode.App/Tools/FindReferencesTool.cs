@@ -380,7 +380,7 @@ public sealed class FindReferencesTool
         catch (ArgumentException ex) { return new List<string> { $"Invalid regex: {ex.Message}" }; }
 
         var excludePatterns = string.IsNullOrEmpty(excludeGlob)
-            ? Array.Empty<string>()
+            ? []
             : excludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         var searchPattern = string.IsNullOrEmpty(glob) ? null : glob;

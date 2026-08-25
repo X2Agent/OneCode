@@ -84,6 +84,7 @@ internal sealed class TeamAgentFactory(
             maxOutputTokensOverride: null,
             CancellationToken.None).ConfigureAwait(false);
         var maxOutputDecorator = new MaxOutputTokensDecorator(chatClient);
+        var instrumentedClient = new DiagnosticsChatClient(maxOutputDecorator, member.AgentId, logger);
 
         // MaxTurns 语义：TeamConfig.MaxTurns = 外层轮数；pipelineMaxToolCallsPerMember = 每 Agent 内部工具调用上限。
         const int pipelineMaxToolCallsPerMember = 50;
@@ -120,7 +121,7 @@ internal sealed class TeamAgentFactory(
 
         return AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
         {
-            ChatClient = maxOutputDecorator,
+            ChatClient = instrumentedClient,
             Name = member.AgentId,
             ChatOptions = new ChatOptions
             {
@@ -194,6 +195,56 @@ internal sealed class TeamAgentFactory(
     /// </summary>
     private static string DefaultSystemPrompt(string? role) =>
         $"You are a {role ?? "general"} agent. Complete your assigned tasks professionally.";
+
+    /// <summary>
+    /// TEAM 诊断装饰器：记录每次 LLM 调用的进入/退出与响应文本长度。
+    /// 用于区分「模型从未被调用」与「调用返回空响应」两类静默失败（turns=0 问题定位）。
+    /// </summary>
+    public sealed class DiagnosticsChatClient : IChatClient
+    {
+        private readonly IChatClient _inner;
+        private readonly string _agentId;
+        private readonly ILogger<TeamAgentFactory> _logger;
+
+        public DiagnosticsChatClient(IChatClient inner, string agentId, ILogger<TeamAgentFactory> logger)
+        {
+            _inner = inner;
+            _agentId = agentId;
+            _logger = logger;
+        }
+
+        public async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation(
+                "Team LLM call ENTER agent={Agent} messages={Count} ctCancelled={Cancelled}",
+                _agentId, messages.Count(), cancellationToken.IsCancellationRequested);
+            var response = await _inner.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Team LLM call EXIT agent={Agent} textLen={Len} finish={Finish}",
+                _agentId, response.Text?.Length ?? 0, response.FinishReason);
+            return response;
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation(
+                "Team LLM stream ENTER agent={Agent} messages={Count} ctCancelled={Cancelled}",
+                _agentId, messages.Count(), cancellationToken.IsCancellationRequested);
+            var count = 0;
+            await foreach (var update in _inner.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
+            {
+                count++;
+                yield return update;
+            }
+            _logger.LogInformation("Team LLM stream EXIT agent={Agent} updates={Count}", _agentId, count);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => _inner.GetService(serviceType, serviceKey);
+        void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
+    }
 
     private sealed class TeamSystemPromptProvider(string systemPrompt) : AIContextProvider
     {

@@ -36,6 +36,7 @@ public sealed partial class ReplShell : View
     private readonly View _contentZone;
     private readonly ChatTranscriptView _transcript;
     private readonly PlanSidebarView _planSidebar;
+    private readonly TeamSidebarView _teamSidebar;
     private readonly FrameView _completionOverlay;
     private bool _completionVisible;
 
@@ -158,6 +159,16 @@ public sealed partial class ReplShell : View
         _contentZone.Add(_planSidebar);
         _chatInput.TogglePlanPanelRequested += TogglePlanSidebar;
 
+        // TEAM 运行状态板（右停靠，与 Plan 侧边栏互斥，见 ReplShell.TeamSidebar.cs）
+        _teamSidebar = new TeamSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
+        {
+            Y = 0,
+            Height = Dim.Fill(),
+            Visible = false,
+        };
+        _teamSidebar.X = Pos.AnchorEnd(_teamSidebar.CurrentWidth);
+        _contentZone.Add(_teamSidebar);
+
         // overlay host (full-screen, on top)
         _overlayHost = new OverlayHost(this)
         {
@@ -182,7 +193,7 @@ public sealed partial class ReplShell : View
         _modeController.ModeChanged += (_, args) =>
         {
             _transcript.CurrentMode = args.CurrentMode;
-            var bannerLines = ChatBlockRenderers.RenderModeBanner(args.CurrentMode, args.CurrentStrategy);
+            var bannerLines = ChatBlockRenderers.RenderModeBanner(args.CurrentMode);
             // Replace trailing banner in-place — stacking snapshots makes the chat
             // look one step behind the live status-bar mode during rapid Tab.
             _transcript.UpdateModeBanner(bannerLines);
@@ -199,20 +210,27 @@ public sealed partial class ReplShell : View
     internal bool IsPlanSidebarVisible => _planSidebar.Visible;
 
     /// <summary>
-    /// Toggles the plan sidebar (Ctrl+G). Only meaningful while a plan exists —
-    /// lets the user reclaim full chat width without losing the plan content.
+    /// Toggles the plan sidebar (Ctrl+G). Only meaningful while a plan or a TEAM
+    /// run exists — lets the user reclaim full chat width without losing content.
+    /// 无活动计划时路由到 TEAM 侧边栏（两者互斥，同一时刻至多一个有内容）。
     /// </summary>
     internal void TogglePlanSidebar()
     {
-        if (_activePlan is null)
+        if (_activePlan is not null)
+        {
+            SetPlanSidebarVisible(!_planSidebar.Visible);
             return;
-        SetPlanSidebarVisible(!_planSidebar.Visible);
+        }
+        if (_activeTeamRun is not null)
+            SetTeamSidebarVisible(!_teamSidebar.Visible);
     }
 
     private void SetPlanSidebarVisible(bool visible)
     {
         if (_planSidebar.Visible == visible)
             return;
+        if (visible)
+            SetTeamSidebarVisible(false); // 面板互斥：展开 Plan 时收起 TEAM
         _planSidebar.Visible = visible;
         ApplySidebarLayout();
         // 对话列宽度变化：旧换行不再匹配新视口，请求按新宽度整体重渲。
@@ -227,23 +245,31 @@ public sealed partial class ReplShell : View
     private void OnSidebarWidthChanged() => ApplySidebarLayout();
 
     /// <summary>
-    /// Drag release callback — re-render the plan content and the conversation
+    /// Drag release callback — re-render the sidebar contents and the conversation
     /// list once at the final width (line wrapping depends on it).
     /// </summary>
     private void OnSidebarDragEnded()
     {
         RenderActivePlanCard();
+        RenderActiveTeamSidebar();
         _transcript.RequestContentRerender();
     }
 
     /// <summary>
     /// Recomputes the transcript width so the chat column yields space to the
-    /// sidebar when visible and reclaims it (minus the 1-col gutter) when not.
+    /// visible sidebar (Plan 或 TEAM，互斥) and reclaims it (minus the 1-col gutter)
+    /// when neither is visible.
     /// </summary>
     private void ApplySidebarLayout()
     {
-        _transcript.Width = _planSidebar.Visible
-            ? Dim.Fill() - _planSidebar.CurrentWidth - 1
+        var sidebarWidth = 0;
+        if (_planSidebar.Visible)
+            sidebarWidth = _planSidebar.CurrentWidth;
+        else if (_teamSidebar.Visible)
+            sidebarWidth = _teamSidebar.CurrentWidth;
+
+        _transcript.Width = sidebarWidth > 0
+            ? Dim.Fill() - sidebarWidth - 1
             : Dim.Fill() - 1;
         _transcript.SetNeedsLayout();
         _transcript.NotifyLayoutChanged();

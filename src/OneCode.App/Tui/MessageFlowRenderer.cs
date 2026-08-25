@@ -328,7 +328,7 @@ public sealed class MessageFlowRenderer
 
     /// <summary>Makes a tool-call inline row: ▸ Name  args   ✓/✗/◈
     /// Uses a right-pointing triangle (▸) — clickable to expand/collapse tool details.</summary>
-    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null)
+    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null)
     {
         var segments = new List<LineSegment>
         {
@@ -336,6 +336,9 @@ public sealed class MessageFlowRenderer
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
         };
+        // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
+        if (!string.IsNullOrWhiteSpace(agentName))
+            segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
         if (!string.IsNullOrWhiteSpace(args))
             segments.Add(new($" \u00b7 {args}", TuiPalette.ToolDetailColor));
         if (ok is true)

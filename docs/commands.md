@@ -13,7 +13,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 类别 | 说明 | 数量 |
 |---|---|---|
 | `Builtin` | 内置通用命令（配置、模式、工具等） | 22 |
-| `Session` | 会话管理（记忆、检查点、导出、队列等） | 8 |
+| `Session` | 会话管理（会话、记忆、检查点、导出、队列等） | 11 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
 | `Git` | Git 工作流命令 | 6 |
@@ -23,11 +23,11 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 ## 命令开发约定
 
 - **基类**：所有命令继承 `Command`（位于 `OneCode.Core/Commands/Command.cs`），必须重写 `Name`、`Description`、`ExecuteAsync(string[] args, CancellationToken ct)`。
-- **参数解析**：项目不使用特性式绑定，而是约定式手动解析：
-  - `args.Contains("--flag")` 检测布尔标志
-  - `ParseFlag(args, "--key")` 提取 key-value 参数
-  - 非 `--` 前缀的参数视为位置参数
-  - 子命令通过 `args[0].ToLowerInvariant() switch {...}` 分发
+- **参数解析**：项目不使用特性式绑定，统一使用 [`CommandArgs`](../src/OneCode.Core/Commands/CommandArgs.cs)（`CommandArgs.Parse(args, valueFlags)`）：
+  - 非 `-` 前缀的 token 为位置参数，`SubCommand` 取首个（小写），`Rest` 为其余
+  - 在 `valueFlags` 中声明的旗标消费下一个非旗标 token 作为值（`Value(name)`）
+  - 其余 `-` 前缀旗标为布尔标志（`Has(name)`）；`--key=value` 内联赋值同样支持
+  - 纯子命令分发类命令（如 `/stash`、`/session`）可保留 `args[0]` switch + 切片写法
 - **返回值约定**：
 
   | 方法 | 用途 |
@@ -421,7 +421,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `info` / `show [<name>]` | 显示团队详情 |
 | `help` | 显示帮助 |
 
-> 别名：`teams`。内置团队：`feature-impl`、`code-review`、`research`。
+> 别名：`teams`。内置团队：`code-review`、`research`、`impl`。
 
 ---
 
@@ -554,6 +554,20 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ---
 
+### /close
+
+关闭会话。不带参数关闭当前前台会话（下一条消息惰性开启新会话）；带会话 ID 可关闭前台或后台会话。
+
+**用法**：
+
+```
+/close [session-id]
+```
+
+> 元数据：`Immediate = true`。
+
+---
+
 ### /export
 
 将会话内容导出为 JSON。
@@ -609,6 +623,20 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ---
 
+### /new
+
+启动新会话，当前会话转为后台（后续可用 `/session switch` 恢复）。可选的尾部文字作为新会话名称。
+
+**用法**：
+
+```
+/new [name]
+```
+
+> 元数据：`Immediate = true`。
+
+---
+
 ### /memory
 
 管理**可检索记忆子系统**（会话事实 + `MEMORY.md` 结构化条目）。  
@@ -655,6 +683,28 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `clear` | 清空队列 |
 
 > 队列是内存中的单队列——query 运行时用户输入会自动入队，query 完成后自动出队执行。也可通过此命令主动预排任务序列。
+
+---
+
+### /resume
+
+恢复被中断的 Goal/Team 工作流运行（凭 sessionId），不带参数时列出所有可恢复的运行。
+
+**用法**：
+
+```
+/resume [sessionId]
+```
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `sessionId` | 位置参数 | 否 | 要恢复的 Goal/Team 运行 ID；省略时列出全部可恢复项 |
+
+> 与 `/checkpoint resume` 不同：本命令针对跨进程持久的工作流聚合（GoalRun/TeamRun + Durable Workflow Host），
+> 不依赖活跃会话；返回 `CommandResult.ResumeWorkflowResult`，由 TUI dispatch 层直接调用对应工作流的 resume 流。
+> 元数据：`Immediate = true`。
 
 ---
 
@@ -988,7 +1038,7 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 
 ## 汇总统计
 
-- **总命令数**：41 个
+- **总命令数**：44 个
 - **隐藏命令**：`/gc-stats`
 - **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`
 - **带别名的命令**：

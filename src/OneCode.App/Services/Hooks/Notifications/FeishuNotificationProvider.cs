@@ -47,6 +47,6 @@ public sealed class FeishuNotificationProvider(HttpClient httpClient, ILogger<Fe
     protected override string ComputeSign(string timestamp, string secret)
     {
         var keyBytes = Encoding.UTF8.GetBytes(timestamp + "\n" + secret);
-        return ComputeHmacSha256Base64(keyBytes, Array.Empty<byte>());
+        return ComputeHmacSha256Base64(keyBytes, []);
     }
 }

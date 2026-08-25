@@ -1,5 +1,3 @@
-using System.Threading.Channels;
-using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Coordinator;

@@ -74,7 +74,7 @@ public class FeishuNotificationProviderTests
 
         var expectedKey = timestamp + "\n" + secret;
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(expectedKey));
-        var expectedSign = Convert.ToBase64String(hmac.ComputeHash(Array.Empty<byte>()));
+        var expectedSign = Convert.ToBase64String(hmac.ComputeHash([]));
 
         sign.Should().Be(expectedSign, "飞书签名算法: HMAC-SHA256(key=timestamp+\"\\n\"+secret, message=\"\"), Base64 编码");
     }

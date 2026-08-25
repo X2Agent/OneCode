@@ -20,6 +20,20 @@ public abstract record OrchestrationEvent
     /// <summary>Agent 间协调消息（orchestrator → researcher 等）。Team 专有。</summary>
     public sealed record AgentCoordination(string FromName, string? FromColor, string ToName, string? ToColor, string? Content) : OrchestrationEvent;
 
+    /// <summary>
+    /// Team 任务状态变更快照（开始时 Status=null，结束时为终态名称），
+    /// 携带全量计数（已完成/总数/活跃/阻塞），供 TUI 进度面板消费。Team 专有。
+    /// </summary>
+    public sealed record TeamTaskProgress(
+        string TaskId,
+        string TaskTitle,
+        string AssigneeRole,
+        string? Status,
+        int CompletedTasks,
+        int TotalTasks,
+        int ActiveTasks = 0,
+        int BlockedTasks = 0) : OrchestrationEvent;
+
     /// <summary>单个 Agent 的消息输出。Team 专有。</summary>
     public sealed record AgentMessage(string AgentName, string? AgentColor, string Content) : OrchestrationEvent;
 
@@ -70,4 +84,7 @@ public abstract record OrchestrationEvent
         string PlanSummary,
         IReadOnlyList<string> Tasks,
         IReadOnlyList<string> RequiredGates) : OrchestrationEvent;
+
+    /// <summary>用户在澄清/审批交互中给出的回答回显，供 TUI 写入会话记录。</summary>
+    public sealed record TeamUserResponse(string TeamName, string Response) : OrchestrationEvent;
 }

@@ -389,7 +389,12 @@ public sealed class TuiHostConfigurator(
         {
             var conversation = session.SessionManager.ForegroundConversation;
             if (conversation is null)
+            {
+                // /close closed the foreground session — clear the transcript so
+                // stale messages don't mix into the lazily-created next session.
+                app.Invoke(() => toplevel.ClearConversationView());
                 return;
+            }
 
             app.Invoke(() => toplevel.LoadConversation(conversation));
             await toplevel.ReplayCurrentBuildRunAsync(ct).ConfigureAwait(false);

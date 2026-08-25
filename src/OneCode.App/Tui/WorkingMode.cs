@@ -27,33 +27,12 @@ public enum WorkingMode
 /// <summary>
 /// Orchestration strategies for the TEAM mode (driven by team.yaml).
 ///
-/// Design-spec §1.3:
-/// - <see cref="Magentic"/>:   Orchestrator-led, agents report back.
-/// - <see cref="GroupChat"/>: Peer-to-peer round-robin discussion.
-/// </summary>
-public enum TeamStrategy
-{
-    /// <summary>Config — use the selected team's YAML template without a runtime override.</summary>
-    Config = 0,
-
-    /// <summary>Magentic — orchestrator-led workflow.</summary>
-    Magentic = 1,
-
-    /// <summary>GroupChat — peer round-robin discussion.</summary>
-    GroupChat = 2,
-}
-
-/// <summary>
-/// Centralised, observable state machine for the TUI working mode.
-///
-/// Threading: mutated only on the Terminal.Gui main loop. Listeners are
-/// invoked synchronously from the setter methods.
+/// 编排模式（Magentic / GroupChat / ParallelDag）是团队定义的固定属性，
+/// 由 team.yaml 的 template 字段声明，运行期不可覆盖——用户只能通过
+/// 切换团队来选择不同的执行方式。
 /// </summary>
 public sealed class WorkingModeController
 {
-    // Strategy retains explicit backing field because Mode setter resets it directly.
-    private TeamStrategy _strategy;
-
     /// <summary>Currently active working mode.</summary>
     public WorkingMode Mode
     {
@@ -63,38 +42,16 @@ public sealed class WorkingModeController
             if (field == value) return;
             var previous = field;
             field = value;
-            // When leaving TEAM, reset to Config so the next Team run follows YAML by default.
-            if (previous == WorkingMode.Team && value != WorkingMode.Team)
-                _strategy = TeamStrategy.Config;
-            ModeChanged?.Invoke(this, new WorkingModeChangedEventArgs(previous, field, _strategy));
+            ModeChanged?.Invoke(this, new WorkingModeChangedEventArgs(previous, field));
         }
     }
 
-    /// <summary>
-    /// Currently active team strategy. Only meaningful when
-    /// <see cref="Mode"/> is <see cref="WorkingMode.Team"/>; the setter is a
-    /// no-op when called outside TEAM mode.
-    /// </summary>
-    public TeamStrategy Strategy
-    {
-        get => _strategy;
-        set
-        {
-            if (Mode != WorkingMode.Team) return;
-            if (_strategy == value) return;
-            _strategy = value;
-            ModeChanged?.Invoke(this, new WorkingModeChangedEventArgs(Mode, Mode, _strategy));
-        }
-    }
-
-    /// <summary>Raised whenever <see cref="Mode"/> or <see cref="Strategy"/> changes.</summary>
+    /// <summary>Raised whenever <see cref="Mode"/> changes.</summary>
     public event EventHandler<WorkingModeChangedEventArgs>? ModeChanged;
 
-    public WorkingModeController(WorkingMode initialMode = WorkingMode.Build,
-        TeamStrategy initialStrategy = TeamStrategy.Config)
+    public WorkingModeController(WorkingMode initialMode = WorkingMode.Build)
     {
         Mode = initialMode;
-        _strategy = initialStrategy;
     }
 
     /// <summary>
@@ -106,43 +63,6 @@ public sealed class WorkingModeController
         return Mode;
     }
 
-    /// <summary>
-    /// Within TEAM mode, toggles between Magentic and GroupChat.
-    /// Outside TEAM mode, this is a no-op.
-    /// </summary>
-    public TeamStrategy ToggleStrategy()
-    {
-        if (Mode != WorkingMode.Team) return _strategy;
-        Strategy = _strategy switch
-        {
-            TeamStrategy.Config => TeamStrategy.Magentic,
-            TeamStrategy.Magentic => TeamStrategy.GroupChat,
-            _ => TeamStrategy.Config,
-        };
-        return _strategy;
-    }
-
-    /// <summary>Shortcut: is TEAM mode active and the strategy is Magentic.</summary>
-    public bool IsMagentic => Mode == WorkingMode.Team && _strategy == TeamStrategy.Magentic;
-
-    /// <summary>Shortcut: is TEAM mode active and the strategy is GroupChat.</summary>
-    public bool IsGroupChat => Mode == WorkingMode.Team && _strategy == TeamStrategy.GroupChat;
-
-    /// <summary>Compact one-line label of the current mode (e.g. "BUILD", "TEAM · Magentic").</summary>
-    public string ModeLabel => Mode switch
-    {
-        WorkingMode.Build => "BUILD",
-        WorkingMode.Plan => "PLAN",
-        WorkingMode.Team => $"TEAM · {_strategy switch
-        {
-            TeamStrategy.Config => "Config",
-            TeamStrategy.Magentic => "Magentic",
-            _ => "GroupChat",
-        }}",
-        WorkingMode.Goal => "GOAL",
-        _ => "UNKNOWN",
-    };
-
     /// <summary>Uppercase short tag displayed by <see cref="AgentStatusBar"/>.</summary>
     public string ModeTag => Mode switch
     {
@@ -152,18 +72,13 @@ public sealed class WorkingModeController
         WorkingMode.Goal => "GOAL",
         _ => "???",
     };
-
-    /// <summary>True when the strategy tag should be visible in the status bar (only TEAM).</summary>
-    public bool ShowStrategyTag => Mode == WorkingMode.Team;
 }
 
 /// <summary>Event payload for <see cref="WorkingModeController.ModeChanged"/>.</summary>
 public sealed class WorkingModeChangedEventArgs(
     WorkingMode previous,
-    WorkingMode current,
-    TeamStrategy strategy) : EventArgs
+    WorkingMode current) : EventArgs
 {
     public WorkingMode PreviousMode { get; } = previous;
     public WorkingMode CurrentMode { get; } = current;
-    public TeamStrategy CurrentStrategy { get; } = strategy;
 }

@@ -32,9 +32,8 @@ internal static class TeamConfigLoader
     /// <summary>从 AgentTemplateConfig 构建 TeamConfig（YAML/内置模板共享逻辑）。</summary>
     public static TeamConfig BuildTeamConfigFromTemplate(AgentTemplateConfig template, string teamName)
     {
-        var mode = string.Equals(template.Template, "magentic-orchestrator", StringComparison.OrdinalIgnoreCase)
-            ? TeamOrchestrationMode.Magentic
-            : TeamOrchestrationMode.GroupChat;
+        // 模式映射统一走 TeamOrchestrationModeExtensions.FromYamlTemplate（单一事实源）。
+        var mode = TeamOrchestrationModeExtensions.FromYamlTemplate(template.Template);
 
         List<TeamMember> members = [];
         foreach (var w in template.Workers)
@@ -52,7 +51,9 @@ internal static class TeamConfigLoader
                     suffix++;
                 agentId = $"{agentId}-{suffix}";
             }
-            members.Add(new TeamMember(agentId, w.Role, w.Instructions, w.AllowedTools));
+            members.Add(new TeamMember(agentId, w.Role,
+                mode == TeamOrchestrationMode.GroupChat ? WithCollaborationProtocol(w.Instructions) : w.Instructions,
+                w.AllowedTools));
         }
 
         if (members.Count == 0)
@@ -61,6 +62,50 @@ internal static class TeamConfigLoader
         return EnsureOrchestrator(
             new TeamConfig(teamName, "(builtin)", members, template.MaxRounds, mode),
             fallbackInstructions: template.Instructions);
+    }
+
+    /// <summary>
+    /// GroupChat 成员协作协议：Round-Robin 轮询下最容易退化的问题是成员礼貌性附和、空转烧轮次。
+    /// 在加载期把协议注入每个成员 instructions，要求发言必须推进讨论，无可贡献时显式 PASS，
+    /// 配合 GroupChatActivityTracker 的活动计数收敛判定降低无效轮次。
+    /// </summary>
+    internal const string CollaborationProtocol =
+        """
+
+        [GroupChat 协作协议]
+        - 你的每次发言必须推进讨论：补充新证据、反驳具体观点、或提出替代方案。
+        - 禁止单纯附和或复述他人结论；若本轮无可贡献内容，仅回复 "[PASS]"。
+        - 引用其他成员的具体观点时指明其角色名。
+        """;
+
+    internal static string WithCollaborationProtocol(string? instructions)
+        => string.IsNullOrWhiteSpace(instructions)
+            ? CollaborationProtocol.TrimStart()
+            : instructions.TrimEnd() + "\n" + CollaborationProtocol;
+
+    /// <summary>
+    /// 配置级 advisory：解析成功但存在值得提示的选型问题时返回非空列表。
+    /// 由注册方（TeamOrchestrationService）写日志透出。
+    /// </summary>
+    public static IReadOnlyList<string> BuildAdvisories(AgentTemplateConfig template, string teamName)
+    {
+        List<string> advisories = [];
+        var mode = TeamOrchestrationModeExtensions.FromYamlTemplate(template.Template);
+
+        // 视角独立型团队误用 GroupChat：全共享上下文成本高且互相污染视角，
+        // 这类"只从 X 视角审查"的团队更适合 parallel-dag（隔离 + 聚合去重）。
+        if (mode == TeamOrchestrationMode.GroupChat && template.Workers.Count >= 3)
+        {
+            var perspectiveCount = template.Workers.Count(w =>
+                (w.Instructions ?? "").Contains("视角", StringComparison.OrdinalIgnoreCase) ||
+                (w.Instructions ?? "").Contains("不要评价", StringComparison.OrdinalIgnoreCase));
+            if (perspectiveCount >= 2)
+                advisories.Add(
+                    $"Team '{teamName}': 检测到 {perspectiveCount} 个视角独立型成员使用 groupchat 模式。" +
+                    "若各成员无需互相回应，建议改用 template: parallel-dag（上下文隔离，成本更低）。");
+        }
+
+        return advisories;
     }
 
     /// <summary>

@@ -58,7 +58,7 @@ public sealed class MemoryCommandTests
 
         var memoryService = Substitute.For<IMemoryService>();
         memoryService.ListMemoryEntriesAsync(conv.WorkingDirectory, Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<MemoryEntryInfo>());
+            .Returns([]);
 
         var sut = new MemoryCommand(
             sessionManager,

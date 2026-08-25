@@ -15,7 +15,7 @@ public sealed class AgentStatusBar : View
     private bool _modeFlash;
     private object? _modeFlashTimer;
     private string? _activeTeam;
-    private string? _resolvedTeamMode;
+    private string? _teamModeLabel;
     private string _activity = "处理中";
     private string _model = "Opus";
     private string _cost = "$0.00";
@@ -78,24 +78,17 @@ public sealed class AgentStatusBar : View
     public void SetSandboxMode(string s) { _sandbox = string.IsNullOrWhiteSpace(s) ? "Sandbox" : s; SetNeedsDraw(); }
 
     /// <summary>
-    /// 更新团队标签。<paramref name="resolvedTeamMode"/> 为 Strategy=Config 时
-    /// YAML 实际解析出的模式（如 "Magentic"），用于透出 Config 背后的真实策略（P3-10）。
+    /// 更新团队标签。<paramref name="teamModeLabel"/> 为该团队 team.yaml 声明的编排模式
+    /// 标签（经 TeamOrchestrationModeExtensions.ToLabel 得到）——模式是团队的固定属性，
+    /// 状态栏只透出 YAML 事实，不存在运行期覆盖。
     /// </summary>
-    public void SetActiveTeam(string? teamName, string? resolvedTeamMode = null)
+    public void SetActiveTeam(string? teamName, string? teamModeLabel = null)
     {
-        if (_activeTeam == teamName && _resolvedTeamMode == resolvedTeamMode) return;
+        if (_activeTeam == teamName && _teamModeLabel == teamModeLabel) return;
         _activeTeam = teamName;
-        _resolvedTeamMode = resolvedTeamMode;
+        _teamModeLabel = teamModeLabel;
         SetNeedsDraw();
     }
-
-    internal static string GetStrategyLabel(TeamStrategy strategy, string? resolvedMode = null) => strategy switch
-    {
-        TeamStrategy.Config when !string.IsNullOrWhiteSpace(resolvedMode) => $"Config({resolvedMode})",
-        TeamStrategy.Config => "Config",
-        TeamStrategy.Magentic => "Magentic",
-        _ => "GroupChat",
-    };
 
     /// <summary>
     /// Update the LSP status indicator shown in the status bar.
@@ -182,8 +175,9 @@ public sealed class AgentStatusBar : View
     private void DrawModeTag(int width)
     {
         var modeTag = _modeController.ModeTag;
-        var strategyLabel = _modeController.ShowStrategyTag
-            ? $" \u00b7 {GetStrategyLabel(_modeController.Strategy, _resolvedTeamMode)}"
+        // TEAM 模式下显示团队 YAML 声明的编排模式（固定属性，非运行期可变状态）。
+        var strategyLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_teamModeLabel)
+            ? $" \u00b7 {_teamModeLabel}"
             : "";
         var teamLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_activeTeam)
             ? $" \u00b7 {_activeTeam}"

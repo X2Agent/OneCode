@@ -1,7 +1,5 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Coordinator;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Teams;
 

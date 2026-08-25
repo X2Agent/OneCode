@@ -148,10 +148,7 @@ public sealed class OrchestrationStreamService(
     {
         var teamName = teamService.ResolveActiveTeam() ?? teamService.RegisteredTeams[0];
 
-        // Config 为默认值：遵循团队 YAML。只有用户显式切换策略时才覆盖配置。
-        var overrideMode = ResolveTeamOverride(session.ModeController.Strategy);
-
-        // 编排模式和成员清单属于详情信息；主对话只投影当前可理解阶段。
+        // 编排模式由团队 YAML 固定声明，无运行期覆盖；主对话只投影当前可理解阶段。
         yield return new TuiModeProgress(
             WorkingMode.Team,
             $"团队 {teamName} 正在分析任务…");
@@ -164,7 +161,6 @@ public sealed class OrchestrationStreamService(
         {
             teamResult = await teamService.RunTeamStreamingAsync(
                 teamName, text, sink, token,
-                overrideMode: overrideMode,
                 imagePaths: imagePaths,
                 sessionId: session.SessionManager.ForegroundConversation?.Id).ConfigureAwait(false);
         }, ct).ConfigureAwait(false))
@@ -232,14 +228,6 @@ public sealed class OrchestrationStreamService(
             || result.TurnsCompleted == 0
             || string.IsNullOrWhiteSpace(result.Output)
             || string.Equals(result.Output.Trim(), "(no output)", StringComparison.Ordinal);
-
-    internal static TeamOrchestrationMode? ResolveTeamOverride(TeamStrategy strategy) => strategy switch
-    {
-        TeamStrategy.Magentic => TeamOrchestrationMode.Magentic,
-        TeamStrategy.GroupChat => TeamOrchestrationMode.GroupChat,
-        _ => null,
-    };
-
     private static string? BuildTeamFailureSummary(TeamRunResult? result)
     {
         if (result is null)
@@ -438,6 +426,10 @@ public sealed class OrchestrationStreamService(
                     break;
 
                 case TuiTextDelta:
+                    break;
+                case TuiTeamProgress progress when progress.Tasks.Count > 0:
+                    // 结构化进度（如澄清问题清单）— 原样透传，presenter 多行渲染。
+                    yield return progress;
                     break;
                 case TuiTeamProgress progress:
                     yield return new TuiModeProgress(WorkingMode.Team, progress.Header);

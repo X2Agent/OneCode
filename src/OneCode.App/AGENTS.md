@@ -233,22 +233,25 @@ public sealed class MyCommand : ICommand
 
 **占位符语法**：prompt 文件中使用 `{{varName}}`，由 `PromptTemplate.Render(variables)` 替换。
 
-**兜底常量模式**：每个文件化 prompt 的命令必须提供内联 `FallbackXxxPrompt` 常量，保证 `PromptManager` 为 null（单元测试）或文件缺失时仍可工作：
+**缺失处理策略**（二选一，按调用场景决定，禁止内联兜底常量——prompt 经 csproj 双重打包，生产环境必然存在，静默降级到低质量内置版本会掩盖打包问题）：
+
+| 场景 | 策略 | 实现 |
+|------|------|------|
+| 用户可触发的命令路径（`/commit`、`/compact`、`/review`…） | 转为用户可见错误 | `Command.LoadPromptAsync` 返回 null → `CommandResult.Error("Prompt 'xxx' is not available...")` |
+| 系统内部关键路径（harness、mode overlay、goal-subgoal、compaction 管道） | fail-fast 抛异常 | `?? throw new InvalidOperationException("Prompt 'xxx' not found in any IPromptManager store.")` |
 
 ```csharp
-private const string FallbackXxxPrompt = "极简版本，含 {{var}} 占位符";
+// 命令路径：基类 LoadPromptAsync 返回 null 时转错误
+var prompt = await LoadPromptAsync(promptManager, "system/commit", variables, ct);
+if (prompt is null)
+    return CommandResult.Error("Prompt 'system/commit' is not available. Verify prompts/system/commit.prompt exists.");
 
-private async Task<string> LoadPromptAsync(
-    string name, IReadOnlyDictionary<string, string> variables, CancellationToken ct)
-{
-    if (promptManager is null)
-        return new PromptTemplate(name, FallbackXxxPrompt).Render(variables);
-
-    var loaded = await promptManager.GetPromptAsync(name, ct).ConfigureAwait(false);
-    var raw = string.IsNullOrWhiteSpace(loaded) ? FallbackXxxPrompt : loaded;
-    return new PromptTemplate(name, raw).Render(variables);
-}
+// 内部关键路径：null 合并抛异常
+var harness = await promptManager.GetPromptAsync(HarnessPromptName, ct).ConfigureAwait(false)
+    ?? throw new InvalidOperationException($"Harness prompt '{HarnessPromptName}' not found in any IPromptManager store.");
 ```
+
+单元测试中通过 `PromptManager.RegisterTemplate(new PromptTemplate(name, body))` 注入测试用 prompt，不依赖任何生产兜底。
 
 **csproj 打包**：prompt 文件必须同时声明为 `Content`（复制到输出目录）和 `EmbeddedResource`：
 
@@ -259,7 +262,7 @@ private async Task<string> LoadPromptAsync(
 <EmbeddedResource Include="prompts\**\*.prompt" />
 ```
 
-**参考实现**：`CompactPromptBuilder`（文件优先 + 兜底常量）、`CommitCommand` / `ReviewCommand`（含 `--focus` 切换多套 prompt）/ `InitCommand`（文件化 + 变量渲染 + 兜底）。
+**参考实现**：`CommitCommand`（错误呈现 + `--focus` 切换多套 prompt）、`MainAgentRunner` / `PlanModeService`（内部关键路径 fail-fast）、`CompactCommand` / `CompactPromptBuilder`（服务层抛出、命令层转用户错误）。
 
 ### Prompt 分层与合成（harness / default / role / mode）
 

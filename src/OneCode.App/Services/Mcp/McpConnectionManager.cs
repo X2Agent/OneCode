@@ -1,3 +1,4 @@
+using Microsoft.Agents.AI.Mcp;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.Infrastructure.Mcp;
@@ -323,21 +324,21 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
     private const int MaxFunctionNameLength = 64;
 
     /// <summary>
-    /// 用 MCP SDK 原生 API（<see cref="McpClient.ListToolsAsync"/>）加载工具并包装为
-    /// <see cref="AIFunction"/>，工具名带 <c>mcp__{server}__{tool}</c> 前缀。
-    ///
-    /// <para>注意：不使用 MAF 的 <c>ListAgentToolsWithTaskSupportAsync</c>——MAF
-    /// （Microsoft.Agents.AI.Mcp）针对 ModelContextProtocol 1.2.0 编译（引用
-    /// <c>ModelContextProtocol.Protocol.ToolTaskSupport</c>），运行时绑定 2.1.0 会抛
-    /// TypeLoadException（该类型在 2.1.0 已移除）。改用 SDK 原生工具枚举 + 自包装
-    /// <see cref="McpToolAIFunction"/> 可同时兼容 1.x / 2.x SDK。</para>
+    /// 用 MAF 桥接（Microsoft.Agents.AI.Mcp 的
+    /// <see cref="McpClientTaskExtensions.ListAgentToolsWithTasksAsync"/>）加载工具：
+    /// 透明处理 MCP 2026-07-28 Tasks extension（long-running 工具轮询、input_required 解析、
+    /// 远程取消），同时兼容不支持 task 的普通同步工具。
+    /// 工具名经 <see cref="RenamedAIFunction"/> 包装为 <c>mcp__{server}__{tool}</c> 前缀
+    /// （MAF 包装器不暴露 WithName）。
     /// </summary>
     private static async Task<IReadOnlyList<AIFunction>> LoadAgentToolsAsync(
-        McpClient client,
+        OneCode.Infrastructure.Mcp.McpClient client,
         string serverName,
         CancellationToken ct)
     {
-        var tools = await client.ListToolsAsync(ct).ConfigureAwait(false);
+        var sdk = client.SdkClient
+            ?? throw new InvalidOperationException($"MCP server '{serverName}' is not connected.");
+        var tools = await sdk.ListAgentToolsWithTasksAsync(cancellationToken: ct).ConfigureAwait(false);
         if (tools.Count == 0)
             return [];
 
@@ -345,8 +346,7 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var tool in tools)
         {
-            var prefixedName = CreateUniqueToolName(serverName, tool.Name, usedNames);
-            prefixed.Add(new McpToolAIFunction(client, tool, prefixedName));
+            prefixed.Add(new RenamedAIFunction(tool, CreateUniqueToolName(serverName, tool.Name, usedNames)));
         }
 
         return prefixed;
@@ -432,52 +432,4 @@ internal sealed class RenamedAIFunction : AIFunction
         => _inner.InvokeAsync(arguments, cancellationToken);
 }
 
-/// <summary>
-/// 将 MCP 工具（<see cref="McpTool"/>）包装为 <see cref="AIFunction"/>：
-/// 名称带 <c>mcp__{server}__{tool}</c> 前缀，调用时经 <see cref="McpClient.CallToolAsync"/>
-/// 转发到 MCP 服务器，返回文本内容。
-///
-/// <para>替代 MAF 的 <c>ListAgentToolsWithTaskSupportAsync</c>（其依赖 ModelContextProtocol
-/// 1.2.0 的 ToolTaskSupport 类型，与运行时绑定的 2.x SDK 不兼容）。</para>
-/// </summary>
-internal sealed class McpToolAIFunction : AIFunction
-{
-    private readonly McpClient _client;
-    private readonly string _toolName;
-    private readonly string _description;
-    private readonly JsonElement _inputSchema;
 
-    public McpToolAIFunction(McpClient client, McpTool tool, string name)
-    {
-        _client = client;
-        _toolName = tool.Name;
-        _description = tool.Description ?? "";
-        _inputSchema = tool.InputSchema
-            ?? JsonSerializer.SerializeToElement(new { type = "object", properties = new Dictionary<string, object?>() });
-        Name = name;
-    }
-
-    public override string Name { get; }
-    public override string Description => _description;
-    public override JsonElement JsonSchema => _inputSchema;
-    public override JsonElement? ReturnJsonSchema => null;
-    public override JsonSerializerOptions JsonSerializerOptions => JsonSerializerOptions.Default;
-
-    protected override async ValueTask<object?> InvokeCoreAsync(
-        AIFunctionArguments arguments,
-        CancellationToken cancellationToken)
-    {
-        Dictionary<string, object?>? args = null;
-        if (arguments.Count > 0)
-        {
-            // AIFunctionArguments 继承自 Dictionary<string, object?>，可直接复制。
-            args = new Dictionary<string, object?>(arguments, StringComparer.Ordinal);
-        }
-
-        var result = await _client.CallToolAsync(_toolName, args, cancellationToken).ConfigureAwait(false);
-        if (result.IsError)
-            throw new InvalidOperationException($"MCP tool '{_toolName}' failed: {result.Content}");
-
-        return result.Content;
-    }
-}

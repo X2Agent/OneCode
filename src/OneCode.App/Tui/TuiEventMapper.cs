@@ -128,13 +128,23 @@ public static class TuiEventMapper
             OrchestrationEvent.AgentMessage am
                 => new TuiAgentMessage(am.AgentName, am.AgentColor, am.Content),
             OrchestrationEvent.ToolStart ts
-                => new TuiToolStart(ts.ToolId, ts.Name, ts.ToolInput),
+                => new TuiToolStart(ts.ToolId, ts.Name, ts.ToolInput, ts.AgentName),
             OrchestrationEvent.ToolDone td
-                => new TuiToolDone(td.Name, td.IsError, td.Result, td.ToolInput, td.ToolId),
+                => new TuiToolDone(td.Name, td.IsError, td.Result, td.ToolInput, td.ToolId, td.AgentName),
             OrchestrationEvent.TextDelta td
                 => new TuiTextDelta(td.Text),
             OrchestrationEvent.FileChanged fc
-                => new TuiFileChange(fc.FileName, fc.AddedLines, fc.RemovedLines),
+                => new TuiFileChange(fc.FileName, fc.AddedLines, fc.RemovedLines, fc.AgentName),
+            OrchestrationEvent.TeamTaskProgress progress
+                => new TuiTeamTaskProgress(
+                    progress.TaskId,
+                    progress.TaskTitle,
+                    progress.AssigneeRole,
+                    progress.Status,
+                    progress.CompletedTasks,
+                    progress.TotalTasks,
+                    progress.ActiveTasks,
+                    progress.BlockedTasks),
             OrchestrationEvent.Error err
                 => new TuiError(err.Message),
             OrchestrationEvent.ApprovalRequest ar
@@ -144,11 +154,16 @@ public static class TuiEventMapper
                     ar.Request.ToolInput,
                     ar.ResponseSource),
             OrchestrationEvent.TeamClarificationRequest clarification
-                => new TuiError(
-                    $"Team '{clarification.TeamName}' requires clarification before planning:\n" +
-                    string.Join("\n", clarification.Questions.Select((question, index) => $"{index + 1}. {question}"))),
+                => new TuiTeamProgress(
+                    $"团队 '{clarification.TeamName}' 需要澄清 {clarification.Questions.Count} 个问题后才能规划",
+                    clarification.Questions.Select((question, index) =>
+                        ($"问题 {index + 1}", question, "待回答")).ToList(),
+                    "请在随后的澄清向导中回答",
+                    clarification.TeamName),
             OrchestrationEvent.TeamPlanApprovalRequest approval
                 => MapTeamPlanApproval(approval),
+            OrchestrationEvent.TeamUserResponse userResponse
+                => new TuiTeamUserResponse(userResponse.TeamName, userResponse.Response),
             _ => null,
         };
     }

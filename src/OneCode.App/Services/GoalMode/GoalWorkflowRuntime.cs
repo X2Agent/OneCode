@@ -1,6 +1,5 @@
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
-using Microsoft.Extensions.Logging;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Cost;
@@ -57,9 +56,9 @@ internal sealed class GoalWorkflowRuntime(
 {
     private const int MaxRecursiveDecompositionDepth = 3;
     private readonly GoalBudget _budget = context.Options.Budget ?? new GoalBudget();
+    private readonly GoalRuntimeProgress _progress = new(context.EventWriter, context.Options.Budget ?? new GoalBudget());
     private GoalRun? _run;
     private long _fencingToken;
-    private GoalBudgetWarningLevel? _lastWarningLevel;
 
     public async Task BindAsync(GoalRun run, long fencingToken, CancellationToken ct)
     {
@@ -110,6 +109,7 @@ internal sealed class GoalWorkflowRuntime(
                 FailureSummary = null,
             };
             await SaveAsync(fallback, ct).ConfigureAwait(false);
+                _progress.PlanCreated(plan);
                 return ToWorkflowState(_run!, currentIndex: 0, hasReplanned: _run!.HasReplanned);
         }
 
@@ -121,6 +121,7 @@ internal sealed class GoalWorkflowRuntime(
             FailureSummary = plan.Length == 0 ? result.Error ?? "Goal decomposition produced no executable steps." : null,
         };
         await SaveAsync(updated, ct).ConfigureAwait(false);
+        _progress.PlanCreated(plan);
         return ToWorkflowState(_run!, currentIndex: 0, hasReplanned: _run!.HasReplanned);
     }
 
@@ -131,11 +132,11 @@ internal sealed class GoalWorkflowRuntime(
             throw new InvalidOperationException("Goal workflow cursor is outside the current plan.");
 
         // Fix-7：墙钟只累计运行区间（Paused / 进程离线时间不计入），并回写到本次状态流转。
-        var budget = RollForwardWallClock(run.Budget);
+        var budget = GoalBudgetAccountant.RollForwardWallClock(run.Budget);
         state = state with { Budget = budget };
-        var usage = BuildBudgetUsage(budget);
+        var usage = GoalBudgetAccountant.BuildUsage(budget);
         // Fix-6：EvaluateWarning 已存在但从未发布——级别变化时推送 TUI 预警（黄/橙）。
-        PublishBudgetWarning(usage);
+        _progress.PublishBudgetWarning(usage);
         if (_budget.ShouldForceTerminate(usage))
         {
             var paused = run with
@@ -146,6 +147,7 @@ internal sealed class GoalWorkflowRuntime(
                 FailureSummary = "Goal execution budget was exhausted.",
             };
             await SaveAsync(paused, ct).ConfigureAwait(false);
+            _progress.Progress("预算耗尽，已暂停（可通过 /resume 恢复）");
             return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
         }
 
@@ -197,12 +199,9 @@ internal sealed class GoalWorkflowRuntime(
                     var expanded = state.Plan.ToList();
                     expanded[state.CurrentIndex] = step with { State = GoalStepState.Skipped };
                     expanded.InsertRange(state.CurrentIndex + 1, decomposition.Value.SubGoals.Select(ToSnapshot));
-                    var expandedBudget = state.Budget with
-                    {
-                        TotalInputTokens = state.Budget.TotalInputTokens + decomposition.Value.InputTokens,
-                        TotalOutputTokens = state.Budget.TotalOutputTokens + decomposition.Value.OutputTokens,
-                        EstimatedCostUsd = CurrentExecutionCost(),
-                    };
+                    var expandedBudget = GoalBudgetAccountant
+                        .AddLlmUsage(state.Budget, decomposition.Value.InputTokens, decomposition.Value.OutputTokens)
+                        with { EstimatedCostUsd = CurrentExecutionCost() };
                     var expandedState = state with
                     {
                         Plan = expanded,
@@ -229,6 +228,8 @@ internal sealed class GoalWorkflowRuntime(
         }
 
         var currentGoal = ToGoalItem(step with { State = GoalStepState.InProgress });
+        // P0：步骤开始进度（含预算快照）——消除 Goal 模式执行期的长时间静默。
+        _progress.StepStarted(state.CurrentIndex, state.Plan.Count, step, GoalBudgetAccountant.BuildUsage(state.Budget));
         var currentPlan = new GoalPlan { Goals = state.Plan.Select(ToGoalItem).ToArray() };
         var priorExecutions = state.Executions.Select(ToSubGoalExecution).ToArray();
         subGoalExecutor.UpdateGoalContext(
@@ -349,6 +350,8 @@ internal sealed class GoalWorkflowRuntime(
                         },
                     };
                     await SaveStateAsync(applied, ct).ConfigureAwait(false);
+                    // P3：replan 对用户可见——失败步骤的后续安排是关键节点。
+                    _progress.Progress("步骤失败，已重新规划剩余步骤");
                 }
             }
             return applied;
@@ -415,15 +418,7 @@ internal sealed class GoalWorkflowRuntime(
             .Where(item => item.GoalId != evidence.GoalId)
             .Append(evidence)
             .ToArray();
-        var budget = state.Budget with
-        {
-            // Fix-2/F-02：差值公式加下限保护——budget-skip 等场景下新证据计数为 0 时，
-            // 不得对旧证据做负扣减导致预算消耗回退。
-            TotalAttempts = state.Budget.TotalAttempts + Math.Max(0, evidence.Attempts - (previous?.Attempts ?? 0)),
-            TotalInputTokens = state.Budget.TotalInputTokens + Math.Max(0, evidence.InputTokens - (previous?.InputTokens ?? 0)),
-            TotalOutputTokens = state.Budget.TotalOutputTokens + Math.Max(0, evidence.OutputTokens - (previous?.OutputTokens ?? 0)),
-            EstimatedCostUsd = CurrentExecutionCost(),
-        };
+        var budget = GoalBudgetAccountant.AccumulateEvidence(state.Budget, previous, evidence) with { EstimatedCostUsd = CurrentExecutionCost() };
         var next = state with
         {
             Plan = plan,
@@ -432,6 +427,8 @@ internal sealed class GoalWorkflowRuntime(
             CurrentIndex = index + 1,
         };
         await SaveStateAsync(next, ct).ConfigureAwait(false);
+        // P3：步骤回执对用户可见——✓/✗/跳过 + 重试轮数 + 变更文件数。
+        _progress.StepReceipt(index, state.Plan.Count, evidence);
         return next;
     }
 
@@ -482,50 +479,6 @@ internal sealed class GoalWorkflowRuntime(
     private decimal CurrentExecutionCost()
         // Fix-2：以持久化的 CostBaselineUsd 快照为基线，不再依赖实例字段（resume 安全）。
         => Math.Max(0m, costTracker.GetTotalCost() - (_run?.Budget.CostBaselineUsd ?? 0m));
-
-    private static GoalBudgetSnapshot RollForwardWallClock(GoalBudgetSnapshot budget)
-    {
-        // Fix-7：墙钟语义 = 仅累计运行区间。LastActivityAt 是上次活动时间戳，
-        // Paused / 进程离线期间的时间不计入；首次调用只打点不累计。
-        var now = DateTimeOffset.UtcNow;
-        if (budget.LastActivityAt is not { } last)
-            return budget with { LastActivityAt = now };
-        return budget with
-        {
-            AccumulatedElapsed = budget.AccumulatedElapsed + (now - last),
-            LastActivityAt = now,
-        };
-    }
-
-    private static GoalBudgetUsage BuildBudgetUsage(GoalBudgetSnapshot budget)
-        => new(
-            budget.TotalAttempts,
-            budget.TotalInputTokens + budget.TotalOutputTokens,
-            ResolveElapsed(budget),
-            budget.EstimatedCostUsd);
-
-    private static TimeSpan? ResolveElapsed(GoalBudgetSnapshot budget)
-        // 旧版本快照兼容：无累加墙钟时回退到"自 StartedAt 起的总墙钟"。
-        => budget.LastActivityAt is null && budget.AccumulatedElapsed == TimeSpan.Zero
-            ? DateTimeOffset.UtcNow - budget.StartedAt
-            : budget.AccumulatedElapsed;
-
-    private void PublishBudgetWarning(GoalBudgetUsage usage)
-    {
-        var level = _budget.EvaluateWarning(usage);
-        if (level == _lastWarningLevel)
-            return;
-        _lastWarningLevel = level;
-        if (level is null)
-            return;
-        context.EventWriter.TryWrite(new TuiGoalBudgetWarning(
-            level.Value,
-            usage.TotalAttempts,
-            usage.TotalTokens,
-            usage.Elapsed,
-            usage.EstimatedCostUsd));
-    }
-
     private static int FindNextIndex(IReadOnlyList<GoalStepSnapshot> plan)
     {
         for (var index = 0; index < plan.Count; index++)

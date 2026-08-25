@@ -77,6 +77,7 @@ internal sealed class TeamTaskWorkflowRuntime(
         {
             var run = BoundRun;
             _run = await runService.StartTaskAsync(run.Id, task.Id, _fencingToken, ct).ConfigureAwait(false);
+            EmitTaskProgress(task, status: null);
         }
         finally
         {
@@ -126,6 +127,7 @@ internal sealed class TeamTaskWorkflowRuntime(
             var current = BoundRun;
             _run = await runService.CompleteTaskAsync(
                 current.Id, task.Id, result, _fencingToken, ct).ConfigureAwait(false);
+            EmitTaskProgress(task, ResolveTerminalStatus(task.Id));
         }
         finally
         {
@@ -133,6 +135,39 @@ internal sealed class TeamTaskWorkflowRuntime(
         }
         return result;
     }
+
+    /// <summary>
+    /// 任务开始/结束时向 eventSink 推送任务级进度快照（TeamTaskProgress），
+    /// 供 TUI 进度面板实时显示 x/y、活跃与阻塞计数。计数从最新 TeamRun.TaskGraph 统计。
+    /// <paramref name="status"/> 为 null 表示任务运行中；否则为终态名称（Succeeded/Failed/Blocked/...）。
+    /// </summary>
+    private void EmitTaskProgress(TeamTaskDefinition task, string? status)
+    {
+        try
+        {
+            var required = BoundRun.TaskGraph?.RequiredTasks;
+            if (required is null)
+                return;
+            eventSink?.Invoke(new OrchestrationEvent.TeamTaskProgress(
+                task.Id,
+                task.Title,
+                task.AssigneeRole,
+                status,
+                CompletedTasks: required.Count(t => t.Status == TeamTaskStatus.Succeeded),
+                TotalTasks: required.Count,
+                ActiveTasks: status is null ? 1 : 0,
+                BlockedTasks: required.Count(t => t.Status == TeamTaskStatus.Blocked)));
+        }
+        catch (Exception ex)
+        {
+            // 进度推送失败不得影响任务执行本身。
+            Console.Error.WriteLine($"[TeamTaskWorkflowRuntime] emit progress failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>从最新 TaskGraph 读取指定任务的终态名称。</summary>
+    private string? ResolveTerminalStatus(string taskId)
+        => BoundRun.TaskGraph?.Tasks.FirstOrDefault(t => t.Definition.Id == taskId)?.Status?.ToString();
 
     private IReadOnlyList<string> FindOutOfScopeChanges(TeamTaskDefinition task, long changeVersion)
     {

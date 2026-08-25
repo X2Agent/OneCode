@@ -34,7 +34,7 @@ internal sealed class SessionWorkingDirectoryAccessor : IWorkingDirectoryAccesso
         {
             var dirs = _configManager.Current.Effective.AllowedDirectories;
             if (dirs.Count == 0)
-                return Array.Empty<string>();
+                return [];
 
             // Defensive snapshot — AllowedDirectories is a mutable List<string>;
             // return an isolated copy so external mutation can't affect callers.

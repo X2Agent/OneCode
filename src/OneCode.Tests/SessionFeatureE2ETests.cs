@@ -64,7 +64,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
             sessionIdHolder: new SessionIdHolder(),
             sessionToolSetManager: Substitute.For<OneCode.App.Query.ISessionToolSetManager>());
 
-        var sessionCmd = new SessionCommand(manager2);
+        var sessionCmd = new SessionCommand(manager2, new NewCommand(manager2), new CloseCommand(manager2));
         var listResult = await sessionCmd.ExecuteAsync(["list"], ct);
         listResult.Should().BeOfType<CommandResult.TextResult>();
         ((CommandResult.TextResult)listResult).Value.Should().Contain(sessionId[..8]);
@@ -84,7 +84,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
         await _sessionManager.AppendUserMessageAsync("background task", ct);
         var firstId = first.Id.Value;
 
-        var sessionCmd = new SessionCommand(_sessionManager);
+        var sessionCmd = new SessionCommand(_sessionManager, new NewCommand(_sessionManager), new CloseCommand(_sessionManager));
         // /session new backgrounds the current one and creates a new foreground session
         var newResult = await sessionCmd.ExecuteAsync(["new"], ct);
         newResult.Should().BeOfType<CommandResult.TextResult>();

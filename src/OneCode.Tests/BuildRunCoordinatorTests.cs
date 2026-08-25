@@ -1122,7 +1122,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
             provider,
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
-            taskService ?? new TaskService(),
+            new BuildTaskLinker(taskService ?? new TaskService()),
             clarificationGenerator ?? CreateFakeClarificationGenerator(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
 

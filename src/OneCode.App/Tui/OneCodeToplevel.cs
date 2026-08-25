@@ -168,7 +168,7 @@ public sealed partial class OneCodeToplevel : Window
     }
 
     /// <summary>
-    /// Ctrl+Shift+T 事件处理：调用 TuiContext.CycleTeam 切换到下一个已注册团队，
+    /// Shift+Tab 事件处理：调用 TuiContext.CycleTeam 切换到下一个已注册团队，
     /// 然后刷新 AgentStatusBar 显示并给出系统提示。
     /// </summary>
     private void OnCycleTeamRequested()
@@ -343,9 +343,22 @@ public sealed partial class OneCodeToplevel : Window
 
     public void LoadConversation(Conversation conversation)
     {
-        _transcriptPresenter.Reset();
+        ClearConversationView();
         _shell.Transcript.LoadConversation(conversation);
         _shell.AgentStatusBar.SetModel(conversation.Model);
+
+        _maxContextTokens = ModelContextDefaults.Resolve(conversation.Model);
+        _shell.SessionContextBar.SetContextUsage(_maxContextTokens, 0);
+    }
+
+    /// <summary>
+    /// Clear transcript and session-scoped counters without loading another
+    /// conversation — used after /close leaves no foreground session.
+    /// </summary>
+    public void ClearConversationView()
+    {
+        _transcriptPresenter.Reset();
+        _shell.Transcript.Clear();
 
         // 重置 token/turn/tool 计数器，避免显示前一会话的累积数据
         _inputTokens = 0;
@@ -355,9 +368,6 @@ public sealed partial class OneCodeToplevel : Window
         _turnNumber = 0;
         _shell.SessionContextBar.SetTokens(0, 0);
         _shell.SessionContextBar.SetTurn(0);
-
-        _maxContextTokens = ModelContextDefaults.Resolve(conversation.Model);
-        _shell.SessionContextBar.SetContextUsage(_maxContextTokens, 0);
 
         _shell.ClearPlan();
 

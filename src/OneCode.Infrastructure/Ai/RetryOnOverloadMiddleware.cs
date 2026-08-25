@@ -58,7 +58,7 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                 UseJitter = true,
                 Delay = DefaultRetryDelay,
                 MaxDelay = MaxRetryDelay,
-                ShouldHandle = static args => ValueTask.FromResult(IsRateLimitError(args.Outcome.Exception)),
+                ShouldHandle = static args => ValueTask.FromResult(IsTransientUpstreamError(args.Outcome.Exception)),
                 OnRetry = args =>
                 {
                     _logger?.LogWarning(
@@ -169,11 +169,11 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                         await writer.WriteAsync(update, cancellationToken).ConfigureAwait(false);
                     }
                 }
-                catch (Exception ex) when (attempt < _maxRetries && IsRateLimitError(ex))
+                catch (Exception ex) when (attempt < _maxRetries && IsTransientUpstreamError(ex))
                 {
                     retryDelay = GetRetryDelay(ex, attempt);
                     _logger?.LogWarning(
-                        "LLM rate limit / overload during streaming — attempt {Attempt}/{Max}, retrying in {Delay:g}. Replaying {TextChars} chars and {ToolCalls} tool calls.",
+                        "LLM transient upstream error during streaming (rate limit / overload / empty choices) — attempt {Attempt}/{Max}, retrying in {Delay:g}. Replaying {TextChars} chars and {ToolCalls} tool calls.",
                         attempt + 1,
                         _maxRetries,
                         retryDelay,
@@ -217,6 +217,20 @@ public sealed class RetryOnOverloadChatClient : IChatClient
             ClientResultException cre => cre.Status is 429 or 503 or 529,
             _ => false,
         };
+
+    /// <summary>
+    /// 可重试的瞬时上游错误 = 限流/过载 + "200 但空 choices" + "200 但错误体且判定为瞬时"
+    /// （OpenRouter 免费模型过载时返回空 choices 或 {"error":{...}} 错误体，
+    /// 由 <see cref="OpenAiResponseSanitizingHandler"/> 分别转为
+    /// <see cref="EmptyChoicesResponseException"/> 与
+    /// <see cref="UpstreamProviderErrorException"/>；后者仅瞬时错误重试，
+    /// 401/400 等永久错误立即失败）。熔断器只统计限流错误，
+    /// 避免免费模型的偶发空响应把熔断器打开。
+    /// </summary>
+    private static bool IsTransientUpstreamError(Exception? ex) =>
+        ex is EmptyChoicesResponseException
+        || (ex is UpstreamProviderErrorException { IsTransient: true })
+        || IsRateLimitError(ex);
 
     private TimeSpan? GetRetryAfterDelay(ClientResultException ex)
     {

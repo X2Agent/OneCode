@@ -9,7 +9,6 @@ using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Invariants;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
 
 namespace OneCode.App.Services.AutoDream;
@@ -85,8 +84,9 @@ public sealed partial class AutoDreamService : BackgroundService
     /// <summary>是否正在运行整合（进程内重入保护）。</summary>
     private volatile bool _isRunning;
 
-    /// <summary>全局配置目录（~/.onecode/），可被测试 override。</summary>
     private readonly string _globalConfigDir;
+    
+    private readonly AutoDreamSessionScanner _sessionScanner;
 
     public AutoDreamService(
         ILogger<AutoDreamService> logger,
@@ -105,6 +105,7 @@ public sealed partial class AutoDreamService : BackgroundService
         _configManager = storage.ConfigManager;
         _wdAccessor = storage.WorkingDirectory;
         _globalConfigDir = globalConfigDirOverride ?? PathsHelper.GetUserConfigDir();
+        _sessionScanner = new AutoDreamSessionScanner(logger, _globalConfigDir);
     }
 
     // BackgroundService 主循环
@@ -339,8 +340,8 @@ public sealed partial class AutoDreamService : BackgroundService
     /// <summary>
     /// 解析 Agent 输出的增量变更 JSON 数组，合并写入对应的 MEMORY.md 文件。
     /// 容错：容忍 Agent 在 JSON 前后添加 markdown 围栏或额外说明文本。
-    /// 安全：Agent 输出为不可信内容，必须经过 <see cref="SanitizeKey"/> / <see cref="SanitizeValue"/>
-    /// 清洗，防止 MEMORY.md 结构注入（如 <c>## </c> 开头的行会被 <see cref="MemoryEntryStore.ParseEntries"/>
+    /// 安全：Agent 输出为不可信内容，必须经过 <see cref="AutoDreamOutputSanitizer.SanitizeKey"/> / <see cref="AutoDreamOutputSanitizer.SanitizeValue"/>
+    /// 清洗，防止 MEMORY.md 结构注入（如 <c>## </c> 开头的行会被 <see cref="OneCode.App.Services.Memory.MemoryEntryStore.ParseEntries"/>
     /// 误识别为新的 entry header，导致条目边界错乱、内容串入相邻条目）。
     /// </summary>
     private async Task<int> ApplyConsolidationChangesAsync(string outputText, CancellationToken ct)
@@ -348,7 +349,7 @@ public sealed partial class AutoDreamService : BackgroundService
         if (string.IsNullOrWhiteSpace(outputText))
             return 0;
 
-        var json = ExtractJsonArray(outputText);
+        var json = AutoDreamOutputSanitizer.ExtractJsonArray(outputText);
         if (json is null)
         {
             _logger.LogWarning("AutoDream: failed to extract JSON array from agent output");
@@ -371,12 +372,12 @@ public sealed partial class AutoDreamService : BackgroundService
 
         // 配额限制：防止 Agent 输出过多变更导致 MEMORY.md 膨胀或写入风暴。
         // 50 条覆盖典型整合场景（事实/约定/教训/纠正），超出部分丢弃并记录。
-        if (changes.Count > MaxChangesPerConsolidation)
+        if (changes.Count > AutoDreamOutputSanitizer.MaxChangesPerConsolidation)
         {
             _logger.LogWarning(
                 "AutoDream: agent output {Count} changes exceeds limit {Max}, truncating",
-                changes.Count, MaxChangesPerConsolidation);
-            changes = changes.Take(MaxChangesPerConsolidation).ToList();
+                changes.Count, AutoDreamOutputSanitizer.MaxChangesPerConsolidation);
+            changes = changes.Take(AutoDreamOutputSanitizer.MaxChangesPerConsolidation).ToList();
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -393,7 +394,7 @@ public sealed partial class AutoDreamService : BackgroundService
         foreach (var change in changes)
         {
             // 清洗 Key：strip 换行/前导#防止 entry header 注入，限制长度
-            var key = SanitizeKey(change.Key);
+            var key = AutoDreamOutputSanitizer.SanitizeKey(change.Key);
             if (string.IsNullOrEmpty(key))
             {
                 skipped++;
@@ -435,7 +436,7 @@ public sealed partial class AutoDreamService : BackgroundService
             }
 
             // 清洗 Value：strip 行首 ## 防止 entry header 注入，限制长度
-            var value = SanitizeValue(change.Value);
+            var value = AutoDreamOutputSanitizer.SanitizeValue(change.Value);
             if (string.IsNullOrEmpty(value))
             {
                 skipped++;
@@ -498,70 +499,6 @@ public sealed partial class AutoDreamService : BackgroundService
         return written;
     }
 
-    // 不可信输出清洗
-
-    /// <summary>单次整合允许的最大变更条数（防止 Agent 输出风暴）。</summary>
-    private const int MaxChangesPerConsolidation = 50;
-
-    /// <summary>Key 最大长度（{category}:{short-id} 格式，100 字符足够描述性 ID）。</summary>
-    private const int MaxKeyLength = 100;
-
-    /// <summary>Value 最大长度（10K 字符覆盖多段事实/约定，超出截断）。</summary>
-    private const int MaxValueLength = 10_000;
-
-    /// <summary>
-    /// 清洗 Agent 输出的 Key，防止 MEMORY.md 结构注入。
-    /// - 换行 → 空格：Key 必须单行（<see cref="MemoryEntryStore"/> 序列化为 <c>## {Key}</c> 单行 header）
-    /// - 前导 <c>#</c> → 移除：防止 <c>## fact:foo</c> 被解析器当作已存在的 header 而错位
-    /// - 长度限制：防止超长 Key 撑爆 MEMORY.md 单行
-    /// </summary>
-    private static string SanitizeKey(string? key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            return string.Empty;
-
-        // 统一换行为空格，确保单行
-        var single = key.ReplaceLineEndings(" ").Trim();
-
-        // 移除所有前导 '#'（防止 ## 注入）
-        single = single.TrimStart('#').TrimStart();
-
-        // 长度截断
-        return single.Length > MaxKeyLength ? single[..MaxKeyLength] : single;
-    }
-
-    /// <summary>
-    /// 清洗 Agent 输出的 Value，防止 MEMORY.md 结构注入。
-    /// - 移除行首 <c>## </c>：这些行会被 <see cref="MemoryEntryStore.EntryHeaderRegex"/>
-    ///   误识别为新的 entry header，导致当前 Value 被截断、后续行被解析为独立（无元数据）条目。
-    ///   处理方式：将行首 <c>## </c> 替换为 <c># # </c>（保留可读性，破坏 header 模式）。
-    /// - 长度限制：防止超长 Value 撑爆 MEMORY.md
-    /// </summary>
-    private static string SanitizeValue(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return string.Empty;
-
-        var trimmed = value.Trim();
-        if (trimmed.Length > MaxValueLength)
-            trimmed = trimmed[..MaxValueLength];
-
-        // 防止行首 "## " 注入：逐行检查，将 "## " 替换为 "# # "
-        // (RegexOptions.Multiline 使 ^ 匹配每行行首)
-        return EntryHeaderInjectionRegex().Replace(trimmed, "# # ");
-    }
-
-    [GeneratedRegex(@"^##\s+", RegexOptions.Multiline)]
-    private static partial Regex EntryHeaderInjectionRegex();
-
-    private static string? ExtractJsonArray(string text)
-    {
-        var start = text.IndexOf('[');
-        if (start < 0) return null;
-        var end = text.LastIndexOf(']');
-        if (end <= start) return null;
-        return text.Substring(start, end - start + 1);
-    }
 
     // 门控配置（settings.json 优先，环境变量覆盖，默认开）
 
@@ -632,83 +569,12 @@ public sealed partial class AutoDreamService : BackgroundService
         }
     }
 
-    internal int CountNewSessionsSince(DateTimeOffset since)
-    {
-        var sessionsDir = Path.Combine(GetConfigDir(), "sessions");
-        if (!Directory.Exists(sessionsDir)) return 0;
+    internal int CountNewSessionsSince(DateTimeOffset since) =>
+        _sessionScanner.CountNewSessionsSince(since, GetCurrentProjectRoot());
 
-        var projectRoot = GetCurrentProjectRoot();
-        if (projectRoot is null)
-        {
-            _logger.LogDebug("AutoDream: workingDirectory not available, skipping session count");
-            return 0;
-        }
+    internal bool IsSessionForProject(string sessionFile, string projectRoot) =>
+        _sessionScanner.IsSessionForProject(sessionFile, projectRoot);
 
-        try
-        {
-            var files = Directory.GetFiles(sessionsDir, "*.jsonl");
-            var count = 0;
-            foreach (var file in files)
-            {
-                if (File.GetLastWriteTimeUtc(file) <= since.UtcDateTime)
-                    continue;
-
-                if (IsSessionForProject(file, projectRoot))
-                    count++;
-            }
-            return count;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to count new sessions in {SessionsDir}", sessionsDir);
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// 检查会话文件是否属于当前项目：读取 JSONL 首行的 <c>working_directory</c> 字段并比较。
-    /// </summary>
-    internal bool IsSessionForProject(string sessionFile, string projectRoot)
-    {
-        try
-        {
-            var firstLine = ReadFirstLine(sessionFile);
-            if (string.IsNullOrEmpty(firstLine))
-                return false;
-
-            using var doc = JsonDocument.Parse(firstLine);
-            if (!doc.RootElement.TryGetProperty("working_directory", out var wdElem))
-                return false;
-
-            var wd = wdElem.GetString();
-            if (string.IsNullOrWhiteSpace(wd))
-                return false;
-
-            return string.Equals(
-                PathsHelper.NormalizePath(wd),
-                PathsHelper.NormalizePath(projectRoot),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to read working_directory from {File}", sessionFile);
-            return false;
-        }
-    }
-
-    private static string? ReadFirstLine(string file)
-    {
-        try
-        {
-            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(stream);
-            return reader.ReadLine();
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     // 跨进程文件锁（原子获取）
 

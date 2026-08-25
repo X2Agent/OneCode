@@ -13,14 +13,14 @@ namespace OneCode.App.Commands;
 ///   /team switch &lt;name&gt;      → 同上（显式 switch）
 ///   /team info [&lt;name&gt;]     → 显示团队详情（成员、模式、轮数）
 ///
-/// 内置团队：feature-impl / code-review / research
+/// 内置团队：code-review / research / impl
 /// 用户自定义团队：~/.onecode/teams/{name}/team.yaml
 /// </summary>
 public sealed class TeamCommand(ITeamOrchestrationService teamService) : Command
 {
     private static readonly HashSet<string> BuiltinTeams = new(StringComparer.OrdinalIgnoreCase)
     {
-        "feature-impl", "code-review", "research"
+        "code-review", "research", "impl"
     };
 
     public override string Name => "team";
@@ -58,14 +58,14 @@ public sealed class TeamCommand(ITeamOrchestrationService teamService) : Command
         var active = teamService.ResolveActiveTeam();
 
         if (teams.Count == 0)
-            return CommandResult.Text("No teams registered. Built-in teams (feature-impl, code-review, research) should auto-register on startup.");
+            return CommandResult.Text("No teams registered. Built-in teams (code-review, research, impl) should auto-register on startup.");
 
         var sb = new StringBuilder("Teams:");
         foreach (var name in teams)
         {
             var marker = string.Equals(name, active, StringComparison.OrdinalIgnoreCase) ? " *" : "";
             var tag = BuiltinTeams.Contains(name) ? " (built-in)" : " (user)";
-            var mode = teamService.GetTeamMode(name) ?? "?";
+            var mode = teamService.GetTeamMode(name)?.ToLabel() ?? "?";
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {name}{marker}{tag}  [{mode}]");
         }
         sb.AppendLine();
@@ -99,12 +99,14 @@ public sealed class TeamCommand(ITeamOrchestrationService teamService) : Command
         if (!teams.Contains(name))
             return CommandResult.Error($"Team '{name}' not registered.");
 
-        var mode = teamService.GetTeamMode(name) ?? "unknown";
+        var mode = teamService.GetTeamMode(name);
         var tag = BuiltinTeams.Contains(name) ? "built-in" : "user-defined";
 
         var sb = new StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture, $"Team: {name} ({tag})");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Mode: {mode}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Mode: {mode?.ToLabel() ?? "unknown"}");
+        if (mode is { } resolvedMode)
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Guidance: {resolvedMode.ToGuidance()}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"  Active: {(string.Equals(name, teamService.ResolveActiveTeam(), StringComparison.OrdinalIgnoreCase) ? "yes" : "no")}");
 
         // 成员列表：显示每个成员的角色和是否为协调者
@@ -135,9 +137,9 @@ public sealed class TeamCommand(ITeamOrchestrationService teamService) : Command
               /team info [<name>]    Show team details (defaults to active)
 
             Built-in teams:
-              feature-impl   Magentic — orchestrator + researcher + executor + tester
-              code-review    GroupChat — reviewer + architect + researcher
+              code-review    ParallelDag — security + performance + maintainability
               research       GroupChat — planner + 2×researcher + architect
+              impl           Magentic — planner + 2×executor + tester
 
             User-defined teams:
               Place team.yaml at ~/.onecode/teams/{name}/team.yaml

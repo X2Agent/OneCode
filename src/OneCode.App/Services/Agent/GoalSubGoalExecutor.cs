@@ -128,7 +128,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 options,
                 sharedTransaction,
                 userPrompt,
-                evt => CaptureToolEvidence(evt, toolExecutions),
+                evt => GoalSubGoalAssessment.CaptureToolEvidence(evt, toolExecutions),
                 ct).ConfigureAwait(false);
 
             var innerAgent = await _mainAgentRunner.BuildAsAIAgentAsync(runOptions, ct).ConfigureAwait(false);
@@ -184,6 +184,9 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                         goal.Id,
                         actualIterations,
                         hardValidation.Feedback);
+                    // P0：迭代重试对用户可见——硬验证未过、真实证据回注下一轮。
+                    eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+                        $"子目标 #{goal.Id} · 第 {actualIterations}/{MaxAttemptsPerSubGoal} 轮未通过验证，反馈注入重试"));
                     return LoopEvaluation.Continue(hardValidation.Feedback);
                 }
 
@@ -202,6 +205,10 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
 
                 _logger.LogInformation("Sub-goal {Id} iteration {Iteration} not completed, feedback: {Feedback}",
                     goal.Id, actualIterations, feedback ?? "(none)");
+
+                // P0：AI Judge 判定未完成——继续迭代对用户可见。
+                eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+                    $"子目标 #{goal.Id} · 第 {actualIterations}/{MaxAttemptsPerSubGoal} 轮未完成，继续迭代"));
 
                 // Continue(feedback) → LoopAgent 用 FeedbackMessageTemplate 将 feedback 注入下一轮
                 return LoopEvaluation.Continue(feedback);
@@ -295,7 +302,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             Success criteria: {criteria}
 
             Verified execution evidence:
-            {FormatEvidenceForJudge(evidence)}
+            {GoalSubGoalAssessment.FormatEvidenceForJudge(evidence)}
 
             Deterministic gates have passed. Evaluate only semantic coverage of the sub-goal and success criteria.
             Reply with exactly one of:
@@ -344,7 +351,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             evidenceSummary.AppendLine(CultureInfo.InvariantCulture, $"Success criteria: {goal.SuccessCriteria}");
             evidenceSummary.AppendLine(CultureInfo.InvariantCulture, $"Status: {execution?.Status.ToString() ?? "Missing"}");
             if (execution?.Evidence is { } evidence)
-                evidenceSummary.AppendLine(FormatEvidenceForJudge(evidence));
+                evidenceSummary.AppendLine(GoalSubGoalAssessment.FormatEvidenceForJudge(evidence));
         }
 
         var prompt = $"""
@@ -402,7 +409,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 : $"{toolErrors.Count} tool execution error(s): {string.Join("; ", toolErrors.Select(e => $"{e.ToolName}: {e.Result}"))}"));
 
         var missingFiles = goal.ExpectedFiles
-            .Select(path => ResolveWorkspacePath(fullWorkingDirectory, path))
+            .Select(path => GoalSubGoalAssessment.ResolveWorkspacePath(fullWorkingDirectory, path))
             .Where(path => !File.Exists(path) && !Directory.Exists(path))
             .Select(path => Path.GetRelativePath(fullWorkingDirectory, path))
             .ToList();
@@ -416,7 +423,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                     ? $"All {goal.ExpectedFiles.Count} expected artifact(s) exist."
                     : $"Missing expected artifact(s): {string.Join(", ", missingFiles)}"));
 
-        var outOfScope = FindOutOfScopeFiles(fullWorkingDirectory, changedFiles, goal.AllowedPaths);
+        var outOfScope = GoalSubGoalAssessment.FindOutOfScopeFiles(fullWorkingDirectory, changedFiles, goal.AllowedPaths);
         validations.Add(new GoalValidationEvidence(
             "change-scope",
             outOfScope.Count == 0,
@@ -483,7 +490,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         IReadOnlyList<string> changedFiles)
     {
         if (_diagnosticRegistry is null || changedFiles.Count == 0)
-            return Array.Empty<string>();
+            return [];
 
         var changed = changedFiles
             .Select(Path.GetFullPath)
@@ -494,50 +501,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             .Where(d => changed.Contains(Path.GetFullPath(d.FilePath)))
             .Select(d => d.Summary)
             .ToList();
-    }
-
-    private static IReadOnlyList<string> FindOutOfScopeFiles(
-        string workingDirectory,
-        IReadOnlyList<string> changedFiles,
-        IReadOnlyList<string> allowedPaths)
-    {
-        var allowedRoots = allowedPaths
-            .Select(path => ResolveWorkspacePath(workingDirectory, path))
-            .ToList();
-        return changedFiles
-            .Select(Path.GetFullPath)
-            .Where(path => !PathBoundary.IsWithinDirectory(path, workingDirectory)
-                || allowedRoots.Count > 0 && !allowedRoots.Any(root => PathBoundary.IsWithinDirectory(path, root)))
-            .Select(path => Path.GetRelativePath(workingDirectory, path))
-            .ToList();
-    }
-
-    private static string ResolveWorkspacePath(string workingDirectory, string path)
-    {
-        var resolved = Path.GetFullPath(path, workingDirectory);
-        if (!PathBoundary.IsWithinDirectory(resolved, workingDirectory))
-            throw new InvalidOperationException($"Declared Goal path '{path}' is outside the working directory.");
-        return resolved;
-    }
-
-    private static string FormatEvidenceForJudge(SubGoalEvidence evidence)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine("Agent summary:");
-        builder.AppendLine(evidence.AgentSummary);
-        builder.AppendLine(CultureInfo.InvariantCulture, $"Changed files: {(evidence.ChangedFiles.Count == 0 ? "(none)" : string.Join(", ", evidence.ChangedFiles))}");
-        builder.AppendLine("Deterministic validation:");
-        foreach (var validation in evidence.Validations)
-            builder.AppendLine(CultureInfo.InvariantCulture, $"- {validation.Gate}: {(validation.Skipped ? "SKIPPED" : validation.Passed ? "PASSED" : "FAILED")} — {validation.Summary}");
-        return builder.ToString();
-    }
-
-    private static void CaptureToolEvidence(
-        OrchestrationEvent evt,
-        ICollection<GoalToolExecutionEvidence> toolExecutions)
-    {
-        if (evt is OrchestrationEvent.ToolDone done)
-            toolExecutions.Add(new GoalToolExecutionEvidence(done.Name, done.IsError, done.Result));
     }
 
     private sealed record SubGoalHardValidationResult(
@@ -552,7 +515,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     {
         var completedSummaries = executions
             .Where(e => e.Status == GoalStatus.Completed)
-            .Select(e => (e.GoalId, plan.Goals.FirstOrDefault(g => g.Id == e.GoalId)?.Description ?? "", TruncateForSummary(e.AgentOutput)))
+            .Select(e => (e.GoalId, plan.Goals.FirstOrDefault(g => g.Id == e.GoalId)?.Description ?? "", GoalSubGoalAssessment.TruncateForSummary(e.AgentOutput)))
             .ToList();
 
         var failedSummaries = executions
@@ -569,90 +532,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             CurrentGoalDepth: currentGoal.Depth);
 
         _goalContextState.Update(snapshot);
-    }
-
-    /// <summary>
-    /// 生成 GOAL 模式执行汇总文本。
-    /// </summary>
-    public static string BuildSummary(
-        GoalPlan plan,
-        IReadOnlyList<SubGoalExecution> executions,
-        long totalInputTokens,
-        long totalOutputTokens,
-        bool usedFallback)
-    {
-        var completed = plan.Goals.Where(g => g.Status == GoalStatus.Completed).ToList();
-        var failed = plan.Goals.Where(g => g.Status == GoalStatus.Failed).ToList();
-        var skipped = plan.Goals.Where(g => g.Status == GoalStatus.Skipped).ToList();
-
-        var lines = new List<string>
-        {
-            "",
-            "═══════════════════════════════════════",
-            "  GOAL MODE EXECUTION SUMMARY",
-            "═══════════════════════════════════════",
-            "",
-        };
-
-        if (usedFallback)
-            lines.Add("  (Decomposition failed — executed as single goal)");
-
-        lines.Add($"  Completed: {completed.Count}/{plan.Goals.Count}");
-        lines.Add($"  Failed:    {failed.Count}/{plan.Goals.Count}");
-
-        if (skipped.Count > 0)
-            lines.Add($"  Skipped:   {skipped.Count}/{plan.Goals.Count}");
-
-        lines.Add("");
-        lines.Add($"  Total attempts:   {executions.Sum(e => e.Attempts)}");
-        lines.Add($"  Input tokens:     {totalInputTokens:N0}");
-        lines.Add($"  Output tokens:    {totalOutputTokens:N0}");
-
-        if (executions.Count > 1)
-        {
-            lines.Add("");
-            lines.Add("  Per-sub-goal token usage:");
-            foreach (var exec in executions)
-            {
-                var goalDesc = plan.Goals.FirstOrDefault(g => g.Id == exec.GoalId)?.Description ?? "(unknown)";
-                if (goalDesc.Length > 40) goalDesc = goalDesc[..37] + "...";
-                lines.Add($"    #{exec.GoalId} ({exec.Status}, {exec.Attempts} attempts): {exec.InputTokens + exec.OutputTokens:N0} tokens — {goalDesc}");
-            }
-        }
-
-        if (completed.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("  Completed sub-goals:");
-            foreach (var g in completed)
-                lines.Add($"    ✓ #{g.Id}: {g.Description}");
-        }
-
-        if (failed.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("  Failed sub-goals:");
-            foreach (var g in failed)
-            {
-                var exec = executions.FirstOrDefault(e => e.GoalId == g.Id);
-                lines.Add($"    ✗ #{g.Id}: {g.Description}");
-                if (exec is not null && !string.IsNullOrEmpty(exec.Evaluation))
-                    lines.Add($"      → {exec.Evaluation}");
-            }
-        }
-
-        if (skipped.Count > 0)
-        {
-            lines.Add("");
-            lines.Add("  Skipped sub-goals (due to iteration limit or prior failures):");
-            foreach (var g in skipped)
-                lines.Add($"    - #{g.Id}: {g.Description}");
-        }
-
-        lines.Add("");
-        lines.Add("═══════════════════════════════════════");
-
-        return string.Join("\n", lines);
     }
 
     /// <summary>
@@ -753,12 +632,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         return Task.FromResult(prompt);
     }
 
-    private static string TruncateForSummary(string output, int maxChars = 500)
-    {
-        if (string.IsNullOrEmpty(output)) return "";
-        if (output.Length <= maxChars) return output;
-        return output[..maxChars] + "...";
-    }
 
     /// <summary>
     /// Builds a user ChatMessage with optional image attachments as DataContent blocks.

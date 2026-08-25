@@ -9,7 +9,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup Label="Microsoft Extensions (.NET 10)">
-    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.15.0-preview.260722.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.19.0-preview.260822.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
@@ -43,17 +43,17 @@
     <PackageVersion Include="Anthropic" Version="12.40.0" />
   </ItemGroup>
   <ItemGroup Label="Agent Framework">
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.18.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.18.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.19.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.19.0" />
     <!--
       Workflows.Declarative 评估结论：
       该包要求 ResponseAgentProvider（Azure AI Foundry），与本地 IChatClient 架构不兼容。
       未来如需声明式 YAML 工作流，需实现自定义 ResponseAgentProvider 适配器。
       Microsoft.Agents.AI.Workflows 仍被 TeamOrchestrationService 使用（GroupChat/Magentic）。
     -->
-    <!-- 1.15.0 配套版本：与 Microsoft.Agents.AI 1.15.0 对齐 -->
-    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.15.0-alpha.260722.1" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.15.0-preview.260722.1" />
+    <!-- Mcp：MCP 工具 → AIFunction 桥接 + 2026-07-28 Tasks extension（long-running 工具）透明处理 -->
+    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.19.0-alpha.260822.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.19.0-preview.260822.1" />
     <PackageVersion Include="Hyperlight.HyperlightSandbox.Api" Version="0.5.0" />
     <PackageVersion Include="Hyperlight.HyperlightSandbox.Guest.Python" Version="0.5.0" />
   </ItemGroup>

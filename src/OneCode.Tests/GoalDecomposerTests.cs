@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using NSubstitute.Core;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Hooks;
 using OneCode.Core.Prompt;

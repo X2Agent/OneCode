@@ -15,8 +15,8 @@ namespace OneCode.App.Services.Compact;
 ///
 /// <para><b>阈值即语义</b>：
 ///   0.70 (<see cref="WarningThreshold"/>) — 首次跨越时发射告警，提醒用户执行 /compact（无 LLM，无压缩）
-///   0.85+ — MAF in-pipeline 自动压缩（L1 ToolResult 折叠），用户无感知
-///   0.95+ — MAF in-pipeline LLM 摘要 + 截断兜底，用户无感知
+///   ≥ 0.5（Main）/0.4（Worker）inputBudget — MAF in-pipeline L1 ToolResult 折叠，用户无感知
+///   ≥ 0.7/0.6 — MAF in-pipeline L2 LLM 摘要；≥ 0.85/0.8 — L3 截断兜底，用户无感知
 /// </para>
 /// </summary>
 public sealed class AutoCompactService

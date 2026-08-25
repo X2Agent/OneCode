@@ -1,4 +1,5 @@
 using OneCode.App.Tui;
+using OneCode.Core.Coordinator;
 
 namespace OneCode.Tests;
 
@@ -22,26 +23,11 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderModeBanner_TeamConfig_MentionsYamlDefault()
+    public void RenderModeBanner_Team_MentionsYamlFixedMode()
     {
-        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team, TeamStrategy.Config);
-        lines[1].FullText.Should().Contain("Config");
-        lines[1].FullText.Should().Contain("YAML");
-    }
-
-    [Fact]
-    public void RenderModeBanner_TeamMagentic_MentionsOrchestrator()
-    {
-        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team, TeamStrategy.Magentic);
-        lines[1].FullText.Should().Contain("Magentic");
-        lines[1].FullText.Should().Contain("Orchestrator");
-    }
-
-    [Fact]
-    public void RenderModeBanner_TeamGroupChat_MentionsRoundRobin()
-    {
-        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team, TeamStrategy.GroupChat);
-        lines[1].FullText.Should().Contain("GroupChat");
+        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team);
+        lines[1].FullText.Should().Contain("TEAM");
+        lines[1].FullText.Should().Contain("team.yaml");
     }
 
     [Fact]
@@ -310,6 +296,77 @@ public sealed class ChatBlockRenderersTests
         lines[1].FullText.Should().Contain("new line");
         lines[2].FullText.Should().Contain("-");
         lines[2].FullText.Should().Contain("old line");
+    }
+
+    [Fact]
+    public void RenderDiffBlock_WithAgentName_ShowsAttributionInHeader()
+    {
+        var withAgent = ChatBlockRenderers.RenderDiffBlock(
+            "A.cs", new[] { "+ x" }, [], agentName: "executor-1");
+        withAgent[0].FullText.Should().Contain("by executor-1");
+
+        // 无归属（非 Team 路径）不出现 by 标注。
+        var withoutAgent = ChatBlockRenderers.RenderDiffBlock(
+            "B.cs", new[] { "+ x" }, []);
+        withoutAgent[0].FullText.Should().NotContain("by ");
+    }
+
+    [Fact]
+    public void MapOrchestrationEvent_TeamTaskProgress_MapsAllFields()
+    {
+        var mapped = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+            new OrchestrationEvent.TeamTaskProgress(
+                "t1", "实现解析器", "executor", null,
+                CompletedTasks: 2, TotalTasks: 5, ActiveTasks: 1, BlockedTasks: 0));
+        var progress = mapped.Should().BeOfType<TuiTeamTaskProgress>().Subject;
+        progress.TaskId.Should().Be("t1");
+        progress.TaskTitle.Should().Be("实现解析器");
+        progress.AssigneeRole.Should().Be("executor");
+        progress.Status.Should().BeNull();
+        progress.CompletedTasks.Should().Be(2);
+        progress.TotalTasks.Should().Be(5);
+        progress.ActiveTasks.Should().Be(1);
+
+        var done = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+            new OrchestrationEvent.TeamTaskProgress(
+                "t1", "实现解析器", "executor", TeamTaskStatus.Succeeded.ToString(),
+                CompletedTasks: 3, TotalTasks: 5))
+            .Should().BeOfType<TuiTeamTaskProgress>().Subject;
+        done.Status.Should().Be("Succeeded");
+    }
+
+    [Fact]
+    public void MapOrchestrationEvent_TeamClarificationRequest_MapsToStructuredProgress()
+    {
+        // 澄清请求不再映射为 TuiError（会被截断成单行红字），
+        // 而是结构化 TuiTeamProgress：标题 + 编号问题清单，多行完整显示。
+        var mapped = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+            new OrchestrationEvent.TeamClarificationRequest(
+                new TeamRunId("r1"), "impl", "目标",
+                ["第一个里程碑想验证什么核心能力？", "交付物是什么？"]));
+        var progress = mapped.Should().BeOfType<TuiTeamProgress>().Subject;
+        progress.Header.Should().Contain("impl").And.Contain("2 个问题");
+        progress.Tasks.Should().HaveCount(2);
+        progress.Tasks[0].Detail.Should().Contain("里程碑");
+    }
+
+    [Fact]
+    public void MapOrchestrationEvent_AgentEvents_CarryAgentAttribution()
+    {
+        var fileChange = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+                new OrchestrationEvent.FileChanged("executor-1", "A.cs", ["+ a"], []))
+            .Should().BeOfType<TuiFileChange>().Subject;
+        fileChange.AgentName.Should().Be("executor-1");
+
+        var toolStart = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+                new OrchestrationEvent.ToolStart("executor-1", "id1", "read_file"))
+            .Should().BeOfType<TuiToolStart>().Subject;
+        toolStart.AgentName.Should().Be("executor-1");
+
+        var toolDone = TuiEventMapper.MapOrchestrationEventToTuiEvent(
+                new OrchestrationEvent.ToolDone("executor-1", "read_file", IsError: false, ToolId: "id1"))
+            .Should().BeOfType<TuiToolDone>().Subject;
+        toolDone.AgentName.Should().Be("executor-1");
     }
 
     [Fact]

@@ -104,7 +104,7 @@ public sealed class MainAgentRunnerTests : IDisposable
         FunctionCallContent call)
     {
         var agent = Substitute.For<AIAgent>();
-        var ctx = new ToolAutoApprovalRuleContext(call, agent, null, Array.Empty<ChatMessage>(), null);
+        var ctx = new ToolAutoApprovalRuleContext(call, agent, null, [], null);
         foreach (var rule in rules)
             if (await rule(ctx).ConfigureAwait(false))
                 return true;

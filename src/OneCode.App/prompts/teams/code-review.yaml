@@ -1,37 +1,45 @@
 # 内置团队模板：代码评审
-# 模式：GroupChat（对等讨论，多视角碰撞）
+# 模式：ParallelDag（三视角并行独立审查，上下文隔离，最后聚合去重）
 # 适用：代码评审、架构讨论、技术方案评估
-# 成员：reviewer + architect + researcher
+# 成员：security（安全）+ performance（性能）+ maintainability（可维护性）
 name: code-review
-description: 代码评审团队 - 对等讨论，多视角审查代码与设计
-template: groupchat
+description: 代码评审团队 - 三视角并行独立审查，汇总去重后输出报告
+template: parallel-dag
 max_rounds: 15
 workers:
-  - name: reviewer
-    role: reviewer
+  - name: security
+    role: security
+    instructions: |
+      你是安全审查专家。只从安全视角审查目标代码：注入、越权、密钥泄露、
+      不安全的反序列化、资源耗尽。不要评价性能或风格——其他视角会覆盖。
+      输出：问题清单（按严重度排序）+ 每条的证据（文件/行号/原因）。
     allowed_tools:
       - Read
       - Grep
       - Glob
       - LS
       - SymbolSearch
-      - WebSearch
-  - name: architect
-    role: architect
+  - name: performance
+    role: performance
+    instructions: |
+      你是性能审查专家。只从性能视角审查目标代码：N+1 查询、不必要的分配、
+      锁竞争、热路径上的重复计算。不要评价安全或风格。
+      输出：问题清单（按影响排序）+ 每条的证据与量化估计。
     allowed_tools:
       - Read
       - Grep
       - Glob
       - LS
       - SymbolSearch
-      - WebSearch
-  - name: researcher
-    role: researcher
+  - name: maintainability
+    role: maintainability
+    instructions: |
+      你是可维护性审查专家。只从可维护性视角审查：命名清晰度、圈复杂度、
+      重复代码、测试缺口、公共 API 一致性。不要评价安全或性能。
+      输出：问题清单（按维护成本排序）+ 每条的重构建议。
     allowed_tools:
       - Read
       - Grep
       - Glob
       - LS
       - SymbolSearch
-      - WebSearch
-      - WebFetch

@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
 using OneCode.Core.Coordinator;
-using OneCode.App.Services.Agent;
 using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
 using CoreConstants = OneCode.Core.Constants;
@@ -22,7 +21,7 @@ namespace OneCode.App.Services.Coordinator;
 /// Agent 构建、工作流运行、审批事件映射已分别提取到
 /// <see cref="TeamAgentFactory"/>、<see cref="TeamWorkflowRunner"/>，审批映射内联到 TeamAgentFactory 中。
 /// </summary>
-public sealed class TeamOrchestrationService
+public sealed partial class TeamOrchestrationService
     : ITeamOrchestrationService, IDisposable
 {
     private readonly TeamWorkflowRunner _workflowRunner;
@@ -37,8 +36,7 @@ public sealed class TeamOrchestrationService
     private readonly TeamClarificationWorkflowHost _clarificationWorkflowHost;
     private readonly ITeamRunStore _teamRunStore;
     private readonly OneCode.Core.Workflows.IOperationLedger? _operationLedger;
-
-    private readonly ConcurrentDictionary<string, TeamConfig> _teams = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TeamRegistry _registry;
 
     internal TeamOrchestrationService(
         TeamWorkflowRunner workflowRunner,
@@ -66,34 +64,32 @@ public sealed class TeamOrchestrationService
         _clarificationWorkflowHost = clarificationWorkflowHost;
         _teamRunStore = teamRunStore;
         _operationLedger = operationLedger;
+        // 职责收敛：注册表（注册/发现/活跃团队）与结果聚合分别由 TeamRegistry / TeamResultAggregator 承担，
+        // 本服务退化为用例门面（运行/恢复/审批/澄清编排）。
+        _registry = new TeamRegistry(logger);
     }
 
-    public IReadOnlyList<string> RegisteredTeams =>
-        _teams.Keys.OrderBy(k => k).ToList();
+    public IReadOnlyList<string> RegisteredTeams => _registry.RegisteredTeams;
 
     /// <summary>当前活跃团队。为 null 时回退到第一个注册的团队。</summary>
-    public string? ActiveTeam { get; set; }
-
-    /// <summary>获取当前应使用的团队名（ActiveTeam 或第一个注册的团队）</summary>
-    public string? ResolveActiveTeam()
+    public string? ActiveTeam
     {
-        if (!string.IsNullOrEmpty(ActiveTeam) && _teams.ContainsKey(ActiveTeam))
-            return ActiveTeam;
-        var teams = RegisteredTeams;
-        return teams.Count > 0 ? teams[0] : null;
+        get => _registry.ActiveTeam;
+        set => _registry.ActiveTeam = value;
     }
 
-    public string? GetTeamMode(string teamName) =>
-        _teams.TryGetValue(teamName, out var config)
-            ? config.Mode == TeamOrchestrationMode.Magentic ? "magentic" : "groupchat"
-            : null;
+    /// <summary>获取当前应使用的团队名（ActiveTeam 或第一个注册的团队）</summary>
+    public string? ResolveActiveTeam() => _registry.ResolveActiveTeam();
+
+    public TeamOrchestrationMode? GetTeamMode(string teamName) =>
+        _registry.TryGet(teamName, out var config) ? config.Mode : null;
 
     /// <summary>
     /// 返回指定团队的成员信息列表（AgentId + Role + 是否为 Orchestrator）。
     /// 用于 TUI 启动横幅显示成员构成，让用户知道这个团队有哪些角色。
     /// </summary>
     public IReadOnlyList<TeamMemberInfo>? GetTeamMembers(string teamName) =>
-        _teams.TryGetValue(teamName, out var config)
+        _registry.TryGet(teamName, out var config)
             ? config.Members
                 .Select(m => new TeamMemberInfo(
                     m.AgentId,
@@ -116,12 +112,8 @@ public sealed class TeamOrchestrationService
 
         try
         {
-            // 统一 YAML 格式，不再支持 JSON。
-            var config = TeamConfigLoader.LoadTeamFromYaml(teamFilePath, teamName);
-            _teams[teamName] = config;
-            _logger.LogInformation(
-                "Team '{TeamName}' registered: mode={Mode} members={Count}",
-                teamName, config.Mode, config.Members.Count);
+            // 统一 YAML 格式，不再支持 JSON。注册表负责解析、advisory 透出与日志。
+            _registry.RegisterFromFile(teamFilePath, teamName);
         }
         catch (Exception ex)
         {
@@ -131,80 +123,17 @@ public sealed class TeamOrchestrationService
 
     public Task UnregisterTeamAsync(string teamName, CancellationToken ct = default)
     {
-        _teams.TryRemove(teamName, out _);
-        _logger.LogInformation("Team '{TeamName}' unregistered", teamName);
+        if (_registry.Remove(teamName))
+            _logger.LogInformation("Team '{TeamName}' unregistered", teamName);
         return Task.CompletedTask;
     }
-
-    // 内置团队模板：从嵌入式资源加载（OneCode.App.prompts.teams.{name}.yaml）
-
-    private static readonly string[] BuiltinTeamTemplates = ["feature-impl", "code-review", "research"];
 
     /// <summary>
-    /// 注册内置团队模板（从嵌入式资源加载）。
+    /// 注册内置团队模板（从嵌入式资源加载）+ 扫描用户团队目录。
     /// 幂等：已注册的同名团队不会被覆盖。
     /// </summary>
-    public Task RegisterBuiltinTeamsAsync(CancellationToken ct = default)
-    {
-        var assembly = typeof(TeamOrchestrationService).Assembly;
-
-        foreach (var name in BuiltinTeamTemplates)
-        {
-            if (_teams.ContainsKey(name))
-                continue;
-
-            var resourceName = $"OneCode.App.prompts.teams.{name}.yaml";
-            try
-            {
-                using var stream = assembly.GetManifestResourceStream(resourceName);
-                if (stream is null)
-                {
-                    _logger.LogWarning("Built-in team template resource not found: {Resource}", resourceName);
-                    continue;
-                }
-
-                using var reader = new StreamReader(stream);
-                var yaml = reader.ReadToEnd();
-                var template = AgentTemplateConfig.FromYaml(yaml);
-
-                var config = TeamConfigLoader.BuildTeamConfigFromTemplate(template, name);
-                _teams[name] = config;
-                _logger.LogInformation(
-                    "Built-in team '{Name}' registered: mode={Mode} members={Count}",
-                    name, config.Mode, config.Members.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load built-in team template: {Resource}", resourceName);
-            }
-        }
-
-        // 2. 扫描用户团队目录（~/.onecode/teams/*/team.yaml）
-        //    使 /team list 能显示用户自定义团队，无需先触发一次查询才注册。
-        foreach (var (name, filePath) in TeamConfigLoader.DiscoverUserTeams())
-        {
-            if (_teams.ContainsKey(name))
-                continue;
-
-            try
-            {
-                var config = TeamConfigLoader.LoadTeamFromYaml(filePath, name);
-                _teams[name] = config;
-                _logger.LogInformation(
-                    "User team '{Name}' registered from {Path}: mode={Mode} members={Count}",
-                    name, filePath, config.Mode, config.Members.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load user team '{Name}' from {Path}", name, filePath);
-            }
-        }
-
-        if (string.IsNullOrEmpty(ActiveTeam) && _teams.ContainsKey("feature-impl"))
-            ActiveTeam = "feature-impl";
-
-        return Task.CompletedTask;
-    }
+    public Task RegisterBuiltinTeamsAsync(CancellationToken ct = default) =>
+        _registry.RegisterBuiltinAndUserTeamsAsync(ct);
 
     /// <summary>
     /// 流式运行 Team — 通过 <paramref name="eventSink"/> 回调实时推送 OrchestrationEvent 给 TUI 层。
@@ -215,7 +144,6 @@ public sealed class TeamOrchestrationService
         string goal,
         Action<OrchestrationEvent>? eventSink,
         CancellationToken ct = default,
-        TeamOrchestrationMode? overrideMode = null,
         IReadOnlyList<string>? imagePaths = null,
         SessionId? sessionId = null)
     {
@@ -225,14 +153,7 @@ public sealed class TeamOrchestrationService
             return TeamError(teamName, $"Team '{teamName}' not found.", eventSink);
         }
 
-        // 运行时覆盖编排模式 — TUI 切换 Magentic/GroupChat 时传入 overrideMode，
-        // 覆盖 YAML 模板中 template 字段的默认值，使用户在 TUI 中切换策略能真正生效。
-        if (overrideMode is { } mode)
-        {
-            // 覆盖为 Magentic 时补齐编排者，避免无 lead 团队拿 Members[0] 凑数（P2-8）。
-            config = TeamConfigLoader.EnsureOrchestrator(config with { Mode = mode });
-        }
-
+        // 编排模式由团队 YAML 的 template 字段固定声明，运行期不可覆盖。
         _logger.LogInformation(
             "Team '{TeamName}' streaming starting: mode={Mode} goal={Goal}",
             teamName, config.Mode, goal[..Math.Min(80, goal.Length)]);
@@ -326,18 +247,6 @@ public sealed class TeamOrchestrationService
         var teamRun = await _teamRunService.BeginApprovedExecutionAsync(
             runId, teamName, effectiveGoal, cwd, plan, ct, sessionId).ConfigureAwait(false);
 
-        // P2-9：持久化本次 Run 实际生效的编排模式。此时尚未 Claim fencing token，
-        // TrySaveAsync 可正常写入；失败仅告警——恢复时回退 YAML 默认模式。
-        if (teamRun.EffectiveMode != config.Mode)
-        {
-            var withMode = teamRun with { EffectiveMode = config.Mode };
-            if (await _teamRunStore.TrySaveAsync(withMode, teamRun.Version, ct).ConfigureAwait(false))
-                teamRun = withMode;
-            else
-                _logger.LogWarning(
-                    "Failed to persist effective orchestration mode for TeamRun '{RunId}'", runId);
-        }
-
         try
         {
             return await ExecuteTeamWorkflowCoreAsync(
@@ -380,16 +289,8 @@ public sealed class TeamOrchestrationService
             return TeamError(teamRun.TeamName, $"Team '{teamRun.TeamName}' not found.", eventSink);
         }
 
-        // P2-9：优先使用上次运行实际生效的编排模式，避免 override 后恢复静默回退 YAML 默认。
-        // 边界：澄清阶段（尚未开始执行）崩溃的 run 没有 EffectiveMode 记录，按 YAML 默认恢复——
-        // override 持久化发生在审批通过、开始执行时，这是可接受的设计边界（R-3）。
-        if (teamRun.EffectiveMode is { } effective && effective != config.Mode)
-        {
-            _logger.LogInformation(
-                "Restoring overridden orchestration mode {Mode} for TeamRun '{RunId}'",
-                effective, teamRun.Id);
-            config = TeamConfigLoader.EnsureOrchestrator(config with { Mode = effective });
-        }
+        // 编排模式由团队 YAML 固定声明，恢复直接使用当前注册的配置——
+        // 不存在历史 override 需要还原（EffectiveMode 持久化已随运行期覆盖一起移除）。
 
         if (teamRun.Status == TeamRunStatus.WaitingForUser)
         {
@@ -476,20 +377,39 @@ public sealed class TeamOrchestrationService
 
     /// <summary>
     /// 创建一个包装 eventSink 的观察器，捕获 FileChanged 事件并累积到返回的 fileChanges 列表。
-    /// 两个流式入口共用此逻辑。
+    /// 同一文件被多次（可能由不同成员）修改时按文件合并 diff，并在 Contributors 中
+    /// 记录全部执行者——TEAM 交付报告据此展示归属。两个流式入口共用此逻辑。
     /// </summary>
     private static (List<OneCode.Core.Domain.FileChange> FileChanges, Action<OrchestrationEvent>? ObservedSink)
         CreateObservedSink(Action<OrchestrationEvent>? eventSink)
     {
         var fileChanges = new List<OneCode.Core.Domain.FileChange>();
+        var fileIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         Action<OrchestrationEvent>? observedSink = evt =>
         {
             if (evt is OrchestrationEvent.FileChanged changed)
             {
-                fileChanges.Add(new OneCode.Core.Domain.FileChange(
-                    changed.FileName,
-                    changed.AddedLines,
-                    changed.RemovedLines));
+                if (fileIndex.TryGetValue(changed.FileName, out var idx))
+                {
+                    var existing = fileChanges[idx];
+                    var contributors = existing.Contributors is { Count: > 0 } c && !c.Contains(changed.AgentName)
+                        ? [.. c, changed.AgentName]
+                        : existing.Contributors ?? (changed.AgentName is null ? null : [changed.AgentName]);
+                    fileChanges[idx] = new OneCode.Core.Domain.FileChange(
+                        changed.FileName,
+                        [.. existing.AddedLines, .. changed.AddedLines],
+                        [.. existing.RemovedLines, .. changed.RemovedLines],
+                        contributors);
+                }
+                else
+                {
+                    fileIndex[changed.FileName] = fileChanges.Count;
+                    fileChanges.Add(new OneCode.Core.Domain.FileChange(
+                        changed.FileName,
+                        changed.AddedLines,
+                        changed.RemovedLines,
+                        changed.AgentName is null ? null : [changed.AgentName]));
+                }
             }
             eventSink?.Invoke(evt);
         };
@@ -523,92 +443,6 @@ public sealed class TeamOrchestrationService
             requestId,
             new Microsoft.Agents.AI.Workflows.PortableValue(
                 new TeamPlanApprovalDecision(approved)));
-
-    /// <summary>
-    /// 运行 Team 澄清门禁：首次调用挂起于 MAF RequestPort，通过 AskAsync 获取用户回答后投递
-    /// ExternalResponse 恢复。返回包含 Answer 的最终结果；调用方负责判断 Answer 是否为空。
-    /// </summary>
-    private async Task<TeamClarificationResult> RunClarificationGateAsync(
-        string teamName,
-        TeamRunId runId,
-        TeamConfig config,
-        string modelId,
-        IReadOnlyList<string> questions,
-        string goalForEvent,
-        Action<OrchestrationEvent>? eventSink,
-        CancellationToken ct)
-    {
-        var clarificationInput = new TeamClarificationInput(runId.Value, teamName, questions);
-        var clarification = await _clarificationWorkflowHost.RunAsync(
-            teamName, runId, config, modelId, clarificationInput,
-            new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
-
-        if (clarification.PendingRequest is { } pending)
-        {
-            eventSink?.Invoke(new OrchestrationEvent.TeamClarificationRequest(
-                runId, teamName, goalForEvent, questions));
-            var answer = await _clarificationInteraction.AskAsync(
-                "团队任务需要补充信息", questions, ct: ct).ConfigureAwait(false);
-            var response = BuildClarificationResponse(
-                pending.PortId, pending.RequestId, answer.Response ?? string.Empty);
-            clarification = await _clarificationWorkflowHost.RunAsync(
-                teamName, runId, config, modelId, clarificationInput,
-                new JsonSerializerOptions(), response, ct).ConfigureAwait(false);
-        }
-
-        return clarification;
-    }
-
-    /// <summary>
-    /// 运行 Team 计划审批门禁：构造 approvalInput，首次调用挂起于 MAF RequestPort，
-    /// 通过 AskAsync 获取用户审批决策后投递 ExternalResponse 恢复。
-    /// 返回包含 ApprovalGranted 的最终结果；调用方负责判断是否批准。
-    /// </summary>
-    private async Task<TeamApprovalWorkflowResult> RunApprovalGateAsync(
-        string teamName,
-        TeamRunId runId,
-        TeamConfig config,
-        string modelId,
-        ImplementationPlan plan,
-        Action<OrchestrationEvent>? eventSink,
-        CancellationToken ct)
-    {
-        var approvalInput = new TeamPlanApprovalInput(
-            runId.Value,
-            teamName,
-            plan.Summary,
-            plan.Tasks.Select(t => t.Title).ToList(),
-            plan.RequiredGates.Where(g => g.Required).Select(g => g.Description).ToList());
-
-        var approval = await _approvalWorkflowHost.RunApprovalAsync(
-            teamName, runId, config, modelId, approvalInput,
-            new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
-
-        if (approval.PendingRequest is { } pending)
-        {
-            // Notify TUI of plan approval card (display-only, no TaskCompletionSource).
-            eventSink?.Invoke(new OrchestrationEvent.TeamPlanApprovalRequest(
-                runId, teamName, plan.Summary,
-                plan.Tasks.Select(t => t.Title).ToList(),
-                plan.RequiredGates.Where(g => g.Required).Select(g => g.Description).ToList()));
-
-            var decision = await _clarificationInteraction.AskAsync(
-                $"团队 {teamName} 计划审批",
-                [$"执行方案：{plan.Summary}\n任务数：{plan.Tasks.Count}\n批准执行？"],
-                confirmationOnly: true,
-                ct: ct).ConfigureAwait(false);
-            var approved = !decision.IsCancelled;
-
-            var response = BuildApprovalResponse(pending.PortId, pending.RequestId, approved);
-            approval = await _approvalWorkflowHost.RunApprovalAsync(
-                teamName, runId, config, modelId, approvalInput,
-                new JsonSerializerOptions(),
-                externalResponse: response,
-                ct: ct).ConfigureAwait(false);
-        }
-
-        return approval;
-    }
 
     /// <summary>
     /// 执行 Team 任务工作流的核心逻辑：构造 runtime、运行任务 DAG、聚合结果、完成业务事务。
@@ -697,55 +531,19 @@ public sealed class TeamOrchestrationService
 
     /// <summary>
     /// 将 MAF Team DAG 各任务的结构化结果聚合为业务 TeamRunResult。
-    /// 任一 Required 任务失败/阻塞/取消，或上游失败导致下游 Blocked，均视为整体失败。
+    /// 逻辑已收敛到 <see cref="TeamResultAggregator"/>，此处保留薄委托以稳定调用点。
     /// </summary>
     private static TeamRunResult BuildTeamResult(
         string teamName,
         IReadOnlyList<TeamTaskOutcome> outcomes)
-    {
-        var failed = outcomes
-            .Where(outcome => outcome.Status is
-                TeamTaskOutcomeStatus.Failed or
-                TeamTaskOutcomeStatus.Blocked or
-                TeamTaskOutcomeStatus.Cancelled)
-            .ToList();
-        var succeeded = outcomes
-            .Where(outcome => outcome.Status == TeamTaskOutcomeStatus.Succeeded)
-            .ToList();
-
-        var hadFailures = failed.Count > 0;
-        var errorDetail = string.Join(
-            "; ",
-            failed.Where(outcome => !string.IsNullOrWhiteSpace(outcome.Error))
-                .Select(outcome => $"{outcome.TaskId}: {outcome.Error}"));
-        var error = hadFailures && !string.IsNullOrWhiteSpace(errorDetail)
-            ? AgentProblemDetails.ToolExecutionFailed(errorDetail, toolName: "TeamOrchestration")
-            : null;
-
-        var summary = succeeded.Count > 0
-            ? string.Join(
-                "\n",
-                succeeded.Where(outcome => !string.IsNullOrWhiteSpace(outcome.Summary))
-                    .Select(outcome => outcome.Summary))
-            : hadFailures
-                ? (error?.Detail ?? "Team task execution failed.")
-                : "No Team task produced output.";
-
-        return new TeamRunResult(
-            teamName,
-            summary,
-            succeeded.Sum(outcome => outcome.TurnsCompleted),
-            succeeded.Any(outcome => outcome.MaxTurnsReached),
-            Error: error,
-            HadFailures: hadFailures);
-    }
+        => TeamResultAggregator.Build(teamName, outcomes);
 
     private async Task<(bool Found, TeamConfig? Config)> TryResolveTeamAsync(
         string teamName,
         Action<OrchestrationEvent>? eventSink,
         CancellationToken ct)
     {
-        if (_teams.TryGetValue(teamName, out var existing))
+        if (_registry.TryGet(teamName, out var existing))
             return (true, existing);
 
         var teamFile = TeamConfigLoader.GetTeamFilePath(teamName);
@@ -758,7 +556,7 @@ public sealed class TeamOrchestrationService
         }
 
         await RegisterTeamAsync(teamName, teamFile, ct).ConfigureAwait(false);
-        if (_teams.TryGetValue(teamName, out var loaded))
+        if (_registry.TryGet(teamName, out var loaded))
             return (true, loaded);
 
         var problem2 = AgentProblemDetails.ToolExecutionFailed(

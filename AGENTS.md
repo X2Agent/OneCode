@@ -5,26 +5,51 @@ Keep it updated as the project evolves.
 
 ## Project Overview
 
-<!-- Describe what this project does, its purpose, and key stakeholders -->
+OneCode .NET 是一个基于 .NET 10 的生产级 CLI AI 编程助手，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。四种工作模式（BUILD / PLAN / TEAM / GOAL），41 个斜杠命令，30+ 工具。
+
+**语言**：代码注释与文档以中文为主。详细规范见 [src/AGENTS.md](src/AGENTS.md)（强制编码规范）及各 csproj 的专属 AGENTS.md。
 
 ## Build & Test Commands
 
 ```bash
-# Add your build and test commands here
+dotnet restore src/OneCode.slnx
+dotnet build src/OneCode.slnx        # 无新增警告（历史警告不得扩大）
+dotnet test src/OneCode.slnx         # 全部通过
+dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 ```
+
+要求 .NET SDK 10。测试栈：xUnit v3 + FluentAssertions + NSubstitute。
 
 ## Project Architecture
 
-<!-- Describe the directory structure, key modules, and how they interact -->
+```
+src/
+├── OneCode.Cli/            # CLI 入口 · 快速路径分发（6 文件）
+├── OneCode.App/            # 组合与实现层：Tools/Commands/Tui/Services/DI 注册（~395 文件）
+├── OneCode.Core/           # 纯接口与领域模型（仅依赖 *.Abstractions）
+├── OneCode.Infrastructure/ # 外部系统适配：MCP / MAF 管道 / 配置 / Git / Memory
+├── OneCode.Automation/     # 后台调度：Cron / ModelCatalog 刷新 / YOLO 规则加载
+└── OneCode.Tests/          # xUnit v3 测试套件
+```
+
+依赖方向单向：Cli → App → Infrastructure → Core。SDK 特化代码只允许出现在 Infrastructure。
 
 ## Coding Conventions
 
-<!-- Document style rules, naming conventions, patterns to follow -->
+- **强制规范**：全部见 [src/AGENTS.md](src/AGENTS.md)。要点：简洁优先、不留兼容层、不保留死代码、C# 最新语法、源生成器优先、Central Package Management、单类 ≤500 行（硬上限 600）、构造注入 ≤8 参数。
+- **测试**：见 [src/OneCode.Tests/AGENTS.md](src/OneCode.Tests/AGENTS.md)——测试即防回归，7 类无意义测试禁写。
+- **Prompt 管理**：文件化 prompt（三层覆盖），缺失处理双策略见 [src/OneCode.App/AGENTS.md](src/OneCode.App/AGENTS.md)。
+- **快捷键**：默认绑定源头在 `src/OneCode.Core/Keybindings/KeybindingDefaults.cs`，参考 [docs/keybindings.md](docs/keybindings.md)。
+- **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceExtensions.AddCommands()`，新增/删除命令须同步 [docs/commands.md](docs/commands.md)。
 
 ## Agent Guidelines
 
-<!-- Instructions specific to AI agents -->
+- 修改任何项目前先读该项目的 AGENTS.md；冲突时以子目录文档为准。
+- PR 标题格式 `[dotnet] <描述>`；提交前必须 build + test 通过。
+- TODO 注释必须关联 GitHub Issue：`// TODO(#123): ...`
 
 ## Tool Permissions
 
-<!-- List any tool restrictions or special permissions -->
+- 禁止直接实例化 `HttpClient`（用 `IHttpClientFactory`）。
+- App 层禁止跨 Infrastructure 边界直接文件 I/O（用 `IFileSystem` 抽象）。
+- Terminal.Gui 依赖仅允许在 `OneCode.App/Tui/` 子目录内使用。

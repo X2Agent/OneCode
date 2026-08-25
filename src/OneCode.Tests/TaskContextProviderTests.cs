@@ -37,7 +37,7 @@ public sealed class TaskContextProviderTests
     public async Task NoTasks_ReturnsEmptyContext()
     {
         var taskService = Substitute.For<ITaskService>();
-        taskService.ListTasks(exactScope: true).Returns(Array.Empty<TaskItem>());
+        taskService.ListTasks(exactScope: true).Returns([]);
         var provider = new TaskContextProvider(taskService);
 
         var context = await InvokeProvideAIContext(provider);

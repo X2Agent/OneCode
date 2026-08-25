@@ -68,21 +68,21 @@ public sealed class ReviewCommand(
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
-        var noEdit = args.Contains("--no-edit");
-        var includeBlame = args.Contains("--blame");
+        var a = CommandArgs.Parse(args, ["severity", "base", "focus"]);
+        var noEdit = a.Has("no-edit");
+        var includeBlame = a.Has("blame");
 
-        var severity = ParseFlag(args, "--severity") ?? "all";
-        var baseRef = ParseFlag(args, "--base");
-        var focus = ParseFlag(args, "--focus");
+        var severity = a.Value("severity") ?? "all";
+        var baseRef = a.Value("base");
+        var focus = a.Value("focus");
         if (focus is not null && !FocusToPromptName.ContainsKey(focus))
         {
             var valid = string.Join("|", FocusToPromptName.Keys);
             return CommandResult.Error(
                 $"Unknown --focus value '{focus}'. Valid values: {valid}.");
         }
-        var filePaths = args.Where(a => !a.StartsWith('-')
-            && (baseRef is null || a != baseRef)
-            && (focus is null || a != focus)).ToArray();
+        // 值型旗标的值已被解析器消费，Positionals 只剩文件路径
+        var filePaths = a.Positionals.ToArray();
 
         // Determine diff scope
         string[] diffArgs;
@@ -92,12 +92,12 @@ public sealed class ReviewCommand(
             diffArgs = filePaths.Length > 0 ? ["diff", baseRef, "--", .. filePaths] : ["diff", baseRef];
             scopeDescription = $"diff against `{baseRef}`";
         }
-        else if (args.Contains("--all"))
+        else if (a.Has("all"))
         {
             diffArgs = filePaths.Length > 0 ? ["diff", "HEAD", "--", .. filePaths] : ["diff", "HEAD"];
             scopeDescription = "all changes (staged + unstaged)";
         }
-        else if (args.Contains("--staged"))
+        else if (a.Has("staged"))
         {
             diffArgs = filePaths.Length > 0 ? ["diff", "--staged", "--", .. filePaths] : ["diff", "--staged"];
             scopeDescription = "staged changes";

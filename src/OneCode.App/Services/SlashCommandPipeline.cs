@@ -84,14 +84,17 @@ public sealed class SlashCommandPipeline(
         ICommand cmd, string text, CancellationToken ct)
     {
         var parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var args = parts.Length > 1 ? parts[1..] : Array.Empty<string>();
+        var args = parts.Length > 1 ? parts[1..] : [];
 
         var result = await cmd.ExecuteAsync(args, ct).ConfigureAwait(false);
 
         if (result is CommandResult.ExitResult)
             _exitRequested = true;
 
-        if (result is not CommandResult.ErrorResult && cmd.Name == "session")
+        // Session-affecting commands: session (list/switch/new/close), new, close.
+        // Refresh the TUI so transcript/counters reflect the foreground conversation
+        // (or clear it entirely when /close left no foreground session).
+        if (result is not CommandResult.ErrorResult && cmd.Name is "session" or "new" or "close")
             await _cmdState.RefreshSessionUiAsync(ct).ConfigureAwait(false);
 
         return result;

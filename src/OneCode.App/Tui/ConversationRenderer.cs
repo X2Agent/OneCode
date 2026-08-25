@@ -12,7 +12,7 @@ internal static class ConversationRenderer
     /// 构建已完成工具调用的格式化行（工具名 + 目标 + 结果摘要 + 耗时）。
     /// </summary>
     public static FormattedLine MakeCompletedToolLine(
-        string name, bool isError, string? toolInput, string? duration, string? result = null)
+        string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null)
     {
         var statusColor = isError ? TuiPalette.Error : TuiPalette.Success;
         var segments = new List<LineSegment>
@@ -21,6 +21,9 @@ internal static class ConversationRenderer
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
         };
+        // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
+        if (!string.IsNullOrWhiteSpace(agentName))
+            segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
 
         // 使用 ToolResultSummarizer 格式化目标（文件路径、命令等）
         var target = ToolResultSummarizer.FormatTarget(name, toolInput);

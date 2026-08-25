@@ -99,12 +99,8 @@ public sealed class TuiContextFactory(
                 teamOrchestrationService.ActiveTeam = nextTeam;
                 return nextTeam;
             },
-            GetTeamModeLabel: mode => teamOrchestrationService.GetTeamMode(mode) switch
-            {
-                "magentic" => "Magentic",
-                "groupchat" => "GroupChat",
-                _ => null,
-            },
+            // 模式标签统一由 Core 枚举扩展提供（单一事实源），TUI 层不再手写字符串映射。
+            GetTeamModeLabel: mode => teamOrchestrationService.GetTeamMode(mode)?.ToLabel(),
             GitHelper: gitHelper);
 
         var diagnostics = new TuiDiagnosticServices(

@@ -28,11 +28,20 @@ public sealed class CompactCommand(CompactService compactService) : Command
 
         ct.ThrowIfCancellationRequested();
 
-        var summary = await compactService.CompactAsync(
-            customInstructions: instructions,
-            fromMessageIndex: fromIndex,
-            upToMessageIndex: upToIndex,
-            ct: ct).ConfigureAwait(false);
+        string? summary;
+        try
+        {
+            summary = await compactService.CompactAsync(
+                customInstructions: instructions,
+                fromMessageIndex: fromIndex,
+                upToMessageIndex: upToIndex,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // prompt 缺失等配置性失败（如 system/compact 不存在），转为用户可见错误。
+            return CommandResult.Error(ex.Message);
+        }
 
         if (string.IsNullOrWhiteSpace(summary))
             return CommandResult.Text("No compaction was needed.");

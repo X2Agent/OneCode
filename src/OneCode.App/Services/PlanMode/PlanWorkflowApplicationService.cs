@@ -40,9 +40,9 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         }
 
         var current = existing?.Workflow ?? PlanWorkflow.Create(command.SessionId, command.ActiveRunId);
-        ValidateExpectedVersion(existing?.Workflow, command.ExpectedWorkflowVersion);
+        PlanWorkflowValidator.ValidateExpectedVersion(existing?.Workflow, command.ExpectedWorkflowVersion);
         if (current.State != PlanWorkflowState.Planning)
-            throw InvalidState(current, PlanWorkflowState.Planning);
+            throw PlanWorkflowValidator.InvalidState(current, PlanWorkflowState.Planning);
 
         var revision = CreateRevision(
             current,
@@ -81,9 +81,9 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             var current = aggregate.Workflow;
             if (current.LastProcessedCommandId == command.CommandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
-            ValidateCommandIdentity(current, command.PlanId, command.Revision, command.ExpectedWorkflowVersion);
+            PlanWorkflowValidator.ValidateCommandIdentity(current, command.PlanId, command.Revision, command.ExpectedWorkflowVersion);
             if (current.State != PlanWorkflowState.AwaitingApproval)
-                throw InvalidState(current, PlanWorkflowState.AwaitingApproval);
+                throw PlanWorkflowValidator.InvalidState(current, PlanWorkflowState.AwaitingApproval);
 
             var revision = aggregate.FindRevision(command.Revision)
                 ?? throw new PlanTransitionException($"Plan revision {command.Revision} was not found.");
@@ -205,7 +205,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             if (current.LastProcessedCommandId == command.CommandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.State != PlanWorkflowState.StartingExecution)
-                throw InvalidState(current, PlanWorkflowState.StartingExecution);
+                throw PlanWorkflowValidator.InvalidState(current, PlanWorkflowState.StartingExecution);
             if (current.Version != command.ExpectedWorkflowVersion)
                 throw new PlanConcurrencyException(
                     $"Plan workflow version conflict: expected {command.ExpectedWorkflowVersion}, actual {current.Version}.");
@@ -289,14 +289,14 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
             if (current.LastProcessedCommandId == command.CommandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
-            ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
+            PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
 
             var index = current.StepExecutions
                 .Select((step, position) => (step, position))
                 .FirstOrDefault(item => string.Equals(item.step.StepId, command.StepId, StringComparison.Ordinal));
             if (index.step is null)
                 throw new PlanTransitionException($"Plan step '{command.StepId}' does not exist.");
-            ValidateStepTransition(current, index.step, command);
+            PlanWorkflowValidator.ValidateStepTransition(current, index.step, command);
 
             var executions = current.StepExecutions.ToArray();
             executions[index.position] = index.step with
@@ -325,7 +325,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
             if (current.LastProcessedCommandId == command.CommandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
-            ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
+            PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
             var incomplete = current.StepExecutions
                 .Where(step => step.Status is not (PlanStepExecutionStatus.Completed or PlanStepExecutionStatus.Skipped))
                 .Select(step => step.StepId)
@@ -356,7 +356,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
             if (current.LastProcessedCommandId == command.CommandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
-            ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Verifying);
+            PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Verifying);
             if (command.Passed && command.Evidence.Count == 0)
                 throw new PlanValidationException("Successful verification requires evidence.");
 
@@ -449,9 +449,9 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             var current = await RequireWorkflowAsync(sessionId, planId, ct).ConfigureAwait(false);
             if (current.LastProcessedCommandId == commandId)
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
-            ValidateCommandIdentity(current, planId, revision, expectedVersion);
+            PlanWorkflowValidator.ValidateCommandIdentity(current, planId, revision, expectedVersion);
             if (current.State != PlanWorkflowState.AwaitingApproval)
-                throw InvalidState(current, PlanWorkflowState.AwaitingApproval);
+                throw PlanWorkflowValidator.InvalidState(current, PlanWorkflowState.AwaitingApproval);
 
             var updated = current with
             {
@@ -494,22 +494,6 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             ct).ConfigureAwait(false);
     }
 
-    private static void ValidateCommandIdentity(
-        PlanWorkflow workflow,
-        PlanWorkflowId planId,
-        int revision,
-        long expectedVersion)
-    {
-        if (workflow.Id != planId)
-            throw new PlanTransitionException("Plan ID does not match the active workflow.");
-        if (workflow.SubmittedRevision != revision)
-            throw new PlanTransitionException(
-                $"Revision {revision} is not the submitted revision {workflow.SubmittedRevision}.");
-        if (workflow.Version != expectedVersion)
-            throw new PlanConcurrencyException(
-                $"Plan workflow version conflict: expected {expectedVersion}, actual {workflow.Version}.");
-    }
-
     private static PlanRevision CreateRevision(
         PlanWorkflow workflow,
         string title,
@@ -533,67 +517,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-    private static void ValidateActiveBuildRun(
-        PlanWorkflow workflow,
-        string runId,
-        PlanWorkflowState expectedState)
-    {
-        if (workflow.State != expectedState)
-            throw InvalidState(workflow, expectedState);
-        if (!string.Equals(workflow.ActiveRunId, runId, StringComparison.Ordinal))
-            throw new PlanTransitionException(
-                $"Run '{runId}' does not match active run '{workflow.ActiveRunId}'.");
-    }
 
-    private static void ValidateStepTransition(
-        PlanWorkflow workflow,
-        PlanStepExecution currentStep,
-        UpdatePlanStepCommand command)
-    {
-        if (command.Status == PlanStepExecutionStatus.Completed && string.IsNullOrWhiteSpace(command.Evidence))
-            throw new PlanValidationException($"Completed step '{command.StepId}' requires evidence.");
-        if (command.Status == PlanStepExecutionStatus.Failed && string.IsNullOrWhiteSpace(command.Error))
-            throw new PlanValidationException($"Failed step '{command.StepId}' requires an error.");
-        if (currentStep.Status is PlanStepExecutionStatus.Completed
-            or PlanStepExecutionStatus.Failed
-            or PlanStepExecutionStatus.Skipped
-            or PlanStepExecutionStatus.Cancelled)
-        {
-            if (currentStep.Status != command.Status)
-            {
-                throw new PlanTransitionException(
-                    $"Plan step '{command.StepId}' is terminal in state '{currentStep.Status}' and cannot transition to '{command.Status}'.");
-            }
-
-            return;
-        }
-        if (currentStep.Status == PlanStepExecutionStatus.Pending
-            && command.Status is not (PlanStepExecutionStatus.InProgress
-                or PlanStepExecutionStatus.Failed
-                or PlanStepExecutionStatus.Skipped))
-        {
-            throw new PlanTransitionException(
-                $"Plan step '{command.StepId}' cannot transition directly from Pending to '{command.Status}'.");
-        }
-
-        if (command.Status is not (PlanStepExecutionStatus.InProgress or PlanStepExecutionStatus.Completed))
-            return;
-
-        var definition = workflow.ApprovedSnapshot?.Steps.SingleOrDefault(step =>
-            string.Equals(step.Id, command.StepId, StringComparison.Ordinal))
-            ?? throw new PlanTransitionException(
-                $"Approved plan definition for step '{command.StepId}' was not found.");
-        var unresolved = definition.DependsOn
-            .Where(dependencyId => workflow.StepExecutions.SingleOrDefault(step =>
-                    string.Equals(step.StepId, dependencyId, StringComparison.Ordinal))?.Status
-                != PlanStepExecutionStatus.Completed)
-            .ToArray();
-        if (unresolved.Length > 0)
-        {
-            throw new PlanTransitionException(
-                $"Plan step '{command.StepId}' is blocked by incomplete dependencies: {string.Join(", ", unresolved)}.");
-        }
-    }
 
     private static PlanWorkflow Failure(
         PlanWorkflow current,
@@ -609,18 +533,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             UpdatedAt = occurredAt,
         };
 
-    private static PlanTransitionException InvalidState(
-        PlanWorkflow workflow,
-        PlanWorkflowState expected)
-        => new($"Plan workflow '{workflow.Id}' is in state '{workflow.State}', expected '{expected}'.");
 
-    private static void ValidateExpectedVersion(PlanWorkflow? workflow, long expectedVersion)
-    {
-        var actualVersion = workflow?.Version ?? -1;
-        if (actualVersion != expectedVersion)
-            throw new PlanConcurrencyException(
-                $"Plan workflow version conflict: expected {expectedVersion}, actual {actualVersion}.");
-    }
 
     private static PlanRevisionResult DuplicateRevisionResult(PlanAggregate aggregate)
     {

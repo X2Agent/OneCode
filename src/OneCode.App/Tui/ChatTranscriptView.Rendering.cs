@@ -110,27 +110,28 @@ public sealed partial class ChatTranscriptView
         }, tag);
     }
 
-    public void AddToolStart(string name, string? toolInput, string toolId)
+    public void AddToolStart(string name, string? toolInput, string toolId, string? agentName = null)
     {
         _logger.LogDebug(
-            "[AddToolStart] streaming={Streaming}, name={Name}, toolId={ToolId}",
-            _stream.IsStreaming, name, toolId);
+            "[AddToolStart] streaming={Streaming}, name={Name}, toolId={ToolId}, agent={Agent}",
+            _stream.IsStreaming, name, toolId, agentName);
         if (!_stream.IsStreaming) return;
 
         var lineIndex = _stream.StatusLines.Count;
         // 使用 ToolResultSummarizer 格式化目标显示
         var formattedTarget = ToolResultSummarizer.FormatTarget(name, toolInput);
-        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null));
+        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null, agentName: agentName));
         _stream.ToolTracker.RegisterStart(toolId, lineIndex);
-        _app.Invoke(() => ActivityChanged?.Invoke($"执行 {name}"));
+        _app.Invoke(() => ActivityChanged?.Invoke(
+            string.IsNullOrWhiteSpace(agentName) ? $"执行 {name}" : $"[{agentName}] 执行 {name}"));
         RebuildStreamingPreview();
     }
 
-    public void AddToolDone(string name, bool isError, string? toolInput, string result, string toolId)
+    public void AddToolDone(string name, bool isError, string? toolInput, string result, string toolId, string? agentName = null)
     {
         _logger.LogDebug(
-            "[AddToolDone] streaming={Streaming}, name={Name}, toolId={ToolId}, err={Error}",
-            _stream.IsStreaming, name, toolId, isError);
+            "[AddToolDone] streaming={Streaming}, name={Name}, toolId={ToolId}, err={Error}, agent={Agent}",
+            _stream.IsStreaming, name, toolId, isError, agentName);
         if (_stream.IsStreaming)
         {
             // 按 ToolId 精确匹配
@@ -138,7 +139,7 @@ public sealed partial class ChatTranscriptView
                 && pending.LineIndex < _stream.StatusLines.Count)
             {
                 var durationStr = $"({StreamingToolTracker.FormatDuration(pending.StartTick)})";
-                _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, durationStr, result);
+                _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, durationStr, result, agentName: agentName);
             }
             // 已见过的 ToolId（ContinueStreaming 已提交到历史）— 跳过去重
             else if (_stream.ToolTracker.WasSeen(toolId))
@@ -153,15 +154,12 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        var trm = new ToolResultMessage(
-            Id: Guid.NewGuid().ToString("N"),
-            ToolUseId: toolId,
-            ToolName: name,
-            Content: result,
-            IsError: isError,
-            Timestamp: DateTimeOffset.UtcNow);
-
-        AppendCommittedBlock(RenderMessageJournalEntry(trm));
+        // 非 streaming 态收到的工具完成 — 渲染为折叠的已完成工具行（含结果摘要），
+        // 不再平铺完整 JSON 内容（与 streaming 态的折叠呈现保持一致）。
+        AppendCommittedBlock(_ => new[]
+        {
+            ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, null, result),
+        });
 
         _stream.TextBuffer.Clear();
         _stream.Assistant = null;
@@ -282,14 +280,19 @@ public sealed partial class ChatTranscriptView
     /// 此方法渲染 +N/-M 行的 Diff 块。Diff 行与宽度无关，日志条目直接持有渲染结果。
     /// </summary>
     public void AddFileChange(string fileName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
+        => AddFileChange(fileName, null, addedLines, removedLines);
+
+    /// <summary>带 TEAM 归属的重载：diff 头标注执行修改的成员 ID。</summary>
+    public void AddFileChange(string fileName, string? agentName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
     {
         _logger.LogDebug(
-            "[AddFileChange] streaming={Streaming}, statusLines={StatusLines}, lineCountInView={LineCountInView}, file={File}, +{Added}/-{Removed}",
-            _stream.IsStreaming, _stream.StatusLines.Count, _stream.PreviewLineCount, fileName, addedLines.Count, removedLines.Count);
+            "[AddFileChange] streaming={Streaming}, statusLines={StatusLines}, lineCountInView={LineCountInView}, file={File}, +{Added}/-{Removed}, agent={Agent}",
+            _stream.IsStreaming, _stream.StatusLines.Count, _stream.PreviewLineCount, fileName, addedLines.Count, removedLines.Count, agentName);
         var lines = ChatBlockRenderers.RenderDiffBlock(
             fileName, addedLines, removedLines,
             addedSummary: addedLines.Count,
-            removedSummary: removedLines.Count);
+            removedSummary: removedLines.Count,
+            agentName: agentName);
         if (_stream.IsStreaming)
             AddFormattedLines(lines);
         else

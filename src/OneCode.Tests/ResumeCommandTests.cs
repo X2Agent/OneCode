@@ -1,5 +1,6 @@
 using NSubstitute;
 using OneCode.App.Commands;
+using OneCode.App.Session;
 using OneCode.Core.Commands;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
@@ -8,18 +9,17 @@ using OneCode.Core.Goals;
 namespace OneCode.Tests;
 
 /// <summary>
-/// /checkpoint resume 子命令端到端验证。
+/// /resume 命令端到端验证（自 CheckpointCommand 拆出）。
 ///
 /// 测试覆盖：
-/// 1. /checkpoint resume（无参数）列出所有可恢复会话（Goal + Team 混合）
-/// 2. /checkpoint resume &lt;sessionId&gt; 自动判断 Goal/Team 类型并返回 ResumeWorkflowResult
+/// 1. /resume（无参数）列出所有可恢复会话（Goal + Team 混合）
+/// 2. /resume &lt;sessionId&gt; 自动判断 Goal/Team 类型并返回 ResumeWorkflowResult
 /// 3. 未找到 sessionId 时返回错误并提示可用会话
-/// 4. Goal/Team store 为 null 时的降级行为
+/// 4. Goal/Team 同名会话时 Goal 优先
 /// 5. ResumeWorkflowResult 携带正确的 SessionId 和 WorkflowResumeKind
-/// 6. TuiDone.SessionId / TeamRunResult.SessionId 传递
-/// 7. resume 子命令不需要活跃会话（与 save/list/restore/delete 不同）
+/// 6. /checkpoint resume 寄居分支已删除（回归守卫）
 /// </summary>
-public sealed class CheckpointResumeIntegrationTests
+public sealed class ResumeCommandTests
 {
     // 无参数：列出所有可恢复会话
 
@@ -28,15 +28,15 @@ public sealed class CheckpointResumeIntegrationTests
     {
         var goalStore = await CreateGoalStoreWithSessions("aaaa1111bbbb2222cccc3333dddd4444");
         var teamStore = CreateTeamStoreWithSessions("team-session-1");
-        var cmd = CreateCommand(goalStore, teamStore);
+        var cmd = new ResumeCommand(goalStore, teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync([], TestContext.Current.CancellationToken);
 
         var text = AssertTextResult(result);
         text.Should().Contain("Resumable tasks");
         text.Should().Contain("aaaa1111bbbb2222cccc3333dddd4444");
         text.Should().Contain("team-session-1");
-        text.Should().Contain("/checkpoint resume <sessionId>");
+        text.Should().Contain("/resume <sessionId>");
     }
 
     [Fact]
@@ -44,9 +44,9 @@ public sealed class CheckpointResumeIntegrationTests
     {
         var goalStore = await CreateGoalStoreWithSessions();
         var teamStore = CreateTeamStoreWithSessions();
-        var cmd = CreateCommand(goalStore, teamStore);
+        var cmd = new ResumeCommand(goalStore, teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync([], TestContext.Current.CancellationToken);
 
         var text = AssertTextResult(result);
         text.Should().Contain("No interrupted tasks to resume");
@@ -54,11 +54,11 @@ public sealed class CheckpointResumeIntegrationTests
     }
 
     [Fact]
-    public async Task Resume_NoArgs_BothStoresNull_ShowsHelpMessage()
+    public async Task Resume_NoArgs_BothStoresEmpty_ShowsHelpMessage()
     {
-        var cmd = CreateCommand(goalRunStore: null, teamRunStore: null);
+        var cmd = new ResumeCommand(await CreateGoalStoreWithSessions(), CreateTeamStoreWithSessions());
 
-        var result = await cmd.ExecuteAsync(new[] { "resume" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync([], TestContext.Current.CancellationToken);
 
         var text = AssertTextResult(result);
         text.Should().Contain("No interrupted tasks to resume");
@@ -71,9 +71,9 @@ public sealed class CheckpointResumeIntegrationTests
     {
         var sessionId = "abc123def456abcd7890abcd1234abcd";
         var goalStore = await CreateGoalStoreWithSessions(sessionId);
-        var cmd = CreateCommand(goalStore, teamRunStore: null);
+        var cmd = new ResumeCommand(goalStore, CreateTeamStoreWithSessions());
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", sessionId }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync([sessionId], TestContext.Current.CancellationToken);
 
         var resume = AssertResumeWorkflowResult(result);
         resume.SessionId.Should().Be(sessionId);
@@ -84,9 +84,9 @@ public sealed class CheckpointResumeIntegrationTests
     public async Task Resume_TeamSessionId_ReturnsResumeWorkflowResult()
     {
         var teamStore = CreateTeamStoreWithSessions("team-xyz789");
-        var cmd = CreateCommand(goalRunStore: null, teamRunStore: teamStore);
+        var cmd = new ResumeCommand(await CreateGoalStoreWithSessions(), teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", "team-xyz789" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync(["team-xyz789"], TestContext.Current.CancellationToken);
 
         var resume = AssertResumeWorkflowResult(result);
         resume.SessionId.Should().Be("team-xyz789");
@@ -99,34 +99,9 @@ public sealed class CheckpointResumeIntegrationTests
         var sessionId = "shared1112223334445556667778889990a";
         var goalStore = await CreateGoalStoreWithSessions(sessionId);
         var teamStore = CreateTeamStoreWithSessions(sessionId);
-        var cmd = CreateCommand(goalStore, teamStore);
+        var cmd = new ResumeCommand(goalStore, teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", sessionId }, TestContext.Current.CancellationToken);
-
-        var resume = AssertResumeWorkflowResult(result);
-        resume.Kind.Should().Be(WorkflowResumeKind.Goal);
-    }
-
-    [Fact]
-    public async Task Resume_GoalStoreNull_TeamSessionId_ReturnsTeamResumeResult()
-    {
-        var teamStore = CreateTeamStoreWithSessions("team-only");
-        var cmd = CreateCommand(goalRunStore: null, teamRunStore: teamStore);
-
-        var result = await cmd.ExecuteAsync(new[] { "resume", "team-only" }, TestContext.Current.CancellationToken);
-
-        var resume = AssertResumeWorkflowResult(result);
-        resume.Kind.Should().Be(WorkflowResumeKind.Team);
-    }
-
-    [Fact]
-    public async Task Resume_TeamServiceNull_GoalSessionId_ReturnsGoalResumeResult()
-    {
-        var sessionId = "only0000000000000000000000aaaaaaa";
-        var goalStore = await CreateGoalStoreWithSessions(sessionId);
-        var cmd = CreateCommand(goalStore, teamRunStore: null);
-
-        var result = await cmd.ExecuteAsync(new[] { "resume", sessionId }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync([sessionId], TestContext.Current.CancellationToken);
 
         var resume = AssertResumeWorkflowResult(result);
         resume.Kind.Should().Be(WorkflowResumeKind.Goal);
@@ -140,9 +115,9 @@ public sealed class CheckpointResumeIntegrationTests
         var existingId = "aaa111bbb222ccc333ddd444eee555ff";
         var goalStore = await CreateGoalStoreWithSessions(existingId);
         var teamStore = CreateTeamStoreWithSessions("team-exists");
-        var cmd = CreateCommand(goalStore, teamStore);
+        var cmd = new ResumeCommand(goalStore, teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", "goal-nonexistent000000000000000000dead" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync(["goal-nonexistent000000000000000000dead"], TestContext.Current.CancellationToken);
 
         var error = AssertErrorResult(result);
         error.Should().Contain("not found");
@@ -156,9 +131,9 @@ public sealed class CheckpointResumeIntegrationTests
     {
         var goalStore = await CreateGoalStoreWithSessions();
         var teamStore = CreateTeamStoreWithSessions();
-        var cmd = CreateCommand(goalStore, teamStore);
+        var cmd = new ResumeCommand(goalStore, teamStore);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", "goal-nonexistent000000000000000000dead" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync(["goal-nonexistent000000000000000000dead"], TestContext.Current.CancellationToken);
 
         var error = AssertErrorResult(result);
         error.Should().Contain("not found");
@@ -166,44 +141,36 @@ public sealed class CheckpointResumeIntegrationTests
     }
 
     [Fact]
-    public async Task Resume_BothStoresNull_NonExistentSession_ReturnsError()
+    public async Task Resume_BothStoresEmpty_NonExistentSession_ReturnsError()
     {
-        var cmd = CreateCommand(goalRunStore: null, teamRunStore: null);
+        var cmd = new ResumeCommand(await CreateGoalStoreWithSessions(), CreateTeamStoreWithSessions());
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", "any-session" }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync(["any-session"], TestContext.Current.CancellationToken);
 
         var error = AssertErrorResult(result);
         error.Should().Contain("not found");
         error.Should().Contain("No resumable sessions available");
     }
 
-    // resume 子命令不需要活跃会话
+    // /checkpoint resume 寄居分支已删除（回归守卫）
 
     [Fact]
-    public async Task Resume_WorksWithoutActiveConversation()
+    public async Task Checkpoint_ResumeSubcommand_ReturnsError()
     {
-        var sessionId = "goal-noconv000000000000000000000000ff";
-        var goalStore = await CreateGoalStoreWithSessions(sessionId);
-        var sessionManager = Substitute.For<OneCode.App.Session.ISessionManager>();
-        sessionManager.ForegroundConversation.Returns((OneCode.Core.Domain.Conversation?)null);
-        var cmd = new CheckpointCommand(sessionManager, goalStore, teamRunStore: null);
+        // 必须有活跃会话，否则会话判空先拦截，测不到子命令分支
+        var conv = new Conversation { Name = "active", WorkingDirectory = Path.GetTempPath() };
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.ForegroundConversation.Returns(conv);
+        var cmd = new CheckpointCommand(sessionManager);
 
-        var result = await cmd.ExecuteAsync(new[] { "resume", sessionId }, TestContext.Current.CancellationToken);
+        var result = await cmd.ExecuteAsync(["resume", "any-session"], TestContext.Current.CancellationToken);
 
-        var resume = AssertResumeWorkflowResult(result);
-        resume.Kind.Should().Be(WorkflowResumeKind.Goal);
+        // resume 不再寄居在 /checkpoint 下：应落入未知子命令错误，而非返回 ResumeWorkflowResult
+        AssertErrorResult(result).Should().Contain("Usage");
+        result.Should().NotBeOfType<CommandResult.ResumeWorkflowResult>();
     }
 
     // Helpers
-
-    private static CheckpointCommand CreateCommand(
-        IGoalRunStore? goalRunStore = null,
-        ITeamRunStore? teamRunStore = null)
-    {
-        var sessionManager = Substitute.For<OneCode.App.Session.ISessionManager>();
-        sessionManager.ForegroundConversation.Returns((OneCode.Core.Domain.Conversation?)null);
-        return new CheckpointCommand(sessionManager, goalRunStore, teamRunStore);
-    }
 
     private static Task<IGoalRunStore> CreateGoalStoreWithSessions(params string[] sessionIds)
     {

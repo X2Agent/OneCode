@@ -26,7 +26,7 @@ public static class GitBlameParser
     public static IReadOnlyList<GitBlameEntry> Parse(string porcelainOutput, string filePath)
     {
         if (string.IsNullOrWhiteSpace(porcelainOutput))
-            return Array.Empty<GitBlameEntry>();
+            return [];
 
         var lines = porcelainOutput.Split('\n');
         List<GitBlameEntry> entries = [];

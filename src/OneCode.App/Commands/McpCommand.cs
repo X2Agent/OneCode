@@ -1,24 +1,7 @@
 using System.Text;
-using System.Text.Json.Serialization;
 using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Commands;
-
-/// <summary>JSON config-file entry for a single MCP server (distinct from the runtime McpServerDefinition).</summary>
-internal sealed record McpConfigEntry(
-    [property: JsonPropertyName("type")] string? Type = null,
-    [property: JsonPropertyName("command")] string? Command = null,
-    [property: JsonPropertyName("args")] string[]? Args = null,
-    [property: JsonPropertyName("url")] string? Url = null,
-    [property: JsonPropertyName("env")] Dictionary<string, string>? Env = null,
-    [property: JsonPropertyName("disabled")] bool? Disabled = null);
-
-/// <summary>Root object of MCP config files (user-scope .mcp.json, project-scope .mcp.json).</summary>
-internal sealed class McpConfigFile
-{
-    [JsonPropertyName("mcpServers")]
-    public Dictionary<string, McpConfigEntry> McpServers { get; set; } = new();
-}
 
 /// <summary>
 /// Manages MCP servers: discover (search) and install from the Smithery registry,
@@ -26,6 +9,7 @@ internal sealed class McpConfigFile
 /// All runtime state flows through <see cref="IMcpConnectionManager"/> — the single
 /// source of truth that also feeds the LLM tool catalog, so connect/disconnect
 /// here immediately affects which tools the model can call.
+/// Config-file persistence lives in <see cref="McpConfigFileStore"/>.
 /// </summary>
 public sealed class McpCommand(
     IMcpConnectionManager connectionManager,
@@ -37,13 +21,6 @@ public sealed class McpCommand(
     public override string Description => "Manage MCP server connections";
     public override CommandCategory Category => CommandCategory.Skill;
     public override string? ArgumentHint => "[list|get|search|install|add|remove|connect|disconnect|enable|disable] <args>";
-
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
@@ -176,6 +153,29 @@ public sealed class McpCommand(
 
     // install
 
+    /// <summary>
+    /// 写操作前的配置加载：文件损坏时返回失败与用户可操作指引（绝不静默按"不存在"处理，
+    /// 防止随后的 SaveAsync 覆盖用户原有配置）。
+    /// </summary>
+    private static bool TryLoadConfigForWrite(
+        string path,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out McpConfigFile? file,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+    {
+        try
+        {
+            file = McpConfigFileStore.Load(path) ?? new McpConfigFile();
+            error = null;
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            file = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
     private async Task<string> InstallAsync(string[] args, CancellationToken ct)
     {
         // /mcp install <qualifiedName> [--name <name>] [--scope project|user] [--connect]
@@ -208,11 +208,12 @@ public sealed class McpCommand(
             Url = conn.DeploymentUrl,
         };
 
-        var configPath = GetConfigPath(scope);
+        var configPath = McpConfigFileStore.GetPath(scope);
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var file = LoadConfigFile(configPath) ?? new McpConfigFile();
+        if (!TryLoadConfigForWrite(configPath, out var file, out var installError))
+            return $"Cannot install '{name}': {installError}";
         file.McpServers[name] = entry;
-        await SaveConfigFileAsync(configPath, file, ct).ConfigureAwait(false);
+        await McpConfigFileStore.SaveAsync(configPath, file, ct).ConfigureAwait(false);
 
         logger.LogInformation("Installed MCP server '{Name}' from registry", name);
 
@@ -279,11 +280,12 @@ public sealed class McpCommand(
             Url = url,
         };
 
-        var configPath = GetConfigPath(scope);
+        var configPath = McpConfigFileStore.GetPath(scope);
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        var file = LoadConfigFile(configPath) ?? new McpConfigFile();
-        file.McpServers[name] = entry;
-        await SaveConfigFileAsync(configPath, file, ct).ConfigureAwait(false);
+        if (!TryLoadConfigForWrite(configPath, out var addFile, out var addError))
+            return $"Cannot add '{name}': {addError}";
+        addFile.McpServers[name] = entry;
+        await McpConfigFileStore.SaveAsync(configPath, addFile, ct).ConfigureAwait(false);
         logger.LogInformation("Added MCP server: {Name}", name);
 
         var msg = $"MCP server '{name}' added to {scope} config (transport: {normalized}).";
@@ -309,12 +311,14 @@ public sealed class McpCommand(
 
         foreach (var scope in new[] { "project", "user" })
         {
-            var path = GetConfigPath(scope);
+            var path = McpConfigFileStore.GetPath(scope);
             if (!File.Exists(path)) continue;
-            var file = LoadConfigFile(path);
+            if (!TryLoadConfigForWrite(path, out var removeFile, out var removeError))
+                return $"Cannot update {scope} config for '{name}': {removeError}";
+            var file = removeFile;
             if (file?.McpServers.Remove(name) == true)
             {
-                await SaveConfigFileAsync(path, file, ct).ConfigureAwait(false);
+                await McpConfigFileStore.SaveAsync(path, file, ct).ConfigureAwait(false);
                 return $"MCP server '{name}' removed.";
             }
         }
@@ -365,13 +369,15 @@ public sealed class McpCommand(
         var name = args[0];
         foreach (var scope in new[] { "project", "user" })
         {
-            var path = GetConfigPath(scope);
+            var path = McpConfigFileStore.GetPath(scope);
             if (!File.Exists(path)) continue;
-            var file = LoadConfigFile(path);
+            if (!TryLoadConfigForWrite(path, out var toggleFile, out var toggleError))
+                return $"Cannot update {scope} config for '{name}': {toggleError}";
+            var file = toggleFile;
             if (file?.McpServers.TryGetValue(name, out var entry) == true)
             {
                 file.McpServers[name] = entry with { Disabled = enabled ? null : true };
-                await SaveConfigFileAsync(path, file, ct).ConfigureAwait(false);
+                await McpConfigFileStore.SaveAsync(path, file, ct).ConfigureAwait(false);
 
                 // Disabling also drops the runtime connection; enabling does not auto-connect
                 // (use /mcp connect to bring it up on demand).
@@ -384,31 +390,5 @@ public sealed class McpCommand(
             }
         }
         return $"MCP server '{name}' not found.";
-    }
-
-    // config path + file I/O
-
-    private static string GetConfigPath(string scope) =>
-        scope == "project"
-            ? Path.Combine(Directory.GetCurrentDirectory(), ".mcp.json")
-            : McpMultiScopeConfigLoader.GetUserConfigPath();
-
-    private McpConfigFile? LoadConfigFile(string path)
-    {
-        try
-        {
-            return !File.Exists(path) ? null : JsonSerializer.Deserialize<McpConfigFile>(File.ReadAllText(path), JsonOpts);
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Failed to load MCP config from {Path}", path);
-            return null;
-        }
-    }
-
-    private static async Task SaveConfigFileAsync(string path, McpConfigFile config, CancellationToken ct)
-    {
-        var json = JsonSerializer.Serialize(config, JsonOpts);
-        await File.WriteAllTextAsync(path, json, ct).ConfigureAwait(false);
     }
 }

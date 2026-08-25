@@ -80,7 +80,7 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
         var dir = ResolveDirectory(scope);
         var filePath = GetFilePath(dir);
         if (!File.Exists(filePath))
-            return Array.Empty<MemoryEntry>();
+            return [];
 
         try
         {
@@ -90,7 +90,7 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to read memory file {Path}", filePath);
-            return Array.Empty<MemoryEntry>();
+            return [];
         }
     }
 
@@ -239,14 +239,14 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     internal static IReadOnlyList<MemoryEntry> ParseEntries(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
-            return Array.Empty<MemoryEntry>();
+            return [];
 
         var body = StripFrontmatter(content);
         var results = new List<MemoryEntry>();
 
         var matches = EntryHeaderRegex().Matches(body);
         if (matches.Count == 0)
-            return Array.Empty<MemoryEntry>();
+            return [];
 
         for (var i = 0; i < matches.Count; i++)
         {

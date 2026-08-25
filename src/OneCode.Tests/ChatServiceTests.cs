@@ -362,7 +362,7 @@ public sealed class ChatServiceTests
                 fingerprint,
                 new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
-                new TaskService(),
+                new BuildTaskLinker(new TaskService()),
                 questionGenerator,
                 Substitute.For<ILogger<BuildRunCoordinator>>());
             var registry = new JsonWorkflowRunRegistry(Path.Combine(root, "workflow-runs"));
@@ -559,7 +559,7 @@ public sealed class ChatServiceTests
                 fingerprint,
                 new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
-                new TaskService(),
+                new BuildTaskLinker(new TaskService()),
                 questionGenerator,
                 Substitute.For<ILogger<BuildRunCoordinator>>());
             var clarifier = Substitute.For<IClarificationInteractionService>();

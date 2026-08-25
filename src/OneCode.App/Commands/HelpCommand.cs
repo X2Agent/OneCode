@@ -71,8 +71,7 @@ public sealed class HelpCommand(IServiceProvider services) : Command
                 ("Tab",              "空输入接受建议；/ 补全循环；否则切 BUILD/PLAN/TEAM/GOAL"),
                 ("/",                "斜杠命令补全"),
                 ("Ctrl+← / Ctrl+→",  "循环占位建议"),
-                ("Shift+Tab",        "TEAM 模式切换 Magentic ↔ GroupChat"),
-                ("Ctrl+Shift+T",     "TEAM 模式循环切换已注册团队"),
+                ("Shift+Tab",        "TEAM 模式循环切换已注册团队（编排模式由团队 YAML 固定）"),
             ]),
             ("历史与搜索",
             [

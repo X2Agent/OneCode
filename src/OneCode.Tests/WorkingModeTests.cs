@@ -50,52 +50,14 @@ public sealed class WorkingModeTests
         c.Mode.Should().Be(WorkingMode.Build);
     }
 
-    [Fact]
-    public void ToggleStrategy_TeamMode_FlipsStrategy()
-    {
-        var c = new WorkingModeController(WorkingMode.Team, TeamStrategy.Magentic);
-        c.ToggleStrategy().Should().Be(TeamStrategy.GroupChat);
-        c.IsMagentic.Should().BeFalse();
-        c.IsGroupChat.Should().BeTrue();
-    }
-
     [Theory]
-    [InlineData(WorkingMode.Build)]
-    [InlineData(WorkingMode.Plan)]
-    public void ToggleStrategy_OutsideTeamMode_NoOp(WorkingMode mode)
+    [InlineData(WorkingMode.Build, "BUILD")]
+    [InlineData(WorkingMode.Plan, "PLAN")]
+    [InlineData(WorkingMode.Team, "TEAM")]
+    public void ModeTag_ReflectsModeOnly(WorkingMode mode, string expected)
     {
-        var c = new WorkingModeController(mode, TeamStrategy.Magentic);
-        c.ToggleStrategy().Should().Be(TeamStrategy.Magentic);
-        c.Strategy.Should().Be(TeamStrategy.Magentic);
-    }
-
-    [Fact]
-    public void LeavingTeamMode_ResetsStrategyToConfig()
-    {
-        var c = new WorkingModeController(WorkingMode.Team, TeamStrategy.GroupChat);
-        c.Mode = WorkingMode.Build;
-        // leaving Team resets strategy implicitly (private field reset)
-        // re-entering Team should follow the YAML-configured default strategy
-        c.Mode = WorkingMode.Team;
-        c.Strategy.Should().Be(TeamStrategy.Config);
-        c.IsMagentic.Should().BeFalse();
-        c.IsGroupChat.Should().BeFalse();
-    }
-
-    [Fact]
-    public void SetStrategy_OutsideTeam_NoOp()
-    {
-        var c = new WorkingModeController(WorkingMode.Build);
-        c.Strategy = TeamStrategy.GroupChat;
-        c.Strategy.Should().Be(TeamStrategy.Config);
-    }
-
-    [Fact]
-    public void SetStrategy_InsideTeam_Updates()
-    {
-        var c = new WorkingModeController(WorkingMode.Team);
-        c.Strategy = TeamStrategy.GroupChat;
-        c.Strategy.Should().Be(TeamStrategy.GroupChat);
+        // 编排模式是团队 YAML 的固定属性，控制器不再持有策略状态。
+        new WorkingModeController(mode).ModeTag.Should().Be(expected);
     }
 
     [Fact]
@@ -121,36 +83,6 @@ public sealed class WorkingModeTests
         fired.Should().Be(0);
     }
 
-    [Fact]
-    public void ShowStrategyTag_TrueOnlyInTeam()
-    {
-        new WorkingModeController(WorkingMode.Build).ShowStrategyTag.Should().BeFalse();
-        new WorkingModeController(WorkingMode.Plan).ShowStrategyTag.Should().BeFalse();
-        new WorkingModeController(WorkingMode.Team).ShowStrategyTag.Should().BeTrue();
-    }
-
-    [Theory]
-    [InlineData(WorkingMode.Build, TeamStrategy.Magentic, "BUILD")]
-    [InlineData(WorkingMode.Plan, TeamStrategy.Magentic, "PLAN")]
-    [InlineData(WorkingMode.Team, TeamStrategy.Config, "TEAM · Config")]
-    [InlineData(WorkingMode.Team, TeamStrategy.Magentic, "TEAM · Magentic")]
-    [InlineData(WorkingMode.Team, TeamStrategy.GroupChat, "TEAM · GroupChat")]
-    public void ModeLabel_ReflectsModeAndStrategy(WorkingMode mode, TeamStrategy strategy, string expected)
-    {
-        new WorkingModeController(mode, strategy).ModeLabel.Should().Be(expected);
-    }
-
-    [Fact]
-    public void TeamStrategyOverride_GroupChat_MapsToGroupChatWorkflow()
-    {
-        OrchestrationStreamService.ResolveTeamOverride(TeamStrategy.GroupChat)
-            .Should().Be(OneCode.Core.Coordinator.TeamOrchestrationMode.GroupChat);
-        OrchestrationStreamService.ResolveTeamOverride(TeamStrategy.Magentic)
-            .Should().Be(OneCode.Core.Coordinator.TeamOrchestrationMode.Magentic);
-        OrchestrationStreamService.ResolveTeamOverride(TeamStrategy.Config)
-            .Should().BeNull();
-    }
-
     [Theory]
     [InlineData(0, "(no output)")]
     [InlineData(0, "")]
@@ -171,17 +103,6 @@ public sealed class WorkingModeTests
             .Should().BeFalse();
     }
 
-    [Theory]
-    [InlineData(TeamStrategy.Config, "Config")]
-    [InlineData(TeamStrategy.Magentic, "Magentic")]
-    [InlineData(TeamStrategy.GroupChat, "GroupChat")]
-    public void AgentStatusBarStrategyLabel_ReflectsConfigAndOverrides(
-        TeamStrategy strategy,
-        string expected)
-    {
-        AgentStatusBar.GetStrategyLabel(strategy).Should().Be(expected);
-    }
-
     [Fact]
     public void AgentStatusBar_PreservesExplicitActivityWhenBusyStarts()
     {
@@ -197,9 +118,9 @@ public sealed class WorkingModeTests
     }
 
     [Fact]
-    public void ModeTag_IgnoresStrategy()
+    public void ModeTag_TeamMode_IsPlainTeam()
     {
-        new WorkingModeController(WorkingMode.Team, TeamStrategy.GroupChat)
+        new WorkingModeController(WorkingMode.Team)
             .ModeTag.Should().Be("TEAM");
     }
 }

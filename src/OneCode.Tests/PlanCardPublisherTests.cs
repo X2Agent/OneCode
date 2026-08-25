@@ -44,7 +44,7 @@ public sealed class PlanCardPublisherTests
         // would crash the tool in headless/CI runs where no TUI is attached.
         var sut = new PlanCardPublisher();
 
-        var act = () => sut.Publish("title", Array.Empty<PlanStep>(), PlanCardPhase.Finalizing);
+        var act = () => sut.Publish("title", [], PlanCardPhase.Finalizing);
 
         act.Should().NotThrow();
     }

@@ -32,7 +32,7 @@ public sealed class LsToolTests : IDisposable
     {
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workingDir ?? _projectDir);
-        wd.AdditionalDirectories.Returns(Array.Empty<string>());
+        wd.AdditionalDirectories.Returns([]);
         return wd;
     }
 

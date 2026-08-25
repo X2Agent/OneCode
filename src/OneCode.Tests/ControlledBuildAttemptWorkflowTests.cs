@@ -160,7 +160,7 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
             fingerprint,
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
-            new TaskService(),
+            new BuildTaskLinker(new TaskService()),
             Substitute.For<IClarificationQuestionGenerator>(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
         var host = new ControlledBuildAttemptHost(

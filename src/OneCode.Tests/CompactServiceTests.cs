@@ -145,6 +145,13 @@ public sealed class CompactServiceTests
             sessionIdHolder: new SessionIdHolder(),
             sessionToolSetManager: Substitute.For<OneCode.App.Query.ISessionToolSetManager>());
 
+        var promptManager = new PromptManager();
+        promptManager.RegisterTemplate(new PromptTemplate("system/compact",
+            """
+            Summarize the conversation so far into a concise briefing for continuing work.
+            Respond with <analysis>...</analysis> then <summary>...</summary>.
+            """));
+
         var sut = new CompactService(client, logger,
             Substitute.For<IHookExecutionService>(),
             new CompactSessionDependencies(
@@ -152,7 +159,7 @@ public sealed class CompactServiceTests
                 sessionManager,
                 Substitute.For<IModelManager>(),
                 new OneCode.Infrastructure.TokenEstimator()),
-            new CompactPromptBuilder(new PromptManager()),
+            new CompactPromptBuilder(promptManager),
             new CompactApplier());
         return (sut, client);
     }

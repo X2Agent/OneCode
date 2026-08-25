@@ -17,7 +17,7 @@ public sealed partial class CodeIndexService : ICodeIndexService
     private readonly ConcurrentDictionary<string, List<CodeSymbol>> _index = new(StringComparer.OrdinalIgnoreCase);
 
     // Sorted snapshot of all lowercase keys — rebuilt after each index operation for O(log N) prefix search
-    private volatile string[] _sortedKeys = Array.Empty<string>();
+    private volatile string[] _sortedKeys = [];
 
     // Track which files are indexed
     private readonly ConcurrentDictionary<string, byte> _indexedFiles = new(StringComparer.OrdinalIgnoreCase);
@@ -141,7 +141,7 @@ public sealed partial class CodeIndexService : ICodeIndexService
         string? pathScope = null)
     {
         if (string.IsNullOrWhiteSpace(query))
-            return Array.Empty<CodeSymbolMatch>();
+            return [];
 
         var normalized = query.Trim();
         List<CodeSymbolMatch> results = [];
@@ -227,7 +227,7 @@ public sealed partial class CodeIndexService : ICodeIndexService
     {
         _index.Clear();
         _indexedFiles.Clear();
-        _sortedKeys = Array.Empty<string>();
+        _sortedKeys = [];
         LastIndexedAt = null;
     }
 

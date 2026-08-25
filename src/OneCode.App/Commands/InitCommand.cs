@@ -51,8 +51,9 @@ public sealed class InitCommand(
     {
         var cwd = Directory.GetCurrentDirectory();
         var mdPath = Path.Combine(cwd, "AGENTS.md");
-        var force = args.Contains("--force");
-        var noLlm = args.Contains("--no-llm");
+        var a = CommandArgs.Parse(args);
+        var force = a.Has("force");
+        var noLlm = a.Has("no-llm");
 
         if (File.Exists(mdPath) && !force)
             return CommandResult.Text($"AGENTS.md already exists at {mdPath}.\nUse /init --force to overwrite.");

@@ -32,19 +32,17 @@ public interface ITeamOrchestrationService
     /// <param name="goal">团队目标。</param>
     /// <param name="eventSink">TUI 事件回调（可为 null）。</param>
     /// <param name="ct">取消令牌。</param>
-    /// <param name="overrideMode">
-    /// 运行时覆盖编排模式（Magentic/GroupChat）。
-    /// 传 null 时使用团队 YAML 配置中的 template 字段决定模式；
-    /// 传非 null 值时覆盖 YAML 配置，使用户在 TUI 中切换策略能真正生效。
-    /// </param>
     /// <param name="imagePaths">Optional image file paths for multimodal input.</param>
     /// <param name="sessionId">Optional 会话 Id，关联到 TeamRun 以便跨进程恢复。</param>
+    /// <remarks>
+    /// 编排模式由团队 team.yaml 的 template 字段固定声明，本接口不提供运行期覆盖入口。
+    /// 想改变执行方式请切换团队（ActiveTeam / /team &lt;name&gt;）。
+    /// </remarks>
     Task<TeamRunResult> RunTeamStreamingAsync(
         string teamName,
         string goal,
         Action<OrchestrationEvent>? eventSink,
         CancellationToken ct = default,
-        TeamOrchestrationMode? overrideMode = null,
         IReadOnlyList<string>? imagePaths = null,
         SessionId? sessionId = null);
 
@@ -68,17 +66,19 @@ public interface ITeamOrchestrationService
     Task UnregisterTeamAsync(string teamName, CancellationToken ct = default);
 
     /// <summary>
-    /// 注册内置团队模板（从嵌入式资源加载 feature-impl/code-review/research）。
+    /// 注册内置团队模板（从嵌入式资源加载 code-review/research）。
     /// 幂等：已注册的同名团队不会被覆盖。
-    /// 调用时机：应用启动时调用一次；若 ActiveTeam 未设置，默认为 feature-impl。
+    /// 调用时机：应用启动时调用一次；若 ActiveTeam 未设置，默认为首个内置团队。
     /// </summary>
     Task RegisterBuiltinTeamsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the team's orchestration mode: "groupchat" or "magentic".
+    /// Returns the team's orchestration mode.
     /// Returns null if the team is not registered.
+    /// 显示用标签请使用 <see cref="TeamOrchestrationModeExtensions.ToLabel"/>，
+    /// 不要在本接口消费方手写字符串映射。
     /// </summary>
-    string? GetTeamMode(string teamName);
+    TeamOrchestrationMode? GetTeamMode(string teamName);
 
     /// <summary>
     /// 返回指定团队的成员信息列表（角色名）。用于 TUI 启动横幅和 /team info 命令。
@@ -97,10 +97,64 @@ public interface ITeamOrchestrationService
         CancellationToken ct = default);
 }
 
+/// <summary>
+/// 团队编排模式。
+///
+/// 选型矩阵（docs/team-modes.md 同步维护）：
+///   - 子任务相互独立、编译期可知 → <see cref="ParallelDag"/>（上下文隔离，成本最低）
+///   - 任务需动态分解、成员有上下游分工 → <see cref="Magentic"/>（orchestrator 委派）
+///   - 结论依赖成员互相看到并回应对方观点 → <see cref="GroupChat"/>（全共享上下文，成本最高）
+/// </summary>
 public enum TeamOrchestrationMode
 {
     GroupChat,
     Magentic,
+
+    /// <summary>
+    /// 静态扇出/扇入：每个成员作为独立分支并行执行（上下文隔离），最后聚合结论。
+    /// 适用于视角独立的多路审查/调研场景（子任务编译期确定、无相互依赖）。
+    /// </summary>
+    ParallelDag,
+}
+
+/// <summary>
+/// <see cref="TeamOrchestrationMode"/> 的单一事实源扩展：
+/// YAML template 字符串 ↔ 枚举 ↔ 显示标签 的全部映射集中在此，
+/// TUI / 命令层禁止再手写 "magentic"/"groupchat"/"parallel-dag" 字符串 switch。
+/// </summary>
+public static class TeamOrchestrationModeExtensions
+{
+    /// <summary>解析 YAML team.yaml 的 template 字段；null 或未知值回退 GroupChat。</summary>
+    public static TeamOrchestrationMode FromYamlTemplate(string? template) => template?.Trim().ToLowerInvariant() switch
+    {
+        "magentic-orchestrator" or "magentic" => TeamOrchestrationMode.Magentic,
+        "parallel-dag" => TeamOrchestrationMode.ParallelDag,
+        _ => TeamOrchestrationMode.GroupChat,
+    };
+
+    /// <summary>序列化回 YAML template 字段名（与 <see cref="FromYamlTemplate"/> 往返一致）。</summary>
+    public static string ToYamlName(this TeamOrchestrationMode mode) => mode switch
+    {
+        TeamOrchestrationMode.Magentic => "magentic-orchestrator",
+        TeamOrchestrationMode.ParallelDag => "parallel-dag",
+        _ => "groupchat",
+    };
+
+    /// <summary>TUI / CLI 显示标签。</summary>
+    public static string ToLabel(this TeamOrchestrationMode mode) => mode switch
+    {
+        TeamOrchestrationMode.Magentic => "Magentic",
+        TeamOrchestrationMode.ParallelDag => "ParallelDag",
+        _ => "GroupChat",
+    };
+
+    /// <summary>一行适用性说明，用于 /team info 等场景透出选型指引。</summary>
+    public static string ToGuidance(this TeamOrchestrationMode mode) => mode switch
+    {
+        TeamOrchestrationMode.Magentic => "Orchestrator 动态委派 Worker — 适合任务可分解、成员有分工的实现类工作",
+        TeamOrchestrationMode.ParallelDag => "多视角并行独立执行，上下文隔离后聚合 — 适合视角独立的审查/调研（成本最低）",
+        _ => "对等成员轮询发言共享上下文 — 适合需要观点碰撞的讨论/选型（成本最高）",
+    };
 }
 
 /// <summary>

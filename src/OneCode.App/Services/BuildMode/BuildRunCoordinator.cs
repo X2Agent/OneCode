@@ -1,6 +1,5 @@
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
-using OneCode.Core.Tasks;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 
 namespace OneCode.App.Services.BuildMode;
@@ -57,7 +56,7 @@ public sealed partial class BuildRunCoordinator(
     IWorkspaceFingerprintProvider fingerprintProvider,
     RequirementAssessmentService assessmentService,
     BuildStateTransitionService transitions,
-    ITaskService taskService,
+    BuildTaskLinker taskLinker,
     IClarificationQuestionGenerator clarificationGenerator,
     ILogger<BuildRunCoordinator> logger) : IBuildRunCoordinator
 {
@@ -76,56 +75,41 @@ public sealed partial class BuildRunCoordinator(
         var existing = await store.LoadAsync(conversationId, ct).ConfigureAwait(false);
         if (existing is not null && !BuildStateTransitionService.IsTerminal(existing.State))
         {
-            if (prescribedPlan is not null
-                && existing.Plan is not null
-                && !PlansMatch(existing.Plan, prescribedPlan))
-            {
-                throw new InvalidOperationException(
-                    $"BuildRun '{existing.Id}' cannot replace its persisted plan during resume.");
-            }
-
             var currentFingerprint = await fingerprintProvider.ComputeAsync(workingDirectory, ct).ConfigureAwait(false);
-            var expectedFingerprint = existing.State == BuildRunState.Accepting
-                ? existing.CommitWorkspaceFingerprint
-                : existing.WorkspaceFingerprint;
-            if (!string.Equals(expectedFingerprint, currentFingerprint, StringComparison.Ordinal))
+            var decision = BuildResumePolicy.Evaluate(existing, prescribedPlan, currentFingerprint);
+
+            switch (decision.Action)
             {
-                var blocked = transitions.Transition(existing, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
+                case BuildResumeAction.PlanConflict:
+                    throw new InvalidOperationException(
+                        $"BuildRun '{existing.Id}' cannot replace its persisted plan during resume.");
+
+                case BuildResumeAction.FingerprintDrift:
+                    var blocked = transitions.Transition(existing, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
+                    {
+                        TerminalReason = BuildTerminalReason.Blocked,
+                        FailureSummary = decision.FailureSummary,
+                    };
+                    return await SaveAndReloadAsync(
+                        blocked,
+                        existing.Version,
+                        ct,
+                        durableStateObserver).ConfigureAwait(false);
+
+                case BuildResumeAction.ConfirmCommit:
                 {
-                    TerminalReason = BuildTerminalReason.Blocked,
-                    FailureSummary = existing.State == BuildRunState.Accepting
-                        ? "Workspace changed after final validation; commit recovery requires manual reconciliation."
-                        : "Workspace changed after the BuildRun checkpoint; re-baselining is required before writes can resume.",
-                };
-                return await SaveAndReloadAsync(
-                    blocked,
-                    existing.Version,
-                    ct,
-                    durableStateObserver).ConfigureAwait(false);
-            }
+                    var committed = await ConfirmCommitAsync(existing.Id, ct).ConfigureAwait(false);
+                    durableStateObserver?.Invoke(committed);
+                    return committed;
+                }
 
-            if (existing.State == BuildRunState.Accepting)
-            {
-                var committed = await ConfirmCommitAsync(existing.Id, ct).ConfigureAwait(false);
-                durableStateObserver?.Invoke(committed);
-                return committed;
-            }
+                case BuildResumeAction.ContinueAssessment:
+                    return await ContinueAssessmentAsync(
+                        existing,
+                        ct,
+                        durableStateObserver).ConfigureAwait(false);
 
-            if (existing.State is BuildRunState.Intake or BuildRunState.Assessing)
-            {
-                return await ContinueAssessmentAsync(
-                    existing,
-                    ct,
-                    durableStateObserver).ConfigureAwait(false);
-            }
-
-            if (existing.State == BuildRunState.Clarifying)
-            {
-                // A persisted prescribed plan is already an approved scope contract. Older
-                // checkpoints may have entered Clarifying before this invariant was enforced;
-                // resume them directly instead of asking the user to approve the same plan again.
-                if (existing.Plan is not null)
-                {
+                case BuildResumeAction.ResumePrescribedPlan:
                     return await PrepareForExecutionAsync(
                         existing,
                         CreateScope(existing.IntakePrompt, "prescribed-plan", DateTimeOffset.UtcNow, existing.Plan),
@@ -133,43 +117,31 @@ public sealed partial class BuildRunCoordinator(
                         ct,
                         durableStateObserver,
                         existing.Plan).ConfigureAwait(false);
-                }
 
-                return await ContinueClarificationAsync(
-                    existing,
-                    prompt,
-                    ct,
-                    durableStateObserver).ConfigureAwait(false);
+                case BuildResumeAction.ContinueClarification:
+                    return await ContinueClarificationAsync(
+                        existing,
+                        prompt,
+                        ct,
+                        durableStateObserver).ConfigureAwait(false);
+
+                case BuildResumeAction.PrepareFromScope:
+                    return await PrepareForExecutionAsync(
+                        existing,
+                        existing.Scope
+                            ?? throw new InvalidDataException($"BuildRun '{existing.Id}' lost its confirmed scope."),
+                        DateTimeOffset.UtcNow,
+                        ct,
+                        durableStateObserver,
+                        prescribedPlan).ConfigureAwait(false);
+
+                case BuildResumeAction.ParkAtGate:
+                default:
+                    // Planned 审批门与 Implementing/Verifying/Recovering 等执行中态：
+                    // 计划/运行停靠在当前状态，等待 ApprovePlan / 工作流恢复驱动。
+                    durableStateObserver?.Invoke(existing);
+                    return existing;
             }
-
-            if (existing.State is BuildRunState.ScopeConfirmed or BuildRunState.Planning)
-            {
-                return await PrepareForExecutionAsync(
-                    existing,
-                    existing.Scope
-                        ?? throw new InvalidDataException($"BuildRun '{existing.Id}' lost its confirmed scope."),
-                    DateTimeOffset.UtcNow,
-                    ct,
-                    durableStateObserver,
-                    prescribedPlan).ConfigureAwait(false);
-            }
-
-            // Planned is a user approval gate: the plan stays parked here until the user approves
-            // the plan + tool policy (ApprovePlanAsync) or rejects it (RejectPlanAsync).
-            if (existing.State == BuildRunState.Planned)
-            {
-                durableStateObserver?.Invoke(existing);
-                return existing;
-            }
-
-            if (existing.State is BuildRunState.Implementing or BuildRunState.Verifying or BuildRunState.Recovering)
-            {
-                durableStateObserver?.Invoke(existing);
-                return existing;
-            }
-
-            durableStateObserver?.Invoke(existing);
-            return existing;
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -253,7 +225,7 @@ public sealed partial class BuildRunCoordinator(
                 $"BuildRun '{runId}' cannot prepare an attempt from state '{current.State}'.");
         }
 
-        var prepared = ResetLinkedTasksForRecovery(current) with
+        var prepared = taskLinker.ResetLinkedTasksForRecovery(current) with
         {
             State = BuildRunState.Implementing,
             Validations = [],
@@ -492,7 +464,7 @@ public sealed partial class BuildRunCoordinator(
                 TerminalReason = result.TerminalReason,
                 FailureSummary = result.ValidationFailureSummary ?? result.BudgetExceededReason,
             };
-            MarkLinkedTasksTerminal(
+            taskLinker.MarkLinkedTasksTerminal(
                 current,
                 target == BuildRunState.Cancelled ? TaskStatus.Cancelled : TaskStatus.Failed);
             return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
@@ -505,7 +477,7 @@ public sealed partial class BuildRunCoordinator(
                 TerminalReason = BuildTerminalReason.ValidationFailed,
                 FailureSummary = result.ValidationFailureSummary ?? "Final validation did not pass.",
             };
-            MarkLinkedTasksTerminal(current, TaskStatus.Failed);
+            taskLinker.MarkLinkedTasksTerminal(current, TaskStatus.Failed);
             return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
         }
 
@@ -522,7 +494,7 @@ public sealed partial class BuildRunCoordinator(
                 TerminalReason = BuildTerminalReason.ValidationFailed,
                 FailureSummary = ex.Message,
             };
-            MarkLinkedTasksTerminal(current, TaskStatus.Failed);
+            taskLinker.MarkLinkedTasksTerminal(current, TaskStatus.Failed);
             return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
         }
         var commitFingerprint = await fingerprintProvider.ComputeAsync(
@@ -539,185 +511,6 @@ public sealed partial class BuildRunCoordinator(
         return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
     }
 
-    private async Task<BuildRun> ContinueAssessmentAsync(
-        BuildRun current,
-        CancellationToken ct,
-        Action<BuildRun>? durableStateObserver = null)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var run = current;
-        if (run.State == BuildRunState.Intake)
-        {
-            run = transitions.Transition(run, BuildRunState.Assessing, now);
-            run = await SaveAndReloadAsync(
-                run,
-                run.Version,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        var assessment = run.Assessment ?? assessmentService.Assess(run.IntakePrompt);
-        if (run.Plan is null && assessment.RequiresClarification)
-        {
-            IReadOnlyList<string> questions;
-            try
-            {
-                questions = (await clarificationGenerator.GenerateAsync(run.IntakePrompt, assessment, ct).ConfigureAwait(false)).Questions;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return await BlockClarificationFailureAsync(run, ex, ct, durableStateObserver).ConfigureAwait(false);
-            }
-
-            run = transitions.Transition(run, BuildRunState.Clarifying, now) with
-            {
-                Assessment = assessment,
-                ClarificationQuestions = questions,
-            };
-            return await SaveAndReloadAsync(
-                run,
-                run.Version,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        run = run with { Assessment = assessment };
-        return await PrepareForExecutionAsync(
-            run,
-            CreateScope(run.IntakePrompt, run.Plan is null ? "runtime-derived" : "prescribed-plan", now, run.Plan),
-            now,
-            ct,
-            durableStateObserver,
-            run.Plan).ConfigureAwait(false);
-    }
-
-    private async Task<BuildRun> ContinueClarificationAsync(
-        BuildRun current,
-        string response,
-        CancellationToken ct,
-        Action<BuildRun>? durableStateObserver = null)
-    {
-        var now = DateTimeOffset.UtcNow;
-        if (current.ProposedScope is not null && IsConfirmation(response))
-        {
-            var confirmed = current.ProposedScope with
-            {
-                ConfirmedBy = "user",
-                ConfirmedAt = now,
-            };
-            return await PrepareForExecutionAsync(
-                current,
-                confirmed,
-                now,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        var combined = $"{current.IntakePrompt}\nClarification response: {response.Trim()}";
-        var assessment = assessmentService.Assess(combined);
-        BuildScopeSnapshot? proposed = null;
-        IReadOnlyList<string> questions;
-        if (assessment.RequiresClarification)
-        {
-            try
-            {
-                questions = (await clarificationGenerator.GenerateAsync(combined, assessment, ct).ConfigureAwait(false)).Questions;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return await BlockClarificationFailureAsync(current, ex, ct, durableStateObserver).ConfigureAwait(false);
-            }
-        }
-        else
-        {
-            proposed = CreateScope(combined, "pending-user-confirmation", now, current.Plan);
-            questions = ["开始修改前，请确认建议的任务范围；也可以取消或补充修正。"];
-        }
-
-        var updated = current with
-        {
-            IntakePrompt = combined,
-            Assessment = assessment,
-            ProposedScope = proposed,
-            ClarificationQuestions = questions,
-            SequenceNumber = current.SequenceNumber + 1,
-            UpdatedAt = now,
-        };
-        return await SaveAndReloadAsync(updated, current.Version, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Fail-closed clarification: the generator refused (model error / no valid questions),
-    /// so the run is parked as Blocked instead of falling back to template questions.
-    /// </summary>
-    private async Task<BuildRun> BlockClarificationFailureAsync(
-        BuildRun run,
-        Exception error,
-        CancellationToken ct,
-        Action<BuildRun>? durableStateObserver = null)
-    {
-        var blocked = transitions.Transition(run, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
-        {
-            TerminalReason = BuildTerminalReason.Blocked,
-            FailureSummary = $"澄清问题生成失败：{error.Message}",
-        };
-        return await SaveAndReloadAsync(blocked, run.Version, ct, durableStateObserver).ConfigureAwait(false);
-    }
-
-    private async Task<BuildRun> PrepareForExecutionAsync(
-        BuildRun current,
-        BuildScopeSnapshot scope,
-        DateTimeOffset now,
-        CancellationToken ct,
-        Action<BuildRun>? durableStateObserver = null,
-        BuildPlan? prescribedPlan = null)
-    {
-        var run = current;
-        if (run.State is BuildRunState.Assessing or BuildRunState.Clarifying)
-        {
-            run = transitions.Transition(run, BuildRunState.ScopeConfirmed, now) with
-            {
-                ProposedScope = null,
-                Scope = scope,
-                ClarificationQuestions = [],
-            };
-            run = await SaveAndReloadAsync(
-                run,
-                current.Version,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        if (run.State == BuildRunState.ScopeConfirmed)
-        {
-            run = transitions.Transition(run, BuildRunState.Planning, now);
-            run = await SaveAndReloadAsync(
-                run,
-                run.Version,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        if (run.State == BuildRunState.Planning)
-        {
-            var plan = run.Plan
-                ?? prescribedPlan
-                ?? CreateQuickFixPlan(scope);
-            BuildPlanValidator.Validate(plan);
-            plan = LinkPlanTasks(run, plan);
-            run = run with { Plan = plan };
-            run = transitions.Transition(run, BuildRunState.Planned, now);
-            run = await SaveAndReloadAsync(
-                run,
-                run.Version,
-                ct,
-                durableStateObserver).ConfigureAwait(false);
-        }
-
-        // Planned is a terminal park for this method: execution starts only after the user
-        // approves the plan + tool policy via ApprovePlanAsync (see IBuildRunCoordinator).
-        return run;
-    }
 
     private async Task<BuildRun> SaveAndReloadAsync(
         BuildRun run,
@@ -749,10 +542,4 @@ public sealed partial class BuildRunCoordinator(
         if (expectedWorkflowFencingToken != currentToken)
             throw new InvalidOperationException("Stale BuildRun workflow fencing token.");
     }
-
-    private static bool IsConfirmation(string response) =>
-        response.Trim().Equals("confirm", StringComparison.OrdinalIgnoreCase)
-        || response.Trim().Equals("confirmed", StringComparison.OrdinalIgnoreCase)
-        || response.Trim().Equals("确认", StringComparison.Ordinal)
-        || response.Trim().Equals("确认执行", StringComparison.Ordinal);
 }

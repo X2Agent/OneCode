@@ -13,7 +13,7 @@ namespace OneCode.Tests;
 
 public sealed class MafTeamOrchestrationTests
 {
-    private static TeamOrchestrationService CreateSut()
+    internal static TeamOrchestrationService CreateSut()
     {
         var chatClient = Substitute.For<IChatClient>();
         var promptManager = new PromptManager();
@@ -129,7 +129,7 @@ public sealed class MafTeamOrchestrationTests
             await sut.RegisterTeamAsync("my-team", yamlPath, TestContext.Current.CancellationToken);
 
             sut.RegisteredTeams.Should().Contain("my-team");
-            sut.GetTeamMode("my-team").Should().Be("groupchat");
+            sut.GetTeamMode("my-team").Should().Be(OneCode.Core.Coordinator.TeamOrchestrationMode.GroupChat);
         }
         finally
         {
@@ -162,7 +162,7 @@ public sealed class MafTeamOrchestrationTests
 
             await sut.RegisterTeamAsync("magentic-team", yamlPath, TestContext.Current.CancellationToken);
 
-            sut.GetTeamMode("magentic-team").Should().Be("magentic");
+            sut.GetTeamMode("magentic-team").Should().Be(OneCode.Core.Coordinator.TeamOrchestrationMode.Magentic);
         }
         finally
         {
@@ -312,7 +312,7 @@ public sealed class MafTeamOrchestrationTests
         }
     }
 
-    private static string CreateTempDir()
+    internal static string CreateTempDir()
     {
         var path = Path.Combine(Path.GetTempPath(), $"MafTeamTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);

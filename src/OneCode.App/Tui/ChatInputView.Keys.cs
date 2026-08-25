@@ -158,18 +158,9 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Shift+Tab — 在 TEAM 模式下切换 Magentic ↔ GroupChat 策略。
-        // 在补全激活时，Shift+Tab 仍由 ContextAutocomplete 的 shift+tab=confirm:cycleMode 处理，
-        // 但补全未激活时由这里拦截，调用 ToggleStrategyRequested。
-        if (action == KeybindingDefaults.ActionChatToggleStrategy && !_completion.IsCompletionActive)
-        {
-            ToggleStrategyRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
-        // Ctrl+Shift+T — 在 TEAM 模式下循环切换已注册团队。
-        // 补全激活时不拦截（避免与可能的补全键冲突）。
+        // Shift+Tab — 在 TEAM 模式下循环切换已注册团队。
+        // 编排模式是团队 YAML 的固定属性，运行期不可覆盖（无策略切换键）。
+        // 补全激活时不拦截（Shift+Tab 仍由 ContextAutocomplete 的 shift+tab=confirm:cycleMode 处理）。
         if (action == KeybindingDefaults.ActionChatCycleTeam && !_completion.IsCompletionActive)
         {
             CycleTeamRequested?.Invoke();

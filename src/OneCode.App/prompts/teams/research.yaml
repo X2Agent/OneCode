@@ -2,6 +2,7 @@
 # 模式：GroupChat（对等讨论，需求分析与技术选型）
 # 适用：新项目调研、需求分析、技术选型、可行性研究
 # 成员：planner + researcher x2 + architect
+# 成本：high — 全员共享上下文、按轮次轮询发言，仅用于需要观点碰撞的讨论场景
 name: research
 description: 项目调研团队 - 需求拆解、并行调研、架构评估
 template: groupchat

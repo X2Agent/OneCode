@@ -50,7 +50,7 @@ public sealed class StatusCommand(
 
         var sb = new StringBuilder("Runtime Status:");
 
-        // Session identity (formerly /session info) — lifecycle ops remain on /session.
+        // Session identity — lifecycle ops remain on /session.
         if (conv is null)
         {
             sb.AppendLine("  Session:     (none)");

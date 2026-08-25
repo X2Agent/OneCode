@@ -290,6 +290,56 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         persisted!.Budget.LastActivityAt.Should().NotBeNull("wall clock tracking must stamp activity");
     }
 
+    [Fact]
+    public async Task PlanAsync_PublishesPlanListAndProgress()
+    {
+        // P1：分解完成后必须发布 TuiGoalPlan（编号清单）+ 开始执行进度，消除规划期静默。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "plan-events"));
+        var run = await CreateClaimedRunAsync(store);
+        var (runtime, events) = CreateRuntimeWithEvents(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1)),
+            new FakeWorkspaceService());
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+
+        await runtime.PlanAsync(
+            new GoalWorkflowInput(run.Id, run.Goal, "model", "tools"),
+            TestContext.Current.CancellationToken);
+
+        var published = new List<TuiEvent>();
+        while (events.Reader.TryRead(out var evt))
+            published.Add(evt);
+        published.OfType<TuiGoalPlan>().Should().ContainSingle()
+            .Which.Steps.Should().ContainSingle().Which.Should().NotBeNullOrEmpty();
+        published.OfType<TuiModeProgress>().Should()
+            .Contain(p => p.Message.Contains("已分解为"));
+    }
+
+    [Fact]
+    public async Task ExecuteNext_PublishesStepStartAndReceiptProgress()
+    {
+        // P0/P3：步骤开始（含预算快照）与步骤回执（✓/✗ + 轮数 + 文件数）必须发布。
+        var store = new JsonGoalRunStore(Path.Combine(_root, "step-events"));
+        var plan = new[] { Snapshot(1), Snapshot(2) };
+        var run = await CreateClaimedRunAsync(store, plan, GoalRunState.Executing);
+        var (runtime, events) = CreateRuntimeWithEvents(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1)),
+            new FakeWorkspaceService());
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, plan, [], run.Budget, 0, false, GoalRunState.Executing);
+
+        await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+
+        var published = new List<TuiEvent>();
+        while (events.Reader.TryRead(out var evt))
+            published.Add(evt);
+        published.OfType<TuiModeProgress>().Should().Contain(p => p.Message.Contains("子目标 1/2"));
+        published.OfType<TuiModeProgress>().Should().Contain(p => p.Message.Contains("✓ 子目标 1/2 完成"));
+    }
+
     private GoalWorkflowRuntime CreateRuntime(
         IGoalRunStore store,
         IGoalPlanningService planning,

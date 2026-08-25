@@ -179,7 +179,7 @@ public sealed partial class MemoryService : IMemoryService
     {
         var tokens = Tokenize(query);
         if (tokens.Count == 0)
-            return Array.Empty<ScopedEntry>();
+            return [];
 
         return entries
             .Select(e => e with { RelevanceScore = Score(e, tokens) })
@@ -193,7 +193,7 @@ public sealed partial class MemoryService : IMemoryService
     private static IReadOnlyList<string> Tokenize(string? query)
     {
         if (string.IsNullOrWhiteSpace(query))
-            return Array.Empty<string>();
+            return [];
 
         return QueryTokenRegex().Matches(query)
             .Select(match => match.Value.Trim().ToLowerInvariant())

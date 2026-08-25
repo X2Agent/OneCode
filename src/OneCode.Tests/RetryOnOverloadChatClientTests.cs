@@ -7,6 +7,128 @@ using System.Runtime.CompilerServices;
 
 namespace OneCode.Tests;
 
+/// <summary>
+/// 空 choices 响应检测测试：OpenRouter 等供应商在上游过载/内容过滤时
+/// 返回 HTTP 200 + 空 choices，官方 SDK 反序列化会在 ChatCompletion.get_Role()
+/// 内部抛 ArgumentOutOfRangeException。HasEmptyChoices 用于在 HTTP 层拦截。
+/// </summary>
+public sealed class OpenAiResponseSanitizerEmptyChoicesTests
+{
+    [Fact]
+    public void HasEmptyChoices_EmptyChoicesArray_ReturnsTrue()
+    {
+        const string body = """{"id":"x","object":"chat.completion","choices":[],"usage":{"total_tokens":0}}""";
+        OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasEmptyChoices_MissingChoicesOnChatCompletion_ReturnsTrue()
+    {
+        const string body = """{"id":"x","object":"chat.completion","created":1}""";
+        OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasEmptyChoices_NormalCompletion_ReturnsFalse()
+    {
+        const string body = """{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}""";
+        OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasEmptyChoices_ErrorBodyWithoutChoices_ReturnsTrue()
+    {
+        // OpenRouter 中间件错误：HTTP 200 + {"error":{...}}，无 choices 字段。
+        const string body = """{"error":{"message":"Upstream overloaded","code":503}}""";
+        OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("<html><body>502 Bad Gateway</body></html>")]
+    [InlineData("not json at all")]
+    [InlineData("")]
+    public void HasEmptyChoices_NonJsonBody_ReturnsFalse(string body)
+    {
+        // 非 JSON 响应体（网关 HTML 错误页/截断流）不是补全响应，
+        // 不得误判为 empty-choices 触发重试——应走上层协议错误路径。
+        OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasEmptyChoices_JsonArrayOrScalarRoot_ReturnsFalse()
+    {
+        // 顶层非对象（数组/标量）不是 chat.completion 形态。
+        OpenAiResponseSanitizer.HasEmptyChoices("[1,2,3]").Should().BeFalse();
+        OpenAiResponseSanitizer.HasEmptyChoices("\"plain string\"").Should().BeFalse();
+    }
+}
+
+/// <summary>
+/// HTTP 200 + 显式错误体（{"error":{...}}）的提取与瞬时性分类测试。
+/// 上游真实错误消息/错误码必须被保留（不再笼统归为 empty choices），
+/// 且仅瞬时错误（5xx/429/过载措辞）参与重试，永久错误（401 等）快速失败。
+/// </summary>
+public sealed class UpstreamProviderErrorTests
+{
+    [Theory]
+    [InlineData("""{"error":{"message":"Upstream error from Nvidia: Service temporarily overloaded","code":502}}""",
+        "Upstream error from Nvidia: Service temporarily overloaded", "502")]
+    [InlineData("""{"error":"simple string error"}""", "simple string error", null)]
+    [InlineData("""{"error":{"metadata":{"raw":"raw upstream failure"},"code":"overloaded"}}""",
+        "raw upstream failure", "overloaded")]
+    public void TryExtractUpstreamError_ErrorBody_ParsesMessageAndCode(
+        string body, string expectedMessage, string? expectedCode)
+    {
+        OpenAiResponseSanitizer.TryExtractUpstreamError(body, out var message, out var code)
+            .Should().BeTrue();
+        message.Should().Be(expectedMessage);
+        code.Should().Be(expectedCode);
+    }
+
+    [Theory]
+    [InlineData("""{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}""")]
+    [InlineData("not json at all")]
+    [InlineData("""{"other":"field"}""")]
+    [InlineData("""{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}],"error":null}""")]
+    [InlineData("""{"choices":[{"index":0,"message":{"role":"assistant","content":"there was an error earlier"}}]}""")]
+    [InlineData("""{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],"error":{"message":"ignored","code":500}}""")]
+    public void TryExtractUpstreamError_NonErrorBody_ReturnsFalse(string body)
+    {
+        OpenAiResponseSanitizer.TryExtractUpstreamError(body, out _, out _)
+            .Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("502", true)]
+    [InlineData("429", true)]
+    [InlineData("408", true)]
+    [InlineData("401", false)]
+    [InlineData("400", false)]
+    public void ClassifyTransient_NumericCode_FollowsHttpStatusSemantics(string code, bool expectedTransient)
+    {
+        UpstreamProviderErrorException.ClassifyTransient(code, "any message").Should().Be(expectedTransient);
+    }
+
+    [Fact]
+    public void ClassifyTransient_NonNumericCode_UsesMessageKeywords()
+    {
+        UpstreamProviderErrorException.ClassifyTransient("overloaded", "upstream busy")
+            .Should().BeTrue();
+        UpstreamProviderErrorException.ClassifyTransient("insufficient_quota", "quota exceeded")
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void Exception_CarriesUpstreamDetails_AndTransientFlag()
+    {
+        var ex = new UpstreamProviderErrorException(
+            "Upstream error from Nvidia: Service temporarily overloaded", "502");
+        ex.UpstreamErrorCode.Should().Be("502");
+        ex.IsTransient.Should().BeTrue();
+        ex.Message.Should().Contain("Nvidia");
+    }
+}
+
 public sealed class RetryOnOverloadChatClientTests
 {
     [Fact]
@@ -17,7 +139,7 @@ public sealed class RetryOnOverloadChatClientTests
 
         var updates = new List<ChatResponseUpdate>();
         await foreach (var update in sut.GetStreamingResponseAsync(
-            Array.Empty<ChatMessage>(),
+            [],
             cancellationToken: TestContext.Current.CancellationToken))
         {
             updates.Add(update);
@@ -25,6 +147,76 @@ public sealed class RetryOnOverloadChatClientTests
 
         inner.Attempts.Should().Be(3);
         updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_RetriesEmptyChoicesExceptionBeforeFirstChunk()
+    {
+        // 免费模型过载时返回 HTTP 200 + 空 choices（body 内嵌 502 错误），
+        // OpenAiResponseSanitizingHandler 将其转为 EmptyChoicesResponseException。
+        // 流式路径必须与非流式路径一致地按瞬时上游错误重试，而不是直接抛给上层。
+        var inner = new RateLimitedStreamingClient(
+            failuresBeforeSuccess: 1,
+            () => new EmptyChoicesResponseException(
+                "Provider returned HTTP 200 with no completion choices. Body preview: {\"error\":{\"code\":502}}"));
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 2);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        inner.Attempts.Should().Be(2);
+        updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_RetriesTransientUpstreamErrorBodyAndRecovers()
+    {
+        // 上游过载错误体（Nvidia 502）被 Handler 转为瞬时的 UpstreamProviderErrorException，
+        // 流式路径应与非流式路径一致地自动重试。
+        var inner = new RateLimitedStreamingClient(
+            failuresBeforeSuccess: 1,
+            () => new UpstreamProviderErrorException(
+                "Upstream error from Nvidia: Service temporarily overloaded", "502"));
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 2);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        inner.Attempts.Should().Be(2);
+        updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_DoesNotRetryPermanentUpstreamError()
+    {
+        // 401 无效密钥属于永久错误——立即失败，不浪费重试预算。
+        var inner = new RateLimitedStreamingClient(
+            failuresBeforeSuccess: 5,
+            () => new UpstreamProviderErrorException("Invalid API key provided", "401"));
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 3);
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in sut.GetStreamingResponseAsync(
+                [],
+                cancellationToken: TestContext.Current.CancellationToken))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<UpstreamProviderErrorException>()
+            .Where(ex => ex.Message.Contains("Invalid API key"));
+        inner.Attempts.Should().Be(1);
     }
 
     [Fact]
@@ -36,7 +228,7 @@ public sealed class RetryOnOverloadChatClientTests
         Func<Task> act = async () =>
         {
             await foreach (var _ in sut.GetStreamingResponseAsync(
-                Array.Empty<ChatMessage>(),
+                [],
                 cancellationToken: TestContext.Current.CancellationToken))
             {
             }
@@ -54,7 +246,7 @@ public sealed class RetryOnOverloadChatClientTests
 
         var updates = new List<ChatResponseUpdate>();
         await foreach (var update in sut.GetStreamingResponseAsync(
-            Array.Empty<ChatMessage>(),
+            [],
             cancellationToken: TestContext.Current.CancellationToken))
         {
             updates.Add(update);
@@ -76,7 +268,7 @@ public sealed class RetryOnOverloadChatClientTests
 
         var updates = new List<ChatResponseUpdate>();
         await foreach (var update in sut.GetStreamingResponseAsync(
-            Array.Empty<ChatMessage>(),
+            [],
             cancellationToken: TestContext.Current.CancellationToken))
         {
             updates.Add(update);
@@ -97,10 +289,10 @@ public sealed class RetryOnOverloadChatClientTests
 
     private sealed class RateLimitedStreamingClient : IChatClient
     {
-        private readonly Func<ClientResultException> _exceptionFactory;
+        private readonly Func<Exception> _exceptionFactory;
         private int _remainingFailures;
 
-        public RateLimitedStreamingClient(int failuresBeforeSuccess, Func<ClientResultException> exceptionFactory)
+        public RateLimitedStreamingClient(int failuresBeforeSuccess, Func<Exception> exceptionFactory)
         {
             _remainingFailures = failuresBeforeSuccess;
             _exceptionFactory = exceptionFactory;
@@ -342,7 +534,7 @@ public sealed class RetryOnOverloadChatClientTests
                 return true;
             }
 
-            values = Array.Empty<string>();
+            values = [];
             return false;
         }
     }

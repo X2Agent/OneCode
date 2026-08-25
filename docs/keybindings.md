@@ -83,7 +83,7 @@
 1. **用户绑定追加在默认绑定之后**，相同按键的用户绑定覆盖默认绑定
 2. **设为 `null` 表示显式解绑**：`"ctrl+s": null` 会禁用该默认快捷键
 3. **和弦序列**用空格分隔：`"ctrl+x ctrl+k": "chat:killAgents"`（用户自定义示例）
-4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+g": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告）
+4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+t": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告；注意 ctrl+g 已被默认绑定为 chat:togglePlanPanel）
 
 ### 按键语法
 
@@ -149,8 +149,7 @@
 | `Shift+Down` / `Ctrl+PgDn` | `chat:scrollDown` | 对话区向下滚动（行级，3行） |
 | `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
-| `Shift+Tab` | `chat:toggleStrategy` | TEAM 模式下切换 Magentic ↔ GroupChat 策略 |
-| `Ctrl+Shift+T` | `chat:cycleTeam` | TEAM 模式下循环切换已注册团队 |
+| `Shift+Tab` | `chat:cycleTeam` | TEAM 模式下循环切换已注册团队（编排模式由团队 team.yaml 固定声明） |
 
 ### Autocomplete（自动补全）
 
@@ -253,7 +252,7 @@
 
 ### 示例 2：绑定斜杠命令
 
-将 `Ctrl+G` 绑定到 `/compact` 命令：
+将 `Ctrl+T` 绑定到 `/compact` 命令：
 
 ```json
 {
@@ -261,7 +260,7 @@
     {
       "context": "Chat",
       "bindings": {
-        "ctrl+g": "command:compact"
+        "ctrl+t": "command:compact"
       }
     }
   ]

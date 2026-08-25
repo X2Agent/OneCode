@@ -9,7 +9,8 @@ namespace OneCode.App.Services.Agent;
 /// <summary>
 /// 构建压缩管道 ContextProvider。
 /// 按模型上下文窗口比例计算阈值，自动适配不同模型（32K ~ 1M+）。
-/// 摘要 prompt 经 <see cref="CompactPromptBuilder"/> 统一加载（system/compact + 内置兜底）。
+/// 摘要 prompt 经 <see cref="CompactPromptBuilder"/> 统一加载（system/compact）；
+/// 缺失时异常向上传播，在 Agent 管道构建期 fail-fast。
 /// </summary>
 public sealed class CompactionProviderBuilder
 {
@@ -43,7 +44,8 @@ public sealed class CompactionProviderBuilder
 
         var maxContextWindow = modelInfo?.ContextWindow ?? ModelContextDefaults.Resolve(modelId);
         var maxOutputTokens = modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 8192;
-        var summarizationPrompt = await LoadSummarizationPromptAsync(ct).ConfigureAwait(false);
+        var summarizationPrompt = await _compactPromptBuilder
+            .GetSummarizationPromptAsync(ct).ConfigureAwait(false);
         var compactionProvider = CompactionPipelineBuilder.BuildForMainAgent(
             _chatClient, _loggerFactory, maxContextWindow, maxOutputTokens, summarizationPrompt);
 
@@ -65,23 +67,10 @@ public sealed class CompactionProviderBuilder
         var maxContextWindow = modelInfo?.ContextWindow ?? ModelContextDefaults.Resolve(modelId);
         var maxOutputTokens = maxOutputTokensOverride
             ?? (modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 4096);
-        var summarizationPrompt = await LoadSummarizationPromptAsync(ct).ConfigureAwait(false);
+        var summarizationPrompt = await _compactPromptBuilder
+            .GetSummarizationPromptAsync(ct).ConfigureAwait(false);
 
         return CompactionPipelineBuilder.BuildForWorkerAgent(
             _chatClient, _loggerFactory, maxContextWindow, maxOutputTokens, summarizationPrompt);
-    }
-
-    private async Task<string> LoadSummarizationPromptAsync(CancellationToken ct)
-    {
-        try
-        {
-            return await _compactPromptBuilder.GetSummarizationPromptAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _loggerFactory.CreateLogger<CompactionProviderBuilder>()
-                .LogDebug(ex, "Failed to load system/compact prompt; using built-in fallback");
-            return CompactPromptBuilder.FallbackCompactPrompt;
-        }
     }
 }

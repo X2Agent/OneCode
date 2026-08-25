@@ -79,9 +79,54 @@ internal sealed class TeamWorkflowRunner(
         {
             TeamOrchestrationMode.Magentic => RunMagenticTeamAsync(
                 config, taskGoal, transaction, cwd, eventSink, ct, imagePaths, taskAllowedTools),
+            TeamOrchestrationMode.ParallelDag => RunParallelBranchAsync(
+                config, task, taskGoal, transaction, cwd, eventSink, ct, imagePaths, taskAllowedTools),
             _ => RunGroupChatAsync(
                 config, taskGoal, transaction, cwd, eventSink, ct, imagePaths, taskAllowedTools),
         };
+    }
+
+    /// <summary>
+    /// ParallelDag 模式：任务只由其 AssigneeRole 对应的单个成员独立执行。
+    /// 上下文隔离是此模式的核心价值——各分支互不可见，由聚合任务负责汇总。
+    /// </summary>
+    private async Task<TeamRunResult> RunParallelBranchAsync(
+        TeamConfig config,
+        TeamTaskDefinition task,
+        string goal,
+        EditTransaction transaction,
+        string cwd,
+        Action<OrchestrationEvent>? eventSink,
+        CancellationToken ct,
+        IReadOnlyList<string>? imagePaths,
+        IReadOnlyList<string>? taskAllowedTools)
+    {
+        var member = config.Members.FirstOrDefault(m =>
+                string.Equals(m.Role, task.AssigneeRole, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.AgentId, task.AssigneeRole, StringComparison.OrdinalIgnoreCase))
+            ?? config.Members[0];
+
+        logger.LogInformation(
+            "Team '{Name}' ParallelDag branch: task={Task} member={Member}",
+            config.TeamName, task.Id, member.AgentId);
+
+        var agent = await agentFactory.BuildAgentAsync(
+                member, transaction, cwd, eventSink, taskAllowedTools)
+            .ConfigureAwait(false);
+
+        // 单成员顺序工作流：跑一次该成员即为本分支产出，无需群聊轮询或编排器。
+        var workflow = new SequentialWorkflowBuilder([agent])
+            .WithName(config.TeamName)
+            .Build();
+
+        var inputMessage = BuildInputMessage(goal, imagePaths);
+        var (result, sessionId) = await ExecuteWorkflowAsync(
+            workflow, inputMessage, config.TeamName, "ParallelDag", config.MaxTurns, eventSink, ct)
+            .ConfigureAwait(false);
+
+        return new TeamRunResult(config.TeamName, result.FinalOutput, result.TurnsCompleted,
+            result.MaxTurnsReached, result.InputTokens, result.OutputTokens,
+            SessionId: sessionId, HadFailures: result.HadFailures);
     }
 
     private static string BuildTaskGoal(TeamTaskDefinition task)
@@ -268,15 +313,60 @@ internal sealed class TeamWorkflowRunner(
 
         var sessionId = SessionId.NewId();
         var env = executionEnvironment ?? InProcessExecution.Default;
-        var streamingRun = await env
-            .RunStreamingAsync(workflow, inputMessage, sessionId, ct)
-            .ConfigureAwait(false);
+        logger.LogInformation(
+            "Team workflow START team={Team} mode={Mode} ctCancelled={Cancelled} sessionId={Session}",
+            teamName, modeName, ct.IsCancellationRequested, sessionId);
+
+        // Magentic 工作流必须两段式启动：MagenticOrchestrator（ChatProtocolExecutor）配置了
+        // AutoSendTurnToken=false，RunStreamingAsync 直接投递消息不会触发编排——orchestrator
+        // 收到消息却永远等待 TurnToken，表现为 turns=0、零 LLM 调用、"(no output)"。
+        // 正确姿势（与 MAF 官方 probe 一致）：OpenStreamingAsync → 发任务消息 → 发 TurnToken。
+        StreamingRun streamingRun;
+        if (modeName == "Magentic")
+        {
+            streamingRun = await env
+                .OpenStreamingAsync(workflow, sessionId, ct)
+                .ConfigureAwait(false);
+            _ = await streamingRun.TrySendMessageAsync(inputMessage).ConfigureAwait(false);
+            _ = await streamingRun.TrySendMessageAsync(new TurnToken(emitEvents: true)).ConfigureAwait(false);
+        }
+        else
+        {
+            streamingRun = await env
+                .RunStreamingAsync(workflow, inputMessage, sessionId, ct)
+                .ConfigureAwait(false);
+        }
 
         AgentWorkflowEventProcessor.ProcessResult result;
         try
         {
+            // 自动批准 Magentic 计划评审：Magentic orchestrator 在创建计划后会通过
+            // RequestPort 等待人工签核（MagenticPlanReviewRequest）。TEAM 模式的计划审批
+            // 已在 TeamRun 控制面（TeamApprovalWorkflow）由用户完成，这里无需二次签核，
+            // 收到请求即自动批准，避免工作流无限挂起。
+            async IAsyncEnumerable<WorkflowEvent> WatchWithAutoApprovalAsync()
+            {
+                await foreach (var evt in streamingRun.WatchStreamAsync(ct).ConfigureAwait(false))
+                {
+                    if (evt is RequestInfoEvent { Request: { } pending } &&
+                        pending.TryGetDataAs<MagenticPlanReviewRequest>(out var planReview) &&
+                        planReview is not null)
+                    {
+                        logger.LogInformation(
+                            "Auto-approving Magentic plan review for team '{Team}' (already approved at TeamRun level).",
+                            teamName);
+                        await streamingRun.SendResponseAsync(new ExternalResponse(
+                            pending.PortInfo,
+                            pending.RequestId,
+                            new PortableValue(planReview.Approve()))).ConfigureAwait(false);
+                    }
+
+                    yield return evt;
+                }
+            }
+
             result = await AgentWorkflowEventProcessor.ProcessStreamAsync(
-                streamingRun.WatchStreamAsync(ct),
+                WatchWithAutoApprovalAsync(),
                 maxTurns,
                 "Team '{Name}' {Mode} member failed: {Error}",
                 [teamName, modeName],

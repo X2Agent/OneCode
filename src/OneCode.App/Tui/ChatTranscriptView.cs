@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace OneCode.App.Tui;
 
 public sealed partial class ChatTranscriptView : View

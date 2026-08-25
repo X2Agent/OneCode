@@ -1,0 +1,53 @@
+# 内置团队模板：多文件功能实现
+# 模式：Magentic（orchestrator 动态分解目标、委派 worker）
+# 适用：跨文件功能实现、结构化重构、需要实现+验证分工的任务
+# 成员：planner + executor x2 + tester
+# 成本：medium — 委派轮次受 max_rounds 约束，低于 GroupChat 全员共享上下文的开销
+name: impl
+description: 功能实现团队 - 计划拆解、并行实现、测试验证
+template: magentic-orchestrator
+max_rounds: 20
+workers:
+  - name: planner
+    role: planner
+    instructions: |
+      你是实现计划者。把目标拆解为可并行或有序执行的具体编码任务，
+      指明每个任务的涉及文件、接口契约与完成标准。不要自己写代码。
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+  - name: executor-a
+    role: executor
+    instructions: |
+      你是执行者。按计划完成分配给你的编码任务：小步修改、保持与现有代码风格一致。
+      完成后报告修改的文件清单与关键决策。
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+  - name: executor-b
+    role: executor
+    instructions: |
+      你是执行者。按计划完成分配给你的编码任务：小步修改、保持与现有代码风格一致。
+      完成后报告修改的文件清单与关键决策。
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS
+      - SymbolSearch
+  - name: tester
+    role: tester
+    instructions: |
+      你是验证者。对实现结果运行编译/测试并核对完成标准；
+      输出通过/失败结论，失败时给出最小复现信息。
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - LS

@@ -65,10 +65,11 @@ public sealed class DesignInitCommand(
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
         var cwd = Directory.GetCurrentDirectory();
-        var force = args.Contains("--force");
-        var noLlm = args.Contains("--no-llm");
-        var outputPath = ParseFlag(args, "--output");
-        var url = args.FirstOrDefault(a => !a.StartsWith('-') && a != outputPath);
+        var a = CommandArgs.Parse(args, ["output"]);
+        var force = a.Has("force");
+        var noLlm = a.Has("no-llm");
+        var outputPath = a.Value("output");
+        var url = a.Positionals.FirstOrDefault();
 
         var designPath = string.IsNullOrWhiteSpace(outputPath)
             ? Path.Combine(cwd, "DESIGN.md")

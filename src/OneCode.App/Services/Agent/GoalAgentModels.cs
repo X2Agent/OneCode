@@ -57,7 +57,7 @@ public sealed record GoalRunOptions
 /// </summary>
 public sealed record GoalPlan
 {
-    public IReadOnlyList<GoalItem> Goals { get; init; } = Array.Empty<GoalItem>();
+    public IReadOnlyList<GoalItem> Goals { get; init; } = [];
 }
 
 /// <summary>
@@ -102,13 +102,13 @@ public sealed record GoalItem
     public bool NeedsFurtherDecomposition { get; init; }
 
     /// <summary>完成此子目标后必须存在的工作区相对路径。</summary>
-    public IReadOnlyList<string> ExpectedFiles { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> ExpectedFiles { get; init; } = [];
 
     /// <summary>
     /// 此子目标允许修改的工作区相对路径或目录。为空时仅允许修改工作目录内文件；
     /// 非空时进一步收窄到声明范围。
     /// </summary>
-    public IReadOnlyList<string> AllowedPaths { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> AllowedPaths { get; init; } = [];
 
     /// <summary>是否要求执行项目构建。源码发生修改时即使为 false 也会自动要求构建。</summary>
     public bool RequiresBuild { get; init; }
@@ -145,7 +145,7 @@ public enum GoalStatus
 /// GOAL 模式执行结果。
 /// </summary>
 /// <param name="SessionId">
-/// 会话 ID。可通过 <c>/checkpoint resume</c> 经 Durable Goal 工作流从 Checkpoint 恢复。
+/// 会话 ID。可通过 <c>/resume</c> 经 Durable Goal 工作流从 Checkpoint 恢复。
 /// 为 null 时表示分解失败，未产生会话。
 /// </param>
 public sealed record GoalRunResult(

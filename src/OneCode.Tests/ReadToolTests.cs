@@ -35,7 +35,7 @@ public sealed class ReadToolTests : IDisposable
     {
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(workingDir ?? _projectDir);
-        wd.AdditionalDirectories.Returns(additionalDirs ?? Array.Empty<string>());
+        wd.AdditionalDirectories.Returns(additionalDirs ?? []);
         return wd;
     }
 

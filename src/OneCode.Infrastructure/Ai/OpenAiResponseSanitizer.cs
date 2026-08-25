@@ -1,5 +1,7 @@
 namespace OneCode.Infrastructure.Ai;
 
+using System.Text.Json;
+
 /// <summary>
 /// Rewrites OpenAI-compatible JSON so the official OpenAI .NET SDK can deserialize it.
 /// Third-party providers often send empty or vendor-specific <c>finish_reason</c>
@@ -15,6 +17,124 @@ internal static partial class OpenAiResponseSanitizer
     /// </summary>
     [GeneratedRegex(@"""(tool_calls|annotations)""\s*:\s*null\b")]
     private static partial Regex NullArrayRegex();
+
+    /// <summary>
+    /// Matches an empty <c>"choices": []</c> array. Providers like OpenRouter return
+    /// HTTP 200 with no choices on upstream overload / content filtering; the official
+    /// SDK then crashes inside <c>ChatCompletion.get_Role()</c> (index out of range).
+    /// </summary>
+    [GeneratedRegex(@"""choices""\s*:\s*\[\s*\]")]
+    private static partial Regex EmptyChoicesRegex();
+
+    /// <summary>
+    /// Returns true when the JSON payload is a chat-completion response whose
+    /// <c>choices</c> array is empty or missing — the SDK cannot deserialize it
+    /// and would throw ArgumentOutOfRangeException from ChatCompletion.get_Role().
+    /// 覆盖三种形态：空数组、缺失 choices 的 chat.completion 体、以及
+    /// OpenRouter 中间件错误体（HTTP 200 + {"error":{...}}，无 choices）。
+    /// 判定基于结构而非子串：非 JSON 响应体（HTML 错误页/截断流等）一律不判空，
+    /// 避免被误分类为可重试的 empty-choices。
+    /// </summary>
+    internal static bool HasEmptyChoices(string payload)
+    {
+        // 快速路径：正常补全体必含 "choices"，正则确认是否为空数组。
+        if (payload.Contains("""choices""", StringComparison.Ordinal))
+            return EmptyChoicesRegex().IsMatch(payload);
+
+        // 不含 "choices" 字样：需确认是 JSON 对象且其上确实无 choices 属性才算缺失；
+        // 解析失败（HTML/纯文本/截断体）→ 不是补全响应 → false。
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && !doc.RootElement.TryGetProperty("choices", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 尝试从 HTTP 200 响应体中提取显式的上游错误对象（<c>{"error":{...}}</c>）。
+    /// 一些 OpenAI 兼容网关（OpenRouter → 上游 Nvidia 等）过载时不返回 4xx/5xx，
+    /// 而是 200 + 错误体。支持三种形态：
+    /// <list type="bullet">
+    /// <item><c>error</c> 为对象：<c>message</c> / <c>code</c> 字段（OpenRouter 还可能嵌套 <c>metadata.raw</c>）</item>
+    /// <item><c>error</c> 为字符串：整体作为消息</item>
+    /// <item>其余情况返回 false（不是错误体）</item>
+    /// </list>
+    /// </summary>
+    internal static bool TryExtractUpstreamError(string payload, out string message, out string? code)
+    {
+        message = string.Empty;
+        code = null;
+
+        // 快速路径：绝大多数正常补全响应不含 "error" 字段，
+        // 子串检查避免对每个响应都做完整 JSON 解析（长补全体解析开销可观）。
+        if (!payload.Contains("""error""", StringComparison.Ordinal))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var error))
+                return false;
+
+            // 补全优先：若响应同时携带非空 choices（有效补全），即使存在 error 字段
+            // 也不视为错误体——绝不因附带的 error 字段丢弃正常业务响应。
+            if (root.TryGetProperty("choices", out var choices)
+                && choices.ValueKind == JsonValueKind.Array
+                && choices.GetArrayLength() > 0)
+            {
+                return false;
+            }
+
+            switch (error.ValueKind)
+            {
+                case JsonValueKind.String:
+                    message = error.GetString() ?? string.Empty;
+                    break;
+
+                case JsonValueKind.Object:
+                    if (error.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                        message = msg.GetString() ?? string.Empty;
+                    if (error.TryGetProperty("code", out var c))
+                        code = c.ValueKind switch
+                        {
+                            JsonValueKind.String => c.GetString(),
+                            JsonValueKind.Number => c.GetRawText(),
+                            _ => null,
+                        };
+                    // OpenRouter 形态：{"error":{"metadata":{"raw":"..."}}}
+                    if (string.IsNullOrWhiteSpace(message)
+                        && error.TryGetProperty("metadata", out var md)
+                        && md.ValueKind == JsonValueKind.Object
+                        && md.TryGetProperty("raw", out var raw)
+                        && raw.ValueKind == JsonValueKind.String)
+                    {
+                        message = raw.GetString() ?? string.Empty;
+                    }
+                    break;
+
+                case JsonValueKind.Null:
+                case JsonValueKind.Undefined:
+                    // 某些网关在正常响应中附带 "error": null —— 不是错误。
+                    return false;
+
+                default:
+                    return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(message) || code is not null;
+        }
+        catch (JsonException)
+        {
+            // 非 JSON 或截断的响应体——不是可识别的错误体。
+            return false;
+        }
+    }
 
     /// <summary>
     /// Matches a quoted <c>finish_reason</c> string. JSON <c>null</c> is left untouched

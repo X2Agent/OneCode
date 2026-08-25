@@ -165,7 +165,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Forked agent '{Label}' was cancelled", run.Label);
-            return new ForkedAgentResult { Messages = Array.Empty<ChatMessage>() };
+            return new ForkedAgentResult { Messages = [] };
         }
         catch (Exception ex)
         {
@@ -175,7 +175,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
                 toolName: parameters.ForkLabel);
             return new ForkedAgentResult
             {
-                Messages = Array.Empty<ChatMessage>(),
+                Messages = [],
                 Error = problemDetails,
             };
         }

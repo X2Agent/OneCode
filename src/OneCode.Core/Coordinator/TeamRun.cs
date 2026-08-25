@@ -195,7 +195,7 @@ public sealed record TeamRun
 
     /// <summary>
     /// 发起该 TeamRun 的前台会话 ID（可为空，例如测试/后台宿主）。
-    /// /checkpoint resume 通过它把用户会话映射到可恢复的 TeamRun。
+    /// /resume 通过它把用户会话映射到可恢复的 TeamRun。
     /// </summary>
     public SessionId? SessionId { get; init; }
 
@@ -214,13 +214,6 @@ public sealed record TeamRun
     /// 为 null 表示无指纹记录（旧数据 / provider 不可用），恢复时跳过校验。
     /// </summary>
     public string? LastTaskFingerprint { get; init; }
-
-    /// <summary>
-    /// 本次 Run 实际生效的编排模式（含 TUI overrideMode 覆盖后的结果）。
-    /// Resume 用它重建 config，避免用户覆盖策略后崩溃恢复时静默回退到 YAML 默认模板模式。
-    /// null 表示旧数据或未记录——恢复时按 YAML 默认处理（向后兼容）。
-    /// </summary>
-    public TeamOrchestrationMode? EffectiveMode { get; init; }
 
     public long Version { get; init; }
     public DateTimeOffset CreatedAt { get; init; }

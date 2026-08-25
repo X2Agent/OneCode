@@ -102,7 +102,7 @@ public sealed partial class SessionMemoryService : ISessionMemoryService
             AssistantMessage assistant => assistant.Content.OfType<TextBlock>().Select(block => block.Text),
             SystemMessage system => [system.Content],
             ToolResultMessage tool => [tool.Content],
-            _ => Array.Empty<string>(),
+            _ => [],
         };
     }
 
@@ -131,7 +131,7 @@ public sealed partial class SessionMemoryService : ISessionMemoryService
         Dictionary<string, object> metadata, ILogger? logger = null)
     {
         if (!metadata.TryGetValue(SessionMemoriesKey, out var raw) || raw == null)
-            return Array.Empty<SessionMemoryEntry>();
+            return [];
         try
         {
             var json = raw switch
@@ -147,7 +147,7 @@ public sealed partial class SessionMemoryService : ISessionMemoryService
         {
             // 会话记忆反序列化失败 → 返回空集合并留痕（此前静默吞掉，损坏数据无任何信号）。
             logger?.LogWarning(ex, "Failed to deserialize session memories — returning empty list");
-            return Array.Empty<SessionMemoryEntry>();
+            return [];
         }
     }
 

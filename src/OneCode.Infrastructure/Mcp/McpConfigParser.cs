@@ -45,7 +45,7 @@ public static class McpConfigParser
     {
         string? type = null;
         string? command = null;
-        string[] args = Array.Empty<string>();
+        string[] args = [];
         string? url = null;
         Dictionary<string, string>? env = null;
         Dictionary<string, string>? headers = null;

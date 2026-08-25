@@ -28,7 +28,7 @@ public static class DangerousCommandPatterns
     // 破坏性文件操作
 
     public const string RmRfRoot =
-        @"rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(/|\$HOME|~)";
+        @"rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+[""']?(/|\$HOME|~)";
 
     public const string GlobalChmod777 =
         @"chmod\s+(-R\s+)?777\s+/";

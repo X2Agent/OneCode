@@ -296,7 +296,7 @@ public static partial class BashCommandClassifier
 
         return inPlace
             ? args.Skip(index).Where(IsPathOperand)
-            : Array.Empty<string>();
+            : [];
     }
 
     private static bool LooksLikeSedProgram(string token) =>

@@ -12,18 +12,16 @@ public static partial class ChatBlockRenderers
 {
     private static readonly string[] CircledNumbers = { "\u2460", "\u2461", "\u2462", "\u2463", "\u2464", "\u2465", "\u2466", "\u2467", "\u2468", "\u2469" };
 
-    public static IReadOnlyList<FormattedLine> RenderModeBanner(WorkingMode mode, TeamStrategy strategy = TeamStrategy.Config)
+    public static IReadOnlyList<FormattedLine> RenderModeBanner(WorkingMode mode)
     {
         var (tag, desc, fg) = mode switch
         {
             WorkingMode.Build => ("BUILD", "直接执行，适合小改动和探索性任务", TuiPalette.ModeBuildFg),
             WorkingMode.Plan => ("PLAN", "先出计划再执行，适合复杂重构", TuiPalette.ModePlanFg),
-            WorkingMode.Team when strategy == TeamStrategy.Config
-                => ("TEAM · Config", "遵循 team.yaml（YAML）默认编排策略", TuiPalette.ModeTeamFg),
-            WorkingMode.Team when strategy == TeamStrategy.GroupChat
-                => ("TEAM · GroupChat", "对等轮询讨论，适合头脑风暴", TuiPalette.ModeTeamFg),
+            // TEAM：编排模式由所选团队的 team.yaml 固定声明，横幅不再区分策略。
+            WorkingMode.Team => ("TEAM", "多 Agent 协作——模式由团队 team.yaml 固定声明", TuiPalette.ModeTeamFg),
             WorkingMode.Goal => ("GOAL", "自主分解目标并迭代验证", TuiPalette.ModeGoalFg),
-            _ => ("TEAM · Magentic", "Orchestrator 协调多 Agent 分工", TuiPalette.ModeTeamFg),
+            _ => ("BUILD", "直接执行，适合小改动和探索性任务", TuiPalette.ModeBuildFg),
         };
         return new[]
         {
@@ -54,13 +52,28 @@ public static partial class ChatBlockRenderers
 
     public static IReadOnlyList<FormattedLine> RenderDiffBlock(string fileName,
         IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines,
-        int? addedSummary = null, int? removedSummary = null)
+        int? addedSummary = null, int? removedSummary = null, string? agentName = null)
     {
         var list = new List<FormattedLine>();
         var hdr = $"   \U0001f4c4 {fileName}";
         if (addedSummary is { } a) hdr += $"  +{a}";
         if (removedSummary is { } r) hdr += $"  -{r}";
-        list.Add(FormattedLine.Plain(hdr, TuiPalette.Accent));
+
+        // TEAM 归属标注：diff 头追加执行者（角色专属色），多成员并发修改时可追溯。
+        if (!string.IsNullOrWhiteSpace(agentName))
+        {
+            var segments = new List<LineSegment>
+            {
+                new(hdr, TuiPalette.Accent),
+                new($"  · by {agentName}", TuiPalette.FromAgentName(agentName)),
+            };
+            list.Add(FormattedLine.FromSegments(segments.ToArray()));
+        }
+        else
+        {
+            list.Add(FormattedLine.Plain(hdr, TuiPalette.Accent));
+        }
+
         foreach (var l in addedLines) list.Add(FormattedLine.Plain($"   +{l}", TuiPalette.DiffAdded));
         foreach (var l in removedLines) list.Add(FormattedLine.Plain($"   -{l}", TuiPalette.DiffRemoved));
         return list;

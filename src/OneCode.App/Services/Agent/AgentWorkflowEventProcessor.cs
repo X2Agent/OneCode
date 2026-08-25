@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Services.Agent;
@@ -100,6 +101,27 @@ internal static class AgentWorkflowEventProcessor
                         $"Team workflow failed: {exMessage}"));
                     hadFailures = true;
                     break;
+
+                case WorkflowOutputEvent outputEvt:
+                    // 工作流最终输出（Magentic orchestrator 的结论消息走此事件）：
+                    // 此前被静默丢弃，导致 LLM 调用成功但 FinalOutput="(no output)"、turns=0，
+                    // 被上层误报为 ChatClient 配置问题。
+                    var outputText = ExtractOutputText(outputEvt.Data);
+                    if (!string.IsNullOrWhiteSpace(outputText))
+                    {
+                        outputParts.Add(outputText);
+                        eventSink?.Invoke(new OrchestrationEvent.AgentMessage(
+                            outputEvt.ExecutorId ?? "workflow", null, outputText));
+                    }
+                    break;
+
+                default:
+                    // 诊断 turns=0：记录所有未被消费的事件类型，避免静默丢弃。
+                    logger.LogDebug(
+                        "Workflow event (unconsumed): {EventType} from {ExecutorId}",
+                        evt?.GetType().Name ?? "(null)",
+                        evt is ExecutorEvent executorEvt ? executorEvt.ExecutorId : null);
+                    break;
             }
         }
 
@@ -109,4 +131,18 @@ internal static class AgentWorkflowEventProcessor
 
         return new ProcessResult(outputParts, turnsCompleted, maxTurnsReached, finalOutput, inputTokens, outputTokens, hadFailures);
     }
+
+    /// <summary>
+    /// 从 WorkflowOutputEvent.Data 提取文本。Magentic 的最终结论可能是
+    /// ChatMessage、ChatMessage 集合或纯字符串，统一归一化为文本。
+    /// </summary>
+    private static string? ExtractOutputText(object? data) => data switch
+    {
+        null => null,
+        string s => s,
+        ChatMessage cm => string.IsNullOrWhiteSpace(cm.Text) ? null : cm.Text,
+        IEnumerable<ChatMessage> msgs => string.Join("\n\n",
+            msgs.Select(m => m.Text).Where(t => !string.IsNullOrWhiteSpace(t))),
+        _ => data.ToString(),
+    };
 }

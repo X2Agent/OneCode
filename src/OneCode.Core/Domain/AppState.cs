@@ -7,7 +7,7 @@ namespace OneCode.Core.Domain;
 /// </summary>
 public sealed record AppState
 {
-    public IReadOnlyList<Microsoft.Extensions.AI.AIFunction> Tools { get; init; } = Array.Empty<Microsoft.Extensions.AI.AIFunction>();
+    public IReadOnlyList<Microsoft.Extensions.AI.AIFunction> Tools { get; init; } = [];
     public ToolPermissionContext ToolPermissionContext { get; init; } = new();
 
     public string? MainLoopModel { get; init; }

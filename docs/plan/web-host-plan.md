@@ -73,6 +73,7 @@ public interface IInteractionProtocol
 ```
 
 - `InteractionRequest`（record）：问题列表 / 单选多选 / 计划卡审批，纯数据模型，可 JSON 序列化。
+- **AG-UI 对齐约束**：`InteractionRequest/Response` 的语义设计尽量向 [AG-UI 协议](https://docs.ag-ui.com/)的 interrupt / function-approval 模型靠拢（请求带稳定 ID、应答为封闭枚举、可 JSON 序列化）。MAF 已提供官方 C# 集成（`Microsoft.Agents.AI.Hosting.AGUI.AspNetCore` 服务端托管 + `Microsoft.Agents.AI.AGUI` 客户端），未来若开放 AG-UI 端点（见 §9），本协议到 AG-UI 的适配即可保持薄层。
 - `ApprovalRequestEvent` 链路不动：Web 层订阅事件流，收到后推送浏览器并异步 `SetResult`。
 - Build 门禁的 `ClarificationInteraction`/`PlanCardPublisher` 现为回调注入，天然可换 Web 后端（构造注入 Web 实现）。
 - **职责边界**（避免双通道重叠）：`IInteractionProtocol` 只承载**不走 QueryEvent 流**的交互——Build 门禁的澄清提问与计划卡审批；权限审批一律走 `ApprovalRequestEvent` + TCS 待决表。同一交互绝不允许同时出现在两条通道中，实现时以「事件流中已有对应 Event 类型则不进 Protocol」为准绳。
@@ -226,3 +227,25 @@ FastPathDispatcher:      CliMode.WebHost   → WebHostRunner.RunAsync(args)   //
 | 单文件发布 | 静态资源内嵌 + 组件编译进程序集 | 静态资源内嵌 | WASM payload 打包 |
 
 **结论**：本地 localhost、单用户、纯 C# 约束下，Blazor Server 的「电路内直接消费 `IAsyncEnumerable<QueryEvent>`」是最大优势——省掉整个 JSON 协议层（WebEventMapper/信封/Hub 方法/前端状态同步），UI 代码与 TUI 一样是 C# 事件驱动模型。其内存与断连代价在本地场景均可控。
+
+> **AG-UI 澄清**：AG-UI（Agent–User Interaction Protocol）不是 JS 前端方案——MAF 提供官方纯 C# 集成（`Microsoft.Agents.AI.Hosting.AGUI.AspNetCore` / `Microsoft.Agents.AI.AGUI`），可在同一 Kestrel 上以 HTTP POST + SSE 形式暴露 agent/workflow 端点，与 Blazor Server 并存不冲突。本计划首期不采用它做自家 UI 数据面（Blazor 电路内直连 QueryEvent 更短），但它是后续开放协议化访问的正确演进路径（见 §9）。注意两包当前均为 preview 版本。
+
+## 9. 演进方向：AG-UI 协议化端点（非首期）
+
+当首期非目标中的「远程访问/多客户端接入」被打破时，推荐经 AG-UI 开放 OneCode 的 agent 能力，而非自建私有协议。
+
+**为什么是 AG-UI**：
+- 开源事件协议（MIT，CopilotKit/LangChain/CrewAI 发起），标准化流式输出、状态同步、human-in-the-loop 审批、前端工具调用；
+- MAF 一方支持：`Microsoft.Agents.AI.Hosting.AGUI.AspNetCore` 可把 AIAgent/Workflow 直接托管为 ASP.NET Core SSE 端点——与本计划的 Kestrel 宿主天然契合，无 Node.js/JS 构建链；
+- 现成客户端生态：CopilotKit（React）、Slack/Teams Channels SDK、React Native 等，接入即得完整 UI；
+- 与 MCP（工具）、A2A（agent 协作）互补，构成完整 agentic 协议栈。
+
+**试点顺序（按适配成本升序）**：
+1. **Team 模式**：执行体已是 MAF Workflow（`MagenticWorkflowBuilder`/ParallelDag），经 Hosting 包暴露成本最低；
+2. **Goal 模式**：MAF Durable Workflow Host，同上；
+3. **主聊天循环（BUILD/PLAN）**：自建管线（MainAgentRunner + QueryEvent），需包装为 AIAgent 或做 QueryEvent → AG-UI 事件映射适配层——成本最高，最后做。
+
+**前置依赖与风险**：
+- §3.2 的 `InteractionRequest/Response` 需按「AG-UI 对齐约束」设计，保证审批/interrupt 映射为薄层；
+- 两包均处 `1.x-preview`，API 不稳定——在包 GA 前仅作旁路端点试水，不进入主链路；
+- 开放远程访问时必须补齐鉴权（Phase 1 的本地 token 方案不够），并重新评估 localhost 绑定假设。
