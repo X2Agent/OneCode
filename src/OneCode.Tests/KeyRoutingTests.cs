@@ -286,37 +286,17 @@ public sealed class KeyRoutingTests
             "计划内容不进入对话流");
     }
 
-    // Ctrl+G toggle：有活动计划时可收起/展开；无计划时无效
-    [Fact]
-    public void PlanSidebar_ToggleCtrlG_CollapsesAndExpands()
-    {
-        var shell = CreateShell();
-        shell.ShowPlanCard("重构", [new PlanStep("第一步")], PlanCardPhase.Finalizing);
-
-        shell.TogglePlanSidebar();
-        shell.IsPlanSidebarVisible.Should().BeFalse("Ctrl+G 收起侧边栏");
-
-        shell.TogglePlanSidebar();
-        shell.IsPlanSidebarVisible.Should().BeTrue("再次 Ctrl+G 展开");
-
-        shell.ClearPlan();
-        shell.IsPlanSidebarVisible.Should().BeFalse("清除计划后隐藏");
-        shell.TogglePlanSidebar();
-        shell.IsPlanSidebarVisible.Should().BeFalse("无活动计划时 toggle 无效");
-    }
-
-    // 用户显式收起后，同一计划的后续非审批更新不强制展开；
+    // 侧边栏一经展开保持可见：同一计划的后续更新不收起，
     // PendingApproval 强制展开（审批必须能看到完整计划）
     [Fact]
-    public void PlanSidebar_PendingApproval_ForcesVisibleAfterManualCollapse()
+    public void PlanSidebar_PendingApproval_KeepsSidebarVisible()
     {
         var shell = CreateShell();
         shell.ShowPlanCard("重构", [new PlanStep("第一步")], PlanCardPhase.Finalizing);
-        shell.TogglePlanSidebar();
-        shell.IsPlanSidebarVisible.Should().BeFalse();
+        shell.IsPlanSidebarVisible.Should().BeTrue("计划出现时侧边栏展开并保持可见");
 
         shell.ShowPlanCard("重构", [new PlanStep("第一步")], PlanCardPhase.PendingApproval);
-        shell.IsPlanSidebarVisible.Should().BeTrue("审批阶段强制展开侧边栏");
+        shell.IsPlanSidebarVisible.Should().BeTrue("审批阶段侧边栏保持可见");
     }
 
     private static ReplShell CreateShell()

@@ -6,13 +6,13 @@ namespace OneCode.App.Tui;
 /// <summary>
 /// Chat content renderers. All return FormattedLine sequences for ChatTranscriptView.
 /// Structured cards (BuildRun / Scope / Delivery / Plan) live in
-/// <see cref="ChatBlockRenderers.Cards.cs"/>.
+/// <c>ChatBlockRenderers.Cards.cs</c>.
 /// </summary>
 public static partial class ChatBlockRenderers
 {
     private static readonly string[] CircledNumbers = { "\u2460", "\u2461", "\u2462", "\u2463", "\u2464", "\u2465", "\u2466", "\u2467", "\u2468", "\u2469" };
 
-    public static IReadOnlyList<FormattedLine> RenderModeBanner(WorkingMode mode)
+    public static IReadOnlyList<FormattedLine> RenderModeBanner(WorkingMode mode, int maxWidth = 0)
     {
         var (tag, desc, fg) = mode switch
         {
@@ -23,60 +23,60 @@ public static partial class ChatBlockRenderers
             WorkingMode.Goal => ("GOAL", "自主分解目标并迭代验证", TuiPalette.ModeGoalFg),
             _ => ("BUILD", "直接执行，适合小改动和探索性任务", TuiPalette.ModeBuildFg),
         };
+        // 窄终端防溢出：maxWidth > 0 时按显示宽度截断（CJK 感知），默认不截断。
+        var text = $" {tag}  {desc}";
+        if (maxWidth > 0)
+        {
+            var budget = Math.Max(12, maxWidth - 1);
+            if (TextWidthHelper.GetDisplayWidth(text) > budget)
+                text = TextWidthHelper.TruncateByWidth(text, budget);
+        }
         return new[]
         {
             FormattedLine.Plain("", TuiPalette.BgPrimary),
             FormattedLine.FromSegments(new[]
             {
                 new LineSegment(TuiGlyphs.BarQuote, fg),
-                new LineSegment($" {tag}  {desc}", TuiPalette.FgMuted),
+                new LineSegment(text, TuiPalette.FgMuted),
             }),
         };
     }
 
-    public static IReadOnlyList<FormattedLine> RenderToolCallRow(string name, string? args = null, bool ok = true)
-    {
-        var statusLabel = ok ? "完成" : "错误";
-        var statusColor = ok ? TuiPalette.Success : TuiPalette.Error;
-        var segments = new List<LineSegment>
-        {
-            new("  ", TuiPalette.BgPrimary),
-            new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
-            new(name, TuiPalette.Warning),
-        };
-        if (!string.IsNullOrWhiteSpace(args))
-            segments.Add(new($" \u00b7 {args}", TuiPalette.ToolDetailColor));
-        segments.Add(new($" \u00b7 {statusLabel}", statusColor));
-        return new[] { FormattedLine.FromSegments(segments.ToArray()) };
-    }
-
     public static IReadOnlyList<FormattedLine> RenderDiffBlock(string fileName,
         IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines,
-        int? addedSummary = null, int? removedSummary = null, string? agentName = null)
+        int? addedSummary = null, int? removedSummary = null, string? agentName = null,
+        int viewWidth = 80)
     {
         var list = new List<FormattedLine>();
         var hdr = $"   \U0001f4c4 {fileName}";
         if (addedSummary is { } a) hdr += $"  +{a}";
         if (removedSummary is { } r) hdr += $"  -{r}";
 
-        // TEAM 归属标注：diff 头追加执行者（角色专属色），多成员并发修改时可追溯。
-        if (!string.IsNullOrWhiteSpace(agentName))
-        {
-            var segments = new List<LineSegment>
-            {
-                new(hdr, TuiPalette.Accent),
-                new($"  · by {agentName}", TuiPalette.FromAgentName(agentName)),
-            };
-            list.Add(FormattedLine.FromSegments(segments.ToArray()));
-        }
-        else
-        {
-            list.Add(FormattedLine.Plain(hdr, TuiPalette.Accent));
-        }
+        // 对话视图渲染时按 contentWidth 截断不换行；文件头与 diff 行（代码行可能很长）
+        // 必须在此按 viewWidth 预换行，否则超宽内容不可见。
+        foreach (var line in TextWidthHelper.WordWrapByWidth(hdr, Math.Max(8, viewWidth)))
+            list.Add(FormattedLine.Plain(line, TuiPalette.Accent));
 
-        foreach (var l in addedLines) list.Add(FormattedLine.Plain($"   +{l}", TuiPalette.DiffAdded));
-        foreach (var l in removedLines) list.Add(FormattedLine.Plain($"   -{l}", TuiPalette.DiffRemoved));
+        // TEAM 归属标注：diff 头后追加执行者（角色专属色），多成员并发修改时可追溯。
+        if (!string.IsNullOrWhiteSpace(agentName))
+            foreach (var line in TextWidthHelper.WordWrapByWidth(
+                $"   · by {agentName}", Math.Max(8, viewWidth)))
+                list.Add(FormattedLine.Plain(line, TuiPalette.FromAgentName(agentName)));
+
+        var diffWidth = Math.Max(8, viewWidth - 4);
+        foreach (var l in addedLines) AddDiffLines(list, "+" + l, TuiPalette.DiffAdded, diffWidth);
+        foreach (var l in removedLines) AddDiffLines(list, "-" + l, TuiPalette.DiffRemoved, diffWidth);
         return list;
+    }
+
+    private static void AddDiffLines(List<FormattedLine> list, string text, Color color, int width)
+    {
+        var wrapped = TextWidthHelper.WordWrapByWidth(text, width);
+        if (wrapped.Count == 0)
+            return;
+        list.Add(FormattedLine.Plain($"   {wrapped[0]}", color));
+        foreach (var continuation in wrapped.Skip(1))
+            list.Add(FormattedLine.Plain($"      {continuation}", color));
     }
 
     public static IReadOnlyList<FormattedLine> RenderModeProgress(TuiModeProgress progress, int viewWidth = 80)
@@ -99,26 +99,6 @@ public static partial class ChatBlockRenderers
             : string.Empty;
         var text = $"  {glyph} {progress.Message}{progressText}";
         return FitToWidth([FormattedLine.Plain(text, color)], viewWidth);
-    }
-
-    public static IReadOnlyList<FormattedLine> RenderAgentCoordinationMessage(string fromName, string? fromColor, string toName, string? toColor, string? content = null)
-    {
-        var f = TuiPalette.FromAgentName(fromName);
-        var t = TuiPalette.FromAgentName(toName);
-        var segments = new List<LineSegment>
-        {
-            new($" {TuiGlyphs.BorderVertical} ", TuiPalette.FgMuted),
-            new(fromName, f),
-            new($" {TuiGlyphs.ArrowRight} ", TuiPalette.FgMuted),
-            new(toName, t),
-        };
-        if (!string.IsNullOrWhiteSpace(content))
-            segments.Add(new($"  {content}", TuiPalette.FgSecondary));
-        return new[]
-        {
-            FormattedLine.Plain("", TuiPalette.BgPrimary),
-            FormattedLine.FromSegments(segments.ToArray()),
-        };
     }
 
     public static IReadOnlyList<FormattedLine> RenderAgentMessage(string agentName, string? agentColor, string content,
@@ -157,26 +137,16 @@ public static partial class ChatBlockRenderers
         return lines;
     }
 
-    public static IReadOnlyList<FormattedLine> RenderThinkingBlock(string? thinking = null)
-    {
-        return new[]
-        {
-            FormattedLine.FromSegments(new[]
-            {
-                new LineSegment("  ", TuiPalette.BgPrimary),
-                new LineSegment($"{TuiGlyphs.Collapsed} 思考：{thinking ?? "思考中\u2026"}", TuiPalette.FgMuted),
-            })
-        };
-    }
-
     /// <summary>
     /// Renders an inline LSP diagnostics block for a file. Shows a header line
     /// with the file name and error/warning counts, followed by one line per
     /// diagnostic (sorted by severity, then by line number).
     /// Uses TuiPalette colors throughout — no hardcoded color values.
+    /// <paramref name="viewWidth"/> &gt; 0 时消息按显示宽度截断、整块经
+    /// <see cref="FitToWidth"/> 兜底（旧实现按字符数截断，CJK 双宽字符会溢出）。
     /// </summary>
     public static IReadOnlyList<FormattedLine> RenderLspDiagnosticsBlock(
-        string fileName, IReadOnlyList<LspDiagnostic> diagnostics)
+        string fileName, IReadOnlyList<LspDiagnostic> diagnostics, int viewWidth = 0)
     {
         var list = new List<FormattedLine> { FormattedLine.Plain("", TuiPalette.BgPrimary) };
 
@@ -210,7 +180,19 @@ public static partial class ChatBlockRenderers
 
             var line = d.Range.StartLine + 1; // LSP uses 0-based lines; display 1-based
             var col = d.Range.StartColumn + 1;
-            var message = d.Message.Length > 80 ? d.Message[..80] + TuiGlyphs.Ellipsis : d.Message;
+            var message = d.Message;
+            // 按显示宽度截断消息（预留滚动条列），而非旧的字符数截断。
+            if (viewWidth > 0)
+            {
+                var rowPrefixWidth = TextWidthHelper.GetDisplayWidth($"    {prefix} L{line}:C{col} ");
+                var budget = Math.Max(8, viewWidth - rowPrefixWidth - 1);
+                if (TextWidthHelper.GetDisplayWidth(d.Message) > budget)
+                    message = TextWidthHelper.TruncateByWidth(d.Message, budget);
+            }
+            else if (message.Length > 80)
+            {
+                message = message[..80] + TuiGlyphs.Ellipsis;
+            }
 
             list.Add(FormattedLine.FromSegments(new[]
             {
@@ -220,6 +202,7 @@ public static partial class ChatBlockRenderers
             }));
         }
 
-        return list;
+        // 兜底：头部行（fileName 可能很长）与任何残留超宽行整体截断。
+        return viewWidth > 0 ? FitToWidth(list, viewWidth) : list;
     }
 }

@@ -9,8 +9,8 @@ namespace OneCode.App.Tui;
 /// contract) is inherited from <see cref="SidebarViewBase"/>.
 ///
 /// Visibility is driven by <see cref="ReplShell"/>: auto-shown when a plan exists
-/// (first plan submission), auto-hidden when the plan is cleared. Ctrl+G toggles
-/// manually (KeybindingDefaults.ActionChatTogglePlanPanel).
+/// and it stays visible until the plan is cleared or a new session starts
+/// (no manual toggle).
 /// </summary>
 internal sealed class PlanSidebarView : SidebarViewBase
 {

@@ -387,8 +387,11 @@ public sealed class ConfigManager : IConfigManager, IDisposable
                 continue;
             }
 
+            // 未知键容忍：settings.json 是跨版本的用户数据，已移除功能或其他版本的键
+            // 不得导致读取失败（残留旧键会让所有保存路径硬失败，如 TrustService 写信任目录）。
+            // 写入路径仍经 ValidatePatch 严格校验；未知键在下次保存该作用域时被自然清除。
             if (!SettingDescriptors.TryGet(key, out var descriptor))
-                throw new JsonException($"Unknown configuration key '{key}'.");
+                continue;
 
             result[descriptor.Key] = SettingDescriptors.Coerce(descriptor, ConvertJsonElement(property.Value));
         }

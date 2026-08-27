@@ -87,7 +87,7 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
         _showThinkingCheck = CreateCheckBox("显示思考", settings.Get("showThinking", false));
         _showThinkingCheck.X = Pos.Right(_thinkingCheck) + TuiSpacing.Md;
         _notificationsCheck = CreateCheckBox("任务完成通知", settings.NotificationsEnabled);
-        _notificationsCheck.Y = 1;
+        _notificationsCheck.X = Pos.Right(_showThinkingCheck) + TuiSpacing.Md;
         AddCustomRow(3, _thinkingCheck, _showThinkingCheck, _notificationsCheck);
 
         _maxTurnsField = CreateTextField(settings.MaxTurns.ToString(CultureInfo.InvariantCulture), 10);

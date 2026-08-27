@@ -508,6 +508,12 @@ The welcome screen re-renders on terminal resize to stay centered.
   progress.
 - **Respect overlay stacking.** Multiple overlays may stack. Always use
   `OverlayHost` to manage z-order and `Esc` propagation.
+- **Every mouse behavior must have a keyboard equivalent action.** Any
+  click-driven interaction (expand/collapse, copy, navigation) must also be
+  reachable via a `KeybindingDefaults` action so `keybindings.json` users can
+   remap it. Register new interactions in the appropriate context
+   (`Chat` / `Transcript` / `Diff` / `Selector`) and surface them in the
+   `/keybindings` panel and the welcome-screen tips when they are part of the primary flow.
 
 ### Don'ts
 

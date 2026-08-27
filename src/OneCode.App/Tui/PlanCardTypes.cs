@@ -62,7 +62,7 @@ public sealed record PlanCardStateSnapshot(
 
 /// <summary>
 /// <see cref="PlanStep"/> 的持久化 DTO——避免直接序列化 internal 类型。
-/// 与 <see cref="PlanStepDto"/> 字段对齐，但用于持久化场景（跨会话恢复）。
+/// 与 <see cref="OneCode.App.Tools.PlanStepDto"/> 字段对齐，但用于持久化场景（跨会话恢复）。
 /// </summary>
 public sealed record PlanStepSnapshot(
     string Label,

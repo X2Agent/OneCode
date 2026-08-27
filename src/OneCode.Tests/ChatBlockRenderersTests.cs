@@ -213,38 +213,6 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderToolCallRow_Success_ProducesCheckMark()
-    {
-        var lines = ChatBlockRenderers.RenderToolCallRow("Read", "file.txt", ok: true);
-        lines.Should().HaveCount(1);
-        lines[0].FullText.Should().Contain("Read");
-        lines[0].FullText.Should().Contain("file.txt");
-        lines[0].FullText.Should().Contain("完成");
-    }
-
-    [Fact]
-    public void RenderToolCallRow_Failure_ProducesCrossMark()
-    {
-        var lines = ChatBlockRenderers.RenderToolCallRow("Bash", null, ok: false);
-        lines[0].FullText.Should().Contain("错误");
-    }
-
-    [Fact]
-    public void RenderToolCallRow_NoArgs_OmitsArgSegment()
-    {
-        var lines = ChatBlockRenderers.RenderToolCallRow("Read");
-        lines[0].FullText.Should().NotContain("null");
-    }
-
-    [Fact]
-    public void RenderToolCallRow_IsMultiSegment()
-    {
-        var lines = ChatBlockRenderers.RenderToolCallRow("Read", "file.txt", true);
-        lines[0].Segments.Should().NotBeNull();
-        lines[0].Segments!.Count.Should().BeGreaterThan(1);
-    }
-
-    [Fact]
     public void InlineSelector_UsesSharedInformationRequestCardHeader()
     {
         var lines = InlineSelector.RenderAsLines(
@@ -303,12 +271,13 @@ public sealed class ChatBlockRenderersTests
     {
         var withAgent = ChatBlockRenderers.RenderDiffBlock(
             "A.cs", new[] { "+ x" }, [], agentName: "executor-1");
-        withAgent[0].FullText.Should().Contain("by executor-1");
+        withAgent[0].FullText.Should().Contain("A.cs");
+        withAgent.Should().Contain(l => l.FullText.Contains("by executor-1"));
 
         // 无归属（非 Team 路径）不出现 by 标注。
         var withoutAgent = ChatBlockRenderers.RenderDiffBlock(
             "B.cs", new[] { "+ x" }, []);
-        withoutAgent[0].FullText.Should().NotContain("by ");
+        withoutAgent.Should().NotContain(l => l.FullText.Contains("by "));
     }
 
     [Fact]
@@ -473,30 +442,6 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderAgentCoordinationMessage_FormatsFromToContent()
-    {
-        var lines = ChatBlockRenderers.RenderAgentCoordinationMessage(
-            "orchestrator", "purple",
-            "researcher", "blue",
-            "调研 Terminal.Gui 限制");
-        var contentLine = lines.First(l => l.FullText.Contains("orchestrator"));
-        contentLine.FullText.Should().Contain("│");
-        contentLine.FullText.Should().Contain("→");
-        contentLine.FullText.Should().Contain("researcher");
-        contentLine.FullText.Should().Contain("调研 Terminal.Gui 限制");
-    }
-
-    [Fact]
-    public void RenderAgentCoordinationMessage_IsMultiSegment()
-    {
-        var lines = ChatBlockRenderers.RenderAgentCoordinationMessage(
-            "orchestrator", "purple", "researcher", "blue");
-        var contentLine = lines.First(l => l.FullText.Contains("orchestrator"));
-        contentLine.Segments.Should().NotBeNull();
-        contentLine.Segments!.Count.Should().BeGreaterThanOrEqualTo(3); // pipe + from + arrow + to
-    }
-
-    [Fact]
     public void RenderAgentMessage_HasHeaderAndContent()
     {
         var lines = ChatBlockRenderers.RenderAgentMessage("executor", "orange", "done");
@@ -505,19 +450,5 @@ public sealed class ChatBlockRenderersTests
         var headerLine = lines.First(l => l.FullText.Contains("Executor"));
         headerLine.Segments.Should().NotBeNull();
         headerLine.Segments!.Should().Contain(s => s.Text.Contains("\u25b8"));
-    }
-
-    [Fact]
-    public void RenderThinkingBlock_WithoutText_ShowsEllipsis()
-    {
-        var lines = ChatBlockRenderers.RenderThinkingBlock(null);
-        lines[0].FullText.Should().Contain("思考");
-    }
-
-    [Fact]
-    public void RenderThinkingBlock_WithText_ShowsText()
-    {
-        var lines = ChatBlockRenderers.RenderThinkingBlock("Considering options…");
-        lines[0].FullText.Should().Contain("Considering options");
     }
 }

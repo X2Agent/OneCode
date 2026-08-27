@@ -157,6 +157,30 @@ public sealed class SettingsOverlayTests
         changes["apiKey"].Should().BeOfType<ConfigMutation.Remove>();
     }
 
+    private static SettingsResult MakeResult()
+    {
+        var settings = new AppSettings(new Dictionary<string, object?>
+        {
+            ["provider"] = "openai",
+            ["model"] = "gpt-5.6",
+            ["maxTurns"] = 20,
+        });
+        return new SettingsResult(
+            ConfigScope.User,
+            Provider: "openai",
+            BaseUrl: "https://api.example.com",
+            ApiKey: string.Empty,
+            ApiKeyChanged: false,
+            Model: "gpt-5.6",
+            FastModel: string.Empty,
+            ThinkingEnabled: false,
+            ShowThinking: false,
+            NotificationsEnabled: false,
+            MaxTurns: 20,
+            Effort: "medium",
+            InitialSnapshot: ConfigSnapshot.FromEffective(settings));
+    }
+
     private static SettingsOverlay CreateOverlay()
     {
         var settings = new AppSettings(new Dictionary<string, object?>

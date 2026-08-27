@@ -9,7 +9,7 @@ public sealed partial class QuestionWizard
     /// <summary>
     /// 渲染向导为 FormattedLines，用于在对话视图中显示。
     /// </summary>
-    public IReadOnlyList<FormattedLine> RenderAsLines()
+    public IReadOnlyList<FormattedLine> RenderAsLines(int viewWidth = TuiSpacing.DefaultContentWidth)
     {
         var question = CurrentQuestion;
         var lines = QuestionCardRenderer.RenderHeader(
@@ -18,7 +18,8 @@ public sealed partial class QuestionWizard
             _currentIndex + 1,
             TotalQuestions,
             GetQuestionTypeLabel(question.Type),
-            question.Description);
+            question.Description,
+            viewWidth);
 
         // 根据题型渲染不同UI
         switch (question.Type)

@@ -1,6 +1,6 @@
 # OneCode 配置项参考
 
-本文档列出 `settings.json` 中所有合法配置项及其作用。配置文件只接受文档声明的键；未知键、点号属性名和类型错误都会导致该次加载失败，并保留上一份有效快照。分组配置必须使用嵌套 JSON，例如 `autodream.enabled` 写为 `{ "autodream": { "enabled": true } }`。
+本文档列出 `settings.json` 中所有合法配置项及其作用。配置文件只接受文档声明的键：**未知键会被忽略**（兼容旧版本残留的配置项，如已移除功能的 showKeyHints，并在下次保存该作用域时清除）；点号属性名和类型错误仍会导致该次加载失败，并保留上一份有效快照。分组配置必须使用嵌套 JSON，例如 `autodream.enabled` 写为 `{ "autodream": { "enabled": true } }`。
 
 ## 配置文件位置
 

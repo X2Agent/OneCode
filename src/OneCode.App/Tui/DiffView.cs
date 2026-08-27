@@ -1,5 +1,13 @@
 namespace OneCode.App.Tui;
 
+using OneCode.Core.Keybindings;
+
+/// <summary>
+/// Unified-diff scroll view. All keybindings resolve through
+/// <see cref="KeybindingResolver"/> in the <see cref="KeybindingDefaults.ContextDiff"/>
+/// context (unioned into the active set at resolution time — no push/pop lifecycle
+/// to leak); Esc-close stays a retained hardcoded overlay behavior.
+/// </summary>
 public sealed class DiffView : View
 {
     // 颜色从 TuiPalette 集中管理，参考 code.pen 设计
@@ -12,13 +20,27 @@ public sealed class DiffView : View
 
     private readonly List<DiffLine> _lines = new();
     private int _scrollOffset;
+    private readonly KeybindingResolver _keyResolver;
+    private readonly KeybindingContextManager _keyContextManager;
 
-    public DiffView()
+    public DiffView(KeybindingResolver? keyResolver = null, KeybindingContextManager? keyContextManager = null)
     {
+        // 独立构造（测试/预览）时回退到默认绑定，行为与全局实例一致。
+        _keyResolver = keyResolver ?? new KeybindingResolver();
+        if (keyResolver is null)
+            _keyResolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+        _keyContextManager = keyContextManager ?? new KeybindingContextManager();
+
         Width = Dim.Fill();
         Height = Dim.Fill();
         CanFocus = true;
     }
+
+    /// <summary>当前滚动偏移（测试断言用）。</summary>
+    public int ScrollOffset => _scrollOffset;
+
+    /// <summary>Simulates a KeyDown reaching this view (test hook, mirrors OnKeyDown).</summary>
+    internal bool DispatchKey(Key kb) => OnKeyDown(kb);
 
     public void SetDiff(string diffText)
     {
@@ -102,17 +124,28 @@ public sealed class DiffView : View
     {
         var vp = Viewport;
         var pageSize = Math.Max(1, vp.Height - 1);
-        var maxOffset = Math.Max(0, _lines.Count - vp.Height);
 
-        if (kb == Key.CursorUp) { Scroll(-1); return true; }
-        if (kb == Key.CursorDown) { Scroll(1); return true; }
-        if (kb == Key.PageUp) { Scroll(-pageSize); return true; }
-        if (kb == Key.PageDown) { Scroll(pageSize); return true; }
-        if (kb == Key.Home) { _scrollOffset = 0; SetNeedsDraw(); return true; }
-        if (kb == Key.End) { _scrollOffset = maxOffset; SetNeedsDraw(); return true; }
-        // Vim-style bindings (when not in text input context)
-        if (kb == Key.J) { Scroll(1); return true; }
-        if (kb == Key.K) { Scroll(-1); return true; }
+        // Diff 上下文在解析时并入活跃集合：DiffView 聚焦期间才消费 diff:*，
+        // 无 push/pop 生命周期可泄漏。未匹配的按键不处理，交回基础滚动逻辑。
+        var contexts = new HashSet<string>(_keyContextManager.ActiveContexts, StringComparer.Ordinal)
+        {
+            KeybindingDefaults.ContextDiff,
+        };
+        switch (TuiKeyAdapter.ResolveAction(kb, _keyResolver, contexts))
+        {
+            case KeybindingDefaults.ActionDiffScrollUp: Scroll(-1); return true;
+            case KeybindingDefaults.ActionDiffScrollDown: Scroll(1); return true;
+            case KeybindingDefaults.ActionDiffPageUp: Scroll(-pageSize); return true;
+            case KeybindingDefaults.ActionDiffPageDown: Scroll(pageSize); return true;
+            case KeybindingDefaults.ActionDiffTop:
+                _scrollOffset = 0;
+                SetNeedsDraw();
+                return true;
+            case KeybindingDefaults.ActionDiffBottom:
+                _scrollOffset = Math.Max(0, _lines.Count - vp.Height);
+                SetNeedsDraw();
+                return true;
+        }
 
         return base.OnKeyDown(kb);
     }

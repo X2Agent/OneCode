@@ -5,7 +5,7 @@ using OneCode.App.Tui;
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Runtime artifacts produced by <see cref="InteractiveModeExecutor.InitializeAsync"/>
+/// Runtime artifacts produced by <see cref="InteractiveBootstrapService.InitializeAsync"/>
 /// and consumed by both the executor's streaming/command methods and
 /// <see cref="TuiHostConfigurator"/>. Carries the shared, immutable session
 /// state needed to wire the TUI and dispatch queries.

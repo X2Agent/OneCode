@@ -82,6 +82,16 @@ public sealed partial class ChatInputView : View
     /// <summary>Raised when the user presses Tab in a non-completion context to cycle the working mode.</summary>
     public event Action? CycleModeRequested;
 
+    /// <summary>进入对话区导航模式（Ctrl+T）。由 ReplShell 接线：焦点切换 + Transcript 上下文 push。</summary>
+    public event Action? EnterTranscriptRequested;
+
+    /// <summary>
+    /// 直达指定工作模式（Alt+1..4，app:mode* 动作）。
+    /// 视图内部接线到 <see cref="WorkingModeController.Mode"/>，复用 ModeChanged
+    /// 徽章闪烁（AgentStatusBar 订阅），无需跨层订阅。
+    /// </summary>
+    internal event Action<WorkingMode>? ModeDirectRequested;
+
     /// <summary>
     /// Raised when an image paste is rejected because the current model doesn't
     /// support multimodal input. The caller should show a visible error message.
@@ -94,12 +104,6 @@ public sealed partial class ChatInputView : View
     /// 并刷新 AgentStatusBar 显示的团队名。
     /// </summary>
     public event Action? CycleTeamRequested;
-
-    /// <summary>
-    /// 切换右侧计划侧边栏（Ctrl+G）。有活动计划时可收起/展开，
-    /// 让对话区临时回到全宽。
-    /// </summary>
-    public event Action? TogglePlanPanelRequested;
 
     /// <summary>
     /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。

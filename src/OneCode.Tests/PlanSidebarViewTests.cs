@@ -3,7 +3,7 @@ using OneCode.App.Tui;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Drag-width clamp rules for <see cref="PlanSidebarView.ComputeDraggedWidth"/>:
+/// Drag-width clamp rules for <c>PlanSidebarView.ComputeDraggedWidth</c>:
 /// lower bound MinWidth, upper bound min(60% of screen, screen - chat column
 /// minimum), and no width may ever exceed the screen (negative AnchorEnd X)
 /// or violate Math.Clamp's max >= min contract on tiny terminals.

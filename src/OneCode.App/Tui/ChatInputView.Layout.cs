@@ -41,6 +41,10 @@ public sealed partial class ChatInputView
 
         CycleModeRequested += () => _modeController.CycleMode();
 
+        // Alt+N 直达模式：视图内部接线（参照上方 CycleModeRequested 先例）。
+        // 直接赋值 Mode 触发 ModeChanged，状态栏徽章闪烁随之复用。
+        ModeDirectRequested += mode => _modeController.Mode = mode;
+
         // Fallback for terminals/drivers where IApplication.Paste doesn't fire
         // (e.g. ConPTY may strip bracketed-paste markers and deliver text as
         // regular input). ChatTextEditor detects large pastes by line-count

@@ -3,7 +3,7 @@ namespace OneCode.App.Tui;
 /// <summary>
 /// 多问题向导组件 — 支持多种题型（单选、多选、短文本、长文本、确认题），可前后导航。
 /// 类似 InlineSelector，但支持多问题和更复杂的导航。
-/// 渲染逻辑见 <see cref="QuestionWizard.Rendering.cs"/>。
+/// 渲染逻辑见 <c>QuestionWizard.Rendering.cs</c>。
 /// </summary>
 public sealed partial class QuestionWizard
 {

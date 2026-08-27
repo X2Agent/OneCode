@@ -36,12 +36,29 @@ public sealed partial class MessageListView
 
             var lineBg = entry.Bg ?? TuiPalette.BgPrimary;
 
+            // Transcript 导航行：整行提亮背景并加 Accent 游标条，与搜索高亮互斥时
+            // 导航优先（导航行同时被搜索命中也只呈现导航态，避免双重高亮混淆）。
+            var isNavRow = lineIdx == _navHighlightLine;
+            if (isNavRow)
+                lineBg = TuiPalette.BgActive;
+
             // Always fill the full row with the background first.
             // This clears stale characters from previous frames regardless of
             // which content path (segments/plain) runs below.
             SetAttribute(new Attribute(entry.Color, lineBg));
             AddStr(new string(' ', viewport.Width));
-            Move(leftPad, i);
+
+            // 导航行在行首绘制 Accent 游标条，内容整体右移一列。
+            var rowLeft = leftPad;
+            if (isNavRow)
+            {
+                Move(0, i);
+                SetAttribute(new Attribute(TuiPalette.Accent, lineBg));
+                AddStr(TuiGlyphs.BlockFull);
+                rowLeft += 1;
+            }
+
+            Move(rowLeft, i);
 
             // Search highlight: split the line's text around the query and render
             // matched portions with a distinct background color.

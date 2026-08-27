@@ -13,6 +13,7 @@ public sealed class AgentStatusBar : View
     private readonly WorkingModeController _modeController;
     private bool _busy;
     private bool _modeFlash;
+    private bool _navMode;
     private object? _modeFlashTimer;
     private string? _activeTeam;
     private string? _teamModeLabel;
@@ -77,6 +78,14 @@ public sealed class AgentStatusBar : View
     public string CurrentCost => _cost;
     public void SetSandboxMode(string s) { _sandbox = string.IsNullOrWhiteSpace(s) ? "Sandbox" : s; SetNeedsDraw(); }
 
+    /// <summary>Transcript 导航模式指示（Ctrl+T 进入时点亮，避免用户在对话流中迷失）。</summary>
+    public void SetNavigationMode(bool active)
+    {
+        if (_navMode == active) return;
+        _navMode = active;
+        SetNeedsDraw();
+    }
+
     /// <summary>
     /// 更新团队标签。<paramref name="teamModeLabel"/> 为该团队 team.yaml 声明的编排模式
     /// 标签（经 TeamOrchestrationModeExtensions.ToLabel 得到）——模式是团队的固定属性，
@@ -113,6 +122,17 @@ public sealed class AgentStatusBar : View
 
         // LEFT: live activity · model · cost · sandbox · LSP.
         var col = 1;
+        if (_navMode)
+        {
+            Move(col, 0);
+            SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+            AddStr("导航模式");
+            col += TextWidthHelper.GetDisplayWidth("导航模式") + 1;
+            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+            Move(col, 0);
+            AddStr("\u00b7 ");
+            col += 3;
+        }
         Move(col, 0);
         if (_busy)
         {

@@ -254,8 +254,15 @@ public static partial class ChatBlockRenderers
             else
             {
                 var assigneeTag = $"{TuiGlyphs.ArrowRight} {s.Assignee}";
-                var leftPart = $"  {num} {s.Label}";
-                var padLen = Math.Max(1, viewWidth - leftPart.Length - assigneeTag.Length - 2);
+                var tagWidth = TextWidthHelper.GetDisplayWidth(assigneeTag);
+                // 标签预算：总宽 - 缩进/序号/间隔 - 归属标签。超长标签按显示宽度
+                // 截断；pad 用显示宽度计算——旧实现用 .Length，CJK 行会错位溢出。
+                var labelBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(num) - 1 - 2 - tagWidth);
+                var label = TextWidthHelper.GetDisplayWidth(s.Label) > labelBudget
+                    ? TextWidthHelper.TruncateByWidth(s.Label, labelBudget)
+                    : s.Label;
+                var leftPart = $"  {num} {label}";
+                var padLen = Math.Max(1, viewWidth - TextWidthHelper.GetDisplayWidth(leftPart) - tagWidth - 2);
                 list.Add(FormattedLine.FromSegments(new[]
                 {
                     new LineSegment(leftPart, lc),

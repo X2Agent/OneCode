@@ -101,9 +101,12 @@ public sealed class MessageFlowRenderer
         Color barColor,
         int reservedRightWidth)
     {
+        // CJK 内容显示宽度大于字符数，pad 必须按显示宽度计算，
+        // 否则中文首行的时间戳错位甚至整行溢出视口。
         var headerPad = Math.Max(
             1,
-            CurrentWidth - reservedRightWidth - ContentIndent - content.Length - time.Length);
+            CurrentWidth - reservedRightWidth - ContentIndent
+            - TextWidthHelper.GetDisplayWidth(content) - time.Length);
 
         return FormattedLine.FromSegments(new[]
         {
@@ -327,8 +330,9 @@ public sealed class MessageFlowRenderer
     // Helpers
 
     /// <summary>Makes a tool-call inline row: ▸ Name  args   ✓/✗/◈
-    /// Uses a right-pointing triangle (▸) — clickable to expand/collapse tool details.</summary>
-    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null)
+    /// Uses a right-pointing triangle (▸) — clickable to expand/collapse tool details.
+    /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度截断 args 段，防止长参数溢出视口被裁切。</summary>
+    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null, int maxWidth = 0)
     {
         var segments = new List<LineSegment>
         {
@@ -339,18 +343,39 @@ public sealed class MessageFlowRenderer
         // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
         if (!string.IsNullOrWhiteSpace(agentName))
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
+
+        // 尾部状态段宽度固定，先算出来，从 args 段的截断预算中扣除。
+        var suffix = ok switch
+        {
+            true => string.IsNullOrEmpty(duration) ? " \u00b7 完成" : $" \u00b7 {duration}",
+            false => string.IsNullOrEmpty(duration) ? " \u00b7 错误" : $" \u00b7 {duration}",
+            _ => string.Empty,
+        };
+
         if (!string.IsNullOrWhiteSpace(args))
-            segments.Add(new($" \u00b7 {args}", TuiPalette.ToolDetailColor));
+        {
+            var displayArgs = args;
+            if (maxWidth > 0)
+            {
+                var fixedWidth = segments.Sum(s => TextWidthHelper.GetDisplayWidth(s.Text))
+                    + TextWidthHelper.GetDisplayWidth(suffix)
+                    + 1; // 尾部滚动条列
+                // "-3" 为 " · " 分隔符；仅在超宽时截断（TruncateByWidth 为省略号
+                // 预留 1 列，恰宽文本传入会被误截）；空间不足时整段省略。
+                var argsAvailable = Math.Max(0, maxWidth - fixedWidth) - 3;
+                if (argsAvailable > 0 && TextWidthHelper.GetDisplayWidth(args) > argsAvailable)
+                    displayArgs = TextWidthHelper.TruncateByWidth(args, argsAvailable);
+                else if (argsAvailable <= 0)
+                    displayArgs = string.Empty;
+            }
+            if (!string.IsNullOrWhiteSpace(displayArgs))
+                segments.Add(new($" \u00b7 {displayArgs}", TuiPalette.ToolDetailColor));
+        }
+
         if (ok is true)
-        {
-            var suffix = string.IsNullOrEmpty(duration) ? " \u00b7 完成" : $" \u00b7 {duration}";
             segments.Add(new(suffix, TuiPalette.Success));
-        }
         else if (ok is false)
-        {
-            var suffix = string.IsNullOrEmpty(duration) ? " \u00b7 错误" : $" \u00b7 {duration}";
             segments.Add(new(suffix, TuiPalette.Error));
-        }
         var tag = new ToolLineTag(name, args, result, IsExpanded: false);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }

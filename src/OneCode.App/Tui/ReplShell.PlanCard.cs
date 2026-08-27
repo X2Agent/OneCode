@@ -25,14 +25,11 @@ public sealed partial class ReplShell
         string? markdown = null,
         string? documentPath = null)
     {
-        // 新计划第一次出现（前一状态为空）自动展开侧边栏；同一计划的后续更新
-        // 尊重用户 Ctrl+G 的显式收起，不强制重新展开——PendingApproval 例外：
-        // 审批决策必须能看到完整计划。
-        var isNewPlan = _activePlan is null;
+        // 侧边栏一旦展开即保持可见（直至计划清除/新会话），后续更新只刷新内容；
+        // PendingApproval 额外弹出 InlineSelector 决策面板。
         _activePlan = new PlanCardState(title, steps.ToList(), phase, markdown, documentPath);
         RenderActivePlanCard();
-        if (isNewPlan)
-            SetPlanSidebarVisible(true);
+        SetPlanSidebarVisible(true);
 
         if (phase is PlanCardPhase.Completed or PlanCardPhase.Failed or PlanCardPhase.Cancelled)
         {

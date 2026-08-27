@@ -2,7 +2,7 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// 提问模式（AskUserQuestionTool 向导的文本题输入）：由 ReplShell 经
-/// <see cref="EnterTextModeForCurrentQuestion"/> 进入，Enter 提交、
+/// <see cref="ReplShell.EnterTextModeForCurrentQuestion"/> 进入，Enter 提交、
 /// Esc/导航键经 <see cref="IInteractionSession"/> 路由。
 /// </summary>
 public sealed partial class ChatInputView

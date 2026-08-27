@@ -57,7 +57,7 @@ public sealed partial class ReplShell
             : await _gitHelper.GetFileDiffAgainstHeadAsync(filePath).ConfigureAwait(true);
         _app.Invoke(() =>
         {
-            var overlay = new DiffDetailOverlay(_app, filePath, diffText ?? "");
+            var overlay = new DiffDetailOverlay(_app, filePath, diffText ?? "", _keyResolver, _keyContextManager);
             ShowOverlay(overlay);
             overlay.SetNeedsDraw();
         });

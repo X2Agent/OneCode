@@ -21,6 +21,8 @@ public sealed partial class ReplShell : IInteractionSession
     public void ShowInlineSelector(InlineSelector selector)
     {
         DismissActiveSession();
+        // 注入全局键位系统：selector:* 动作走全局 Resolver（用户重映射生效）。
+        selector.AttachKeybindingSystem(_keyResolver, _keyContextManager);
         _activeInlineSelector = selector;
         _chatInput.SetInteractionSuspended(true);
 
@@ -29,7 +31,8 @@ public sealed partial class ReplShell : IInteractionSession
             selector.Options,
             selector.SelectedIndex,
             selector.Prompt,
-            selector.UseInformationRequestCard));
+            selector.UseInformationRequestCard,
+            _transcript.MessageView.ContentWidth));
     }
 
     public void DismissInlineSelector()
@@ -53,7 +56,7 @@ public sealed partial class ReplShell : IInteractionSession
         _activeQuestionWizard = wizard;
         UpdateQuestionWizardInputState();
 
-        _transcript.MessageView.BeginTailRegion(wizard.RenderAsLines());
+        _transcript.MessageView.BeginTailRegion(wizard.RenderAsLines(_transcript.MessageView.ContentWidth));
     }
 
     /// <summary>
@@ -86,7 +89,7 @@ public sealed partial class ReplShell : IInteractionSession
     private void RefreshQuestionWizard()
     {
         if (_activeQuestionWizard is null) return;
-        _transcript.MessageView.ReplaceTailRegion(_activeQuestionWizard.RenderAsLines());
+        _transcript.MessageView.ReplaceTailRegion(_activeQuestionWizard.RenderAsLines(_transcript.MessageView.ContentWidth));
         UpdateQuestionWizardInputState();
     }
 
@@ -108,7 +111,8 @@ public sealed partial class ReplShell : IInteractionSession
             _activeInlineSelector.Options,
             _activeInlineSelector.SelectedIndex,
             _activeInlineSelector.Prompt,
-            _activeInlineSelector.UseInformationRequestCard));
+            _activeInlineSelector.UseInformationRequestCard,
+            _transcript.MessageView.ContentWidth));
     }
 
     // ── IInteractionSession ──────────────────────────────────────────────

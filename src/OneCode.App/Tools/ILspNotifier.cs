@@ -2,7 +2,7 @@ namespace OneCode.App.Tools;
 
 /// <summary>
 /// Notifies an editor host that a file changed on disk.
-/// The production DI registers <see cref="LspNotifier"/>; <see cref="NoOpLspNotifier"/>
+/// The production DI registers <see cref="OneCode.App.Services.Lsp.LspNotifier"/>; <see cref="NoOpLspNotifier"/>
 /// is available for tests and environments without an LSP server.
 /// </summary>
 public interface ILspNotifier

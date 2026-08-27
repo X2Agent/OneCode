@@ -11,12 +11,22 @@ public static class KeybindingDefaults
     public const string ContextChat = "Chat";
     public const string ContextAutocomplete = "Autocomplete";
 
+    /// <summary>对话区导航模式激活时（Ctrl+T 进入，Esc/i 退出）。</summary>
+    public const string ContextTranscript = "Transcript";
+
+    /// <summary>Diff 审查视图聚焦时（DiffDetailOverlay 内部解析时并入）。</summary>
+    public const string ContextDiff = "Diff";
+
+    /// <summary>内联选择器（权限提示 / Plan 审批）接管键盘时并入。</summary>
+    public const string ContextSelector = "Selector";
+
     /// <summary>
     /// 所有有效的上下文名列表。
     /// </summary>
     public static readonly string[] AllContexts =
     [
-        ContextGlobal, ContextChat, ContextAutocomplete,
+        ContextGlobal, ContextChat, ContextAutocomplete, ContextTranscript,
+        ContextDiff, ContextSelector,
     ];
 
     /// <summary>
@@ -27,6 +37,9 @@ public static class KeybindingDefaults
         [ContextGlobal] = "Active everywhere, regardless of focus",
         [ContextChat] = "When the chat input is focused",
         [ContextAutocomplete] = "When autocomplete menu is visible",
+        [ContextTranscript] = "While navigating the conversation transcript",
+        [ContextDiff] = "While the diff review view has focus",
+        [ContextSelector] = "While an inline selector owns the keyboard",
     };
 
     #endregion
@@ -35,6 +48,13 @@ public static class KeybindingDefaults
 
     // App 级别动作
     public const string ActionAppExit = "app:exit";
+
+    // 工作模式直达（Alt+1..4 独立单键绑定，与裸 Tab 循环解耦——共享 tab 前缀
+    // 会与循环/补全语义冲突；经典终端把 ctrl+2/3/4 编码为 NUL/ESC/FS。注册于 Chat 上下文。
+    public const string ActionAppModeBuild = "app:modeBuild";
+    public const string ActionAppModePlan = "app:modePlan";
+    public const string ActionAppModeTeam = "app:modeTeam";
+    public const string ActionAppModeGoal = "app:modeGoal";
 
     // 历史导航
     public const string ActionHistoryPrevious = "history:previous";
@@ -52,9 +72,6 @@ public static class KeybindingDefaults
     public const string ActionChatPageUp = "chat:pageUp";
     public const string ActionChatPageDown = "chat:pageDown";
 
-    // Plan 侧边栏开关（有活动计划时可收起/展开）
-    public const string ActionChatTogglePlanPanel = "chat:togglePlanPanel";
-
     // TEAM 模式专用：循环切换已注册团队（code-review → research → ...）
     // 绑定 Shift+Tab（Tab 换模式、Shift+Tab 换模式内的团队）。
     public const string ActionChatCycleTeam = "chat:cycleTeam";
@@ -62,6 +79,34 @@ public static class KeybindingDefaults
     // Autocomplete 菜单动作
     public const string ActionAutocompletePrevious = "autocomplete:previous";
     public const string ActionAutocompleteNext = "autocomplete:next";
+    // Tab 接受建议：tab 自身在 Autocomplete 上下文绑定，补全激活时立即触发；
+    // 模式直达已改绑 alt+1..4，tab 不再承担和弦前缀职责。
+    public const string ActionAutocompleteAccept = "autocomplete:accept";
+    public const string ActionAutocompleteDismiss = "autocomplete:dismiss";
+
+    // Diff 审查视图滚动（DiffView 聚焦时并入 ContextDiff 解析）
+    public const string ActionDiffScrollUp = "diff:scrollUp";
+    public const string ActionDiffScrollDown = "diff:scrollDown";
+    public const string ActionDiffPageUp = "diff:pageUp";
+    public const string ActionDiffPageDown = "diff:pageDown";
+    public const string ActionDiffTop = "diff:top";
+    public const string ActionDiffBottom = "diff:bottom";
+
+    // 内联选择器（权限提示 / Plan 审批）导航与确认
+    public const string ActionSelectorPrevious = "selector:previous";
+    public const string ActionSelectorNext = "selector:next";
+    public const string ActionSelectorConfirm = "selector:confirm";
+    public const string ActionSelectorDismiss = "selector:dismiss";
+
+    // Transcript 对话区导航（Ctrl+T 进入，Esc/i 退出；j/k 在可交互行间跳转）
+    public const string ActionChatEnterTranscript = "chat:enterTranscript";
+    public const string ActionTranscriptExit = "transcript:exit";
+    public const string ActionTranscriptNext = "transcript:next";
+    public const string ActionTranscriptPrevious = "transcript:previous";
+    public const string ActionTranscriptToggle = "transcript:toggle";
+    public const string ActionTranscriptCopyCode = "transcript:copyCode";
+    public const string ActionTranscriptTop = "transcript:top";
+    public const string ActionTranscriptBottom = "transcript:bottom";
 
     /// <summary>
     /// 所有有效的标准动作名列表。
@@ -69,14 +114,23 @@ public static class KeybindingDefaults
     public static readonly string[] AllActions =
     [
         ActionAppExit,
+        ActionAppModeBuild, ActionAppModePlan, ActionAppModeTeam, ActionAppModeGoal,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
         ActionChatCancel, ActionChatKillAgents,
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
-        ActionChatTogglePlanPanel,
         ActionChatCycleTeam,
         ActionAutocompletePrevious, ActionAutocompleteNext,
+        ActionAutocompleteAccept, ActionAutocompleteDismiss,
+        ActionChatEnterTranscript,
+        ActionTranscriptExit, ActionTranscriptNext, ActionTranscriptPrevious,
+        ActionTranscriptToggle, ActionTranscriptCopyCode,
+        ActionTranscriptTop, ActionTranscriptBottom,
+        ActionDiffScrollUp, ActionDiffScrollDown,
+        ActionDiffPageUp, ActionDiffPageDown, ActionDiffTop, ActionDiffBottom,
+        ActionSelectorPrevious, ActionSelectorNext,
+        ActionSelectorConfirm, ActionSelectorDismiss,
     ];
 
     private static readonly HashSet<string> AllActionsSet = new(AllActions);
@@ -125,17 +179,64 @@ public static class KeybindingDefaults
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
 
-            // Plan 侧边栏开关
-            ["ctrl+g"] = ActionChatTogglePlanPanel,
-
             // TEAM 模式下循环切换已注册团队（Shift+Tab）。
             // 编排模式由 team.yaml 固定声明，运行期不可覆盖，无策略切换键。
             ["shift+tab"] = ActionChatCycleTeam,
+
+            // 工作模式直达（Alt+数字独立绑定；裸 Tab 循环为硬编码行为，不经 Resolver，
+            // 两者无共享前缀、互不干扰）。
+            ["alt+1"] = ActionAppModeBuild,
+            ["alt+2"] = ActionAppModePlan,
+            ["alt+3"] = ActionAppModeTeam,
+            ["alt+4"] = ActionAppModeGoal,
+
+            // 进入对话区导航模式（焦点移到对话流，j/k 在可交互行间跳转）
+            ["ctrl+t"] = ActionChatEnterTranscript,
         }),
         new(ContextAutocomplete, new Dictionary<string, string?>
         {
             ["up"] = ActionAutocompletePrevious,
             ["down"] = ActionAutocompleteNext,
+            // Tab 接受 / Esc 关闭：经 eager-fire 与 Chat 的 tab N 和弦共存
+            //（补全未激活时 Autocomplete 上下文不活跃，Tab 仍走模式循环）。
+            ["tab"] = ActionAutocompleteAccept,
+            ["escape"] = ActionAutocompleteDismiss,
+        }),
+        // 对话区导航上下文（Ctrl+T 激活）。声明在 Chat 默认块之后：
+        // Resolver「后匹配生效」，esc 在此解析为退出导航而非 chat:cancel。
+        // 注意：方向键/翻页键不在此注册——导航模式下由 MessageListView
+        // 原生滚动先行消费，不经 Resolver。
+        new(ContextTranscript, new Dictionary<string, string?>
+        {
+            ["escape"] = ActionTranscriptExit,
+            ["i"] = ActionTranscriptExit,
+            ["j"] = ActionTranscriptNext,
+            ["k"] = ActionTranscriptPrevious,
+            ["enter"] = ActionTranscriptToggle,
+            ["space"] = ActionTranscriptToggle,
+            ["c"] = ActionTranscriptCopyCode,
+            ["g"] = ActionTranscriptTop,
+            ["shift+g"] = ActionTranscriptBottom,
+        }),
+        // Diff 审查视图滚动。Esc 关闭 overlay 属保留行为（见 docs「保留行为」），
+        // 不在此注册，保证关闭永远可用。
+        new(ContextDiff, new Dictionary<string, string?>
+        {
+            ["up"] = ActionDiffScrollUp,
+            ["k"] = ActionDiffScrollUp,
+            ["down"] = ActionDiffScrollDown,
+            ["j"] = ActionDiffScrollDown,
+            ["pageup"] = ActionDiffPageUp,
+            ["pagedown"] = ActionDiffPageDown,
+            ["home"] = ActionDiffTop,
+            ["end"] = ActionDiffBottom,
+        }),
+        new(ContextSelector, new Dictionary<string, string?>
+        {
+            ["up"] = ActionSelectorPrevious,
+            ["down"] = ActionSelectorNext,
+            ["enter"] = ActionSelectorConfirm,
+            ["escape"] = ActionSelectorDismiss,
         }),
     ];
 

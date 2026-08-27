@@ -75,22 +75,6 @@ public sealed class TuiEventDispatchTests
         fullText.Should().Contain("-old line 1");
     }
 
-    // ChatBlockRenderers.RenderAgentCoordinationMessage
-
-    [Fact]
-    public void RenderAgentCoordinationMessage_ProducesFromToArrow()
-    {
-        var lines = ChatBlockRenderers.RenderAgentCoordinationMessage(
-            "orchestrator", null, "researcher", null, "Investigate the issue");
-
-        lines.Should().NotBeEmpty();
-        var fullText = string.Join("\n", lines.Select(l => l.FullText));
-        fullText.Should().Contain("orchestrator");
-        fullText.Should().Contain("→");
-        fullText.Should().Contain("researcher");
-        fullText.Should().Contain("Investigate the issue");
-    }
-
     // ChatBlockRenderers.RenderAgentMessage
 
     [Fact]

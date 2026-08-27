@@ -130,9 +130,9 @@ public sealed class TeamSidebarTests
         var lines = ChatBlockRenderers.RenderTeamSidebar(snapshot.ToContent(), width: 48);
         var text = string.Join("\n", lines.Select(l => l.FullText));
 
-        // 五区齐全
+        // 五区齐全（标题带图标与汇总计数）
         text.Should().Contain("任务");
-        text.Should().Contain("决策记录");
+        text.Should().Contain("澄清决策");
         text.Should().Contain("模拟命令行工具运行");
         text.Should().Contain("文件变更 (1)");
         text.Should().Contain("parser.ts");
@@ -156,6 +156,44 @@ public sealed class TeamSidebarTests
         var lines = ChatBlockRenderers.RenderTeamSidebar(new TeamRunSnapshot().ToContent(), width: 48);
         var text = string.Join("\n", lines.Select(l => l.FullText));
         text.Should().NotContain("── ");
+    }
+
+    [Fact]
+    public void RenderTeamSidebar_TasksRunningFirst_DoneLast_SectionTitleCarriesProgress()
+    {
+        var snapshot = new TeamRunSnapshot();
+        snapshot.Apply(new TuiTeamPlanApproval("impl", "摘要", ["t-done", "t-run", "t-pending"], []));
+        snapshot.Apply(new TuiTeamTaskProgress("t-done", "t-done", "executor", "Succeeded", 1, 1));
+        snapshot.Apply(new TuiTeamTaskProgress("t-run", "t-run", "executor", null, 0, 1));
+
+        var texts = ChatBlockRenderers.RenderTeamSidebar(snapshot.ToContent(), width: 48)
+            .Select(l => l.FullText).ToList();
+
+        // 标题汇总计数：1 已结束 / 3 总数，一眼看到整体进度
+        texts.Should().Contain(t => t.Contains("任务 (1/3)"));
+
+        // 重点前置：进行中 → 待执行 → 已完成
+        var indexOf = (string fragment) => texts.FindIndex(t => t.Contains(fragment));
+        var running = indexOf("t-run");
+        var pending = indexOf("t-pending");
+        var done = indexOf("t-done");
+        running.Should().BeGreaterThan(-1);
+        pending.Should().BeGreaterThan(-1);
+        done.Should().BeGreaterThan(-1);
+        running.Should().BeLessThan(pending);
+        pending.Should().BeLessThan(done);
+    }
+
+    [Fact]
+    public void RenderTeamSidebar_CjkContent_EveryRowFitsWithinPanelWidth()
+    {
+        // 回归：旧 TruncateToFit 按 text.Length 截断，CJK 双宽字符会溢出面板。
+        var snapshot = new TeamRunSnapshot();
+        snapshot.Apply(new TuiTeamUserResponse("impl", string.Concat(Enumerable.Repeat("很长的中文回答", 30))));
+
+        var lines = ChatBlockRenderers.RenderTeamSidebar(snapshot.ToContent(), width: 32);
+        lines.Select(l => TextWidthHelper.GetDisplayWidth(l.FullText))
+            .Should().OnlyContain(w => w <= 32);
     }
 
     private static TuiTeamDelivery MakeDelivery(bool committed)

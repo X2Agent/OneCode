@@ -9,7 +9,7 @@ namespace OneCode.App.Tui;
 /// Markdown → <see cref="ConvLine"/> renderer: block dispatch, inline text
 /// extraction, and simple block types (heading / quote / paragraph / html).
 /// Complex block types (code, table, list) live in
-/// <see cref="MarkdownRenderer.Blocks.cs"/>.
+/// <c>MarkdownRenderer.Blocks.cs</c>.
 /// </summary>
 internal static partial class MarkdownRenderer
 {

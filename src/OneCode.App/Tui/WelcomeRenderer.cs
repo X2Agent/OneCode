@@ -71,30 +71,43 @@ public static class WelcomeRenderer
 
         body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
 
-        // tips — discoverability only; runtime state lives in chrome bars
-        var tips = new[]
-        {
+        // tips — discoverability only; runtime state lives in chrome bars.
+        // Two rows: input basics first, then mode-direct / panel entry.
+        RenderTipLine(
+        [
             ("/ ", "斜杠命令"),
             ("@ ", "提及文件"),
-            ("Tab ", "空输入切模式"),
+            ("Tab ", "循环切模式"),
             ("Esc ", "中断"),
             ("/find ", "搜索会话"),
-        };
+        ]);
 
-        var tipSegs = new List<LineSegment>();
-        for (var i = 0; i < tips.Length; i++)
+        body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+
+        RenderTipLine(
+        [
+            ("Ctrl+T ", "浏览对话"),
+            ("Alt+1..4 ", "直达模式"),
+            ("/keybindings ", "快捷键面板"),
+        ]);
+
+        void RenderTipLine((string Key, string Desc)[] tips)
         {
-            var (key, desc) = tips[i];
-            tipSegs.Add(new(key, TuiPalette.Accent));
-            tipSegs.Add(new(desc, TuiPalette.FgMuted));
-            if (i < tips.Length - 1)
-                tipSegs.Add(new(" · ", TuiPalette.FgMuted));
-        }
+            var tipSegs = new List<LineSegment>();
+            for (var i = 0; i < tips.Length; i++)
+            {
+                var (key, desc) = tips[i];
+                tipSegs.Add(new(key, TuiPalette.Accent));
+                tipSegs.Add(new(desc, TuiPalette.FgMuted));
+                if (i < tips.Length - 1)
+                    tipSegs.Add(new(" · ", TuiPalette.FgMuted));
+            }
 
-        var tipFullWidth = tipSegs.Sum(s => TextWidthHelper.GetDisplayWidth(s.Text));
-        var tipPad = new string(' ', Math.Max(0, (viewWidth - tipFullWidth) / 2));
-        tipSegs.Insert(0, new(tipPad, TuiPalette.BgPrimary));
-        body.Add(FormattedLine.FromSegments(tipSegs.ToArray()));
+            var tipFullWidth = tipSegs.Sum(s => TextWidthHelper.GetDisplayWidth(s.Text));
+            var tipPad = new string(' ', Math.Max(0, (viewWidth - tipFullWidth) / 2));
+            tipSegs.Insert(0, new(tipPad, TuiPalette.BgPrimary));
+            body.Add(FormattedLine.FromSegments(tipSegs.ToArray()));
+        }
 
         body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
 

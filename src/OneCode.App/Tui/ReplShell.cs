@@ -16,7 +16,7 @@ namespace OneCode.App.Tui;
 /// │  ⠋ 思考中 · Opus · $0.04 · Sandbox              BUILD │
 /// ├─ ChatInputView ────────────────────────────────────────┤  4–5 rows
 /// │ > _                                                    │
-/// │  (ChatInputContextGap — blank row)                     │  1 row
+/// │  (ChatInputContextGap — 空行)                          │  1 row
 /// └─ SessionContextBar ────────────────────────────────────┘  1 row
 /// </code>
 /// </summary>
@@ -72,6 +72,8 @@ public sealed partial class ReplShell : View
         _gitHelper = gitHelper;
 
         _transcript = new ChatTranscriptView(app, clipboard, getShowThinking);
+        _transcriptNav = new OneCode.App.Transcript.TranscriptViewModel(
+            () => _transcript.MessageView.GetInteractiveLineIndices());
         _chatInput = new ChatInputView(
             app,
             _modeController,
@@ -97,6 +99,9 @@ public sealed partial class ReplShell : View
         // ChatInputView 把挂起态/提问态的按键转发给会话（见 IInteractionSession），
         // 替代旧的松散转发事件。
         _chatInput.InteractionSession = this;
+
+        // Ctrl+T — 进入对话区导航模式（焦点切换 + Transcript 上下文 push）。
+        _chatInput.EnterTranscriptRequested += EnterTranscriptMode;
 
         // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
         _chatInput.ScrollUpRequested += () => _transcript.MessageView.ScrollUp();
@@ -145,8 +150,9 @@ public sealed partial class ReplShell : View
         _transcript.Width = Dim.Fill() - 1; _transcript.Height = Dim.Fill();
 
         // Plan sidebar — right-docked, hidden until a plan exists. When visible
-        // it shrinks the transcript width (ApplySidebarLayout). Ctrl+G toggles;
-        // the separator line is a mouse drag handle: during the drag only layout
+        // it shrinks the transcript width (ApplySidebarLayout); once shown it
+        // stays visible until the plan is cleared or a new session starts. The
+        // separator line is a mouse drag handle: during the drag only layout
         // is refreshed (OnSidebarWidthChanged), the plan content and conversation
         // list re-render on release (OnSidebarDragEnded).
         _planSidebar = new PlanSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
@@ -157,7 +163,6 @@ public sealed partial class ReplShell : View
         };
         _planSidebar.X = Pos.AnchorEnd(_planSidebar.CurrentWidth);
         _contentZone.Add(_planSidebar);
-        _chatInput.TogglePlanPanelRequested += TogglePlanSidebar;
 
         // TEAM 运行状态板（右停靠，与 Plan 侧边栏互斥，见 ReplShell.TeamSidebar.cs）
         _teamSidebar = new TeamSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
@@ -193,13 +198,16 @@ public sealed partial class ReplShell : View
         _modeController.ModeChanged += (_, args) =>
         {
             _transcript.CurrentMode = args.CurrentMode;
-            var bannerLines = ChatBlockRenderers.RenderModeBanner(args.CurrentMode);
+            // TEAM/GOAL 模式下底部栏隐藏 ctx 百分比（见 SessionContextBar.SetWorkingMode）。
+            _sessionContextBar.SetWorkingMode(args.CurrentMode);
+            var bannerLines = ChatBlockRenderers.RenderModeBanner(args.CurrentMode, ContentWidth);
             // Replace trailing banner in-place — stacking snapshots makes the chat
             // look one step behind the live status-bar mode during rapid Tab.
             _transcript.UpdateModeBanner(bannerLines);
         };
 
         _transcript.CurrentMode = _modeController.Mode;
+        _sessionContextBar.SetWorkingMode(_modeController.Mode);
     }
 
     // Plan card interaction (design-spec §4.2) lives in ReplShell.PlanCard.cs:
@@ -208,22 +216,6 @@ public sealed partial class ReplShell : View
 
     /// <summary>Whether the right plan sidebar is currently visible.</summary>
     internal bool IsPlanSidebarVisible => _planSidebar.Visible;
-
-    /// <summary>
-    /// Toggles the plan sidebar (Ctrl+G). Only meaningful while a plan or a TEAM
-    /// run exists — lets the user reclaim full chat width without losing content.
-    /// 无活动计划时路由到 TEAM 侧边栏（两者互斥，同一时刻至多一个有内容）。
-    /// </summary>
-    internal void TogglePlanSidebar()
-    {
-        if (_activePlan is not null)
-        {
-            SetPlanSidebarVisible(!_planSidebar.Visible);
-            return;
-        }
-        if (_activeTeamRun is not null)
-            SetTeamSidebarVisible(!_teamSidebar.Visible);
-    }
 
     private void SetPlanSidebarVisible(bool visible)
     {
@@ -314,6 +306,9 @@ public sealed partial class ReplShell : View
         if (busy)
             _agentStatusBar.SetActivity(initialActivity);
         _agentStatusBar.SetBusy(busy);
+        // 流式开始时自动退出导航模式：流式插入会让游标行号漂移（流式禁入）。
+        if (busy)
+            ExitTranscriptMode();
     }
 
     public void FocusChatInput()

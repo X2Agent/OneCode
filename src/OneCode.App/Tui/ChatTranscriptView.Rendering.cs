@@ -120,7 +120,7 @@ public sealed partial class ChatTranscriptView
         var lineIndex = _stream.StatusLines.Count;
         // 使用 ToolResultSummarizer 格式化目标显示
         var formattedTarget = ToolResultSummarizer.FormatTarget(name, toolInput);
-        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null, agentName: agentName));
+        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null, agentName: agentName, maxWidth: ContentWidth));
         _stream.ToolTracker.RegisterStart(toolId, lineIndex);
         _app.Invoke(() => ActivityChanged?.Invoke(
             string.IsNullOrWhiteSpace(agentName) ? $"执行 {name}" : $"[{agentName}] 执行 {name}"));
@@ -139,7 +139,7 @@ public sealed partial class ChatTranscriptView
                 && pending.LineIndex < _stream.StatusLines.Count)
             {
                 var durationStr = $"({StreamingToolTracker.FormatDuration(pending.StartTick)})";
-                _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, durationStr, result, agentName: agentName);
+                _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, durationStr, result, agentName: agentName, maxWidth: ContentWidth);
             }
             // 已见过的 ToolId（ContinueStreaming 已提交到历史）— 跳过去重
             else if (_stream.ToolTracker.WasSeen(toolId))
@@ -148,7 +148,7 @@ public sealed partial class ChatTranscriptView
             }
 
             if (isError && !string.IsNullOrWhiteSpace(result))
-                _stream.StatusLines.Add(ConversationRenderer.MakeStreamingNotice(result, TuiPalette.Error));
+                AddNoticeLines(result, TuiPalette.Error);
 
             RebuildStreamingPreview();
             return;
@@ -156,9 +156,10 @@ public sealed partial class ChatTranscriptView
 
         // 非 streaming 态收到的工具完成 — 渲染为折叠的已完成工具行（含结果摘要），
         // 不再平铺完整 JSON 内容（与 streaming 态的折叠呈现保持一致）。
-        AppendCommittedBlock(_ => new[]
+        // 闭包按当前视口宽度重渲（resize 时自动适配，见 AppendCommittedBlock）。
+        AppendCommittedBlock(width => new[]
         {
-            ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, null, result),
+            ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, null, result, maxWidth: width),
         });
 
         _stream.TextBuffer.Clear();
@@ -173,13 +174,31 @@ public sealed partial class ChatTranscriptView
             return;
         }
 
-        _stream.StatusLines.Add(ConversationRenderer.MakeStreamingNotice(text, color ?? TuiPalette.SystemMessage));
+        AddNoticeLines(text, color ?? TuiPalette.SystemMessage);
         RebuildStreamingPreview();
+    }
+
+    /// <summary>
+    /// 把长通知文本（权限拒绝 / shell 输出预览 / 工具错误等）按视口宽度预换行为
+    /// 多条通知行（CJK 显示宽度感知）。流式态的 StatusLines 不参与 resize 后的
+    /// 宽度重渲，超宽单行会被终端硬裁切，必须在此处适配。
+    /// </summary>
+    private void AddNoticeLines(string text, Color color)
+    {
+        var available = Math.Max(20,
+            ContentWidth - ConversationRenderer.ContentIndent
+            - TextWidthHelper.GetDisplayWidth(TuiGlyphs.BorderHorizontal) - 2);
+        foreach (var wrapped in ConversationRenderer.WordWrapStreaming(text, available))
+        {
+            if (wrapped.Length == 0) continue;
+            _stream.StatusLines.Add(ConversationRenderer.MakeStreamingNotice(wrapped, color));
+        }
     }
 
     /// <summary>
     /// TEAM 成员发言块：说话人行 + 最多 3 行预览（折叠式呈现）。
     /// 完整内容仍保留在 Delivery 证据中，主对话不被长文本刷屏。
+    /// 预览行按视口宽度预换行；块由闭包持有宽度，resize 时整体重渲。
     /// </summary>
     public void AddTeamSpeech(string agentName, string content)
     {
@@ -188,24 +207,29 @@ public sealed partial class ChatTranscriptView
             .Replace("\r\n", "\n")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var lines = new List<FormattedLine>
+        AppendCommittedBlock(width =>
         {
-            FormattedLine.FromSegments(new[]
+            var available = Math.Max(10, width - ConversationRenderer.ContentIndent - 2);
+            var lines = new List<FormattedLine>
             {
-                new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
-                new LineSegment($"{TuiGlyphs.Collapsed} {agentName}", TuiPalette.FgMuted),
-            }),
-        };
-        foreach (var line in speechLines.Take(PreviewLineCount))
-            lines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}  {line}", TuiPalette.FgSecondary));
-        if (speechLines.Length > PreviewLineCount)
-            lines.Add(FormattedLine.FromSegments(new[]
-            {
-                new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
-                new LineSegment($"… 共 {speechLines.Length} 行，完整内容见交付报告", TuiPalette.FgMuted),
-            }));
-
-        AppendCommittedBlock(_ => lines, withSpacing: false);
+                FormattedLine.FromSegments(new[]
+                {
+                    new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
+                    new LineSegment($"{TuiGlyphs.Collapsed} {agentName}", TuiPalette.FgMuted),
+                }),
+            };
+            foreach (var line in speechLines.Take(PreviewLineCount))
+                foreach (var wrapped in ConversationRenderer.WordWrapStreaming(line, available))
+                    lines.Add(FormattedLine.Plain(
+                        $"{ConversationRenderer.Indent}  {wrapped}", TuiPalette.FgSecondary));
+            if (speechLines.Length > PreviewLineCount)
+                lines.Add(FormattedLine.FromSegments(new[]
+                {
+                    new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
+                    new LineSegment($"… 共 {speechLines.Length} 行，完整内容见交付报告", TuiPalette.FgMuted),
+                }));
+            return lines;
+        }, withSpacing: false);
     }
 
     public void UpdateBuildRunStatus(TuiBuildRunState state)
@@ -277,7 +301,8 @@ public sealed partial class ChatTranscriptView
     /// <summary>
     /// 文件修改 Diff 展示 — 接入 ChatBlockRenderers.RenderDiffBlock。
     /// EditTransactionMiddleware 检测到 Write/Edit 后发射 TuiFileChange 事件，
-    /// 此方法渲染 +N/-M 行的 Diff 块。Diff 行与宽度无关，日志条目直接持有渲染结果。
+    /// 此方法渲染 +N/-M 行的 Diff 块。Diff 行按内容宽度预换行；
+    /// 提交路径经日志条目持有宽度闭包，宽度变化时整体重渲。
     /// </summary>
     public void AddFileChange(string fileName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
         => AddFileChange(fileName, null, addedLines, removedLines);
@@ -288,15 +313,24 @@ public sealed partial class ChatTranscriptView
         _logger.LogDebug(
             "[AddFileChange] streaming={Streaming}, statusLines={StatusLines}, lineCountInView={LineCountInView}, file={File}, +{Added}/-{Removed}, agent={Agent}",
             _stream.IsStreaming, _stream.StatusLines.Count, _stream.PreviewLineCount, fileName, addedLines.Count, removedLines.Count, agentName);
-        var lines = ChatBlockRenderers.RenderDiffBlock(
-            fileName, addedLines, removedLines,
-            addedSummary: addedLines.Count,
-            removedSummary: removedLines.Count,
-            agentName: agentName);
         if (_stream.IsStreaming)
-            AddFormattedLines(lines);
+        {
+            AddFormattedLines(ChatBlockRenderers.RenderDiffBlock(
+                fileName, addedLines, removedLines,
+                addedSummary: addedLines.Count,
+                removedSummary: removedLines.Count,
+                agentName: agentName,
+                viewWidth: ContentWidth));
+        }
         else
-            AppendCommittedBlock(_ => lines);
+        {
+            AppendCommittedBlock(width => ChatBlockRenderers.RenderDiffBlock(
+                fileName, addedLines, removedLines,
+                addedSummary: addedLines.Count,
+                removedSummary: removedLines.Count,
+                agentName: agentName,
+                viewWidth: width));
+        }
     }
 
     /// <summary>流式期间追加状态行（宽度相关块由提交时的日志条目负责重渲）。</summary>

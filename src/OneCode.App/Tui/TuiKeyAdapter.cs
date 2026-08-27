@@ -44,8 +44,11 @@ public sealed class TuiKeyAdapter : IKeyInput
     {
         get
         {
-            // For special keys (Enter, Esc, etc.) AsRune returns 0.
-            var rune = _key.AsRune;
+            // TGv2 的 AsRune 在带 Ctrl/Alt 时返回 default（控制码语义），
+            // 若不剥离修饰键，ctrl+g / ctrl+v / ctrl+t 等字母类组合键的
+            // 键名恒为 null，永远无法匹配绑定。修饰键已通过下方布尔属性
+            // 暴露并由 KeybindingMatcher.ModifiersMatch 单独比对。
+            var rune = _key.NoShift.NoCtrl.NoAlt.AsRune;
             if (rune.Value == 0) return string.Empty;
             return ((char)rune.Value).ToString();
         }

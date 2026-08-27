@@ -22,15 +22,15 @@ using OneCode.Core.Cost;
 using OneCode.Core.Cron;
 using OneCode.Core.Goals;
 using OneCode.Core.Hooks.Notifications;
-using OneCode.Infrastructure.Build;
-using OneCode.Infrastructure.Goals;
-using OneCode.Infrastructure.Keybindings;
 using OneCode.Core.Models;
-using OneCode.Core.Prompt;
 using OneCode.Core.Permissions.Yolo;
+using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Api;
+using OneCode.Infrastructure.Build;
 using OneCode.Infrastructure.Config;
+using OneCode.Infrastructure.Goals;
+using OneCode.Infrastructure.Keybindings;
 using OneCode.Infrastructure.Model;
 
 namespace OneCode.App;
@@ -109,6 +109,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<IWorkspaceFingerprintProvider, WorkspaceFingerprintProvider>();
         services.AddSingleton<RequirementAssessmentService>();
         services.AddSingleton<BuildStateTransitionService>();
+        services.AddSingleton<BuildTaskLinker>();
         services.AddSingleton<IBuildRunCoordinator, BuildRunCoordinator>();
 
         services.AddSingleton<ChatSessionDependencies>();
@@ -116,7 +117,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<IToolProtocolValidator, ToolProtocolValidator>();
         services.AddSingleton<ChatService>();
         services.AddSingleton<IConversationRunner>(sp => sp.GetRequiredService<ChatService>());
-        services.AddSingleton<OneCode.Core.Tools.ICacheSafeParamsProvider>(
+        services.AddSingleton<ICacheSafeParamsProvider>(
             sp => sp.GetRequiredService<ChatService>());
 
         services.AddSingleton<InputQueue>();
@@ -124,13 +125,13 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<PermissionModeProvider>();
         services.AddSingleton<IPermissionModeProvider>(sp => sp.GetRequiredService<PermissionModeProvider>());
 
-        services.AddSingleton<OneCode.App.Services.BuildMode.BuildModeAttachmentProvider>(sp =>
-            new OneCode.App.Services.BuildMode.BuildModeAttachmentProvider(
+        services.AddSingleton<BuildModeAttachmentProvider>(sp =>
+            new BuildModeAttachmentProvider(
                 sp.GetRequiredService<IPermissionModeProvider>(),
                 sp.GetRequiredService<IPromptManager>()));
 
-        services.AddSingleton<OneCode.App.Services.PlanMode.PlanExecutionContextProvider>(sp =>
-            new OneCode.App.Services.PlanMode.PlanExecutionContextProvider(
+        services.AddSingleton<PlanExecutionContextProvider>(sp =>
+            new PlanExecutionContextProvider(
                 sp.GetRequiredService<IPlanWorkflowApplicationService>(),
                 sp.GetRequiredService<IPermissionModeProvider>()));
 

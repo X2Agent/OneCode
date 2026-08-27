@@ -12,6 +12,15 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView
 {
+    /// <summary>app:mode* 动作 → 目标工作模式映射（Alt+1..4 直达）。</summary>
+    private static readonly Dictionary<string, WorkingMode> ModeDirectActions = new()
+    {
+        [KeybindingDefaults.ActionAppModeBuild] = WorkingMode.Build,
+        [KeybindingDefaults.ActionAppModePlan] = WorkingMode.Plan,
+        [KeybindingDefaults.ActionAppModeTeam] = WorkingMode.Team,
+        [KeybindingDefaults.ActionAppModeGoal] = WorkingMode.Goal,
+    };
+
     /// <summary>
     /// Dispatches a key as if the nested editor raised KeyDownEvent.
     /// Tests use this to exercise the OnInputKeyPress path without a live driver loop.
@@ -122,6 +131,15 @@ public sealed partial class ChatInputView
             return;
         }
 
+        // Esc 在补全激活时经 Resolver 解析为 autocomplete:dismiss
+        // （Autocomplete 块声明在 Chat 之后，「后匹配生效」）。
+        if (action == KeybindingDefaults.ActionAutocompleteDismiss)
+        {
+            _completion.Hide();
+            e.Handled = true;
+            return;
+        }
+
         // Custom / chord binding for interrupt (e.g. ctrl+x ctrl+k → chat:killAgents).
         // Same behavior as Esc while busy: cancel the running query without exiting.
         if (action == KeybindingDefaults.ActionChatKillAgents)
@@ -132,9 +150,18 @@ public sealed partial class ChatInputView
             return;
         }
 
+        // Tab（补全激活）——经 Resolver 的 autocomplete:accept；补全未激活时
+        // 该动作不命中分发分支，Tab 继续走下方硬编码分支（占位建议 / 斜杠补全 / 循环）。
+        if (action == KeybindingDefaults.ActionAutocompleteAccept && _completion.IsCompletionActive)
+        {
+            HandleTab();
+            e.Handled = true;
+            return;
+        }
+
         // Tab is hardcoded (not via KeybindingResolver) because it implements
         // context-sensitive behavior that depends on runtime state rather than
-        // a single action: accept placeholder suggestion (empty input), cycle
+        // a single action: accept placeholder suggestion (empty input), open
         // slash-command completion (/prefix), or cycle working mode (default).
         // Each behavior is a distinct action, making a single binding impractical.
         if (e == Key.Tab)
@@ -168,10 +195,30 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+G — 切换右侧计划侧边栏（有活动计划时可收起/展开）。
-        if (action == KeybindingDefaults.ActionChatTogglePlanPanel && !_completion.IsCompletionActive)
+        // Alt+1..4（app:mode*）— 工作模式直达，busy 态同样允许。
+        // 守卫：补全激活 / 交互挂起 / 提问模式下数字必须入文或交给交互会话；
+        // 被拦下时不置 Handled，按键交还后续处理（编辑器 / 交互会话）。
+        // 挂起分支在本方法前部已先行吞键返回，此处守卫作纵深防御。
+        if (action is not null
+            && ModeDirectActions.TryGetValue(action, out var targetMode)
+            && !_completion.IsCompletionActive
+            && !_interactionSuspended
+            && !_isQuestionMode)
         {
-            TogglePlanPanelRequested?.Invoke();
+            ModeDirectRequested?.Invoke(targetMode);
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+T — 进入对话区导航模式（焦点切换与 Transcript 上下文 push 在 ReplShell）。
+        // 补全激活时不进入：Enter/数字优先服务补全确认；挂起/提问态不进入，
+        // 键盘归交互会话（挂起分支本已先行吞键，此处守卫作纵深防御）。
+        if (action == KeybindingDefaults.ActionChatEnterTranscript
+            && !_completion.IsCompletionActive
+            && !_interactionSuspended
+            && !_isQuestionMode)
+        {
+            EnterTranscriptRequested?.Invoke();
             e.Handled = true;
             return;
         }

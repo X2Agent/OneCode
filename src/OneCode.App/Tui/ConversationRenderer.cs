@@ -10,11 +10,20 @@ internal static class ConversationRenderer
 
     /// <summary>
     /// 构建已完成工具调用的格式化行（工具名 + 目标 + 结果摘要 + 耗时）。
+    /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度（CJK 感知）截断中间内容段
+    /// （目标 / 结果摘要），保证整行不超出视口宽度（尾部预留 1 列滚动条），
+    /// 避免长参数被终端裁切；目标段优先占用预算，摘要使用剩余空间。
     /// </summary>
     public static FormattedLine MakeCompletedToolLine(
-        string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null)
+        string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null, int maxWidth = 0)
     {
         var statusColor = isError ? TuiPalette.Error : TuiPalette.Success;
+
+        // 尾部状态段宽度固定，先计算出来，从中间内容段的截断预算中扣除。
+        var statusText = isError
+            ? (string.IsNullOrEmpty(duration) ? " \u00b7 error" : $" \u00b7 {duration}")
+            : string.IsNullOrEmpty(duration) ? string.Empty : $" \u00b7 {duration}";
+
         var segments = new List<LineSegment>
         {
             new($"{Indent}", TuiPalette.BgPrimary),
@@ -27,12 +36,45 @@ internal static class ConversationRenderer
 
         // 使用 ToolResultSummarizer 格式化目标（文件路径、命令等）
         var target = ToolResultSummarizer.FormatTarget(name, toolInput);
-        if (!string.IsNullOrWhiteSpace(target))
-            segments.Add(new($" {target}", TuiPalette.ToolDetailColor));
+        var summary = !isError && !string.IsNullOrEmpty(result)
+            ? ToolResultSummarizer.Summarize(name, result, toolInput)
+            : string.Empty;
 
-        if (!isError && !string.IsNullOrEmpty(result))
+        if (maxWidth > 0)
         {
-            var summary = ToolResultSummarizer.Summarize(name, result, toolInput);
+            var fixedWidth = segments.Sum(s => TextWidthHelper.GetDisplayWidth(s.Text))
+                + TextWidthHelper.GetDisplayWidth(statusText)
+                + 1; // 尾部滚动条列
+            var budget = Math.Max(0, maxWidth - fixedWidth);
+
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                // "-1" 为目标段前导空格；仅在超宽时截断（TruncateByWidth 为省略号
+                // 预留 1 列，恰宽文本传入会被误截）。
+                var targetAvailable = budget - 1;
+                if (targetAvailable > 0 && TextWidthHelper.GetDisplayWidth(target) > targetAvailable)
+                    target = TextWidthHelper.TruncateByWidth(target, targetAvailable);
+                if (TextWidthHelper.GetDisplayWidth(target) <= Math.Max(0, targetAvailable))
+                {
+                    segments.Add(new($" {target}", TuiPalette.ToolDetailColor));
+                    budget -= TextWidthHelper.GetDisplayWidth(target) + 1;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(summary))
+            {
+                // "-3" 为 " · " 分隔符；同样仅在超宽时截断。
+                var summaryAvailable = budget - 3;
+                if (summaryAvailable > 0 && TextWidthHelper.GetDisplayWidth(summary) > summaryAvailable)
+                    summary = TextWidthHelper.TruncateByWidth(summary, summaryAvailable);
+                if (TextWidthHelper.GetDisplayWidth(summary) <= Math.Max(0, summaryAvailable))
+                    segments.Add(new($" \u00b7 {summary}", statusColor));
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(target))
+                segments.Add(new($" {target}", TuiPalette.ToolDetailColor));
             if (!string.IsNullOrEmpty(summary))
                 segments.Add(new($" \u00b7 {summary}", statusColor));
         }

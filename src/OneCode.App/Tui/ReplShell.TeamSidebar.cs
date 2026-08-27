@@ -5,8 +5,9 @@ namespace OneCode.App.Tui;
 /// 消费 Team 相关 TuiEvent 维护 <see cref="TeamRunSnapshot"/>，驱动右侧
 /// <see cref="TeamSidebarView"/>（纯显示状态板）。
 ///
-/// 显示策略与 Plan 侧边栏一致：首个 Team 事件自动展开；用户 Ctrl+G 显式收起后
-/// 不强制重开；运行终态保留展示，新一次澄清/审批事件整体重置。
+/// 显示策略与 Plan 侧边栏一致：首个有实质内容的 Team 事件（审批/协调/任务进度等）
+/// 自动展开，弹出后保持可见（直至运行清除/新会话）；澄清/回答阶段不展开
+/// （内容近乎空白）；运行终态保留展示，新一次澄清/审批事件整体重置。
 /// Plan/Team 面板互斥：同一时刻最多一个可见，避免叠加扣宽挤没对话列。
 /// </summary>
 public sealed partial class ReplShell
@@ -29,15 +30,24 @@ public sealed partial class ReplShell
         if (_activeTeamRun is { IsTerminal: true } && evt is TuiTeamProgress or TuiTeamPlanApproval)
             _activeTeamRun = null;
 
-        if (_activeTeamRun is null)
-        {
-            _activeTeamRun = new TeamRunSnapshot();
-            SetTeamSidebarVisible(true);
-        }
-
+        _activeTeamRun ??= new TeamRunSnapshot();
         _activeTeamRun.Apply(evt);
+
+        // 澄清/回答阶段不自动展开：此时快照只有团队名与阶段，弹出一个近乎空白的
+        // 面板观感很差（左侧向导卡片已承载澄清交互）。等首个有实质内容的事件
+        // （审批/协调/任务进度/文件变更/交付）才自动展开；用户仍可 Ctrl+G 显式展开。
+        if (ShouldAutoShowSidebar(evt))
+            SetTeamSidebarVisible(true);
+
         RenderActiveTeamSidebar();
     }
+
+    private static bool ShouldAutoShowSidebar(TuiEvent evt) => evt switch
+    {
+        // 澄清提问与用户作答属于左侧向导阶段，不足以撑起侧边栏内容。
+        TuiTeamProgress or TuiTeamUserResponse => false,
+        _ => true,
+    };
 
     private static bool IsTeamSidebarEvent(TuiEvent evt) => evt switch
     {

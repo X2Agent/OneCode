@@ -106,4 +106,101 @@ public sealed class MagenticReproTests
         llmCalls.Should().BeGreaterThan(0);
         sawOutput.Should().BeTrue("workflow must produce final output after auto-approving the plan review");
     }
+
+    /// <summary>
+    /// 固化 MAF 1.19.0 ChatProtocol 语义：单成员 SequentialWorkflowBuilder 用
+    /// RunStreamingAsync 直接投递消息不会触发 agent（executor 只累积对话，等 TurnToken），
+    /// 表现为零 LLM 调用、turns=0、"(no output)"——这正是 TeamWorkflowRunner 曾在线上
+    /// 踩到的 ParallelDag 静默失败。若 MAF 升级后本测试失败（语义改为直接执行），
+    /// 可考虑把 ExecuteWorkflowAsync 简化回 RunStreamingAsync。
+    /// </summary>
+    [Fact]
+    public async Task Sequential_DirectMessageStart_DoesNotInvokeAgent_MafChatProtocolSemantics()
+    {
+        var echo = new EchoChatClient();
+        var agent = new ChatClientAgent(echo, name: "solo");
+        var workflow = new SequentialWorkflowBuilder([agent])
+            .WithName("repro")
+            .Build();
+        var env = InProcessExecution.Default;
+        var run = await env.RunStreamingAsync(
+            workflow, new ChatMessage(ChatRole.User, "do a task"), SessionId.NewId());
+        var sawOutput = false;
+        using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            await foreach (var evt in run.WatchStreamAsync(timer.Token))
+            {
+                if (evt is WorkflowOutputEvent) sawOutput = true;
+            }
+        }
+        catch (OperationCanceledException) { }
+        await run.DisposeAsync();
+        Volatile.Read(ref echo.CallCount).Should().Be(0, "MAF ChatProtocol: plain ChatMessage never triggers a turn without TurnToken");
+        sawOutput.Should().BeFalse("workflow completes silently without any agent output");
+    }
+
+    /// <summary>
+    /// ParallelDag 修复验证：两段式启动（消息 + TurnToken）应触发 agent 执行。
+    /// </summary>
+    [Fact]
+    public async Task Sequential_TwoPhaseStart_WithTurnToken_InvokesAgent()
+    {
+        var echo = new EchoChatClient();
+        var agent = new ChatClientAgent(echo, name: "solo");
+        var workflow = new SequentialWorkflowBuilder([agent])
+            .WithName("repro")
+            .Build();
+        var env = InProcessExecution.Default;
+        var run = await env.OpenStreamingAsync(workflow, SessionId.NewId());
+        _ = await run.TrySendMessageAsync(new ChatMessage(ChatRole.User, "do a task"));
+        _ = await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
+        var sawOutput = false;
+        using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            await foreach (var evt in run.WatchStreamAsync(timer.Token))
+            {
+                if (evt is WorkflowOutputEvent) sawOutput = true;
+            }
+        }
+        catch (OperationCanceledException) { }
+        await run.DisposeAsync();
+        Volatile.Read(ref echo.CallCount).Should().BeGreaterThan(0, "TurnToken must trigger the agent turn");
+        sawOutput.Should().BeTrue("workflow must produce final output");
+    }
+
+    /// <summary>
+    /// 固化 MAF 1.19.0 语义：RoundRobin 群聊用 RunStreamingAsync 直接投递消息同样
+    /// 不触发成员发言（与 Sequential 相同的 TurnToken 语义）——GroupChat 路径因此
+    /// 也必须走两段式启动。
+    /// </summary>
+    [Fact]
+    public async Task GroupChat_DirectMessageStart_DoesNotInvokeAgent_MafChatProtocolSemantics()
+    {
+        var echo = new EchoChatClient();
+        var agent1 = new ChatClientAgent(echo, name: "a1");
+        var agent2 = new ChatClientAgent(echo, name: "a2");
+        var workflow = AgentWorkflowBuilder.CreateGroupChatBuilderWith(
+                agentList => new RoundRobinGroupChatManager(agentList, (_, _, _) => ValueTask.FromResult(true)))
+            .AddParticipants([agent1, agent2])
+            .WithName("repro")
+            .Build();
+        var env = InProcessExecution.Default;
+        var run = await env.RunStreamingAsync(
+            workflow, new ChatMessage(ChatRole.User, "do a task"), SessionId.NewId());
+        var sawOutput = false;
+        using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            await foreach (var evt in run.WatchStreamAsync(timer.Token))
+            {
+                if (evt is WorkflowOutputEvent) sawOutput = true;
+            }
+        }
+        catch (OperationCanceledException) { }
+        await run.DisposeAsync();
+        Volatile.Read(ref echo.CallCount).Should().Be(0, "MAF ChatProtocol: group chat members never speak without TurnToken");
+        sawOutput.Should().BeFalse("workflow completes silently without any agent output");
+    }
 }

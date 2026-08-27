@@ -10,7 +10,7 @@ namespace OneCode.App.Tools;
 /// serialized so concurrent WebFetch SPA fallbacks do not clobber each other's page.
 ///
 /// 按需连接：playwright 是内置 MCP 服务，不随启动连接（见
-/// <see cref="McpConnectionManager.ConnectAllAsync"/>）；首次 RenderAsync 找不到
+/// <see cref="IMcpConnectionManager.ConnectAllAsync"/>）；首次 RenderAsync 找不到
 /// 已连接客户端时调用 <see cref="IMcpConnectionManager.ConnectOneAsync"/> 按需连接，
 /// 失败静默返回 null，由调用方（WebFetchTool）保留 HTTP 渲染结果。
 /// </summary>

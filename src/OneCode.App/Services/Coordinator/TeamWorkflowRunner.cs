@@ -317,25 +317,18 @@ internal sealed class TeamWorkflowRunner(
             "Team workflow START team={Team} mode={Mode} ctCancelled={Cancelled} sessionId={Session}",
             teamName, modeName, ct.IsCancellationRequested, sessionId);
 
-        // Magentic 工作流必须两段式启动：MagenticOrchestrator（ChatProtocolExecutor）配置了
-        // AutoSendTurnToken=false，RunStreamingAsync 直接投递消息不会触发编排——orchestrator
-        // 收到消息却永远等待 TurnToken，表现为 turns=0、零 LLM 调用、"(no output)"。
-        // 正确姿势（与 MAF 官方 probe 一致）：OpenStreamingAsync → 发任务消息 → 发 TurnToken。
-        StreamingRun streamingRun;
-        if (modeName == "Magentic")
-        {
-            streamingRun = await env
-                .OpenStreamingAsync(workflow, sessionId, ct)
-                .ConfigureAwait(false);
-            _ = await streamingRun.TrySendMessageAsync(inputMessage).ConfigureAwait(false);
-            _ = await streamingRun.TrySendMessageAsync(new TurnToken(emitEvents: true)).ConfigureAwait(false);
-        }
-        else
-        {
-            streamingRun = await env
-                .RunStreamingAsync(workflow, inputMessage, sessionId, ct)
-                .ConfigureAwait(false);
-        }
+        // ChatProtocol 语义（MAF 1.19.0）：agent executor 收到普通 ChatMessage 只累积对话，
+        // 必须收到 TurnToken 才会执行（TakeTurnAsync）。RunStreamingAsync 直接投递消息对
+        // Sequential（ParallelDag 分支）与 GroupChat 均表现为 executor 瞬间完成——零 LLM 调用、
+        // turns=0、"(no output)"（已由 MagenticReproTests 复现验证）。
+        // 统一采用两段式启动（与 MAF 官方 probe 一致）：OpenStreamingAsync → 发任务消息 → 发 TurnToken。
+        // Magentic 额外原因：orchestrator（ChatProtocolExecutor）配置了 AutoSendTurnToken=false，
+        // 直接投递会永久等待 TurnToken 而挂起。
+        StreamingRun streamingRun = await env
+            .OpenStreamingAsync(workflow, sessionId, ct)
+            .ConfigureAwait(false);
+        _ = await streamingRun.TrySendMessageAsync(inputMessage).ConfigureAwait(false);
+        _ = await streamingRun.TrySendMessageAsync(new TurnToken(emitEvents: true)).ConfigureAwait(false);
 
         AgentWorkflowEventProcessor.ProcessResult result;
         try

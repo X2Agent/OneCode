@@ -1,9 +1,14 @@
 namespace OneCode.App.Tui;
 
+using OneCode.Core.Keybindings;
+
 /// <summary>
 /// An inline selector that renders options directly within the conversation view.
 /// Users navigate with ↑↓ arrows and confirm with Enter, dismiss with Esc.
 /// Replaces modal overlays for tool permission prompts and other confirmations.
+/// 按键经 <see cref="KeybindingResolver"/> 的 <see cref="KeybindingDefaults.ContextSelector"/>
+/// 上下文分发（解析时并入，无 push/pop 生命周期）；独立构造（工具层/测试）时
+/// 回退到默认绑定，行为一致。用户可通过 keybindings.json 重映射 selector:*。
 /// </summary>
 public sealed class InlineSelector
 {
@@ -13,6 +18,19 @@ public sealed class InlineSelector
     private readonly bool _useInformationRequestCard;
     private int _selectedIndex;
     private readonly TaskCompletionSource<InlineSelectorResult> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // 独立构造（无宿主注入）时的回退键位系统：默认绑定 + 空活跃上下文。
+    private static readonly KeybindingResolver FallbackResolver = CreateFallbackResolver();
+
+    private KeybindingResolver _keyResolver = FallbackResolver;
+    private readonly KeybindingContextManager _keyContextManager = new();
+
+    private static KeybindingResolver CreateFallbackResolver()
+    {
+        var resolver = new KeybindingResolver();
+        resolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+        return resolver;
+    }
 
     public InlineSelector(
         string title,
@@ -28,6 +46,16 @@ public sealed class InlineSelector
         _selectedIndex = Math.Clamp(defaultIndex, 0, options.Count - 1);
     }
 
+    /// <summary>
+    /// 注入全局键位系统（ReplShell.ShowInlineSelector 调用），使用户覆盖的
+    /// selector:* 绑定生效；不注入则使用默认绑定回退。
+    /// </summary>
+    internal void AttachKeybindingSystem(KeybindingResolver keyResolver, KeybindingContextManager keyContextManager)
+    {
+        _keyResolver = keyResolver;
+        _keyContextManager.FocusContext = keyContextManager.FocusContext;
+    }
+
     public string Title => _title;
     public IReadOnlyList<InlineSelectorOption> Options => _options;
     public string? Prompt => _prompt;
@@ -38,31 +66,32 @@ public sealed class InlineSelector
     /// <summary>Handle a key press. Returns true if key was consumed.</summary>
     public bool HandleKey(Key kb)
     {
-        if (kb == Key.CursorUp)
+        // Selector 上下文在解析时并入：仅当本选择器接管键盘时消费 selector:*。
+        var contexts = new HashSet<string>(_keyContextManager.ActiveContexts, StringComparer.Ordinal)
         {
-            if (_selectedIndex > 0) _selectedIndex--;
-            return true;
-        }
-
-        if (kb == Key.CursorDown)
+            KeybindingDefaults.ContextSelector,
+        };
+        switch (TuiKeyAdapter.ResolveAction(kb, _keyResolver, contexts))
         {
-            if (_selectedIndex < _options.Count - 1) _selectedIndex++;
-            return true;
-        }
+            case KeybindingDefaults.ActionSelectorPrevious:
+                if (_selectedIndex > 0) _selectedIndex--;
+                return true;
 
-        if (kb == Key.Enter)
-        {
-            _tcs.TrySetResult(new InlineSelectorResult(_selectedIndex, _options[_selectedIndex].Id));
-            return true;
-        }
+            case KeybindingDefaults.ActionSelectorNext:
+                if (_selectedIndex < _options.Count - 1) _selectedIndex++;
+                return true;
 
-        if (kb == Key.Esc)
-        {
-            Dismiss();
-            return true;
-        }
+            case KeybindingDefaults.ActionSelectorConfirm:
+                _tcs.TrySetResult(new InlineSelectorResult(_selectedIndex, _options[_selectedIndex].Id));
+                return true;
 
-        return false;
+            case KeybindingDefaults.ActionSelectorDismiss:
+                Dismiss();
+                return true;
+
+            default:
+                return false;
+        }
     }
 
     /// <summary>
@@ -80,10 +109,11 @@ public sealed class InlineSelector
         IReadOnlyList<InlineSelectorOption> options,
         int selectedIndex,
         string? prompt = null,
-        bool useInformationRequestCard = false)
+        bool useInformationRequestCard = false,
+        int viewWidth = TuiSpacing.DefaultContentWidth)
     {
         var lines = useInformationRequestCard
-            ? QuestionCardRenderer.RenderHeader(title, prompt)
+            ? QuestionCardRenderer.RenderHeader(title, prompt, viewWidth: viewWidth)
             : RenderStandardHeader(title, prompt);
 
         // Options — bullet + label + description on same line

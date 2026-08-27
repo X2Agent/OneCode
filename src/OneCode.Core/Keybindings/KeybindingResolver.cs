@@ -95,6 +95,18 @@ public sealed class KeybindingResolver
 
         if (hasLongerChords)
         {
+            // Eager-fire：单键自身已精确命中某绑定（且未被解绑）时立即触发，
+            // 同时保持和弦监听窗口。仅此场景生效——ctrl+x ctrl+k 类「纯前缀、
+            // 自身无绑定」的和弦仍走 ChordStarted 等待尾键。
+            foreach (var binding in contextBindings)
+            {
+                if (binding.Action is null) continue;
+                if (!ChordExactlyMatches(testChord, binding)) continue;
+                _pendingChord = testChord;
+                _chordStartTime = DateTime.UtcNow;
+                return new KeyResolveReturn(KeyResolveResult.Match, binding.Action);
+            }
+
             _pendingChord = testChord;
             _chordStartTime = DateTime.UtcNow;
             return new KeyResolveReturn(KeyResolveResult.ChordStarted);

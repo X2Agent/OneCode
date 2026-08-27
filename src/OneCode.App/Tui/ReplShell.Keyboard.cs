@@ -9,6 +9,12 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ReplShell
 {
+    /// <summary>
+    /// Simulates a key reaching the shell's OnKeyDown (bubble from a focused
+    /// non-input view). Tests use this to exercise transcript-nav dispatch.
+    /// </summary>
+    internal bool DispatchShellKey(Key kb) => OnKeyDown(kb);
+
     // Keyboard: design-spec §5
     protected override bool OnKeyDown(Key kb)
     {
@@ -44,6 +50,10 @@ public sealed partial class ReplShell
         // ESC for overlays/completion is handled above (not configurable) because
         // dismissal must always work regardless of keybinding overrides.
         var action = TuiKeyAdapter.ResolveAction(kb, _keyResolver, _keyContextManager.ActiveContexts);
+
+        // transcript:* — 导航模式激活时优先分发（j/k/Enter/C/G/Esc/i）。
+        if (HandleTranscriptAction(action))
+            return true;
 
         // Ctrl+D — exit the application (when prompt is not focused).
         // When the prompt has focus, ChatInputView.OnInputKeyPress handles it instead.

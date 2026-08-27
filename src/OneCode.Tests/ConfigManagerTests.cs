@@ -205,15 +205,25 @@ public sealed class ConfigManagerTests : IDisposable
     }
 
     [Fact]
-    public void UnknownJsonProperty_IsRejectedWithoutReplacingSnapshot()
+    public async Task UnknownJsonProperty_IsIgnored_AndPrunedOnNextSave()
     {
-        File.WriteAllText(UserSettingsPath, """{"model":"original-model"}""");
+        // 回归锚定：残留的旧版本键（如已移除功能的 showKeyHints）不得让配置读取失败，
+        // 否则 TrustService 保存 trustedDirectories 等路径会硬失败。
+        // 未知键在读取时被忽略，并在下次保存该作用域时被清除。
+        File.WriteAllText(UserSettingsPath, """{"showKeyHints":true,"model":"user-model"}""");
         using var sut = new ConfigManager(_userDir, _projectDir);
-        File.WriteAllText(UserSettingsPath, """{"unknownSetting":true}""");
 
-        sut.Reload();
+        sut.Current.Effective.Model.Should().Be("user-model");
 
-        sut.Current.Effective.Model.Should().Be("original-model");
+        var result = await sut.ApplyAsync(
+            ConfigPatch.Set(ConfigScope.User, "maxTurns", 42),
+            TestContext.Current.CancellationToken);
+
+        result.Saved.Should().BeTrue();
+        using var document = JsonDocument.Parse(File.ReadAllText(UserSettingsPath));
+        document.RootElement.TryGetProperty("maxTurns", out _).Should().BeTrue();
+        document.RootElement.TryGetProperty("showKeyHints", out _)
+            .Should().BeFalse("未知键在保存该作用域时被清除");
     }
 
     [Fact]

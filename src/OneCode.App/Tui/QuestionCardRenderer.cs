@@ -12,7 +12,8 @@ internal static class QuestionCardRenderer
         int? currentQuestion = null,
         int? totalQuestions = null,
         string? typeLabel = null,
-        string? description = null)
+        string? description = null,
+        int viewWidth = TuiSpacing.DefaultContentWidth)
     {
         var lines = new List<FormattedLine>
         {
@@ -33,18 +34,37 @@ internal static class QuestionCardRenderer
 
         if (!string.IsNullOrWhiteSpace(prompt))
         {
-            var promptSegments = new List<LineSegment>
+            // 对话视图渲染时按 contentWidth 截断不换行，长问题必须在卡片渲染期
+            // 按 viewWidth 预换行（与 ChatBlockRenderers.AddWrappedField 同一模式）。
+            const string indent = "    ";
+            var typePrefix = string.IsNullOrWhiteSpace(typeLabel) ? string.Empty : $"[{typeLabel}] ";
+            var available = Math.Max(8, viewWidth - indent.Length - TextWidthHelper.GetDisplayWidth(typePrefix));
+            var wrapped = TextWidthHelper.WordWrapByWidth(prompt, available);
+
+            var firstSegments = new List<LineSegment>
             {
-                new("    ", TuiPalette.BgPrimary),
+                new(indent, TuiPalette.BgPrimary),
             };
-            if (!string.IsNullOrWhiteSpace(typeLabel))
-                promptSegments.Add(new($"[{typeLabel}] ", TuiPalette.FgMuted));
-            promptSegments.Add(new(prompt, TuiPalette.FgPrimary));
-            lines.Add(FormattedLine.FromSegments(promptSegments.ToArray()));
+            if (typePrefix.Length > 0)
+                firstSegments.Add(new(typePrefix, TuiPalette.FgMuted));
+            firstSegments.Add(new(wrapped.Count > 0 ? wrapped[0] : prompt, TuiPalette.FgPrimary));
+            lines.Add(FormattedLine.FromSegments(firstSegments.ToArray()));
+
+            var continuation = indent + new string(' ', TextWidthHelper.GetDisplayWidth(typePrefix));
+            foreach (var line in wrapped.Skip(1))
+                lines.Add(FormattedLine.Plain(continuation + line, TuiPalette.FgPrimary));
         }
 
         if (!string.IsNullOrWhiteSpace(description))
-            lines.Add(FormattedLine.Plain($"    {description}", TuiPalette.FgMuted));
+        {
+            const string descIndent = "    ";
+            var descAvailable = Math.Max(8, viewWidth - descIndent.Length);
+            var wrappedDescription = TextWidthHelper.WordWrapByWidth(description, descAvailable);
+            if (wrappedDescription.Count == 0)
+                wrappedDescription = [description];
+            foreach (var line in wrappedDescription)
+                lines.Add(FormattedLine.Plain(descIndent + line, TuiPalette.FgMuted));
+        }
 
         lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
         return lines;

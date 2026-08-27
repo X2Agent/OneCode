@@ -370,6 +370,7 @@ public sealed partial class OneCodeToplevel : Window
         _shell.SessionContextBar.SetTurn(0);
 
         _shell.ClearPlan();
+        _shell.ClearTeamRun();
 
         _shell.FocusChatInput();
     }

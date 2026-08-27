@@ -16,7 +16,7 @@ namespace OneCode.App.Tools;
 /// </summary>
 /// <remarks>
 /// 可选依赖（保留可空）：
-/// - <c>notifier</c>（构造参数）：LSP 通知器；生产环境由 DI 注入 <see cref="LspNotifier"/>
+/// - <c>notifier</c>（构造参数）：LSP 通知器；生产环境由 DI 注入 <see cref="OneCode.App.Services.Lsp.LspNotifier"/>
 /// - <see cref="_ssh"/>：SSH 远程编辑；仅在配置远程连接时非空，缺失时走本地文件系统
 /// </remarks>
 public sealed class EditTool

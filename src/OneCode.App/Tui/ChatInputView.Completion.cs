@@ -5,7 +5,7 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// 补全弹窗（斜杠命令 / @ 文件 typeahead）：ChatCompletionController 的
-/// 接线与宿主视图侧操作；按键分发在 <see cref="ChatInputView.Keys.cs"/>。
+/// 接线与宿主视图侧操作；按键分发在 <c>ChatInputView.Keys.cs</c>。
 /// </summary>
 public sealed partial class ChatInputView
 {

@@ -2,9 +2,9 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// Conversation line store + scrolling + input handling.
-/// Rendering lives in <see cref="MessageListView.Rendering.cs"/>, search in
-/// <see cref="MessageListView.Search.cs"/>, expandable blocks in
-/// <see cref="MessageListView.Expansion.cs"/>.
+/// Rendering lives in <c>MessageListView.Rendering.cs</c>, search in
+/// <c>MessageListView.Search.cs</c>, expandable blocks in
+/// <c>MessageListView.Expansion.cs</c>.
 /// </summary>
 public sealed partial class MessageListView : View
 {
@@ -17,6 +17,22 @@ public sealed partial class MessageListView : View
     public int TotalLines => _lines.Count;
     public IReadOnlyList<string> RenderedLines => _lines.Select(static l => l.Text).ToArray();
     public int ScrollOffset => _scroll.ScrollOffset;
+
+    /// <summary>
+    /// 当前内容列宽度（与 Render 路径一致：预留滚动条列后经 GetContentColumnWidth 换算）。
+    /// 交互卡片（QuestionWizard / InlineSelector）等外部渲染方据此按同一宽度预换行，
+    /// 避免 Render 阶段按 contentWidth 截断丢字。
+    /// </summary>
+    public int ContentWidth
+    {
+        get
+        {
+            var viewport = Viewport;
+            var showScrollbar = _lines.Count > viewport.Height;
+            var availableWidth = showScrollbar ? Math.Max(0, viewport.Width - 1) : viewport.Width;
+            return TuiSpacing.GetContentColumnWidth(availableWidth);
+        }
+    }
 
     /// <summary>
     /// Live streaming preview size, including user-expanded tool/thinking details.
@@ -45,6 +61,7 @@ public sealed partial class MessageListView : View
         _tailRegionStart = -1;
         _streamingPreviewStart = -1;
         _toolDetailLayoutWidth = 0;
+        _navHighlightLine = -1;
         _scroll.Reset();
         SetNeedsDraw();
     }
@@ -320,6 +337,7 @@ public sealed partial class MessageListView : View
 
         // 行索引整体变化，搜索高亮随之失效。
         SetSearchHighlight(null, null);
+        _navHighlightLine = -1;
         SetNeedsDraw();
     }
 

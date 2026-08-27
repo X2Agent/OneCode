@@ -39,11 +39,12 @@ public sealed partial class ChatTranscriptView
             return;
 
         var lines = ChatBlockRenderers.RenderLspDiagnosticsBlock(
-            Path.GetFileName(filePath), matching);
+            Path.GetFileName(filePath), matching, ContentWidth);
         if (_stream.IsStreaming)
             AddFormattedLines(lines);
         else
-            AppendCommittedBlock(_ => lines);
+            AppendCommittedBlock(width => ChatBlockRenderers.RenderLspDiagnosticsBlock(
+                Path.GetFileName(filePath), matching, width));
     }
 
 }
