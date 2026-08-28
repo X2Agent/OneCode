@@ -305,7 +305,10 @@ public sealed class NotificationHookExecutorTests
 
     private static NotificationHookExecutor CreateSut(params INotificationProvider[] providers)
     {
-        return new NotificationHookExecutor(providers, NullLogger<NotificationHookExecutor>.Instance);
+        var factory = Substitute.For<IHttpClientFactory>();
+        var registry = new NotificationProviderRegistry(
+            providers, factory, NullLoggerFactory.Instance);
+        return new NotificationHookExecutor(registry, NullLogger<NotificationHookExecutor>.Instance);
     }
 
     private static INotificationProvider CreateMockProvider(

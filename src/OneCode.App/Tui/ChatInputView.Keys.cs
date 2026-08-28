@@ -223,6 +223,21 @@ public sealed partial class ChatInputView
             return;
         }
 
+        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板），
+        // 与分隔线鼠标拖拽等价的键盘路径。宽度调整与补全/模式切换互不冲突，无额外守卫。
+        if (action == KeybindingDefaults.ActionAppSidebarWider)
+        {
+            SidebarWiderRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+        if (action == KeybindingDefaults.ActionAppSidebarNarrower)
+        {
+            SidebarNarrowerRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+Right / Ctrl+Left — cycle through suggestions when placeholder is visible.
         if (e == Key.CursorRight.WithCtrl && _placeholderLabel.Visible)
         {

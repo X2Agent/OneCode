@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+using OneCode.Core.Hooks.Notifications;
+
 namespace OneCode.App.Services.Hooks;
 
 /// <summary>
@@ -11,6 +13,7 @@ namespace OneCode.App.Services.Hooks;
 [JsonSerializable(typeof(HookConfig))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+[JsonSerializable(typeof(Dictionary<string, NotificationProviderDefinition>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

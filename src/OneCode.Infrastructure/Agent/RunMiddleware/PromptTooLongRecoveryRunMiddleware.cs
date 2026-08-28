@@ -232,11 +232,12 @@ public static class PromptTooLongRecoveryRunMiddleware
         {
             Event = @event,
             Cwd = Environment.CurrentDirectory,
+            Trigger = HookTriggers.Auto,
         };
 
         try
         {
-            await hookService.FireAsync(payload, ct: ct).ConfigureAwait(false);
+            await hookService.FireAsync(payload, actualMatcherValue: HookTriggers.Auto, ct: ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

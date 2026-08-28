@@ -73,7 +73,7 @@
 | 方式 | 说明 |
 |---|---|
 | `/keybindings` | 打开配置文件编辑器，自动生成模板（若不存在） |
-| `/keybindings list` | 列出常用默认快捷键 |
+| `/keybindings list` | 列出全部生效快捷键（按键 → 动作 + 功能说明） |
 | `/keybindings validate` | 校验配置文件格式与合法性 |
 | `/keybindings open` / `/keybindings edit` | 在默认编辑器中打开配置文件 |
 | `/keybindings reset` | 重置为默认绑定，丢弃所有自定义配置 |
@@ -131,6 +131,8 @@
 | 快捷键 | 动作 | 说明 |
 |---|---|---|
 | `Ctrl+D` | `app:exit` | 退出应用 * |
+| `Ctrl+Shift+→` | `app:sidebarWider` | 加宽右侧侧边栏（Plan/TEAM 面板，步进 4 列） |
+| `Ctrl+Shift+←` | `app:sidebarNarrower` | 收窄右侧侧边栏（与分隔线拖拽共用 clamp 规则） |
 
 > \* 标记的快捷键为保留快捷键，不可重新绑定。
 >

@@ -23,22 +23,42 @@ public sealed class HookRegistry
     {
         lock (_lock)
         {
-            if (!_matcherIndex.TryGetValue(hook.Event, out var groups))
-            {
-                groups = [];
-                _matcherIndex[hook.Event] = groups;
-            }
-
-            var group = groups.Find(g =>
-                string.Equals(g.Pattern, hook.Matcher ?? string.Empty, StringComparison.OrdinalIgnoreCase));
-            if (group is null)
-            {
-                group = new MatcherGroup(hook.Matcher ?? string.Empty);
-                groups.Add(group);
-            }
-
-            group.Hooks.Add(hook);
+            RegisterLocked(hook);
         }
+    }
+
+    /// <summary>
+    /// 原子整体替换注册表内容（hook 配置热重载专用）：
+    /// 清空现有索引后重新注册传入的 hook，全程持有 _lock——
+    /// 读取方要么看到完整旧快照、要么看到完整新快照，不会看到中间态。
+    /// </summary>
+    public void ReplaceAll(IEnumerable<HookRegistration> hooks)
+    {
+        lock (_lock)
+        {
+            _matcherIndex.Clear();
+            foreach (var hook in hooks)
+                RegisterLocked(hook);
+        }
+    }
+
+    private void RegisterLocked(HookRegistration hook)
+    {
+        if (!_matcherIndex.TryGetValue(hook.Event, out var groups))
+        {
+            groups = [];
+            _matcherIndex[hook.Event] = groups;
+        }
+
+        var group = groups.Find(g =>
+            string.Equals(g.Pattern, hook.Matcher ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+        if (group is null)
+        {
+            group = new MatcherGroup(hook.Matcher ?? string.Empty);
+            groups.Add(group);
+        }
+
+        group.Hooks.Add(hook);
     }
 
     public IReadOnlyList<HookRegistration> GetAll()

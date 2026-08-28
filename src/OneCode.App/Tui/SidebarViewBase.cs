@@ -155,17 +155,42 @@ internal abstract class SidebarViewBase : View
         _widthChanged();
     }
 
+    /// <summary>键盘调整宽度的步进（列）。Ctrl+Shift+←/→ 每次按键的宽度变化。</summary>
+    internal const int KeyboardResizeStep = 4;
+
     /// <summary>
-    /// 拖动位置到面板宽度的 clamp 规则：下限 <see cref="MinWidth"/>；上限取
-    /// 「屏幕 60%」与「屏幕宽 - 对话区最小宽度」的较小值。极窄终端上退化为
-    /// 不超过屏幕宽——保证 max ≥ min 且面板永远不会被定位到屏幕外。
+    /// 键盘调整宽度：按 <paramref name="delta"/> 列增减，clamp 规则与分隔线拖拽一致
+    /// （下限 <see cref="MinWidth"/>，上限取「屏幕 60%」与「屏幕宽 - 对话区最小宽度」的较小值）。
+    /// 宽度实际变化时更新几何并触发 <c>_widthChanged</c>（仅重排布局）。
     /// </summary>
-    internal static int ComputeDraggedWidth(int screenX, int screenWidth)
+    /// <returns>宽度是否实际变化（被 clamp 抵消时为 false，调用方无需重渲内容）。</returns>
+    public bool AdjustWidth(int delta)
     {
-        var maxWidth = Math.Min(screenWidth, Math.Max(MinWidth, Math.Min(screenWidth * 3 / 5, screenWidth - ChatColumnMinWidth)));
-        var minWidth = Math.Min(MinWidth, screenWidth);
-        return Math.Clamp(screenWidth - screenX, minWidth, maxWidth);
+        var screenWidth = _app.Screen.Width;
+        var newWidth = Math.Clamp(
+            CurrentWidth + delta, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
+        if (newWidth == CurrentWidth)
+            return false;
+
+        CurrentWidth = newWidth;
+        Width = newWidth;
+        X = Pos.AnchorEnd(newWidth);
+        _widthChanged();
+        return true;
     }
+
+    /// <summary>拖动位置到面板宽度的 clamp 规则：下限 <see cref="MinWidth"/>；上限取
+    /// 「屏幕 60%」与「屏幕宽 - 对话区最小宽度」的较小值。极窄终端上退化为
+    /// 不超过屏幕宽——保证 max ≥ min 且面板永远不会被定位到屏幕外。</summary>
+    internal static int ComputeDraggedWidth(int screenX, int screenWidth) =>
+        Math.Clamp(screenWidth - screenX, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
+
+    /// <summary>宽度上限：与拖拽 clamp 规则共享（键盘调整走同一规则，见 <see cref="AdjustWidth"/>）。</summary>
+    internal static int ComputeMaxWidth(int screenWidth) =>
+        Math.Min(screenWidth, Math.Max(MinWidth, Math.Min(screenWidth * 3 / 5, screenWidth - ChatColumnMinWidth)));
+
+    /// <summary>宽度下限：极窄终端（< MinWidth）退化为屏幕宽。</summary>
+    internal static int ComputeMinWidth(int screenWidth) => Math.Min(MinWidth, screenWidth);
 
     protected override bool OnDrawingContent(DrawContext? context)
     {

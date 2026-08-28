@@ -181,13 +181,16 @@ public static partial class ServiceCollectionExtensions
     private static void RegisterHookSubsystem(IServiceCollection services)
     {
         services.AddSingleton<GlobHookMatcher>();
+        services.AddSingleton<HookLoadDiagnostics>();
         services.AddSingleton<HookSettingsLoader>();
         services.AddSingleton<HookRegistry>();
         services.AddSingleton<HookPolicyService>();
 
-        services.AddKeyedSingleton<IHookExecutor, CommandHookExecutor>(HookType.Command);
-        services.AddKeyedSingleton<IHookExecutor, NotificationHookExecutor>(HookType.Notification);
-        services.AddKeyedSingleton<IHookExecutor, HttpHookExecutor>(HookType.Http);
+        // HookExecutionService 经 IEnumerable<IHookExecutor> 注入并按 Type 分发——
+        // 新增执行器只需在此追加一行（无需 keyed 服务）。
+        services.AddSingleton<IHookExecutor, CommandHookExecutor>();
+        services.AddSingleton<IHookExecutor, NotificationHookExecutor>();
+        services.AddSingleton<IHookExecutor, HttpHookExecutor>();
 
         services.AddSingleton<INotificationProvider, FeishuNotificationProvider>();
         services.AddSingleton<INotificationProvider, WeChatWorkNotificationProvider>();
@@ -195,9 +198,18 @@ public static partial class ServiceCollectionExtensions
         services.AddHttpClient<FeishuNotificationProvider>();
         services.AddHttpClient<WeChatWorkNotificationProvider>();
 
+        // 声明式通知渠道（notification-providers.json）：定义优先、编译型兜底
+        services.AddHttpClient(NotificationProviderRegistry.HttpClientName);
+        services.AddSingleton<NotificationProviderDefinitionLoader>();
+        services.AddSingleton<NotificationProviderRegistry>();
+
+        // A7：宿主停止时兜底补发 SessionEnd（reason=other）
+        services.AddHostedService<SessionEndHookService>();
+
         services.AddSingleton<HookExecutionService>();
         services.AddSingleton<IHookExecutionService>(sp => sp.GetRequiredService<HookExecutionService>());
         services.AddSingleton<HookConfigBootstrapper>();
+        services.AddSingleton<HookConfigHotReloader>();
     }
 
     private static void RegisterPermissionSubsystem(IServiceCollection services)

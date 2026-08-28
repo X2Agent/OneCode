@@ -11,7 +11,7 @@ namespace OneCode.App.Services;
 
 /// <summary>
 /// Owns one-time host warm-up: process cache, builtin teams, hot-reload watchers,
-/// image cleanup, code index, hook bootstrap, and ToolCatalog cache.
+/// image cleanup, code index, hook bootstrap + config hot-reload, and ToolCatalog cache.
 /// Hosted-service start remains at the composition root (<c>IHost.StartAsync</c>).
 /// </summary>
 public sealed class AppStartupService(
@@ -20,7 +20,7 @@ public sealed class AppStartupService(
     CodeIndexHotReloader codeIndexHotReloader,
     ImagePipeline imagePipeline,
     ICodeIndexService codeIndexService,
-    HookConfigBootstrapper hookBootstrapper,
+    HookConfigHotReloader hookHotReloader,
     IToolCatalog toolCatalog,
     IConfigManager configManager,
     ILogger<OneCodeApp> logger)
@@ -50,7 +50,7 @@ public sealed class AppStartupService(
             Constants.App.ConfigDirName);
         try
         {
-            hookBootstrapper.Bootstrap(configDir, projectConfigDir);
+            hookHotReloader.BootstrapAndStartWatching(configDir, projectConfigDir);
         }
         catch (Exception ex)
         {

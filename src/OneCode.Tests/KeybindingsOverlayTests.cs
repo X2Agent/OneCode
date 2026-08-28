@@ -38,6 +38,20 @@ public sealed class KeybindingsOverlayTests
     }
 
     [Fact]
+    public void FormatRows_WithDescription_ShowsIndentedDescriptionLine()
+    {
+        var views = new List<KeybindingView>
+        {
+            new("Chat", "Enter", "chat:submit", KeybindingSource.Default, "提交消息"),
+        };
+
+        var rows = KeybindingsOverlay.FormatRows(views, []);
+
+        rows.Should().Contain(r => r.Contains("Enter") && r.Contains("chat:submit"));
+        rows.Should().Contain(r => r.TrimStart().StartsWith("提交消息", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void FormatRows_UnboundBinding_ShowsUnboundText()
     {
         var views = new List<KeybindingView>

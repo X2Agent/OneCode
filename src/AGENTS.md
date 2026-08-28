@@ -431,6 +431,8 @@ services.AddHttpClient("anthropic")
         options.Retry.MaxRetryAttempts = 3;
         options.Retry.Backoff.Delay = TimeSpan.FromMilliseconds(100);
         options.CircuitBreaker.FailureRatio = 0.5;
+        // 熔断采样时长必须 ≥ 2× AttemptTimeout（启动校验强制，默认 30s 不够）
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(60);
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
         options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(120);
     });

@@ -62,6 +62,10 @@ public sealed class KeybindingsOverlay : CenteredOverlay
                     : view.Action ?? string.Empty;
                 var mark = view.Source == KeybindingSource.Custom ? $"  {CustomMark}" : string.Empty;
                 rows.Add($"  {view.KeyDisplay,-18} {action}{mark}");
+
+                // 功能说明缩进对齐动作 ID 列，独占一行
+                if (view.Description is { } description)
+                    rows.Add(new string(' ', 21) + description);
             }
             rows.Add(string.Empty);
         }

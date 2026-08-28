@@ -30,6 +30,7 @@ public interface ISessionManager : ISessionConversationAccess, ISessionWorkingDi
     void SetForegroundMode(string mode);
     Task<Conversation?> ResumeAsync(string conversationId, CancellationToken ct = default);
     Task CloseAsync(CancellationToken ct = default);
+    Task CloseAsync(string reason, CancellationToken ct = default);
     Task<Conversation?> SwitchToSessionAsync(string conversationId, CancellationToken ct = default);
     Task<Conversation> BackgroundCurrentAndCreateNewAsync(ConversationOptions options, CancellationToken ct = default);
     Task<bool> CloseBackgroundSessionAsync(string conversationId, CancellationToken ct = default);

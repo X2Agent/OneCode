@@ -1,11 +1,12 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace OneCode.App.Services.Hooks;
 
 /// <summary>
 /// Hook 执行服务——应用层统一入口
 ///
 /// 整合 HookRegistry，按 HookType 分发到 IHookExecutor。
+/// 执行器经 <see cref="IEnumerable{T}"/> 注入并按 <see cref="IHookExecutor.Type"/> 自建分发字典
+/// （照抄 NotificationHookExecutor 的 Provider 分发模式）：新增 HookType 只需实现
+/// IHookExecutor 并注册 DI，无需修改本类。
 /// </summary>
 public sealed class HookExecutionService : IHookExecutionService
 {
@@ -16,9 +17,7 @@ public sealed class HookExecutionService : IHookExecutionService
 
     public HookExecutionService(
         HookRegistry hookRegistry,
-        [FromKeyedServices(HookType.Command)] IHookExecutor commandExecutor,
-        [FromKeyedServices(HookType.Notification)] IHookExecutor notificationExecutor,
-        [FromKeyedServices(HookType.Http)] IHookExecutor httpExecutor,
+        IEnumerable<IHookExecutor> executors,
         HookPolicyService policyService,
         ILogger<HookExecutionService> logger)
     {
@@ -26,12 +25,10 @@ public sealed class HookExecutionService : IHookExecutionService
         _policyService = policyService ?? throw new ArgumentNullException(nameof(policyService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _executors = new Dictionary<HookType, IHookExecutor>
-        {
-            [HookType.Command] = commandExecutor,
-            [HookType.Notification] = notificationExecutor,
-            [HookType.Http] = httpExecutor,
-        };
+        // 同类型重复注册时首个生效（与旧 keyed 注入的 FirstOrDefault 语义一致）
+        _executors = executors
+            .GroupBy(e => e.Type)
+            .ToDictionary(g => g.Key, g => g.First());
     }
 
     public async Task<AggregatedHookResult> FireAsync(
@@ -51,21 +48,14 @@ public sealed class HookExecutionService : IHookExecutionService
 
         hooks.Sort((a, b) => a.Priority.CompareTo(b.Priority));
 
-        var result = await ExecuteAndAggregateAsync(hooks, payload, ct).ConfigureAwait(false);
-
-        RemoveOnceHooks(hooks);
-
-        return result;
+        return await ExecuteAndAggregateAsync(hooks, payload, ct).ConfigureAwait(false);
     }
 
-    private void RemoveOnceHooks(List<HookRegistration> hooks)
-    {
-        foreach (var hook in hooks.Where(h => h.Once))
-        {
-            _hookRegistry.Unregister(hook.Name);
-        }
-    }
-
+    /// <summary>
+    /// 串行执行并聚合结果。<c>once</c> hook 仅在<strong>成功执行</strong>后注销——
+    /// 异常 / 取消 / 执行器缺失视为未完成，保留待下次触发；
+    /// Blocking（成功送达阻断裁决，如 Stop 阻断触发纠偏续跑）同样移除，防止无限循环。
+    /// </summary>
     private async Task<AggregatedHookResult> ExecuteAndAggregateAsync(
         List<HookRegistration> hooks,
         HookPayload payload,
@@ -77,6 +67,9 @@ public sealed class HookExecutionService : IHookExecutionService
         {
             var result = await ExecuteSingleHookAsync(hook, payload, ct).ConfigureAwait(false);
             results.Add(result);
+
+            if (hook.Once && result is { Outcome: HookOutcome.Success or HookOutcome.Blocking })
+                _hookRegistry.Unregister(hook.Name);
         }
 
         return HookResultAggregator.Aggregate(results);

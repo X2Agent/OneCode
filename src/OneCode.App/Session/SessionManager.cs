@@ -428,7 +428,10 @@ public sealed class SessionManager : ISessionManager
     /// Close the current conversation (async — fires SessionEnd hook and clears session cache).
     /// Also invoked by <see cref="DisposeAsync"/> at shutdown (idempotent: no-op when no foreground conversation).
     /// </summary>
-    public async Task CloseAsync(CancellationToken ct = default)
+    public Task CloseAsync(CancellationToken ct = default) => CloseAsync(SessionEndReason.Close, ct);
+
+    /// <summary>关闭前台会话并以 <paramref name="reason"/> 作为 SessionEnd 的 matcher 值触发。</summary>
+    public async Task CloseAsync(string reason, CancellationToken ct = default)
     {
         if (ForegroundConversation == null)
             return;
@@ -443,7 +446,7 @@ public sealed class SessionManager : ISessionManager
             "Closed conversation {Id} - total usage: {Usage}",
             ForegroundConversation.Id, ForegroundConversation.TotalUsage);
 
-        await FireHookAsync(HookEvent.SessionEnd, "close", sessionId, ct);
+        await FireHookAsync(HookEvent.SessionEnd, reason, sessionId, ct);
 
         RemoveBackgroundSession(ForegroundConversation.Id);
         await _shellExecutorCleanup.ReleaseAsync(ForegroundConversation.Id).ConfigureAwait(false);
@@ -456,7 +459,8 @@ public sealed class SessionManager : ISessionManager
     {
         try
         {
-            await CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            // 兜底 reason=other：宿主停止路径由 SessionEndHookService 先行关闭（幂等），此处覆盖未启停宿主的释放路径
+            await CloseAsync(SessionEndReason.Other, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

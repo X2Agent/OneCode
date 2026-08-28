@@ -85,6 +85,12 @@ public sealed partial class ChatInputView : View
     /// <summary>进入对话区导航模式（Ctrl+T）。由 ReplShell 接线：焦点切换 + Transcript 上下文 push。</summary>
     public event Action? EnterTranscriptRequested;
 
+    /// <summary>加宽右侧侧边栏（Ctrl+Shift+→，app:sidebarWider）。由 ReplShell 接线到宽度调整。</summary>
+    public event Action? SidebarWiderRequested;
+
+    /// <summary>收窄右侧侧边栏（Ctrl+Shift+←，app:sidebarNarrower）。由 ReplShell 接线到宽度调整。</summary>
+    public event Action? SidebarNarrowerRequested;
+
     /// <summary>
     /// 直达指定工作模式（Alt+1..4，app:mode* 动作）。
     /// 视图内部接线到 <see cref="WorkingModeController.Mode"/>，复用 ModeChanged

@@ -50,6 +50,7 @@ public sealed class CompactService(
         string? customInstructions = null,
         int? fromMessageIndex = null,
         int? upToMessageIndex = null,
+        string trigger = HookTriggers.Auto,
         CancellationToken ct = default,
         IProgress<CompactProgress>? progress = null)
     {
@@ -64,7 +65,7 @@ public sealed class CompactService(
 
         // PreCompact hooks (TS: executePreCompactHooks)
         progress?.Report(new CompactProgress("Running PreCompact hooks", 12));
-        await FirePreCompactAsync(session, ct).ConfigureAwait(false);
+        await FirePreCompactAsync(session, trigger, ct).ConfigureAwait(false);
 
         var messages = session.Messages;
 
@@ -140,7 +141,7 @@ public sealed class CompactService(
         await sessionManager.SaveAsync(ct);
         progress?.Report(new CompactProgress("Saving compacted conversation", 95));
 
-        await FirePostCompactAsync(session, formattedSummary, ct).ConfigureAwait(false);
+        await FirePostCompactAsync(session, formattedSummary, trigger, ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "Compact complete: {Before} messages → {After} messages",
@@ -154,27 +155,30 @@ public sealed class CompactService(
     /// <summary>
     /// Fires the <see cref="HookEvent.PreCompact"/> hook.
     /// </summary>
-    private async Task FirePreCompactAsync(Conversation session, CancellationToken ct)
+    private async Task FirePreCompactAsync(Conversation session, string trigger, CancellationToken ct)
     {
         await hooks.FireAsync(new HookPayload
         {
             Event = HookEvent.PreCompact,
             SessionId = session.Id,
             Cwd = session.WorkingDirectory,
-        }, ct: ct).ConfigureAwait(false);
+            Trigger = trigger,
+        }, actualMatcherValue: trigger, ct: ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Fires the <see cref="HookEvent.PostCompact"/> hook with the produced summary.
     /// </summary>
-    private async Task FirePostCompactAsync(Conversation session, string summary, CancellationToken ct)
+    private async Task FirePostCompactAsync(Conversation session, string summary, string trigger, CancellationToken ct)
     {
         await hooks.FireAsync(new HookPayload
         {
             Event = HookEvent.PostCompact,
             SessionId = session.Id,
+            Cwd = session.WorkingDirectory,
             ToolResponse = summary,
-        }, ct: ct).ConfigureAwait(false);
+            Trigger = trigger,
+        }, actualMatcherValue: trigger, ct: ct).ConfigureAwait(false);
     }
 }
 

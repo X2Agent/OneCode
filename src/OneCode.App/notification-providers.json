@@ -1,0 +1,13 @@
+{
+  "dingtalk": {
+    "displayName": "钉钉机器人",
+    "method": "POST",
+    "url": "https://oapi.dingtalk.com/robot/send",
+    "body": {
+      "msgtype": "text",
+      "text": { "content": "{{Text}}" }
+    },
+    "signing": { "preset": "dingtalk" },
+    "success": { "field": "errcode", "equals": 0 }
+  }
+}

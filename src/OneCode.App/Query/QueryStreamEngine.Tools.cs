@@ -187,8 +187,19 @@ internal sealed partial class QueryStreamEngine
         };
     }
 
-    private async Task FireHookAsync(HookEvent @event, SessionId? sessionId, string? workingDirectory,
-        CancellationToken ct = default)
+    /// <summary>
+    /// 触发 hook 事件并返回聚合结果。matcher 的实际比较值由调用方通过
+    /// <paramref name="actualMatcherValue"/> 显式传入（不从 payload 字段猜测，
+    /// 语义声明见 HookEventMetadataRegistry）；<paramref name="configure"/> 用于
+    /// 填充事件专属 payload 字段（UserMessage / TerminalReason / ErrorCategory / ToolName 等）。
+    /// </summary>
+    private async Task<AggregatedHookResult?> FireHookAsync(
+        HookEvent @event,
+        SessionId? sessionId,
+        string? workingDirectory,
+        CancellationToken ct = default,
+        string? actualMatcherValue = null,
+        Action<HookPayload>? configure = null)
     {
         var payload = new HookPayload
         {
@@ -197,8 +208,24 @@ internal sealed partial class QueryStreamEngine
             Cwd = workingDirectory ?? Environment.CurrentDirectory,
         };
 
-        await _hookExecutionService.FireAsync(payload, ct: ct);
+        configure?.Invoke(payload);
+
+        return await _hookExecutionService.FireAsync(payload, actualMatcherValue, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Notification hook 触发器（matcher=permission_prompt）：在 TUI 审批请求下发前执行。
+    /// 挂在 <see cref="OneCode.App.Services.Agent.MainAgentRunOptions.OnPermissionPrompt"/> 上，由 ApprovalBroker 调用；
+    /// 审批流程不受 hook 结果影响（无阻断语义）。
+    /// </summary>
+    private Func<string, CancellationToken, Task> OnPermissionPromptHook(QueryStreamRequest request) =>
+        (toolName, hookCt) => FireHookAsync(
+            HookEvent.Notification,
+            request.SessionId,
+            request.WorkingDirectory,
+            hookCt,
+            actualMatcherValue: "permission_prompt",
+            configure: p => p.ToolName = toolName);
 
     private async Task NotifyAsync(string title, string message, CancellationToken ct)
     {

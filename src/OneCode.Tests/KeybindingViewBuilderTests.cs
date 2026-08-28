@@ -54,6 +54,36 @@ public sealed class KeybindingViewBuilderTests
     }
 
     [Fact]
+    public void Build_DefaultBinding_FillsDescriptionFromActionCatalog()
+    {
+        var views = KeybindingViewBuilder.Build([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+
+        var submit = views.Single(v => v.Action == KeybindingDefaults.ActionChatSubmit);
+        submit.Description.Should().Be(KeybindingDefaults.AllActionDescriptions[KeybindingDefaults.ActionChatSubmit]);
+    }
+
+    [Fact]
+    public void Build_CustomCommandBinding_HasNoDescription()
+    {
+        var merged = MergeDefaults(UserBlock(("ctrl+g", "command:foo")));
+
+        var views = KeybindingViewBuilder.Build(merged);
+
+        views.Single(v => v.KeyDisplay == "Ctrl+G").Description.Should().BeNull();
+    }
+
+    [Fact]
+    public void AllActionDescriptions_CoversEveryActionExactly()
+    {
+        // 键集合与 AllActions 一致：不多（无死条目）不少（防新增动作遗漏）
+        KeybindingDefaults.AllActionDescriptions.Keys.Should().BeEquivalentTo(KeybindingDefaults.AllActions);
+
+        // 每个动作的说明非空
+        KeybindingDefaults.AllActions.Should().OnlyContain(
+            a => !string.IsNullOrWhiteSpace(KeybindingDefaults.AllActionDescriptions[a]));
+    }
+
+    [Fact]
     public void Build_ChordKey_TitleCaseWithSpaceSeparator()
     {
         var merged = MergeDefaults(UserBlock(("ctrl+x ctrl+k", "chat:killAgents")));

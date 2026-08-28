@@ -177,6 +177,10 @@ public sealed class KeybindingsCommand(KeybindingLoader keybindingLoader) : Comm
                 : view.Action ?? string.Empty;
             var mark = view.Source == KeybindingSource.Custom ? "  ★custom" : string.Empty;
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {view.KeyDisplay,-18} {action}{mark}");
+
+            // 功能说明缩进对齐动作 ID 列，独占一行
+            if (view.Description is { } description)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{new string(' ', 21)}{description}");
         }
 
         sb.AppendLine();

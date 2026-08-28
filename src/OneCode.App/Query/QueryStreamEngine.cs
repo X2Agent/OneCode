@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services;
+using OneCode.App.Services.Hooks;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Compact;
@@ -111,9 +112,34 @@ internal sealed partial class QueryStreamEngine
         sessionId ??= _sessionManager.ForegroundConversation?.Id;
         var conversationId = _sessionManager.ForegroundConversation?.Id;
 
+        // UserPromptSubmit hook：在 LoadHistoryAsync 之前触发——被阻断的 prompt 不进入运行循环、
+        // 也不落会话历史（exit code 2 阻断；AdditionalContexts 以 user 消息并入本轮输入）。
+        var promptHook = await FireHookAsync(
+            HookEvent.UserPromptSubmit,
+            sessionId,
+            workingDirectory,
+            ct,
+            configure: p => p.UserMessage = userPrompt).ConfigureAwait(false);
+        if (promptHook?.BlockingErrors is { Count: > 0 } promptBlocks)
+        {
+            _logger.LogInformation("UserPromptSubmit hook blocked prompt: {Error}", promptBlocks[0].Error);
+            yield return new ErrorEvent($"Prompt blocked by hook: {promptBlocks[0].Error}");
+            yield return new DoneEvent(null, null, 0, BuildTerminalReason.Completed, conversationId);
+            yield break;
+        }
+
         var historyMessages = conversationId is { } activeConversationId
             ? await LoadHistoryAsync(activeConversationId, userPrompt, ct).ConfigureAwait(false)
             : null;
+
+        // hook 注入的附加上下文并入本轮输入（user 角色消息，位于实际 prompt 之前）
+        if (promptHook?.AdditionalContexts is { Count: > 0 } promptContexts)
+        {
+            var contextText = string.Join("\n\n", promptContexts);
+            historyMessages = historyMessages is { } existing
+                ? [.. existing, new ChatMessage(ChatRole.User, contextText)]
+                : [new ChatMessage(ChatRole.User, contextText)];
+        }
 
         var capabilities = _toolCapabilityResolver.Resolve(workingMode);
         var localTools = AssembleTools(userPrompt, capabilities, conversationId);
@@ -238,57 +264,154 @@ internal sealed partial class QueryStreamEngine
 
         var previousBuildRunId = OneCodeAgentRunContext.CurrentBuildRunId;
         OneCodeAgentRunContext.CurrentBuildRunId = preambleState.BuildRun?.Id.ToString();
-        var channel = Channel.CreateUnbounded<object>();
+
+        // Stop 纠偏续跑状态：跨轮聚合文本 / 轮次 / 用量；连续阻断计数防死循环。
+        var aggregatedText = new System.Text.StringBuilder();
+        var aggregatedTurns = 0;
+        TokenUsage? aggregatedUsage = null;
+        var consecutiveStopBlocks = 0;
+        var currentFeedback = (string?)null;
+        var finalize = false;
+        StreamingSession session = null!;
+        var outcome = new TerminalOutcomeState { Reason = BuildTerminalReason.Completed };
 
         try
         {
-            var session = new StreamingSession(
-                request.AgentRunId,
-                request.IncludeNextPrompt,
-                _logger,
-                name => TryAutoActivateUnknownTool(name, request.LocalTools));
-            var options = BuildAgentRunOptions(request);
-            var runTask = StartRun(preambleState.BuildRun, options, request.LocalTools, channel.Writer, useDurableBuildAttempt, ct);
-
-            try
+            while (true)
             {
-                await foreach (var evt in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                // 每轮必须新建 Session / Channel / runTask——runner 结束即 TryComplete，不可复用。
+                session = new StreamingSession(
+                    request.AgentRunId,
+                    request.IncludeNextPrompt,
+                    _logger,
+                    name => TryAutoActivateUnknownTool(name, request.LocalTools));
+                var options = BuildAgentRunOptions(request) with
                 {
-                    foreach (var e in session.Digest(evt))
-                        yield return e;
-                }
-            }
-            finally
-            {
-                if (ct.IsCancellationRequested)
+                    // 首轮用原始输入；纠偏轮以阻断反馈重入同一 MAF session（增量 user 消息）。
+                    UserPrompt = currentFeedback ?? request.UserPrompt,
+                    Messages = currentFeedback is null ? request.HistoryMessages : null,
+                };
+                var channel = Channel.CreateUnbounded<object>();
+                var runTask = StartRun(preambleState.BuildRun, options, request.LocalTools, channel.Writer, useDurableBuildAttempt, ct);
+
+                try
                 {
-                    await _buildRunGate.PersistCancelledRunAsync(
-                        request.ConversationId,
-                        request.AgentRunId,
-                        request.WorkingMode,
-                        session.ToolBatchCollector,
-                        CancellationToken.None).ConfigureAwait(false);
+                    await foreach (var evt in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                    {
+                        foreach (var e in session.Digest(evt))
+                            yield return e;
+                    }
                 }
-                OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
+                finally
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        await _buildRunGate.PersistCancelledRunAsync(
+                            request.ConversationId,
+                            request.AgentRunId,
+                            request.WorkingMode,
+                            session.ToolBatchCollector,
+                            CancellationToken.None).ConfigureAwait(false);
+                    }
+                    OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
+                }
+
+                foreach (var e in session.FlushTrailingText())
+                    yield return e;
+                if (session.CompleteTurnIfStarted() is { } turnCompleted)
+                    yield return turnCompleted;
+
+                var (runException, runResult) = await AwaitRunAsync(runTask).ConfigureAwait(false);
+                if (runException is not null)
+                {
+                    await OnRunFailedAsync(request, runException, ct).ConfigureAwait(false);
+                    yield return new ErrorEvent(runException.Message);
+                    yield break;
+                }
+
+                // 跨纠偏轮聚合文本 / 轮次 / 用量，并逐轮持久化 transcript
+                aggregatedText.Append(session.FinalText);
+                aggregatedTurns += session.TurnCount;
+                aggregatedUsage = SumUsage(aggregatedUsage, session.FinalUsage);
+                await PersistTranscriptAsync(
+                    request, session, session.FinalText, session.FinalUsage, ct).ConfigureAwait(false);
+
+                // Stop hook：终因提前解析，TerminalReason 同时进入 payload 与 matcher 值
+                outcome = ResolveTerminalOutcome(session, options, runResult, session.FinalText);
+                var stopResult = await FireHookAsync(
+                    HookEvent.Stop,
+                    request.SessionId,
+                    request.WorkingDirectory,
+                    ct,
+                    actualMatcherValue: outcome.Reason.ToString(),
+                    configure: p => p.TerminalReason = outcome.Reason.ToString()).ConfigureAwait(false);
+
+                if (stopResult?.BlockingErrors is not { Count: > 0 } stopBlocks)
+                {
+                    finalize = true;
+                    break;
+                }
+
+                var stopBlock = stopBlocks[0];
+                consecutiveStopBlocks++;
+
+                if (useDurableBuildAttempt || consecutiveStopBlocks > MaxStopCorrections)
+                {
+                    // durable Build 走 RunNextAsync 受控尝试链，不支持无感重入；连续阻断超限防死循环。
+                    // 两者都降级为 TUI 警告并照常终结（终因保持最后一次解析结果）。
+                    if (useDurableBuildAttempt)
+                    {
+                        _logger.LogWarning(
+                            "Stop hook blocked a durable Build attempt — downgraded to warning (re-entry unsupported)");
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Stop hook blocked completion {Count} times (limit {Limit}) — finalizing run",
+                            consecutiveStopBlocks, MaxStopCorrections);
+                    }
+
+                    yield return new ErrorEvent($"Stop hook blocked completion: {stopBlock.Error}");
+                    finalize = true;
+                    break;
+                }
+
+                _logger.LogInformation(
+                    "Stop hook blocked completion ({Count}/{Limit}) — continuing with correction feedback",
+                    consecutiveStopBlocks, MaxStopCorrections);
+                yield return new ErrorEvent($"Stop hook feedback: {stopBlock.Error}");
+
+                // 阻断反馈以增量 user 消息落盘，下一轮以同一 MAF session 重入
+                if (request.ConversationId is { } feedbackConversationId)
+                {
+                    try
+                    {
+                        await _sessionManager.AppendUserMessageAsync(
+                            feedbackConversationId, stopBlock.Error, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to append stop-hook feedback to conversation");
+                    }
+                }
+
+                currentFeedback = stopBlock.Error;
             }
 
-            foreach (var e in session.FlushTrailingText())
-                yield return e;
-            if (session.CompleteTurnIfStarted() is { } turnCompleted)
-                yield return turnCompleted;
-
-            var (runException, runResult) = await AwaitRunAsync(runTask).ConfigureAwait(false);
-            if (runException is not null)
+            if (finalize)
             {
-                await OnRunFailedAsync(request, runException, ct).ConfigureAwait(false);
-                yield return new ErrorEvent(runException.Message);
-                yield break;
-            }
-
-            await foreach (var e in FinalizeAsync(
-                request, session, options, runResult, preambleState.BuildRun, ct).ConfigureAwait(false))
-            {
-                yield return e;
+                await foreach (var e in FinalizeAsync(
+                    request,
+                    session,
+                    preambleState.BuildRun,
+                    aggregatedText.ToString(),
+                    aggregatedUsage!,
+                    aggregatedTurns,
+                    outcome,
+                    ct).ConfigureAwait(false))
+                {
+                    yield return e;
+                }
             }
         }
         finally
@@ -296,6 +419,22 @@ internal sealed partial class QueryStreamEngine
             OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
         }
     }
+
+    /// <summary>Stop hook 连续阻断上限——超过后降级为警告并照常终结（防死循环）。</summary>
+    private const int MaxStopCorrections = 3;
+
+    /// <summary>聚合跨纠偏轮的 TokenUsage（左侧为 null 时直接返回右侧）。</summary>
+    private static TokenUsage SumUsage(TokenUsage? left, TokenUsage right) =>
+        left is null
+            ? right
+            : new TokenUsage(
+                left.InputTokens + right.InputTokens,
+                left.OutputTokens + right.OutputTokens,
+                left.CacheReadTokens + right.CacheReadTokens,
+                left.CacheWriteTokens + right.CacheWriteTokens,
+                left.TotalCostUsd is null && right.TotalCostUsd is null
+                    ? null
+                    : (left.TotalCostUsd ?? 0m) + (right.TotalCostUsd ?? 0m));
 
     private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)
     {
@@ -321,6 +460,8 @@ internal sealed partial class QueryStreamEngine
             // 从 IConfigManager.Current.Effective.MaxBudgetUsd 动态读取。
             // AppSettings.MaxBudgetUsd 是 double，MainAgentRunOptions.MaxBudgetUsd 是 decimal?，需转换。
             MaxBudgetUsd = ResolveMaxBudgetUsd(),
+            // Notification hook：权限审批挂起时在 TUI 审批请求下发前触发（matcher=permission_prompt）
+            OnPermissionPrompt = OnPermissionPromptHook(request),
         };
     }
 
@@ -354,29 +495,41 @@ internal sealed partial class QueryStreamEngine
         }
     }
 
+    /// <summary>
+    /// 运行异常收场：StopFailure hook（异常类别作 matcher 值与 payload.ErrorCategory）→ 桌面通知。
+    /// </summary>
     private async Task OnRunFailedAsync(QueryStreamRequest request, Exception runException, CancellationToken ct)
     {
-        await FireHookAsync(HookEvent.StopFailure, request.SessionId, request.WorkingDirectory, ct);
+        var errorCategory = HookStopFailureClassifier.Classify(runException);
+        await FireHookAsync(
+            HookEvent.StopFailure,
+            request.SessionId,
+            request.WorkingDirectory,
+            ct,
+            actualMatcherValue: errorCategory,
+            configure: p =>
+            {
+                p.ErrorCategory = errorCategory;
+                p.UserMessage = runException.Message;
+            }).ConfigureAwait(false);
         await NotifyAsync("OneCode 任务执行失败", runException.Message, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 终结段：transcript 持久化 → Plan run 收尾 → Stop hook/通知 → token 记账 →
-    /// 终因解析（含 durable BuildRun 回读）→ DoneEvent → CacheSafe 快照更新。
+    /// 终结段：Plan run 收尾 → 完成通知 → token 记账 → durable BuildRun 回读 →
+    /// DoneEvent → CacheSafe 快照更新。transcript 持久化与 Stop hook 已前移至
+    /// <see cref="StreamCoreAsync"/> 的纠偏续跑主循环（逐轮执行，跨轮聚合由调用方传入）。
     /// </summary>
     private async IAsyncEnumerable<QueryEvent> FinalizeAsync(
         QueryStreamRequest request,
         StreamingSession session,
-        MainAgentRunOptions options,
-        MainAgentRunResult? runResult,
         BuildRun? buildRun,
+        string finalText,
+        TokenUsage finalUsage,
+        int turnsCompleted,
+        TerminalOutcomeState outcome,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var finalText = session.FinalText;
-        var finalUsage = session.FinalUsage;
-
-        await PersistTranscriptAsync(request, session, finalText, finalUsage, ct).ConfigureAwait(false);
-
         await _buildRunGate.CompletePlanRunIfPendingAsync(
             request.ConversationId,
             request.AgentRunId,
@@ -384,8 +537,6 @@ internal sealed partial class QueryStreamEngine
             session.ToolBatchCollector.HasOpenBatch,
             ct).ConfigureAwait(false);
 
-        // Fire Stop hook before completing
-        await FireHookAsync(HookEvent.Stop, request.SessionId, request.WorkingDirectory, ct);
         await NotifyAsync(
             "OneCode 任务执行完成",
             finalText.Length > 200 ? finalText[..200] + "…" : finalText,
@@ -393,14 +544,13 @@ internal sealed partial class QueryStreamEngine
 
         RecordUsage(request, session, finalUsage, request.LocalTools);
 
-        var outcome = ResolveTerminalOutcome(session, options, runResult, finalText);
         await foreach (var e in ResolveDurableOutcomeAsync(request, buildRun, outcome, finalText, ct).ConfigureAwait(false))
             yield return e;
 
         yield return new DoneEvent(
             finalText,
             finalUsage,
-            session.TurnCount,
+            turnsCompleted,
             outcome.Reason,
             request.ConversationId,
             outcome.TransactionRolledBack,

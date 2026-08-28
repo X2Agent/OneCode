@@ -20,6 +20,7 @@
     <PackageReference Include="Microsoft.Extensions.AI" />
 
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
     <PackageReference Include="Terminal.Gui" />
@@ -31,6 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 声明式通知渠道内置默认定义（notification-providers.json）：复制到输出目录供三层合并的内置层加载 -->
+    <Content Include="notification-providers.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+
     <!-- Prompt 文件：复制到输出目录（供 PromptManager FilePromptStore 加载）+ 嵌入式资源（供内置资源加载） -->
     <Content Include="prompts\**\*.prompt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

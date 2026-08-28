@@ -30,14 +30,36 @@ public sealed class ApprovalBroker : IApprovalBroker
         return RequestCoreAsync(request, ct);
     }
 
+    /// <summary>
+    /// Main 路径 broker。在 TUI 审批请求下发前触发 Notification hook
+    /// （matcher=permission_prompt）；hook 失败/取消仅记录，不影响审批链路。
+    /// </summary>
     public static ApprovalBroker ForQuery(
         ChannelWriter<object> writer,
+        Func<string, CancellationToken, Task>? onPermissionPrompt = null,
         ILogger<ApprovalBroker>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
         return new ApprovalBroker(async (request, ct) =>
         {
+            if (onPermissionPrompt is not null)
+            {
+                try
+                {
+                    await onPermissionPrompt(request.ToolName, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Notification hook 无阻断语义；执行器内部已记录日志，此处保证审批链路可靠
+                    logger?.LogDebug(ex, "Permission prompt hook failed for tool {ToolName}", request.ToolName);
+                }
+            }
+
             var evt = new ApprovalRequestEvent(
                 request.RequestId,
                 request.ToolName,

@@ -55,6 +55,19 @@ public sealed partial class ReplShell
         if (HandleTranscriptAction(action))
             return true;
 
+        // app:sidebar* — 键盘调整侧边栏宽度（焦点不在输入框时的兜底路径；
+        // 输入框聚焦时经 ChatInputView 的 SidebarWider/NarrowerRequested 转发到这里）。
+        if (action == KeybindingDefaults.ActionAppSidebarWider)
+        {
+            AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
+            return true;
+        }
+        if (action == KeybindingDefaults.ActionAppSidebarNarrower)
+        {
+            AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
+            return true;
+        }
+
         // Ctrl+D — exit the application (when prompt is not focused).
         // When the prompt has focus, ChatInputView.OnInputKeyPress handles it instead.
         if (action == KeybindingDefaults.ActionAppExit && !_chatInput.HasFocus)

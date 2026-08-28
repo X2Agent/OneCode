@@ -10,15 +10,19 @@ public sealed class HooksCommand : Command
 {
     private readonly HookRegistry _hookRegistry;
     private readonly HookPolicyService _policyService;
+    private readonly HookLoadDiagnostics _loadDiagnostics;
 
     public HooksCommand(
         HookRegistry hookRegistry,
-        HookPolicyService policyService)
+        HookPolicyService policyService,
+        HookLoadDiagnostics loadDiagnostics)
     {
         ArgumentNullException.ThrowIfNull(hookRegistry);
         _hookRegistry = hookRegistry;
         ArgumentNullException.ThrowIfNull(policyService);
         _policyService = policyService;
+        ArgumentNullException.ThrowIfNull(loadDiagnostics);
+        _loadDiagnostics = loadDiagnostics;
     }
 
     public override string Name => "hooks";
@@ -58,6 +62,20 @@ public sealed class HooksCommand : Command
         sb.AppendLine("  ~/.onecode/hooks.json         (user-level, priority 100)");
         sb.AppendLine("  .onecode/hooks.json           (project-level, priority 200)");
         sb.AppendLine();
+
+        var diagnostics = _loadDiagnostics.Reports;
+        if (diagnostics.Count > 0)
+        {
+            sb.AppendLine("Load diagnostics (last bootstrap):");
+            foreach (var report in diagnostics)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {report.ConfigDir}: {report.Status} ({report.HookCount} hooks)");
+                foreach (var error in report.Errors)
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"    ! {error}");
+            }
+            sb.AppendLine();
+        }
+
         sb.AppendLine("Subcommands: /hooks list | /hooks events | /hooks status");
         return sb.ToString();
     }
@@ -104,11 +122,11 @@ public sealed class HooksCommand : Command
         var sb = new StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture, $"Available hook events ({HookEventMetadataRegistry.All.Count}):");
         sb.AppendLine();
-        foreach (var meta in HookEventMetadataRegistry.All.OrderBy(m => m.Key.ToString()))
+        foreach (var meta in HookEventMetadataRegistry.All.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"  {meta.Key,-25} {meta.Value.Summary}");
-            if (meta.Value.MatcherMetadata is { } mm)
-                sb.Append(CultureInfo.InvariantCulture, $"  (matcher: {mm.FieldToMatch})");
+            sb.Append(CultureInfo.InvariantCulture, $"  {meta.Name,-25} {meta.Description}");
+            if (meta.Matcher is { } mm)
+                sb.Append(CultureInfo.InvariantCulture, $"  (matcher: {mm.PayloadField})");
             sb.AppendLine();
         }
         return sb.ToString();

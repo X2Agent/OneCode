@@ -35,6 +35,7 @@ public sealed class CompactCommand(CompactService compactService) : Command
                 customInstructions: instructions,
                 fromMessageIndex: fromIndex,
                 upToMessageIndex: upToIndex,
+                trigger: HookTriggers.Manual,
                 ct: ct).ConfigureAwait(false);
         }
         catch (InvalidOperationException ex)

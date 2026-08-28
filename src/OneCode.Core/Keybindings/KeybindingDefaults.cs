@@ -49,6 +49,12 @@ public static class KeybindingDefaults
     // App 级别动作
     public const string ActionAppExit = "app:exit";
 
+    // 右侧侧边栏（Plan/TEAM）宽度键盘调整——与分隔线鼠标拖拽等价的键盘路径。
+    // 注册于 Global 上下文：输入框聚焦时经 ChatInputView 转发，非聚焦时经
+    // ReplShell.OnKeyDown 兜底，两条分发路径共用同一动作。
+    public const string ActionAppSidebarWider = "app:sidebarWider";
+    public const string ActionAppSidebarNarrower = "app:sidebarNarrower";
+
     // 工作模式直达（Alt+1..4 独立单键绑定，与裸 Tab 循环解耦——共享 tab 前缀
     // 会与循环/补全语义冲突；经典终端把 ctrl+2/3/4 编码为 NUL/ESC/FS。注册于 Chat 上下文。
     public const string ActionAppModeBuild = "app:modeBuild";
@@ -114,6 +120,7 @@ public static class KeybindingDefaults
     public static readonly string[] AllActions =
     [
         ActionAppExit,
+        ActionAppSidebarWider, ActionAppSidebarNarrower,
         ActionAppModeBuild, ActionAppModePlan, ActionAppModeTeam, ActionAppModeGoal,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
         ActionChatCancel, ActionChatKillAgents,
@@ -135,6 +142,69 @@ public static class KeybindingDefaults
 
     private static readonly HashSet<string> AllActionsSet = new(AllActions);
     private static readonly HashSet<string> AllContextsSet = new(AllContexts);
+
+    /// <summary>
+    /// 动作 → 人类可读功能说明（中文），供 /keybindings list 与 TUI overlay 显示。
+    /// 必须覆盖 <see cref="AllActions"/> 中的每个动作（测试守护：AllActionDescriptions_CoversEveryAction）。
+    /// </summary>
+    public static readonly Dictionary<string, string> AllActionDescriptions = new()
+    {
+        // App 级别
+        [ActionAppExit] = "退出应用",
+        [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan/TEAM 面板）",
+        [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan/TEAM 面板）",
+        [ActionAppModeBuild] = "切换到 BUILD 模式",
+        [ActionAppModePlan] = "切换到 PLAN 模式",
+        [ActionAppModeTeam] = "切换到 TEAM 模式",
+        [ActionAppModeGoal] = "切换到 GOAL 模式",
+
+        // 历史导航
+        [ActionHistoryPrevious] = "上一条历史输入",
+        [ActionHistoryNext] = "下一条历史输入",
+        [ActionHistoryRecallLast] = "召回上一条用户消息以便编辑重发",
+
+        // Chat 输入
+        [ActionChatCancel] = "中断模型响应（空闲时关闭补全）",
+        [ActionChatKillAgents] = "中断运行中的查询（可自定义和弦）",
+        [ActionChatSubmit] = "提交消息",
+        [ActionChatNewline] = "输入换行",
+        [ActionChatPaste] = "智能粘贴（图片/路径/大文本折叠）",
+        [ActionChatScrollUp] = "对话区向上滚动（行级）",
+        [ActionChatScrollDown] = "对话区向下滚动（行级）",
+        [ActionChatPageUp] = "对话区向上翻页",
+        [ActionChatPageDown] = "对话区向下翻页",
+        [ActionChatCycleTeam] = "TEAM 模式下循环切换已注册团队",
+        [ActionChatEnterTranscript] = "进入对话区导航模式",
+
+        // Autocomplete
+        [ActionAutocompletePrevious] = "上一条补全建议",
+        [ActionAutocompleteNext] = "下一条补全建议",
+        [ActionAutocompleteAccept] = "接受当前补全",
+        [ActionAutocompleteDismiss] = "关闭补全菜单",
+
+        // Transcript 对话区导航
+        [ActionTranscriptExit] = "退出导航模式，焦点回到输入框",
+        [ActionTranscriptNext] = "下一个可交互行",
+        [ActionTranscriptPrevious] = "上一个可交互行",
+        [ActionTranscriptToggle] = "展开/折叠当前块",
+        [ActionTranscriptCopyCode] = "复制游标行文本到剪贴板",
+        [ActionTranscriptTop] = "跳到第一个可交互行",
+        [ActionTranscriptBottom] = "跳到最后一个可交互行",
+
+        // Diff 审查
+        [ActionDiffScrollUp] = "向上滚动一行",
+        [ActionDiffScrollDown] = "向下滚动一行",
+        [ActionDiffPageUp] = "向上翻页滚动",
+        [ActionDiffPageDown] = "向下翻页滚动",
+        [ActionDiffTop] = "跳到顶部",
+        [ActionDiffBottom] = "跳到底部",
+
+        // 内联选择器
+        [ActionSelectorPrevious] = "上一选项",
+        [ActionSelectorNext] = "下一选项",
+        [ActionSelectorConfirm] = "确认当前选项",
+        [ActionSelectorDismiss] = "取消选择器",
+    };
 
     /// <summary>
     /// 检查是否是有效的上下文名。
@@ -159,6 +229,11 @@ public static class KeybindingDefaults
         new(ContextGlobal, new Dictionary<string, string?>
         {
             ["ctrl+d"] = ActionAppExit,
+
+            // 侧边栏宽度调整（Plan/TEAM 面板）：Ctrl+Shift+方向键，步进见
+            // SidebarViewBase.KeyboardResizeStep。不占用 ctrl+left/right（占位建议循环）。
+            ["ctrl+shift+right"] = ActionAppSidebarWider,
+            ["ctrl+shift+left"] = ActionAppSidebarNarrower,
         }),
         new(ContextChat, new Dictionary<string, string?>
         {

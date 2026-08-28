@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using OneCode.App.Session;
+using OneCode.Core.Hooks;
 
 namespace OneCode.App.Commands;
 
@@ -14,13 +15,14 @@ public sealed class ExitCommand(ISessionManager sessionManager, IHostApplication
     {
         if (sessionManager.ForegroundConversation is not null)
         {
-            try { await sessionManager.SaveAsync(ct).ConfigureAwait(false); }
+            // A7：用户输入退出 → SessionEnd(reason=prompt_input_exit)；CloseAsync 内含 best-effort 持久化
+            try { await sessionManager.CloseAsync(SessionEndReason.PromptInputExit, ct).ConfigureAwait(false); }
             catch (Exception ex)
             {
                 if (logger is not null)
-                    logger.LogDebug(ex, "ExitCommand: best-effort save on exit failed");
+                    logger.LogDebug(ex, "ExitCommand: best-effort close on exit failed");
                 else
-                    System.Diagnostics.Debug.WriteLine($"ExitCommand best-effort save on exit failed: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"ExitCommand best-effort close on exit failed: {ex.Message}");
             }
         }
 

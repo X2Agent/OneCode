@@ -145,6 +145,7 @@ public partial class MainAgentRunner : IMainAgentRunner
                     ? null
                     : ApprovalBroker.ForQuery(
                         writer,
+                        options.OnPermissionPrompt,
                         _loggerFactory.CreateLogger<ApprovalBroker>()),
             };
 

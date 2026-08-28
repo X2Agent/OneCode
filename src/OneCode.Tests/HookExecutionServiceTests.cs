@@ -154,6 +154,38 @@ public sealed class HookExecutionServiceTests
         result.BlockingErrors!.Should().ContainSingle(b => b.Error == "forbidden by policy");
     }
 
+    // Once 语义：仅在成功执行后注销（A4 修复）
+
+    [Fact]
+    public async Task FireAsync_OnceHookWithBlockingResult_IsRemovedAfterExecution()
+    {
+        var (sut, registry, executor) = CreateSut(trusted: true);
+        registry.Register(MakeRegistration("once-blocker", HookEvent.Stop, "Completed", once: true));
+        executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
+            .Returns(new HookResult
+            {
+                Outcome = HookOutcome.Blocking,
+                BlockingError = new HookBlockingError("must continue", "hook"),
+            });
+
+        var result = await sut.FireAsync(MakePayload(HookEvent.Stop, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
+
+        result.BlockingErrors.Should().NotBeNull();
+        registry.GetAll().Should().BeEmpty("Once hook 送达阻断裁决后应注销，防止 Stop 阻断无限循环");
+    }
+
+    [Fact]
+    public async Task FireAsync_OnceHookWithExecutorException_IsKeptForRetry()
+    {
+        var (sut, registry, executor) = CreateSut(trusted: true);
+        registry.Register(MakeRegistration("once-flaky", HookEvent.Stop, "Completed", once: true));
+        executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
+            .Throws(new InvalidOperationException("boom"));
+
+        await sut.FireAsync(MakePayload(HookEvent.Stop, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
+
+        registry.GetAll().Should().ContainSingle("执行异常视为未完成，once hook 应保留待下次触发");
+    }
     // helpers
 
     private static (HookExecutionService sut, HookRegistry registry, IHookExecutor executor) CreateSut(
@@ -173,17 +205,9 @@ public sealed class HookExecutionServiceTests
     {
         var config = CreateConfigManager(trusted);
         var policy = new HookPolicyService(config);
-        var commandExecutor = executors.FirstOrDefault(e => e.Type == HookType.Command)
-            ?? executors.First();
-        var notificationExecutor = executors.FirstOrDefault(e => e.Type == HookType.Notification)
-            ?? Substitute.For<IHookExecutor>();
-        var httpExecutor = executors.FirstOrDefault(e => e.Type == HookType.Http)
-            ?? Substitute.For<IHookExecutor>();
         return new HookExecutionService(
             registry,
-            commandExecutor,
-            notificationExecutor,
-            httpExecutor,
+            executors,
             policy,
             NullLogger<HookExecutionService>.Instance);
     }

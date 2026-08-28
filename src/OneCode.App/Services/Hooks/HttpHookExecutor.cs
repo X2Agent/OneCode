@@ -46,7 +46,8 @@ public sealed class HttpHookExecutor : IHookExecutor
         var method = string.IsNullOrWhiteSpace(config.Method)
             ? DefaultMethod
             : config.Method!.ToUpperInvariant();
-        var renderedUrl = HookTemplateRenderer.Render(config.Url, payload);
+        // C1：url 支持 ${ENV_VAR} / dpapi: 展开，再叠加 {{field}} 模板插值
+        var renderedUrl = HookTemplateRenderer.Render(HookSecretExpander.Expand(config.Url) ?? string.Empty, payload);
 
         if (!Uri.TryCreate(renderedUrl, UriKind.Absolute, out var uri))
         {
@@ -71,7 +72,8 @@ public sealed class HttpHookExecutor : IHookExecutor
                 foreach (var (key, value) in config.Headers)
                 {
                     if (string.IsNullOrWhiteSpace(key)) continue;
-                    request.Headers.TryAddWithoutValidation(key, HookTemplateRenderer.Render(value, payload));
+                    request.Headers.TryAddWithoutValidation(
+                        key, HookTemplateRenderer.Render(HookSecretExpander.Expand(value) ?? string.Empty, payload));
                 }
             }
 

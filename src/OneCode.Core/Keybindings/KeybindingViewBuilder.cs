@@ -16,13 +16,16 @@ public enum KeybindingSource
 }
 
 /// <summary>
-/// 可显示的生效绑定视图条目。
+/// 可显示的生效绑定视图条目。<see cref="Description"/> 为动作的功能说明
+/// （来自 <see cref="KeybindingDefaults.AllActionDescriptions"/>）；
+/// 用户自定义 command: 绑定与显式解绑无说明（null）。
 /// </summary>
 public sealed record KeybindingView(
     string Context,
     string KeyDisplay,
     string? Action,
-    KeybindingSource Source);
+    KeybindingSource Source,
+    string? Description = null);
 
 /// <summary>
 /// 将合并后的绑定条目（默认在前、用户在后，后匹配生效）转换为显示视图：
@@ -56,7 +59,10 @@ public static class KeybindingViewBuilder
                 context,
                 ToTitleCase(KeybindingParser.ChordToDisplayString(entry.Chord)),
                 entry.Action,
-                source));
+                source,
+                entry.Action is null
+                    ? null
+                    : KeybindingDefaults.AllActionDescriptions.GetValueOrDefault(entry.Action)));
         }
 
         // 按 KeybindingDefaults.AllContexts 的顺序分组，组内按按键排序，保证稳定输出。

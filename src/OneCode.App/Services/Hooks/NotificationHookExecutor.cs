@@ -3,23 +3,23 @@ using OneCode.Core.Hooks.Notifications;
 namespace OneCode.App.Services.Hooks;
 
 /// <summary>
-/// Notification 类型 Hook 执行器——通过 INotificationProvider 分发到外部消息系统。
+/// Notification 类型 Hook 执行器——把消息分发到外部消息系统。
 ///
+/// 渠道解析经 <see cref="NotificationProviderRegistry"/>：声明式定义（notification-providers.json）
+/// 优先，编译型 INotificationProvider 兜底，同名声明式胜出。
 /// 模板插值：支持 {{Field}} 语法替换 HookPayload 字段（如 {{Event}} / {{UserMessage}}），
 /// 由 <see cref="HookTemplateRenderer"/> 统一实现。
-/// Provider 解析：通过 IEnumerable 注入，按 Name 字典查找（与 IHookExecutor 模式一致）。
 /// </summary>
 public sealed class NotificationHookExecutor : IHookExecutor
 {
-    private readonly Dictionary<string, INotificationProvider> _providers;
+    private readonly NotificationProviderRegistry _registry;
     private readonly ILogger<NotificationHookExecutor> _logger;
 
     public NotificationHookExecutor(
-        IEnumerable<INotificationProvider> providers,
+        NotificationProviderRegistry registry,
         ILogger<NotificationHookExecutor> logger)
     {
-        _providers = providers?.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, INotificationProvider>(StringComparer.OrdinalIgnoreCase);
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -38,10 +38,11 @@ public sealed class NotificationHookExecutor : IHookExecutor
             };
         }
 
-        if (!_providers.TryGetValue(config.Provider, out var provider))
+        var provider = _registry.Resolve(config.Provider);
+        if (provider is null)
         {
             _logger.LogWarning("Notification provider '{Provider}' not registered. Available: {Available}",
-                config.Provider, string.Join(", ", _providers.Keys));
+                config.Provider, string.Join(", ", _registry.Names));
             return new HookResult
             {
                 Outcome = HookOutcome.NonBlockingError,
@@ -68,13 +69,17 @@ public sealed class NotificationHookExecutor : IHookExecutor
             Timestamp = payload.Timestamp,
         };
 
+        // C1：webhookUrl / secret 支持 ${ENV_VAR} 与 dpapi: 展开后才传给 Provider
+        var webhookUrl = HookSecretExpander.Expand(config.WebhookUrl);
+        var secret = HookSecretExpander.Expand(config.Secret);
+
         var timeoutMs = config.TimeoutMs ?? 5000;
         using var timeoutCts = new CancellationTokenSource(timeoutMs);
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
-            var result = await provider.SendAsync(message, config.WebhookUrl, config.Secret, linkedCts.Token)
+            var result = await provider.SendAsync(message, webhookUrl, secret, linkedCts.Token)
                 .ConfigureAwait(false);
 
             if (!result.Success)

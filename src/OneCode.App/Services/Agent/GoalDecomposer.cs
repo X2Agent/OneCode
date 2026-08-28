@@ -344,11 +344,12 @@ internal sealed class GoalDecomposer : IGoalPlanningService
             {
                 var payload = new HookPayload
                 {
-                    Event = HookEvent.UserPromptSubmit,
+                    Event = HookEvent.GoalStageInvoke,
                     Cwd = Environment.CurrentDirectory,
                     UserMessage = $"[{stageName}] {userPrompt}",
                 };
-                await _hookExecutionService.FireAsync(payload, ct: ct).ConfigureAwait(false);
+                // stage 名作 matcher 值（goal-decomposer / goal-sub-decomposer / goal-replanner）
+                await _hookExecutionService.FireAsync(payload, actualMatcherValue: stageName, ct: ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

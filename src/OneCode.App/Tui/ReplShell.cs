@@ -111,6 +111,10 @@ public sealed partial class ReplShell : View
         _chatInput.PageUpRequested += () => _transcript.MessageView.PageUp();
         _chatInput.PageDownRequested += () => _transcript.MessageView.PageDown();
 
+        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板）。
+        _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
+        _chatInput.SidebarNarrowerRequested += () => AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
+
         // SessionContextBar sits at the bottom; ChatInputView and AgentStatusBar anchor above it.
         _sessionContextBar = new SessionContextBar()
         {
@@ -235,6 +239,24 @@ public sealed partial class ReplShell : View
     /// wasted work mid-drag (and resets the sidebar scroll position).
     /// </summary>
     private void OnSidebarWidthChanged() => ApplySidebarLayout();
+
+    /// <summary>
+    /// 键盘调整当前可见侧边栏（Plan/TEAM 互斥）的宽度，clamp 规则与分隔线鼠标拖拽
+    /// 共用（<see cref="SidebarViewBase.AdjustWidth"/>）。宽度实际变化时按最终宽度
+    /// 重渲侧边栏内容与对话列（等同一次拖拽释放，见 <see cref="OnSidebarDragEnded"/>）。
+    /// </summary>
+    internal void AdjustSidebarWidth(int delta)
+    {
+        SidebarViewBase? sidebar = _planSidebar.Visible ? _planSidebar
+            : _teamSidebar.Visible ? _teamSidebar
+            : null;
+        if (sidebar is null || !sidebar.AdjustWidth(delta))
+            return;
+
+        RenderActivePlanCard();
+        RenderActiveTeamSidebar();
+        _transcript.RequestContentRerender();
+    }
 
     /// <summary>
     /// Drag release callback — re-render the sidebar contents and the conversation

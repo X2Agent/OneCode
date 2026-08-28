@@ -115,6 +115,13 @@ public sealed record MainAgentRunOptions
     /// execution must never suspend on an in-process TaskCompletionSource approval dialog.
     /// </summary>
     public bool SuppressToolApproval { get; init; }
+
+    /// <summary>
+    /// 权限审批挂起回调（可选）。在 TUI 审批请求下发前触发 Notification hook
+    /// （matcher=permission_prompt，ToolName=工具名）。由 ApprovalBroker 调用；
+    /// hook 结果不影响审批流程（无阻断语义）。
+    /// </summary>
+    public Func<string, CancellationToken, Task>? OnPermissionPrompt { get; init; }
 }
 
 /// <summary>
