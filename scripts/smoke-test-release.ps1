@@ -67,13 +67,11 @@ if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
 }
 Write-Pass "可执行文件存在: $exePath"
 
-# Unix 平台需要可执行权限(Linux/macOS runner 上 publish 应自动设置,此处只做提示性检查)
+# Unix 平台需要可执行权限。无条件 chmod +x（幂等）——不要用反射检查权限位，
+# [System.IO.FileSystemInfo]::new() 是抽象类实例化，在 pwsh 上直接抛异常。
 if (-not $isWindowsRid -and -not $IsWindows) {
-    $mode = [System.IO.FileSystemInfo]::new($exePath).UnixMode
-    if ($mode -and $mode -notmatch "x") {
-        Write-Step "补充可执行权限"
-        chmod +x $exePath
-    }
+    Write-Step "补充可执行权限"
+    chmod +x $exePath
 }
 
 # ── 2. --version 断言 ─────────────────────────────────────────────
