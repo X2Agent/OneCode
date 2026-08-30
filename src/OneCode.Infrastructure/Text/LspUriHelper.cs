@@ -36,8 +36,10 @@ public static class LspUriHelper
 
     /// <summary>
     /// Convert a <c>file://</c> URI back to a platform-native file path.
-    /// Strips the <c>file://</c> or <c>file:///</c> prefix and converts
+    /// Strips the <c>file://</c> authority prefix and converts
     /// forward slashes to <see cref="Path.DirectorySeparatorChar"/>.
+    /// Unix 路径保留前导 '/'（<c>file:///tmp/a</c> → <c>/tmp/a</c>）；
+    /// Windows 盘符 URI 的 path 部分是 <c>/C:/...</c>，需去掉前导 '/'。
     /// Non-file URIs are returned unchanged.
     /// </summary>
     public static string UriToFilePath(string uri)
@@ -45,18 +47,16 @@ public static class LspUriHelper
         if (string.IsNullOrEmpty(uri))
             return uri;
 
-        if (uri.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
-        {
-            var path = uri["file:///".Length..];
-            return path.Replace('/', Path.DirectorySeparatorChar);
-        }
+        if (!uri.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            return uri;
 
-        if (uri.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-        {
-            var path = uri["file://".Length..];
-            return path.Replace('/', Path.DirectorySeparatorChar);
-        }
+        // "file://" 之后即 URI path，始终以 '/' 开头（authority 为空）
+        var path = uri["file://".Length..];
 
-        return uri;
+        // Windows 盘符形式：/C:/... → C:/...
+        if (path.Length >= 3 && path[0] == '/' && path[2] == ':')
+            path = path[1..];
+
+        return path.Replace('/', Path.DirectorySeparatorChar);
     }
 }

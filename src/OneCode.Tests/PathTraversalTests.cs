@@ -79,6 +79,10 @@ public sealed class PathTraversalTests
     [InlineData("project/../../../outside")]
     public void SafeResolve_TraversalPattern_OutsideWorkingDir_ReturnsFailure(string traversal)
     {
+        // 反斜杠在 Unix 上是普通文件名字符，不构成穿越语义
+        if (traversal.Contains('\\') && !OperatingSystem.IsWindows())
+            Assert.Skip("Windows-style backslash traversal is only meaningful on Windows");
+
         var workDir = Path.Combine(_tempDir, "project");
         try
         {

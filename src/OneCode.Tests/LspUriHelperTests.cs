@@ -49,9 +49,18 @@ public sealed class LspUriHelperTests
     public void UriToFilePath_UnixTripleSlashUri_ConvertsToUnixPath()
     {
         var uri = "file:///home/user/file.cs";
-        // On Windows, forward slashes are converted to DirectorySeparatorChar.
-        var expected = uri["file:///".Length..].Replace('/', Path.DirectorySeparatorChar);
+        // Unix 路径保留前导 '/'（file:///home → /home），再转本机分隔符
+        var expected = "/home/user/file.cs".Replace('/', Path.DirectorySeparatorChar);
         LspUriHelper.UriToFilePath(uri).Should().Be(expected);
+    }
+
+    [Fact]
+    public void UriToFilePath_UnixUri_ProducesRootedPath()
+    {
+        // 回归：实现曾把 file:/// 前缀整段剥掉，Unix 上得到无根的 "tmp/..."，
+        // 导致诊断/编辑工具的路径匹配全部失效。
+        LspUriHelper.UriToFilePath("file:///tmp/onecode/code.cs")
+            .Should().Be("/tmp/onecode/code.cs".Replace('/', Path.DirectorySeparatorChar));
     }
 
     [Fact]

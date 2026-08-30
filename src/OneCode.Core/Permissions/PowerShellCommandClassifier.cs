@@ -461,7 +461,15 @@ public static partial class PowerShellCommandClassifier
 
     private static bool LooksLikeParameter(string token) =>
         token.StartsWith("-", StringComparison.Ordinal)
-        || token.StartsWith("/", StringComparison.Ordinal);
+        || (token.StartsWith("/", StringComparison.Ordinal) && !LooksLikeUnixAbsolutePath(token));
+
+    /// <summary>
+    /// Unix 绝对路径（/tmp/a/b、/etc/passwd）以 '/' 开头但含多个路径段；
+    /// PowerShell 单字符参数（/c、/y）没有第二个 '/'。非 Windows 平台上
+    /// shell="powershell" 的路径守卫依赖此区分，否则绝对路径引用会被漏检。
+    /// </summary>
+    private static bool LooksLikeUnixAbsolutePath(string token) =>
+        token.IndexOf('/', 1) > 0;
 
     private static int SkipPrefixes(IReadOnlyList<string> statement)
     {
