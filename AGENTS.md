@@ -5,7 +5,7 @@ Keep it updated as the project evolves.
 
 ## Project Overview
 
-OneCode .NET 是一个基于 .NET 10 的生产级 CLI AI 编程助手，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。四种工作模式（BUILD / PLAN / TEAM / GOAL），41 个斜杠命令，30+ 工具。
+OneCode .NET 是一个基于 .NET 10 的生产级 CLI AI 编程助手，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。四种工作模式（BUILD / PLAN / TEAM / GOAL），44 个斜杠命令，30 个工具。
 
 **语言**：代码注释与文档以中文为主。详细规范见 [src/AGENTS.md](src/AGENTS.md)（强制编码规范）及各 csproj 的专属 AGENTS.md。
 
@@ -25,7 +25,7 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 ```
 src/
 ├── OneCode.Cli/            # CLI 入口 · 快速路径分发（6 文件）
-├── OneCode.App/            # 组合与实现层：Tools/Commands/Tui/Services/DI 注册（~395 文件）
+├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Tui/Services/DI 注册（~400 文件）
 ├── OneCode.Core/           # 纯接口与领域模型（仅依赖 *.Abstractions）
 ├── OneCode.Infrastructure/ # 外部系统适配：MCP / MAF 管道 / 配置 / Git / Memory
 ├── OneCode.Automation/     # 后台调度：Cron / ModelCatalog 刷新 / YOLO 规则加载

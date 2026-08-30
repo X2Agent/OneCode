@@ -1,12 +1,12 @@
 # OneCode .NET — 生产级 CLI AI 编程助手
 
-> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.17 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
+> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.19 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
 
 > **免责声明**: 本仓库内容仅用于技术研究和科研爱好者交流学习参考，**严禁任何个人、机构及组织将其用于商业用途、盈利性活动、非法用途及其他未经授权的场景。** 若内容涉及侵犯您的合法权益、知识产权或存在其他侵权问题，请及时联系我们，我们将第一时间核实并予以删除处理。
 
 **仓库地址**: [https://github.com/X2Agent/OneCode](https://github.com/X2Agent/OneCode)  
 **当前版本**: 1.0.0  
-**语言**: [English](README.md) | **中文** 
+**语言**: 中文 
 
 ---
 
@@ -37,7 +37,7 @@
 | 异步模型 | Task + async/await |
 | 包管理 | NuGet（Central Package Management，版本统一由 `src/Directory.Packages.props` 固定） |
 | 测试框架 | xUnit v3 + NSubstitute + FluentAssertions |
-| Agent 框架 | MAF 1.17 (ChatClientAgent + 中间件管道) |
+| Agent 框架 | MAF 1.19 (ChatClientAgent + 中间件管道) |
 | 发布方式 | .NET 自包含单文件 |
 
 > **已知限制**：
@@ -56,7 +56,7 @@ src/
 │   ├── CliModeDetector.cs      #   快速路径检测
 │   └── FastPathDispatcher.cs   #   特殊模式快速分发
 │
-├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（386 文件）
+├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（431 文件）
 │   ├── Tools/                  #   30+ 个工具（通过 AddTool<T> 注册）
 │   ├── Commands/               #   44 斜杠命令
 │   ├── Middleware/              #   MAF 中间件管道
@@ -64,14 +64,14 @@ src/
 │   ├── Tui/                    #   Terminal.Gui v2 全屏界面
 │   └── ServiceCollectionExtensions*.cs  #   DI 注册
 │
-├── OneCode.Core/                # 纯接口与领域模型（136 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
+├── OneCode.Core/                # 纯接口与领域模型（156 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
 │   ├── Permissions/            #   权限系统（9 种策略 + Bash 分类器）
 │   ├── Hooks/                  #   10 种钩子事件 + 3 种执行器
 │   ├── Keybindings/            #   按键绑定系统
 │   ├── Commands/               #   命令抽象
 │   └── Domain/                 #   领域模型
 │
-├── OneCode.Infrastructure/      # 外部系统适配（99 文件）
+├── OneCode.Infrastructure/      # 外部系统适配（97 文件）
 │   ├── Mcp/                    #   MCP 协议（5 种传输）
 │   ├── Agent/                  #   MAF 管道构建 + 中间件实现
 │   ├── Memory/                 #   文件系统记忆存储
@@ -79,7 +79,7 @@ src/
 │
 ├── OneCode.Automation/          # 后台调度服务（Cron / ModelCatalog 刷新 / YOLO 规则加载，9 文件）
 │
-└── OneCode.Tests/               # xUnit v3 测试套件（193 文件，1491+ Fact，124+ Theory）
+└── OneCode.Tests/               # xUnit v3 测试套件（222 文件，1685+ Fact，129+ Theory）
     └── AGENTS.md               #   测试规范约束
 ```
 
@@ -94,14 +94,14 @@ src/
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
-│  OneCode.App  (386 文件)                                        │
+│  OneCode.App  (431 文件)                                        │
 │  工具实现 · 命令 · TUI · 服务组合 · MAF 集成中枢                  │
-│  30+ Tools · 41 Commands · MAF 中间件 · ServiceCollectionExtensions │
+│  30+ Tools · 44 Commands · MAF 中间件 · ServiceCollectionExtensions │
 └───────────┬─────────────────────────────────┬───────────────────┘
             │                                 │
 ┌───────────▼──────────┐          ┌───────────▼───────────────────┐
 │  OneCode.Core    │◄─────────│  OneCode.Infrastructure        │
-│  (136 文件)          │          │  (99 文件)                     │
+│  (156 文件)          │          │  (97 文件)                     │
 │  纯接口与领域模型     │          │  外部系统适配                  │
 │  Permissions/Hooks/  │          │  MCP · Memory · Config ·     │
 │  Tasks/Tools/Domain  │          │  Agent/MAF · LSP · CodeIndex │
@@ -112,10 +112,10 @@ src/
                                     │  后台调度：Cron / 刷新 / YOLO │
                                     └─────────────────────────────┘
 
-            OneCode.Tests (193 文件) → 测试以上所有层
+            OneCode.Tests (222 文件) → 测试以上所有层
 ```
 
-**依赖方向**：Cli → App → Core ← Infrastructure；`Automation` 仅依赖 Core + Infrastructure，通过 DI 反向注入 App 实现的接口（如 `ICronJobExecutor`）。Core 层保持纯抽象，不引入外部实现依赖。
+**依赖方向**：Cli → App → Infrastructure → Core（单向；App 另引用 Automation）。`Automation` 仅依赖 Core + Infrastructure，通过 DI 反向注入 App 实现的接口（如 `ICronJobExecutor`）。Core 层保持纯抽象，不引入外部实现依赖。
 
 ---
 
@@ -135,9 +135,9 @@ src/
 | 10 | Git Integration | 92% | 6 个 Git 命令（branch / commit / diff / rebase / review / stash） |
 | 11 | Deep Reasoning 深度思考 | 88% | `EffortThinking`（4 级强度） |
 | 12 | Web Search 网络搜索 | 87% | `WebSearchTool`（Brave + DuckDuckGo 双引擎） |
-| 13 | Terminal Execution | 92% | `BashTool` + `PowerShellTool` + `BackgroundRunTool` |
+| 13 | Terminal Execution | 92% | `BashTool`（含 powershell 方言）+ `BackgroundRunTool` |
 | 14 | Headless Mode CI/CD 模式 | 90% | 无 TTY 自动进入无交互路径；权限由 `permissionMode` 配置 |
-| 15 | Code Review 代码审查 | 85% | `/review` 斜杠命令（--staged / --output json / LSP / blame / 增量） |
+| 15 | Code Review 代码审查 | 85% | `/review` 斜杠命令（--staged / LSP / blame / 增量） |
 | 16 | Sandboxed Execution 沙箱 | 85% | `HyperlightCodeActService`（默认启用，自动挂载工作目录） |
 | 17 | Background Tasks 后台任务 | 92% | `TaskTool` + `CronCreate/CronList/CronDelete/CronPause/CronResume` |
 
@@ -220,14 +220,13 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 ## 工具系统
 
-工具通过 `AddTool<T>` 扩展方法在 DI 注册时统一登记（`ServiceCollectionExtensions.Tools.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 在运行时反射解析为 `AIFunction`，共约 37 个工具。
+工具通过 `AddTool<T>` 扩展方法在 DI 注册时统一登记（`ServiceCollectionExtensions.Tools.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 在运行时反射解析为 `AIFunction`，共 30 个工具。
 
 ### Shell 与后台执行
 
 | 工具 | 功能 |
 |------|------|
-| Bash | Unix shell 命令执行（含安全分类） |
-| PowerShell | Windows PowerShell / pwsh 执行 |
+| Bash | shell 命令执行（含安全分类；通过 `shell` 参数支持 powershell 方言） |
 | BackgroundRun / BackgroundWait | 后台命令执行与等待 |
 
 ### 文件操作
@@ -278,7 +277,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 | 工具 | 功能 |
 |------|------|
 | SubmitPlan | 提交计划 |
-| UpdatePlanStep / CompletePlanExecution / CompletePlanVerification | 执行计划状态更新与验证 |
+| UpdatePlanStep / CompletePlanVerification | 执行计划状态更新与验证（CompletePlanExecution 由编排层自动推导） |
 
 ### Git Worktree
 
@@ -311,8 +310,8 @@ IChatClient → .AsBuilder() → 注入 8 种 AIContextProvider
 ChatClientAgent
     ↓
 [Run 级中间件 — 包裹整个 Agent Run]
-.Use(BudgetGuardRunMiddleware)        ← 预算熔断（pre-execution 检查，超支短路）
-.Use(UsageTrackingRunMiddleware)      ← Token 成本记录（更新 CostTracker）
+.Use(BudgetGuardRunMiddleware)        ← 预算熔断（pre-execution 检查，token 超限短路）
+.Use(UsageTrackingRunMiddleware)      ← Token 用量记录（更新 TokenLedger）
 .Use(PromptTooLongRecoveryRunMiddleware) ← PromptTooLong 异常恢复（截断重试）
     ↓
 [Function 级中间件 — 包裹每次工具调用]

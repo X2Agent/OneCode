@@ -83,7 +83,7 @@
 1. **用户绑定追加在默认绑定之后**，相同按键的用户绑定覆盖默认绑定
 2. **设为 `null` 表示显式解绑**：`"ctrl+s": null` 会禁用该默认快捷键
 3. **和弦序列**用空格分隔：`"ctrl+x ctrl+k": "chat:killAgents"`（用户自定义示例）
-4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+y": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告；注意 ctrl+g 已被默认绑定为 chat:togglePlanPanel、ctrl+t 为 chat:enterTranscript）
+4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+y": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告；注意 ctrl+t 已被默认绑定为 chat:enterTranscript）
 
 ### 按键语法
 

@@ -2,7 +2,7 @@
 
 > 状态：计划稿（未实施）。目标形态参照 deepseek harness 本地控制台：`onecode web` 启动本地服务，浏览器访问 `http://localhost:xxxx` 用网页完整替代 TUI 执行全部任务。
 > 技术栈约束：纯 C# 生态，UI 框架选用 **Blazor Server**（前后端均为 C#，无 Node.js 工具链；SignalR 电路由框架托管）。选型对比见 §8。
-> 关联文档：`docs/keyboard-first-refactor-plan.md`（TUI 键盘化计划，与本计划并行不冲突）。
+> 关联文档：`docs/keybindings.md`（快捷键体系，Web 端复用同一 `KeybindingResolver`）。
 
 ## 1. 目标与非目标
 
@@ -111,7 +111,7 @@ REST（控制面，Minimal API）+ Blazor Server 电路（UI 数据面，框架�
 **keybindings.json 双宿主共用**：
 - `KeybindingResolver`/`KeybindingParser`/`KeybindingContextManager` 均在 Core 层、UI 无关。Web 端 Blazor `onkeydown`（JS 互操作转按键字符串）同样经 Resolver 解析，网页拥有与 TUI 一致的 Ctrl+T 导航模式与可配置快捷键。
 - 绑定配置经 `GET /api/keybindings` 下发给页面（Phase 4 接入）；`keybindings.json` 修改热重载后两端同步生效。
-- 约束：浏览器保留键（Ctrl+T 新标签页、Ctrl+W 关标签等）不可用。`KeybindingDefaults` 提供**宿主感知默认集**（TUI：ctrl+t；Web：alt+t），用户 `keybindings.json` 覆盖优先于宿主默认；`KeybindingValidator` 增加「Web 保留键」校验集并结合当前宿主校验（见 keyboard-first-refactor-plan §2.3）。
+- 约束：浏览器保留键（Ctrl+T 新标签页、Ctrl+W 关标签等）不可用。`KeybindingDefaults` 提供**宿主感知默认集**（TUI：ctrl+t；Web：alt+t），用户 `keybindings.json` 覆盖优先于宿主默认；`KeybindingValidator` 增加「Web 保留键」校验集并结合当前宿主校验。
 
 ### 3.7 会话所有权与并发模型（多标签语义）
 

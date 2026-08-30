@@ -305,6 +305,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `open` / `edit` | 在编辑器中打开 |
 | `reset` | 重置为默认键位绑定（丢弃所有自定义） |
 
+> 元数据：`Immediate = true`。
+
 ---
 
 ### /lsp
@@ -804,7 +806,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 子命令 | 说明 |
 |---|---|
 | 无参数 / `info` | 会话身份 + 运行时状态（模型、权限、thinking、工具数、git 分支等） |
-| `stats` | token 用量统计、缓存命中率、成本、场景分解 |
+| `stats` | token 用量统计、缓存命中率、场景分解 |
 | `window` | 上下文窗口使用进度条 |
 
 ---
@@ -953,6 +955,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `--staged` | 标志 | 仅显示 staged 变更（文本输出） |
 | `file-path` | 位置参数 | 限制到指定文件（文本输出） |
 
+> 元数据：`Immediate = true`。
+
 ---
 
 ### /rebase
@@ -1040,7 +1044,7 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 
 - **总命令数**：44 个
 - **隐藏命令**：`/gc-stats`
-- **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`
+- **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`、`/new`、`/close`、`/resume`、`/keybindings`
 - **带别名的命令**：
 
   | 命令 | 别名 |

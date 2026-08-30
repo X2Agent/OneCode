@@ -274,7 +274,6 @@ $ARGUMENTS
 | `/skills list` | 同上 |
 | `/skills show <name>` 或 `/skills <name>` | 查看指定技能的详情（预览，不执行） |
 | `/<skill-name> <args>` | **执行**技能的唯一入口（斜杠补全支持 Tab） |
-| `SkillTool`（LLM 工具） | LLM 在对话中自主调用技能 |
 
 > `/skills run` 已移除，避免与 `/<skill-name>` 双路径重复。
 
@@ -290,8 +289,6 @@ $ARGUMENTS
 BundledSkills.All (静态字典)
     ↓
 SkillCommandSource.LoadCommandsAsync()   →  生成 SkillProxyCommand（动态斜杠命令）
-    ↓
-SkillTool                                 →  LLM 工具调用入口
     ↓
 AgentSkillsProviderFactory               →  注入到 Agent context（LLM 可见技能列表）
     ↓

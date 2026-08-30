@@ -105,7 +105,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `maxTurns` | `int` | `100` | 单次会话最大对话轮数 |
-| `maxBudgetUsd` | `double` | `10.0` | 单次会话最大花费上限（美元），用于预算熔断 |
+| `maxBudgetTokens` | `long` | `5000000` | 进程级最大 token 预算（输入 + 输出），达到后预算熔断短路后续 LLM 调用 |
 
 ### 功能开关（Features）
 
@@ -147,7 +147,6 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `goal.maxTurnsPerSubGoal` | `int` | `50` | 每个子目标允许的最大轮数 |
 | `goal.maxTotalTokens` | `long` | `200000` | Goal 运行的总 Token 预算 |
 | `goal.maxWallClockHours` | `double` | `2.0` | Goal 运行的最长墙钟时间（小时） |
-| `goal.maxCostUsd` | `decimal` | `5.0` | Goal 运行的成本上限（美元） |
 
 磁盘格式使用嵌套对象，例如：
 
@@ -157,8 +156,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
     "maxSubGoalAttempts": 20,
     "maxTurnsPerSubGoal": 50,
     "maxTotalTokens": 200000,
-    "maxWallClockHours": 2.0,
-    "maxCostUsd": 5.0
+    "maxWallClockHours": 2.0
   }
 }
 ```
@@ -275,7 +273,7 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
   "trustedDirectories": ["/home/user/projects"],
   "hasTrustAccepted": true,
   "maxTurns": 100,
-  "maxBudgetUsd": 10.0,
+  "maxBudgetTokens": 5000000,
   "webSearchProvider": "duckduckgo",
   "effortValue": "medium",
   "thinkingEnabled": false,
@@ -313,7 +311,7 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `allowedDirectories` | —（字面量） | `AppSettings.AllowedDirectories`（项目级覆盖全局） |
 | `hasTrustAccepted` | —（字面量） | `AppSettings.HasTrustAccepted` |
 | `maxTurns` | `ConfigKeys.MaxTurns` | `AppSettings.MaxTurns` |
-| `maxBudgetUsd` | `ConfigKeys.MaxBudgetUsd` | `AppSettings.MaxBudgetUsd` |
+| `maxBudgetTokens` | `ConfigKeys.MaxBudgetTokens` | `AppSettings.MaxBudgetTokens` |
 | `webSearchProvider` | —（字面量） | `AppSettings.WebSearchProvider` |
 | `webSearchApiKey` | —（字面量） | `AppSettings.WebSearchApiKey` |
 | `effortValue` | —（字面量） | `InteractiveModeExecutor`、`EffortCommand`、`TuiHostConfigurator`、`ThinkingParamsResolver`（经 `AppState`） |
