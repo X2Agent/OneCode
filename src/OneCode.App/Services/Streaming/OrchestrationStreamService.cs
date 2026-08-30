@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
@@ -6,7 +7,6 @@ using OneCode.Infrastructure.Agent;
 using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
-using OneCode.Infrastructure.Config;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -450,7 +450,6 @@ public sealed class OrchestrationStreamService(
     ///   - goal.maxSubGoalAttempts (int, default 20)
     ///   - goal.maxTotalTokens (long?, default 200000; null = 不限制)
     ///   - goal.maxWallClockHours (double?, default 2.0; null = 不限制)
-    ///   - goal.maxCostUsd (decimal?, default 5.0; null = 不限制)
     /// </summary>
     private static TuiGoalResult ToGoalResult(GoalRun run)
         => new(
@@ -482,14 +481,12 @@ public sealed class OrchestrationStreamService(
     {
         var maxTotalTokens = configManager.Current.Effective.Get<long?>("goal.maxTotalTokens", 200_000);
         var maxWallClockHours = configManager.Current.Effective.Get<double?>("goal.maxWallClockHours", 2.0);
-        var maxCostUsd = configManager.Current.Effective.Get<decimal?>("goal.maxCostUsd", 5.0m);
 
         return new GoalBudget
         {
             MaxSubGoalAttempts = maxSubGoalAttempts,
             MaxTotalTokens = maxTotalTokens,
             MaxWallClock = maxWallClockHours.HasValue ? TimeSpan.FromHours(maxWallClockHours.Value) : null,
-            MaxCostUsd = maxCostUsd,
         };
     }
 }

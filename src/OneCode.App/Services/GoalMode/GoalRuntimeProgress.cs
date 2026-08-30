@@ -49,8 +49,6 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
             parts.Add($"{usage.TotalAttempts}/{budget.MaxSubGoalAttempts} 次");
         if (budget.MaxTotalTokens is { } maxTokens)
             parts.Add($"{FormatTokens(usage.TotalTokens)}/{FormatTokens(maxTokens)} tok");
-        if (budget.MaxCostUsd is { } maxCost)
-            parts.Add($"${usage.EstimatedCostUsd:0.##}/${maxCost:0.##}");
         return parts.Count == 0 ? "" : $" · ⛽ {string.Join(" · ", parts)}";
     }
 
@@ -72,7 +70,6 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
             level.Value,
             usage.TotalAttempts,
             usage.TotalTokens,
-            usage.Elapsed,
-            usage.EstimatedCostUsd));
+            usage.Elapsed));
     }
 }

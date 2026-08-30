@@ -115,7 +115,8 @@ public sealed class AskUserQuestionTool
                 suggestedNextAction: "Choose reasonable defaults or skip the step that required user input.");
         }
 
-        var answersJson = JsonSerializer.Serialize(result.Answers, new JsonSerializerOptions { WriteIndented = true });
+        // relaxed encoder：中文回答保持原文，不被转义成 \uXXXX 发给模型。
+        var answersJson = DisplayJsonSerializer.Serialize(result.Answers, writeIndented: true);
         return ToolResult.Success($"Wizard completed: {title}\nAnswers:\n{answersJson}");
     }
 

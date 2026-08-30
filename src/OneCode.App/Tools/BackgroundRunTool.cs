@@ -16,7 +16,7 @@ public sealed class BackgroundRunTool
 
     /// <summary>
     /// Compiled deny-list from <see cref="DangerousCommandPatterns.Layer0HardDeny"/>,
-    /// aligned with BashTool/PowerShellTool safety infrastructure.
+    /// aligned with BashTool (both dialects) safety infrastructure.
     /// </summary>
     private static readonly System.Text.RegularExpressions.Regex[] DenyPatterns =
         DangerousCommandPatterns.Layer0HardDeny
@@ -47,7 +47,7 @@ public sealed class BackgroundRunTool
         if (string.IsNullOrWhiteSpace(description))
             return ToolResult.Error("Error: description is required for task tracking");
 
-        // 应用与 BashTool/PowerShellTool 相同的 deny-list
+        // 应用与 BashTool 相同的 deny-list
         for (var i = 0; i < DenyPatterns.Length; i++)
         {
             try
@@ -63,7 +63,7 @@ public sealed class BackgroundRunTool
 
         cwd ??= _wd.WorkingDirectory;
 
-        // Validate paths referenced in the command string (same as BashTool/PowerShellTool).
+        // Validate paths referenced in the command string (same as BashTool).
         var pathValidationError = ShellExecutionHelper.ValidateReferencedPaths(
             command, _wd.WorkingDirectory, BashCommandClassifier.ExtractReferencedPaths, _wd.AdditionalDirectories);
         if (pathValidationError != null)

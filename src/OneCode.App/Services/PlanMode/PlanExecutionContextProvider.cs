@@ -95,8 +95,7 @@ public sealed class PlanExecutionContextProvider(
             ## STRUCTURED STEPS
             {steps}
 
-            Execute exactly this approved snapshot. Use UpdatePlanStep for progress,
-            CompletePlanExecution before verification, and CompletePlanVerification with concrete evidence.
+            Execute exactly this approved snapshot. Use UpdatePlanStep for progress; verification starts automatically once all steps are terminal, then call CompletePlanVerification with concrete evidence.
             """;
     }
 }

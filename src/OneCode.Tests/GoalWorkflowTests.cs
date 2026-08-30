@@ -242,7 +242,7 @@ public sealed class GoalWorkflowTests : IAsyncLifetime
                 input.GoalRunId,
                 [Step(1, GoalStepState.Pending), Step(2, GoalStepState.Pending)],
                 [],
-                new GoalBudgetSnapshot(0, 0, 0, 0m, DateTimeOffset.UtcNow),
+                new GoalBudgetSnapshot(0, 0, 0, DateTimeOffset.UtcNow),
                 0,
                 false,
                 GoalRunState.Executing));

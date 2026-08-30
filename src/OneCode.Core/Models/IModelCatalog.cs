@@ -1,8 +1,8 @@
 namespace OneCode.Core.Models;
 
 /// <summary>
-/// Read-only view of the models.dev catalog snapshot used for context windows,
-/// attachment support, and pricing lookups.
+/// Read-only view of the models.dev catalog snapshot used for context windows
+/// and capability (attachment / reasoning) lookups.
 /// </summary>
 public interface IModelCatalog
 {
@@ -10,8 +10,6 @@ public interface IModelCatalog
     bool SupportsAttachment(string? modelId);
     bool SupportsReasoning(string? modelId);
     IReadOnlyList<ReasoningOption> GetReasoningOptions(string? modelId);
-    ModelCostInfo? GetCost(string? modelId);
-    IEnumerable<KeyValuePair<string, ModelCostInfo>> GetAllCosts();
     int Count { get; }
 }
 
@@ -35,7 +33,5 @@ public sealed class ModelCatalogStore : IModelCatalog
     public bool SupportsAttachment(string? modelId) => _current.SupportsAttachment(modelId);
     public bool SupportsReasoning(string? modelId) => _current.SupportsReasoning(modelId);
     public IReadOnlyList<ReasoningOption> GetReasoningOptions(string? modelId) => _current.GetReasoningOptions(modelId);
-    public ModelCostInfo? GetCost(string? modelId) => _current.GetCost(modelId);
-    public IEnumerable<KeyValuePair<string, ModelCostInfo>> GetAllCosts() => _current.GetAllCosts();
     public int Count => _current.Count;
 }

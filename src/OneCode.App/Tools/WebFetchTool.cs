@@ -212,13 +212,15 @@ public sealed partial class WebFetchTool
     }
 
 
-    private static ToolResult ApplyPromptAndReturn(string content, string prompt, long startMs)
+    internal static ToolResult ApplyPromptAndReturn(string content, string prompt, long startMs)
     {
         var truncatedContent = content.Length > MaxMarkdownLength
             ? content[..MaxMarkdownLength] + "\n\n[Content truncated due to length...]"
             : content;
 
-        var result = JsonSerializer.Serialize(new
+        // 必须走 DisplayJsonSerializer（relaxed encoder）：默认 encoder 把中文转成
+        // \uXXXX 发给模型，展开详情里呈现为一串反斜杠乱码（见 JsonSuccess 的 remarks）。
+        var result = DisplayJsonSerializer.Serialize(new
         {
             bytes = Encoding.UTF8.GetByteCount(content),
             code = 200,

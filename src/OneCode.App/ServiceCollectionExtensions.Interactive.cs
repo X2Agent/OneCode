@@ -3,7 +3,6 @@ using OneCode.App.Services;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Tui;
-using OneCode.Core.Cost;
 using OneCode.Infrastructure.Media;
 
 namespace OneCode.App;
@@ -27,7 +26,6 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton(sp => new InteractiveTuiDependencies
         {
             ImagePipeline = sp.GetRequiredService<ImagePipeline>(),
-            CostTracker = sp.GetRequiredService<ICostTracker>(),
             TrustService = sp.GetRequiredService<TrustService>(),
             KeybindingLoader = sp.GetRequiredService<OneCode.Infrastructure.Keybindings.KeybindingLoader>(),
             BuildRunTuiReplay = sp.GetRequiredService<BuildRunTuiReplayService>(),

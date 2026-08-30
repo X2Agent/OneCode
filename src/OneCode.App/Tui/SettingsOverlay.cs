@@ -1,5 +1,5 @@
+using OneCode.Core.Config;
 using System.Collections.ObjectModel;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Tui;
 

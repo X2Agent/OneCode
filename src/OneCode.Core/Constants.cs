@@ -42,7 +42,7 @@ public static class Constants
         public const string FastModel = "fastModel";
         public const string PermissionMode = "permissionMode";
         public const string MaxTurns = "maxTurns";
-        public const string MaxBudgetUsd = "maxBudgetUsd";
+        public const string MaxBudgetTokens = "maxBudgetTokens";
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";
@@ -58,7 +58,7 @@ public static class Constants
     public static class Session
     {
         public const int MaxTurnsDefault = 100;
-        public const double MaxBudgetUsdDefault = 10.0;
+        public const long MaxBudgetTokensDefault = 5_000_000;
         public const string SessionFileExtension = ".jsonl";
     }
 

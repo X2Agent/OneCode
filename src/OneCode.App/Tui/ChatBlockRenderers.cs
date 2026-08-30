@@ -1,4 +1,6 @@
 using OneCode.App.Services.Lsp;
+
+
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Tui;
@@ -63,7 +65,9 @@ public static partial class ChatBlockRenderers
                 $"   · by {agentName}", Math.Max(8, viewWidth)))
                 list.Add(FormattedLine.Plain(line, TuiPalette.FromAgentName(agentName)));
 
-        var diffWidth = Math.Max(8, viewWidth - 4);
+        // 换行预算按续行前缀（6 列）扣除——首行前缀只有 3 列，若按首行预算
+        // （viewWidth - 4）折行，续行（前缀 6 列）会超出视口 2 列被绘制层裁掉。
+        var diffWidth = Math.Max(8, viewWidth - 6);
         foreach (var l in addedLines) AddDiffLines(list, "+" + l, TuiPalette.DiffAdded, diffWidth);
         foreach (var l in removedLines) AddDiffLines(list, "-" + l, TuiPalette.DiffRemoved, diffWidth);
         return list;

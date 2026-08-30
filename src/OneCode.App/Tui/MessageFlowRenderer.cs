@@ -404,7 +404,11 @@ public sealed class MessageFlowRenderer
     {
         var maxLen = CurrentWidth - ContentIndent - 2;
         if (maxLen <= 0) return "";
-        return TextWidthHelper.TruncateByWidth(line, maxLen);
+        // 恰好等于预算的行原样保留——TruncateByWidth 会为省略号预留 1 列，
+        // 把不超宽行的最后一个字符误替换成 "…"。
+        return TextWidthHelper.GetDisplayWidth(line) > maxLen
+            ? TextWidthHelper.TruncateByWidth(line, maxLen)
+            : line;
     }
 
     private static List<string> WordWrap(string text, int maxWidth)

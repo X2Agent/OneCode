@@ -21,8 +21,7 @@ public sealed class StatusCommandStatsTests
         var sessionManager = CreateSessionManager();
         var appState = Substitute.For<IAppStateAccessor>();
         var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
-        var costTracker = new CostTracker();
-        var tracker = new TokenUsageTracker(new CostTracker(), TestSupport.NullSessionIdProvider.Instance);
+        var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
 
         // 记录一次：InputTokens=400 (完整输入，含缓存命中), CacheReadTokens=300, CacheWriteTokens=50, OutputTokens=200
         tracker.Record(
@@ -36,7 +35,7 @@ public sealed class StatusCommandStatsTests
                 SystemPromptDetail: new SystemPromptBreakdown(
                     TemplateBody: 20, Environment: 10, ProjectContext: 15, Memory: 5, OtherSections: 0)));
 
-        var sut = new StatusCommand(sessionManager, appState, modeProvider, costTracker, tracker, modelManager: null!);
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tracker, modelManager: null!);
 
         var result = await sut.ExecuteAsync(new[] { "stats" }, TestContext.Current.CancellationToken);
 
@@ -67,9 +66,7 @@ public sealed class StatusCommandStatsTests
         var sessionManager = CreateSessionManager();
         var appState = Substitute.For<IAppStateAccessor>();
         var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
-        var costTracker = new CostTracker();
-
-        var sut = new StatusCommand(sessionManager, appState, modeProvider, costTracker, tokenUsageTracker: null!, modelManager: null!);
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tokenUsageTracker: null!, modelManager: null!);
 
         var result = await sut.ExecuteAsync(new[] { "stats" }, TestContext.Current.CancellationToken);
 

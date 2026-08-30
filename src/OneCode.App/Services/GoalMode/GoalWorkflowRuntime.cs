@@ -2,7 +2,6 @@ using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
-using OneCode.Core.Cost;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
 
@@ -25,7 +24,6 @@ internal sealed class GoalWorkflowRuntimeFactory(
     IGoalRunStore goalRunStore,
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
-    ICostTracker costTracker,
     OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntimeFactory
 {
@@ -36,7 +34,6 @@ internal sealed class GoalWorkflowRuntimeFactory(
             goalRunStore,
             workspaceService,
             completionService,
-            costTracker,
             context with { Ledger = context.Ledger ?? operationLedger },
             logger);
 }
@@ -50,7 +47,6 @@ internal sealed class GoalWorkflowRuntime(
     IGoalRunStore goalRunStore,
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
-    ICostTracker costTracker,
     GoalWorkflowRuntimeContext context,
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntime
 {
@@ -67,16 +63,6 @@ internal sealed class GoalWorkflowRuntime(
             throw new InvalidOperationException("Goal runtime received a stale fencing token.");
         _run = run;
         _fencingToken = fencingToken;
-        // Fix-2/N-02：成本基线只允许建立一次并随 Run 持久化。
-        // - 首次 Bind：基线 = 当前进程累计成本（此时 EstimatedCostUsd 尚未入账，差值恒等）。
-        // - resume 重新 Bind：CostBaselineUsd 已持久化，直接沿用，禁止二次减 EstimatedCostUsd。
-        // - 旧版本快照（无 CostBaselineUsd 字段）：按旧公式换算一次后持久化，后续走快照路径。
-        if (run.Budget.CostBaselineUsd == 0m)
-        {
-            var baseline = Math.Max(0m, costTracker.GetTotalCost() - run.Budget.EstimatedCostUsd);
-            await SaveAsync(run with { Budget = run.Budget with { CostBaselineUsd = baseline } }, ct)
-                .ConfigureAwait(false);
-        }
     }
 
     public async Task<GoalWorkflowState> PlanAsync(GoalWorkflowInput input, CancellationToken ct)
@@ -94,7 +80,6 @@ internal sealed class GoalWorkflowRuntime(
         {
             TotalInputTokens = run.Budget.TotalInputTokens + result.InputTokens,
             TotalOutputTokens = run.Budget.TotalOutputTokens + result.OutputTokens,
-            EstimatedCostUsd = CurrentExecutionCost(),
         };
         if (result.UsedFallback)
         {
@@ -200,8 +185,7 @@ internal sealed class GoalWorkflowRuntime(
                     expanded[state.CurrentIndex] = step with { State = GoalStepState.Skipped };
                     expanded.InsertRange(state.CurrentIndex + 1, decomposition.Value.SubGoals.Select(ToSnapshot));
                     var expandedBudget = GoalBudgetAccountant
-                        .AddLlmUsage(state.Budget, decomposition.Value.InputTokens, decomposition.Value.OutputTokens)
-                        with { EstimatedCostUsd = CurrentExecutionCost() };
+                        .AddLlmUsage(state.Budget, decomposition.Value.InputTokens, decomposition.Value.OutputTokens);
                     var expandedState = state with
                     {
                         Plan = expanded,
@@ -346,7 +330,6 @@ internal sealed class GoalWorkflowRuntime(
                         {
                             TotalInputTokens = applied.Budget.TotalInputTokens + replan.Value.InputTokens,
                             TotalOutputTokens = applied.Budget.TotalOutputTokens + replan.Value.OutputTokens,
-                            EstimatedCostUsd = CurrentExecutionCost(),
                         },
                     };
                     await SaveStateAsync(applied, ct).ConfigureAwait(false);
@@ -418,7 +401,7 @@ internal sealed class GoalWorkflowRuntime(
             .Where(item => item.GoalId != evidence.GoalId)
             .Append(evidence)
             .ToArray();
-        var budget = GoalBudgetAccountant.AccumulateEvidence(state.Budget, previous, evidence) with { EstimatedCostUsd = CurrentExecutionCost() };
+        var budget = GoalBudgetAccountant.AccumulateEvidence(state.Budget, previous, evidence);
         var next = state with
         {
             Plan = plan,
@@ -476,9 +459,6 @@ internal sealed class GoalWorkflowRuntime(
         return run;
     }
 
-    private decimal CurrentExecutionCost()
-        // Fix-2：以持久化的 CostBaselineUsd 快照为基线，不再依赖实例字段（resume 安全）。
-        => Math.Max(0m, costTracker.GetTotalCost() - (_run?.Budget.CostBaselineUsd ?? 0m));
     private static int FindNextIndex(IReadOnlyList<GoalStepSnapshot> plan)
     {
         for (var index = 0; index < plan.Count; index++)

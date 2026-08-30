@@ -31,8 +31,13 @@ public sealed record ToolResult(
     /// <summary>
     /// 将匿名对象/DTO 序列化为 JSON 并创建成功结果。
     /// </summary>
+    /// <remarks>
+    /// 必须经 <see cref="DisplayJsonSerializer"/>（relaxed encoder）序列化：
+    /// 默认 encoder 会把非 ASCII 转义为 \uXXXX，中文在发给模型的 content 与
+    /// TUI 展开详情中均不可读（如 query「孙宇晨」变成 \u5B59\u5B87\u6668）。
+    /// </remarks>
     public static ToolResult JsonSuccess(object data, string? suggestedNextAction = null) =>
-        Success(System.Text.Json.JsonSerializer.Serialize(data), suggestedNextAction);
+        Success(DisplayJsonSerializer.Serialize(data), suggestedNextAction);
 
     /// <summary>创建错误结果。</summary>
     public static ToolResult Error(string content, string? suggestedNextAction = null) =>

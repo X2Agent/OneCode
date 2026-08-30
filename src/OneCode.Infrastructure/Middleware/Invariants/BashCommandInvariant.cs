@@ -19,7 +19,7 @@ public sealed class BashCommandInvariant : ISafetyInvariant
     /// <summary>Shell 类工具名称。</summary>
     private static readonly HashSet<string> ShellTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Bash", "PowerShell", "Shell",
+        "Bash", "Shell",
     };
 
     /// <summary>

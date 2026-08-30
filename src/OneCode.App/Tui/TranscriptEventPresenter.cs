@@ -108,7 +108,7 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                     : TuiPalette.AgentYellow;
                 var label = warning.Level == OneCode.Core.Goals.GoalBudgetWarningLevel.Late ? "橙色预警" : "黄色预警";
                 transcript.AddStreamingNotice(
-                    $"⚠ GOAL 预算{label}：已消耗 attempts={warning.TotalAttempts}, tokens={warning.TotalTokens}, cost=${warning.EstimatedCostUsd:0.####}",
+                    $"⚠ GOAL 预算{label}：已消耗 attempts={warning.TotalAttempts}, tokens={warning.TotalTokens}",
                     color);
                 return true;
 

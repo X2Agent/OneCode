@@ -1,6 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Core.Domain;
 using System.Runtime.CompilerServices;
 
@@ -8,7 +8,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 
 /// <summary>
 /// Agent Run 级 Usage 追踪中间件 — 在 MAF Agent Run 层统一拦截 LLM 返回的
-/// <see cref="UsageDetails"/>，写入 <see cref="ICostTracker"/>。
+/// <see cref="UsageDetails"/>，写入 <see cref="ITokenLedger"/>。
 ///
 /// <para>
 /// <b>三层中间件定位</b>（MAF 1.13 官方设计）：
@@ -29,7 +29,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 ///   <item><c>OutputTokenCount</c> → OutputTokens（含 ReasoningTokens，见 MEAI 契约）</item>
 ///   <item><c>CachedInputTokenCount</c> → CacheReadTokens（其中缓存命中的子集，非额外部分）</item>
 ///   <item><c>AdditionalCounts["cache_creation_input_tokens"]</c> → CacheWriteTokens（Anthropic 创生）</item>
-///   <item><c>ReasoningTokenCount</c> → ReasoningTokens（思考 token，是 OutputTokens 的子集）</item>
+///   <item><c>ReasoningTokenCount</c>：思考 token，是 OutputTokens 的子集，不单独入账</item>
 /// </list>
 /// </para>
 ///
@@ -44,7 +44,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 /// <para>
 /// <b>异常路径 Usage 保留</b>：模型已消耗 token 但流式传输因异常
 /// （网络中断、超时、5xx 等）未正常结束时，已收到的 <see cref="UsageContent"/>
-/// 仍需写入 <see cref="ICostTracker"/>，否则 <c>--max-budget-usd</c> 熔断会因
+/// 仍需写入 <see cref="ITokenLedger"/>，否则 <c>--max-budget-tokens</c> 熔断会因
 /// 累计成本偏低而失效。流式路径使用 <c>try/finally</c> 确保异常时也执行
 /// <see cref="RecordUsage"/>；非流式路径因 <c>agent.RunAsync</c> 抛异常时
 /// <see cref="AgentResponse"/> 对象不可得（usage 封装在 response 内），无法
@@ -57,19 +57,19 @@ public static class UsageTrackingRunMiddleware
     /// 创建 Agent Run 级中间件的 (runFunc, runStreamingFunc) 委托对。
     /// 传给 <see cref="AIAgentBuilder.Use(System.Func{Microsoft.Agents.AI.AIAgent, Microsoft.Agents.AI.AIAgent})"/> 的 Run 中间件重载。
     /// </summary>
-    /// <param name="costTracker">ICostTracker 实例（null 时不拦截 usage）。</param>
-    /// <param name="modelId">当前模型 ID（用于定价查找）。</param>
+    /// <param name="tokenLedger">ITokenLedger 实例（null 时不拦截 usage）。</param>
+    /// <param name="modelId">当前模型 ID（用于用量记录归属）。</param>
     /// <param name="logger">日志器（可选）。</param>
     /// <param name="sessionId">会话 ID（可选，用于按会话记录 usage）。</param>
     /// <returns>(runFunc, runStreamingFunc) 委托对。</returns>
     public static (
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, Task<AgentResponse>>,
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, IAsyncEnumerable<AgentResponseUpdate>>
-        ) Create(ICostTracker? costTracker, string? modelId, ILogger? logger, SessionId? sessionId = null)
+        ) Create(ITokenLedger? tokenLedger, string? modelId, ILogger? logger, SessionId? sessionId = null)
     {
-        if (costTracker is null)
+        if (tokenLedger is null)
         {
-            // No ICostTracker — pass through without interception (测试/无预算场景)
+            // No ITokenLedger — pass through without interception (测试/无账本场景)
             return (PassThroughRun, PassThroughRunStreaming);
 
             static Task<AgentResponse> PassThroughRun(
@@ -93,7 +93,7 @@ public static class UsageTrackingRunMiddleware
             AIAgent agent, CancellationToken ct)
         {
             var response = await agent.RunAsync(messages, session, options, ct).ConfigureAwait(false);
-            RecordUsage(response.Usage, costTracker, modelId, logger, sessionId);
+            RecordUsage(response.Usage, tokenLedger, modelId, logger, sessionId);
             return response;
         }
 
@@ -123,16 +123,16 @@ public static class UsageTrackingRunMiddleware
                 // 无论正常结束还是异常，只要收到过有效 usage 就记录。
                 // 异常会在此 finally 执行后继续向上传播（yield return 语义保证）。
                 if (lastUsage is not null)
-                    RecordUsage(lastUsage, costTracker, modelId, logger, sessionId);
+                    RecordUsage(lastUsage, tokenLedger, modelId, logger, sessionId);
             }
         }
     }
 
     /// <summary>
-    /// 将 <see cref="UsageDetails"/> 写入 <see cref="ICostTracker"/>。
-    /// 提取完整 token 维度：Input, Output, CacheRead, CacheWrite, Reasoning。
+    /// 将 <see cref="UsageDetails"/> 写入 <see cref="ITokenLedger"/>。
+    /// 提取 token 维度：Input, Output, CacheRead, CacheWrite。
     /// </summary>
-    internal static void RecordUsage(UsageDetails? details, ICostTracker costTracker, string? modelId, ILogger? logger, SessionId? sessionId = null)
+    internal static void RecordUsage(UsageDetails? details, ITokenLedger tokenLedger, string? modelId, ILogger? logger, SessionId? sessionId = null)
     {
         if (details is null) return;
         if (!HasValidTokens(details)) return;
@@ -141,13 +141,13 @@ public static class UsageTrackingRunMiddleware
         try
         {
             if (sessionId is { } sid)
-                costTracker.RecordUsage(sid, record);
+                tokenLedger.RecordUsage(sid, record);
             else
-                costTracker.RecordUsage(record);
+                tokenLedger.RecordUsage(record);
         }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "Failed to record usage to ICostTracker for model {ModelId}", modelId);
+            logger?.LogWarning(ex, "Failed to record usage to ITokenLedger for model {ModelId}", modelId);
         }
     }
 
@@ -172,18 +172,13 @@ public static class UsageTrackingRunMiddleware
             "cache_creation",
             "cacheWriteInputTokens",
             "cache_write_input_tokens");
-        var reasoning = SafeInt(details.ReasoningTokenCount);
 
         return new UsageRecord(
             ModelId: modelId ?? "unknown",
             InputTokens: input,
             OutputTokens: output,
             CacheReadTokens: cacheRead,
-            CacheWriteTokens: cacheWrite,
-            ReasoningTokens: reasoning,
-            // ContextTokens = 完整输入 token 数（InputTokens 已含 CacheReadTokens 子集，
-            // 按 MEAI 契约不能再相加，否则会重复计算 cache_read 部分）
-            ContextTokens: input);
+            CacheWriteTokens: cacheWrite);
     }
 
     /// <summary>

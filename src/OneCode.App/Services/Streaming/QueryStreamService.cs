@@ -1,7 +1,7 @@
+using OneCode.Core.Config;
 using OneCode.App.Services.Compact;
 using OneCode.App.Tui;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.App.Services.Streaming;

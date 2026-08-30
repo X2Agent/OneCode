@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Workflows;
 
 namespace OneCode.App.Services.Coordinator;
 
@@ -82,7 +81,9 @@ internal sealed class TeamTaskWorkflowCompiler
         var plan = run.Plan ?? throw new InvalidOperationException($"TeamRun '{run.Id}' has no approved plan.");
         Validate(plan.Tasks);
 
-        var orderedTasks = TopologicalOrder(plan.Tasks);
+        var orderedTasks = WorkflowTopology.KahnOrder(
+            plan.Tasks, task => task.Id, task => task.DependsOn,
+            "Team task graph contains a dependency cycle.");
         var effectiveDependencies = BuildEffectiveDependencies(orderedTasks);
         var outcomeRegistry = new TeamTaskOutcomeRegistry();
         var dispatcher = new TeamTaskDispatcherExecutor(DispatcherId);
@@ -210,42 +211,9 @@ internal sealed class TeamTaskWorkflowCompiler
             }
         }
 
-        _ = TopologicalOrder(tasks);
-    }
-
-    private static IReadOnlyList<TeamTaskDefinition> TopologicalOrder(IReadOnlyList<TeamTaskDefinition> tasks)
-    {
-        var taskById = tasks.ToDictionary(task => task.Id, StringComparer.OrdinalIgnoreCase);
-        var remainingDependencies = tasks.ToDictionary(
-            task => task.Id, task => task.DependsOn.Count, StringComparer.OrdinalIgnoreCase);
-        var dependents = tasks.ToDictionary(
-            task => task.Id, _ => new List<string>(), StringComparer.OrdinalIgnoreCase);
-        foreach (var task in tasks)
-        {
-            foreach (var dependency in task.DependsOn)
-                dependents[dependency].Add(task.Id);
-        }
-
-        var ready = new SortedSet<string>(
-            remainingDependencies.Where(pair => pair.Value == 0).Select(pair => pair.Key),
-            StringComparer.OrdinalIgnoreCase);
-        var ordered = new List<TeamTaskDefinition>(tasks.Count);
-        while (ready.Count > 0)
-        {
-            var taskId = ready.Min!;
-            ready.Remove(taskId);
-            ordered.Add(taskById[taskId]);
-            foreach (var dependent in dependents[taskId].Order(StringComparer.OrdinalIgnoreCase))
-            {
-                remainingDependencies[dependent]--;
-                if (remainingDependencies[dependent] == 0)
-                    ready.Add(dependent);
-            }
-        }
-
-        if (ordered.Count != tasks.Count)
-            throw new InvalidOperationException("Team task graph contains a dependency cycle.");
-        return ordered;
+        _ = WorkflowTopology.KahnOrder(
+            tasks, task => task.Id, task => task.DependsOn,
+            "Team task graph contains a dependency cycle.");
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildEffectiveDependencies(

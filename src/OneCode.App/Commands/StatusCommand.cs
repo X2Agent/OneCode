@@ -3,7 +3,6 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.Core.Models;
-using OneCode.Core.Cost;
 
 namespace OneCode.App.Commands;
 
@@ -21,7 +20,6 @@ public sealed class StatusCommand(
     ISessionManager sessionManager,
     IAppStateAccessor appState,
     IPermissionModeProvider modeProvider,
-    ICostTracker costTracker,
     ITokenUsageTracker tokenUsageTracker,
     IModelManager modelManager,
     ILogger<StatusCommand>? logger = null) : Command
@@ -98,7 +96,6 @@ public sealed class StatusCommand(
     private CommandResult ShowStats()
     {
         var conv = sessionManager.ForegroundConversation;
-        var totalCost = costTracker.GetTotalCost();
 
         var sb = new StringBuilder();
         sb.AppendLine("Session Statistics:");
@@ -158,9 +155,6 @@ public sealed class StatusCommand(
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Output tokens:   {outputTokens:N0}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Total tokens:    {inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens:N0}");
         }
-
-        var costStr = totalCost > 0 ? $"${totalCost:F4}" : "n/a";
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Estimated cost:  {costStr}");
 
         return CommandResult.Text(sb.ToString().TrimEnd());
     }

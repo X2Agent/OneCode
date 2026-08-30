@@ -1,5 +1,6 @@
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using OneCode.Core.Mcp;
 using OneCode.Core.Product;
 
 namespace OneCode.Infrastructure.Mcp;
@@ -8,7 +9,7 @@ namespace OneCode.Infrastructure.Mcp;
 /// MCP client wrapper using the official ModelContextProtocol SDK.
 /// Supports stdio, SSE, and HTTP (Streamable) transports.
 /// </summary>
-public sealed class McpClient : IAsyncDisposable
+public sealed class McpClient : IMcpClient
 {
     private readonly ILogger<McpClient> _logger;
     private readonly McpElicitationHandler? _elicitationHandler;
@@ -375,33 +376,3 @@ public sealed class McpClient : IAsyncDisposable
         }
     }
 }
-
-// Data types
-
-/// <summary>
-/// MCP resource definition.
-/// </summary>
-public sealed record McpResource(string Uri, string Name, string Description);
-
-/// <summary>
-/// MCP tool definition.
-/// </summary>
-public sealed record McpTool(
-    string Name,
-    string? Description = null,
-    JsonElement? InputSchema = null);
-
-/// <summary>
-/// MCP tool execution result.
-/// </summary>
-public sealed record McpToolResult(
-    string Content,
-    bool IsError = false);
-
-/// <summary>
-/// MCP prompt definition.
-/// </summary>
-public sealed record McpPrompt(
-    string Name,
-    string? Description,
-    string[] ArgumentNames);

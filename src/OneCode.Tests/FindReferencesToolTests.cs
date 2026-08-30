@@ -1,8 +1,11 @@
 using NSubstitute;
+using OneCode.App.Services.Search;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+using OneCode.Core.IO;
+
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OneCode.Tests;
 
@@ -54,7 +57,9 @@ public sealed class FindReferencesToolTests : IDisposable
     {
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(false);
-        return new FindReferencesTool(processRunner, new LocalAgentFileStore(CreateWd()), CreateWd(), null!, null!, null!);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()),
+            NullLogger<TextSearchService>.Instance);
+        return new FindReferencesTool(textSearch, new LocalAgentFileStore(CreateWd()), CreateWd(), null!, null!, null!);
     }
 
     private static void AssertRejected(ToolResult result)
@@ -229,7 +234,8 @@ public sealed class FindReferencesToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:var x = MySymbol();", "", false));
 
-        var tool = new FindReferencesTool(processRunner, Substitute.For<IFileSystem>(), CreateWd(), null!, null!, null!);
+        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var tool = new FindReferencesTool(textSearch, Substitute.For<IFileSystem>(), CreateWd(), null!, null!, null!);
 
         var result = await tool.FindAsync("MySymbol", path: "src", ct: ct);
 

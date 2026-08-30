@@ -167,9 +167,8 @@ public sealed class ChatBlockRenderersTests
             Scope: scope,
             ValidationStatus: OneCode.Core.Build.BuildValidationStatus.Pending,
             ChangedFiles: 4,
-            TurnsCompleted: 9,
-            EstimatedCost: 0.42m);
-
+            TurnsCompleted: 9
+            );
         var lines = ChatBlockRenderers.RenderBuildRunPanel(state, width);
 
         lines.Should().ContainSingle();

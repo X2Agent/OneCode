@@ -7,7 +7,8 @@ using OneCode.App.Services.AutoDream;
 using OneCode.App.Services.Coordinator;
 using OneCode.App.Services.Notifier;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+
+using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Media;
 using OneCode.Infrastructure.Remote;
 using OneCode.Infrastructure.Teams;

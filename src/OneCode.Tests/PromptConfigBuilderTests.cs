@@ -1,3 +1,4 @@
+using OneCode.Core.Mcp;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -8,8 +9,8 @@ using OneCode.Core.Memory;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
-using OneCode.Infrastructure.Mcp;
+using OneCode.Core.IO;
+
 using OneCode.Tests.TestSupport;
 
 namespace OneCode.Tests;

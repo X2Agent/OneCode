@@ -29,8 +29,7 @@ internal static class GoalBudgetAccountant
         => new(
             budget.TotalAttempts,
             budget.TotalInputTokens + budget.TotalOutputTokens,
-            ResolveElapsed(budget),
-            budget.EstimatedCostUsd);
+            ResolveElapsed(budget));
 
     /// <summary>旧版本快照兼容：无累加墙钟时回退到“自 StartedAt 起的总墙钟”。</summary>
     public static TimeSpan? ResolveElapsed(GoalBudgetSnapshot budget)

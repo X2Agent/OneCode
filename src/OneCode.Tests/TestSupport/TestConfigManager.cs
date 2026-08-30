@@ -1,5 +1,5 @@
+using OneCode.Core.Config;
 using NSubstitute;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests.TestSupport;
 

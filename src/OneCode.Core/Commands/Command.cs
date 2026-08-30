@@ -27,7 +27,7 @@ public abstract class Command : ICommand
 
     /// <summary>
     /// 加载并渲染 prompt 模板。返回 null 表示模板不存在。
-    /// （统一 Commit/Review/Init/DesignInit 四处逐字相同的私有实现。）
+    /// （统一 Commit/Review/Init 等处逐字相同的私有实现。）
     /// </summary>
     protected static async Task<string?> LoadPromptAsync(
         OneCode.Core.Prompt.IPromptManager promptManager,

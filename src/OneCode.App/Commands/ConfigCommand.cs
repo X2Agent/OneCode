@@ -1,5 +1,5 @@
+using OneCode.Core.Config;
 using System.Text;
-using OneCode.Infrastructure.Config;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Commands;

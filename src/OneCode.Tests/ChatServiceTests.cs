@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using System.Collections.Immutable;
 using System.Threading.Channels;
 using OneCode.App.Query;
@@ -10,7 +11,6 @@ using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.App.Tools;
-using OneCode.App.Tui;
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
@@ -22,7 +22,6 @@ using OneCode.Core.Tools;
 using OneCode.Core.Tasks;
 using OneCode.Infrastructure.Api;
 using OneCode.Infrastructure.Build;
-using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Workflows;
 using OneCode.Tests.TestSupport;
 using Microsoft.Agents.AI;
@@ -855,7 +854,7 @@ public sealed class ChatServiceTests
                 Substitute.For<IVerificationProvider>(),
                 modeProvider,
                 Substitute.For<IPermissionChecker>(),
-                new CostTracker()),
+                new TokenLedger()),
             new CompactionProviderBuilder(chatClient, NullLoggerFactory.Instance, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
             new AgentSessionStore(sessionManager, NullLoggerFactory.Instance.CreateLogger<AgentSessionStore>()),
             chatClient,

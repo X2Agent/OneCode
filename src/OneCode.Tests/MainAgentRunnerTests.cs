@@ -7,8 +7,8 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
-using OneCode.App.Tui;
 using OneCode.Core.Hooks;
+using OneCode.Core.Build;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
@@ -51,7 +51,7 @@ public sealed class MainAgentRunnerTests : IDisposable
             verificationProvider: Substitute.For<IVerificationProvider>(),
             modeProvider: _modeProvider,
             permissionChecker: Substitute.For<IPermissionChecker>(),
-            costTracker: new CostTracker());
+            tokenLedger: new TokenLedger());
 
         var chatClient = Substitute.For<IChatClient>();
         var modelManager = new ModelManager(_configManager, new ModelCatalogStore());
@@ -87,12 +87,26 @@ public sealed class MainAgentRunnerTests : IDisposable
         return _pipelineAssembly.CreateAutoApprovalRules();
     }
 
+    [Theory]
+    [InlineData(BuildValidationStatus.Skipped, false)]
+    [InlineData(BuildValidationStatus.Passed, false)]
+    [InlineData(BuildValidationStatus.Failed, true)]
+    public void ShouldRollBackForValidation_OnlyFailedTriggersRollback(
+        BuildValidationStatus status, bool expected)
+    {
+        // 回归守护：旧实现按 != Passed 判定，验证 Skipped（如生成的 HTML 报告
+        // 无匹配验证 profile）会被当失败处理，静默删除已写入的文件。
+        MainAgentRunner.ShouldRollBackForValidation(status).Should().Be(expected);
+    }
+
     // Helper: build a FunctionCallContent with a given tool name and (optional) args.
-    private static FunctionCallContent MakeCall(string toolName, string? command = null)
+    private static FunctionCallContent MakeCall(string toolName, string? command = null, string? shell = null)
     {
         var args = new Dictionary<string, object?>();
         if (command is not null)
             args["command"] = command;
+        if (shell is not null)
+            args["shell"] = shell;
         return new FunctionCallContent(
             callId: "test-call",
             name: toolName,
@@ -166,7 +180,7 @@ public sealed class MainAgentRunnerTests : IDisposable
         (await EvaluateAsync(rules, MakeCall("Edit"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("ApplyWorkspaceEdit"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf /tmp/x"))).Should().BeTrue();
-        (await EvaluateAsync(rules, MakeCall("PowerShell", "Remove-Item foo"))).Should().BeTrue();
+        (await EvaluateAsync(rules, MakeCall("Bash", "Remove-Item foo", shell: "powershell"))).Should().BeTrue();
         // Unknown tools also approved
         (await EvaluateAsync(rules, MakeCall("CustomTool"))).Should().BeTrue();
     }
@@ -253,7 +267,8 @@ public sealed class MainAgentRunnerTests : IDisposable
         // Read-only shell approved (auto-approved via IsReadOnlyShell)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "ls -la"))).Should().BeTrue();
-        (await EvaluateAsync(rules, MakeCall("PowerShell", "Get-ChildItem"))).Should().BeTrue();
+        // PowerShellTool 已并入 BashTool；powershell 方言经由 shell 参数识别
+        (await EvaluateAsync(rules, MakeCall("Bash", "Get-ChildItem", shell: "powershell"))).Should().BeTrue();
 
         // File writes / destructive shell / unknown tools denied
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();

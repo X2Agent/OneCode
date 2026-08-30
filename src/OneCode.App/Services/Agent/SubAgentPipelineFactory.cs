@@ -1,7 +1,7 @@
+using OneCode.Core.Config;
 using OneCode.Core.Coordinator;
 using OneCode.Infrastructure.Agent;
-using OneCode.Core.Cost;
-using OneCode.Infrastructure.Config;
+using OneCode.Core.Tokens;
 
 namespace OneCode.App.Services.Agent;
 
@@ -34,10 +34,10 @@ public sealed class SubAgentPipelineFactory(
     IVerificationProvider verificationProvider,
     IPermissionChecker permissionChecker,
     IAppStateAccessor appStateAccessor,
-    ICostTracker costTracker,
+    ITokenLedger tokenLedger,
     IConfigManager configManager)
 {
-    private decimal? MaxBudgetUsd => (decimal?)configManager.Current.Effective.MaxBudgetUsd;
+    private long? MaxBudgetTokens => configManager.Current.Effective.MaxBudgetTokens;
 
     /// <summary>
     /// Builds <see cref="AgentPipelineOptions"/> for a sub-agent profile.
@@ -83,7 +83,7 @@ public sealed class SubAgentPipelineFactory(
             permissionMode: permissionMode,
             hook: hookExecutionService,
             permissionChecker: permissionChecker,
-            costTracker: costTracker,
+            tokenLedger: tokenLedger,
             rulesBySource: permCtx?.RulesBySource,
             additionalWorkingDirectories: permCtx?.AdditionalWorkingDirectories,
             sessionAllowlist: permCtx?.SessionAllowlist,
@@ -96,7 +96,7 @@ public sealed class SubAgentPipelineFactory(
             behaviorContracts: behaviorContracts,
             editTransaction: request.EditTransaction,
             conversationId: request.ConversationId,
-            maxBudgetUsd: MaxBudgetUsd);
+            maxBudgetTokens: MaxBudgetTokens);
     }
 
     private static PipelineRoleOverrides BuildRoleOverrides(SubAgentPipelineRequest request)

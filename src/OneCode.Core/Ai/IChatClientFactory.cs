@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace OneCode.Infrastructure.Ai;
+namespace OneCode.Core.Ai;
 
 /// <summary>
 /// Creates provider-specific <see cref="IChatClient"/> instances and decorator chains.

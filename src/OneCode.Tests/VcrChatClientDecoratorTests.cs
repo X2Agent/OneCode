@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using OneCode.Infrastructure;
+using OneCode.Core.Ai;
 using OneCode.Infrastructure.Ai;
 using System.Runtime.CompilerServices;
 

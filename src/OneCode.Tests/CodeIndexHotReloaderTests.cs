@@ -1,5 +1,6 @@
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+
+using OneCode.Core.Lsp;
 using NSubstitute;
 
 namespace OneCode.Tests;

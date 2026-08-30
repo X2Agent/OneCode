@@ -24,23 +24,6 @@ public sealed class LspClient : IAsyncDisposable
     private Task? _readLoopTask;
     private readonly ConcurrentDictionary<string, Task> _outstandingServerRequests = new();
 
-    // Cloned JsonElements outlive their parent JsonDocument, so these are safe to
-    // reuse as default parameter values without disposing.
-    private static readonly JsonElement EmptyObject = CreateEmptyObject();
-    private static readonly JsonElement EmptyNull = CreateEmptyNull();
-
-    private static JsonElement CreateEmptyObject()
-    {
-        using var doc = JsonDocument.Parse("{}");
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement CreateEmptyNull()
-    {
-        using var doc = JsonDocument.Parse("null");
-        return doc.RootElement.Clone();
-    }
-
     /// <summary>
     /// Server capabilities received after initialization.
     /// </summary>
@@ -142,7 +125,7 @@ public sealed class LspClient : IAsyncDisposable
             if (result.TryGetProperty("capabilities", out var caps))
                 Capabilities = caps;
 
-            await SendNotificationAsync("initialized", EmptyObject).ConfigureAwait(false);
+            await SendNotificationAsync("initialized", LspProtocol.EmptyObject).ConfigureAwait(false);
 
             _isInitialized = true;
 
@@ -329,44 +312,13 @@ public sealed class LspClient : IAsyncDisposable
         try
         {
             var stream = _process!.StandardOutput.BaseStream;
-            var oneByte = new byte[1];
-            List<byte> headerBuffer = [];
-
             while (_process != null && !_process.HasExited)
             {
-                var read = await stream.ReadAsync(oneByte, 0, 1).ConfigureAwait(false);
-                if (read == 0) break; // EOF
-                var b = oneByte[0];
+                var jsonText = await LspProtocol.ReadFrameAsync(stream).ConfigureAwait(false);
+                if (jsonText is null)
+                    break; // EOF or truncated stream
 
-                // Phase 1: accumulate header bytes until \r\n\r\n terminator.
-                headerBuffer.Add(b);
-                if (headerBuffer.Count >= 4 &&
-                    headerBuffer[^4] == '\r' && headerBuffer[^3] == '\n' &&
-                    headerBuffer[^2] == '\r' && headerBuffer[^1] == '\n')
-                {
-                    var headerText = System.Text.Encoding.ASCII.GetString(headerBuffer.ToArray());
-                    // LSP 协议头格式固定为 "Content-Length: <digits>\r\n"，用字符串查找替代正则。
-                    // 正则在此场景属于过度设计，IndexOf + int.TryParse 更轻量且无 ReDoS 隐患。
-                    var contentLength = TryParseContentLength(headerText);
-                    headerBuffer.Clear();
-                    if (contentLength.HasValue)
-                    {
-                        // Phase 2: read exactly contentLength bytes of JSON payload.
-                        var content = new byte[contentLength.Value];
-                        var offset = 0;
-                        while (offset < contentLength.Value)
-                        {
-                            var n = await stream.ReadAsync(content, offset, contentLength.Value - offset).ConfigureAwait(false);
-                            if (n == 0) break; // EOF mid-content
-                            offset += n;
-                        }
-
-                        if (offset < contentLength.Value) break; // truncated stream
-
-                        var jsonText = System.Text.Encoding.UTF8.GetString(content);
-                        await DispatchMessageAsync(jsonText).ConfigureAwait(false);
-                    }
-                }
+                await DispatchMessageAsync(jsonText).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -377,47 +329,7 @@ public sealed class LspClient : IAsyncDisposable
 
     /// <summary>
     /// 从 LSP 协议头文本中解析 Content-Length 值。
-    ///
-    /// <para>LSP 协议头格式固定为 <c>Content-Length: &lt;digits&gt;\r\n</c>（可能还有 Content-Type 等其他头）。
-    /// 用字符串查找替代正则，更轻量且无 ReDoS 隐患。</para>
-    ///
-    /// <para>查找策略：
-    /// <list type="number">
-    ///   <item>用 <see cref="string.IndexOf(string, StringComparison)"/> 定位 "Content-Length:" 标记</item>
-    ///   <item>从标记后开始跳过空白字符</item>
-    ///   <item>读取连续的数字字符</item>
-    ///   <item>用 <see cref="int.TryParse(string, NumberStyles, IFormatProvider, out int)"/> 解析为整数</item>
-    /// </list>
-    /// </para>
     /// </summary>
-    /// <returns>解析成功返回 Content-Length 值；找不到或解析失败返回 null。</returns>
-    private static int? TryParseContentLength(string headerText)
-    {
-        const string Marker = "Content-Length:";
-        var markerIndex = headerText.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
-            return null;
-
-        var i = markerIndex + Marker.Length;
-
-        // 跳过标记后的空白字符（空格、制表符）
-        while (i < headerText.Length && (headerText[i] == ' ' || headerText[i] == '\t'))
-            i++;
-
-        var start = i;
-        while (i < headerText.Length && headerText[i] >= '0' && headerText[i] <= '9')
-            i++;
-
-        if (i == start)
-            return null;  // 标记后没有数字
-
-        var numberSpan = headerText.AsSpan(start, i - start);
-        if (int.TryParse(numberSpan, System.Globalization.NumberStyles.None, CultureInfo.InvariantCulture, out var contentLength))
-            return contentLength;
-
-        return null;
-    }
-
     private async Task DispatchMessageAsync(string jsonText)
     {
         try
@@ -437,7 +349,7 @@ public sealed class LspClient : IAsyncDisposable
                     // reconstitutes the original JSON token.
                     var requestIdRaw = root.TryGetProperty("id", out var ridEl) ? ridEl.GetRawText() : "null";
                     // Clone params so the handler can use them after doc is disposed.
-                    var @params = root.TryGetProperty("params", out var pEl) ? pEl.Clone() : EmptyObject;
+                    var @params = root.TryGetProperty("params", out var pEl) ? pEl.Clone() : LspProtocol.EmptyObject;
 
                     Func<JsonElement, Task<JsonElement>>? handler = null;
                     lock (_requestHandlers)
@@ -501,7 +413,7 @@ public sealed class LspClient : IAsyncDisposable
                     {
                         if (_notificationHandlers.TryGetValue(method, out var handler))
                         {
-                            var @params = root.TryGetProperty("params", out var p) ? p : EmptyObject;
+                            var @params = root.TryGetProperty("params", out var p) ? p : LspProtocol.EmptyObject;
                             handler(@params);
                         }
                     }
@@ -513,7 +425,7 @@ public sealed class LspClient : IAsyncDisposable
                 // string id returns quoted JSON (e.g. "\"abc\"") which never matches the
                 // unquoted key we stored when sending the request, causing every response
                 // to be dropped and every request to time out.
-                var requestId = ToPendingRequestKey(idProp);
+                var requestId = LspProtocol.ToPendingRequestKey(idProp);
                 lock (_pendingRequests)
                 {
                     if (_pendingRequests.TryGetValue(requestId, out var tcs))
@@ -526,7 +438,7 @@ public sealed class LspClient : IAsyncDisposable
                             else if (root.TryGetProperty("result", out var result))
                                 tcs.SetResult(result.Clone());
                             else
-                                tcs.SetResult(EmptyNull);
+                                tcs.SetResult(LspProtocol.EmptyNull);
                         }
                         catch (Exception ex) { tcs.SetException(ex); }
                     }
@@ -550,31 +462,8 @@ public sealed class LspClient : IAsyncDisposable
         if (_process == null)
             throw new InvalidOperationException("LSP client not started");
 
-        var json = JsonSerializer.Serialize(message);
-        var contentBytes = System.Text.Encoding.UTF8.GetBytes(json);
-
-        // LSP uses Content-Length header format
-        var header = $"Content-Length: {contentBytes.Length}\r\n\r\n";
-        var headerBytes = System.Text.Encoding.ASCII.GetBytes(header);
-
-        await _process.StandardInput.BaseStream.WriteAsync(headerBytes, 0, headerBytes.Length).ConfigureAwait(false);
-        await _process.StandardInput.BaseStream.WriteAsync(contentBytes, 0, contentBytes.Length).ConfigureAwait(false);
-        await _process.StandardInput.BaseStream.FlushAsync().ConfigureAwait(false);
+        await LspProtocol.WriteFrameAsync(_process.StandardInput.BaseStream, message).ConfigureAwait(false);
     }
-
-    /// <summary>
-    /// Normalize a JSON-RPC <c>id</c> value to the key used in <see cref="_pendingRequests"/>.
-    /// String ids must use <see cref="JsonElement.GetString"/> — <see cref="JsonElement.GetRawText"/>
-    /// includes surrounding quotes and would never match the unquoted key stored at send time.
-    /// </summary>
-    internal static string ToPendingRequestKey(JsonElement id) =>
-        id.ValueKind switch
-        {
-            JsonValueKind.String => id.GetString() ?? "",
-            JsonValueKind.Number => id.GetRawText(),
-            JsonValueKind.Null => "null",
-            _ => id.GetRawText(),
-        };
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
@@ -598,8 +487,8 @@ public sealed class LspClient : IAsyncDisposable
         {
             if (_process != null && !_process.HasExited)
             {
-                await SendNotificationAsync("shutdown", EmptyObject).ConfigureAwait(false);
-                await SendNotificationAsync("exit", EmptyObject).ConfigureAwait(false);
+                await SendNotificationAsync("shutdown", LspProtocol.EmptyObject).ConfigureAwait(false);
+                await SendNotificationAsync("exit", LspProtocol.EmptyObject).ConfigureAwait(false);
 
                 using var exitCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Constants.Lsp.ProcessExitWaitMs));
                 try

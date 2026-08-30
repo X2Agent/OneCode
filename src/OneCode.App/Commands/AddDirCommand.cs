@@ -1,4 +1,4 @@
-using OneCode.Infrastructure.Config;
+using OneCode.Core.Config;
 using System.Text;
 
 namespace OneCode.App.Commands;

@@ -199,7 +199,7 @@ public static class ToolArgumentExtractor
     }
 
     private static bool IsShellTool(string toolName) =>
-        IsToolName(toolName, "Bash") || IsToolName(toolName, "PowerShell");
+        IsToolName(toolName, "Bash");
 
     private static bool IsToolName(string toolName, string expected) =>
         string.Equals(toolName, expected, StringComparison.OrdinalIgnoreCase);

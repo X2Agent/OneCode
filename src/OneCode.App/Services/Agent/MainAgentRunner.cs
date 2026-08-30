@@ -231,34 +231,37 @@ public partial class MainAgentRunner : IMainAgentRunner
                 modifiedFiles = transaction.GetModifiedFiles();
                 if (_verificationProvider is null)
                 {
+                    // 未注册验证器 = 无验证可跑。这是"验证不适用"而非失败——
+                    // 回滚会静默删除用户已成功写入的文件。
                     finalValidationStatus = BuildValidationStatus.Skipped;
-                    validationFailureSummary = "Final validation is unavailable because no verification provider is registered.";
-                    terminalReason = BuildTerminalReason.ValidationFailed;
-                    transactionRolledBack = true;
-                    return BuildResult();
                 }
-
-                var finalCheck = await _verificationProvider.VerifyAsync(
-                    cwd, modifiedFiles, ct).ConfigureAwait(false);
-                finalValidationStatus = finalCheck.Skipped
-                    ? BuildValidationStatus.Skipped
-                    : finalCheck.Success
-                        ? BuildValidationStatus.Passed
-                        : BuildValidationStatus.Failed;
-
-                if (finalValidationStatus != BuildValidationStatus.Passed)
+                else
                 {
-                    _logger.LogWarning(
-                        "Final validation did not pass (status={Status}, errors={ErrorCount}) — rolling back {FileCount} file changes",
-                        finalValidationStatus, finalCheck.Errors.Count, transaction.SnapshotCount);
+                    var finalCheck = await _verificationProvider.VerifyAsync(
+                        cwd, modifiedFiles, ct).ConfigureAwait(false);
+                    finalValidationStatus = finalCheck.Skipped
+                        ? BuildValidationStatus.Skipped
+                        : finalCheck.Success
+                            ? BuildValidationStatus.Passed
+                            : BuildValidationStatus.Failed;
 
-                    validationFailureSummary = finalCheck.FormatForLlm();
-                    terminalReason = BuildTerminalReason.ValidationFailed;
-                    transactionRolledBack = true;
-                    return BuildResult();
+                    // 仅真实验证失败才回滚。Skipped（修改的文件没有匹配的验证 profile，
+                    // 如生成的 HTML 报告）表示验证不适用——按失败处理会把已写入的
+                    // 文件静默删除，而对话里模型早已报告"文件已生成"。
+                    if (ShouldRollBackForValidation(finalValidationStatus))
+                    {
+                        _logger.LogWarning(
+                            "Final validation failed (status={Status}, errors={ErrorCount}) — rolling back {FileCount} file changes",
+                            finalValidationStatus, finalCheck.Errors.Count, transaction.SnapshotCount);
+
+                        validationFailureSummary = finalCheck.FormatForLlm();
+                        terminalReason = BuildTerminalReason.ValidationFailed;
+                        transactionRolledBack = true;
+                        return BuildResult();
+                    }
+
+                    _logger.LogDebug("Final validation finished (status={Status})", finalValidationStatus);
                 }
-
-                _logger.LogDebug("Final validation passed after agent run");
             }
 
             // Shared transactions and explicitly deferred Build transactions are committed
@@ -300,6 +303,14 @@ public partial class MainAgentRunner : IMainAgentRunner
             ValidationFailureSummary: validationFailureSummary,
             CompletedToolBatches: evidence.CompletedToolBatches);
     }
+
+    /// <summary>
+    /// 仅真实验证失败才回滚文件修改。Skipped（修改的文件没有匹配的验证 profile、
+    /// 验证命令不可用或未注册验证器）表示"验证不适用"——旧实现按 != Passed 判定，
+    /// 会把 Skipped 当失败并静默删除已成功写入的文件（如 Build 会话生成的 HTML 报告）。
+    /// </summary>
+    internal static bool ShouldRollBackForValidation(BuildValidationStatus status)
+        => status == BuildValidationStatus.Failed;
 
     private static ChatOptions BuildChatOptions(MainAgentRunOptions options)
     {

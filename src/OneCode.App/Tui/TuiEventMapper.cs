@@ -46,7 +46,6 @@ public static class TuiEventMapper
                 ValidationStatus: var validationStatus,
                 ChangedFiles: var changedFiles,
                 TurnsCompleted: var turnsCompleted,
-                EstimatedCost: var estimatedCost,
                 ActiveTasks: var activeTasks,
                 BlockedTasks: var blockedTasks,
             } => new TuiBuildRunState(
@@ -62,7 +61,6 @@ public static class TuiEventMapper
                 validationStatus,
                 changedFiles,
                 turnsCompleted,
-                estimatedCost,
                 activeTasks,
                 blockedTasks),
             BuildRunCompletedEvent { Result: var result }

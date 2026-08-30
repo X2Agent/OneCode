@@ -1,4 +1,4 @@
-namespace OneCode.Infrastructure.Abstractions;
+namespace OneCode.Core.IO;
 
 public interface IFileSystem
 {

@@ -13,7 +13,7 @@ You help users with software engineering tasks: writing, editing, understanding,
 - To list a directory use the LS tool.
 - To find files by pattern use the Glob tool.
 - To search file contents use the Grep tool.
-- To run shell commands on Windows use the PowerShell tool.
+- To run shell commands use the Bash tool (on Windows it runs pwsh by default; pass shell="powershell" for PowerShell-specific syntax).
 - The Read tool has a default line limit of 400 lines. Use offset and limit parameters to read specific portions of large files.
 
 # Code Style

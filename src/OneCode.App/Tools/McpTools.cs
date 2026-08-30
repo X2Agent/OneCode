@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using OneCode.Core.Errors;
-using OneCode.Infrastructure.Mcp;
+using OneCode.Core.Mcp;
 
 namespace OneCode.App.Tools;
 

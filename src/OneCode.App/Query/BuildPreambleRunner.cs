@@ -1,5 +1,4 @@
 using OneCode.App.Services.BuildMode;
-using OneCode.App.Tui;
 using OneCode.Core.Build;
 using System.Runtime.CompilerServices;
 
@@ -7,16 +6,25 @@ namespace OneCode.App.Query;
 
 /// <summary>
 /// Build 门禁前置（澄清 → 计划审批 → 终态判定）的迭代器实现，拆自
-/// <see cref="QueryStreamEngine"/> 以控制单文件规模。按职责分 partial（无新增共享可变状态，
-/// 结果经 <see cref="BuildPreambleState"/> 带出），不违反 ADR 0006 的状态对象原则。
+/// <see cref="QueryStreamEngine"/> 为真正的协作类（原为 partial 分片）。无新增共享可变状态，
+/// 结果经 <see cref="BuildPreambleState"/> 带出。
 /// </summary>
-internal sealed partial class QueryStreamEngine
+internal sealed class BuildPreambleRunner
 {
+    private readonly BuildRunGate _buildRunGate;
+    private readonly ToolAssembler _toolAssembler;
+
+    public BuildPreambleRunner(BuildRunGate buildRunGate, ToolAssembler toolAssembler)
+    {
+        _buildRunGate = buildRunGate;
+        _toolAssembler = toolAssembler;
+    }
+
     /// <summary>
     /// Build 门禁前置：澄清 → 计划审批 → 终态判定。状态事件随交互逐步流出（时序与
     /// 重构前的内联实现逐语句等价）；结果经 <paramref name="state"/> 带出（迭代器不能带返回值）。
     /// </summary>
-    private async IAsyncEnumerable<QueryEvent> EnsureBuildRunPreambleAsync(
+    public async IAsyncEnumerable<QueryEvent> EnsureBuildRunPreambleAsync(
         QueryStreamRequest request,
         BuildPreambleState state,
         [EnumeratorCancellation] CancellationToken ct)
@@ -119,7 +127,7 @@ internal sealed partial class QueryStreamEngine
             && buildRun.State == BuildRunState.Planned
             && _buildRunGate.Clarification is { } clarificationInteraction)
         {
-            var approvedTools = SnapshotApprovedTools();
+            var approvedTools = _toolAssembler.SnapshotApprovedTools();
             var approval = await clarificationInteraction.AskAsync(
                 "计划已生成，请确认后开始执行",
                 [BuildPlanApprovalPrompt(buildRun, approvedTools)],
@@ -170,15 +178,15 @@ internal sealed partial class QueryStreamEngine
             events.Add(BuildRunStateEvent.From(run));
         return (run, events);
     }
-}
 
-/// <summary>
-/// Outcome carrier for the Build gate preamble: async iterators cannot return values,
-/// so the preamble writes its result here while yielding gate events.
-/// </summary>
-internal sealed class BuildPreambleState
-{
-    public BuildRun? BuildRun { get; set; }
-
-    public bool EarlyDone { get; set; }
+    private static string BuildPlanApprovalPrompt(
+        BuildRun buildRun,
+        IReadOnlyList<string> approvedTools)
+    {
+        var planSummary = buildRun.Plan?.Summary ?? "（无计划摘要）";
+        var toolSummary = approvedTools.Count == 0
+            ? "（空）"
+            : string.Join(", ", approvedTools);
+        return $"{planSummary}\n\n本次执行允许工具：{toolSummary}";
+    }
 }

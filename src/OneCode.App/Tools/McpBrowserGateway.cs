@@ -1,4 +1,4 @@
-using OneCode.Infrastructure.Mcp;
+using OneCode.Core.Mcp;
 
 namespace OneCode.App.Tools;
 
@@ -171,7 +171,7 @@ public sealed class McpBrowserGateway : IBrowserPageRenderer
     /// Prefer the conventional <c>playwright</c> server; otherwise use the first connected
     /// client whose status name contains "playwright" (case-insensitive).
     /// </summary>
-    private McpClient? ResolvePlaywrightClient()
+    private IMcpClient? ResolvePlaywrightClient()
     {
         var preferred = _mcpManager.GetClient(DefaultServerName);
         if (preferred is not null)

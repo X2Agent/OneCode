@@ -47,7 +47,7 @@ public sealed class YoloClassifierTests
                 ApprovalMode = OneCode.Core.Tools.ToolApprovalMode.Never,
             });
 
-        var dangerousTools = new[] { "Write", "Edit", "ApplyWorkspaceEdit", "Bash", "PowerShell" };
+        var dangerousTools = new[] { "Write", "Edit", "ApplyWorkspaceEdit", "Bash" };
         foreach (var name in dangerousTools)
             reg.Register(new OneCode.Core.Tools.ToolMetadata
             {
@@ -110,7 +110,6 @@ public sealed class YoloClassifierTests
 
     [Theory]
     [InlineData("Bash")]
-    [InlineData("PowerShell")]
     [InlineData("Write")]
     [InlineData("Edit")]
     [InlineData("UnknownTool")]
@@ -244,13 +243,13 @@ public sealed class YoloClassifierTests
     }
 
     [Fact]
-    public async Task ClassifyAsync_PowerShellTool_UsesCommandForRuleMatching()
+    public async Task ClassifyAsync_UsesCommandForRuleMatchingRegardlessOfToolName()
     {
         var ct = TestContext.Current.CancellationToken;
         _ruleStore.AddRule(new UserRule("deny", @"Remove-Item", "no remove-item"));
         var input = ParseJson(@"{""command"":""Remove-Item -Recurse -Force""}");
 
-        var result = await _sut.ClassifyAsync("PowerShell", input, ct: ct);
+        var result = await _sut.ClassifyAsync("Bash", input, ct: ct);
 
         result.ShouldBlock.Should().BeTrue();
         result.MatchedRule!.Pattern.Should().Be("Remove-Item");

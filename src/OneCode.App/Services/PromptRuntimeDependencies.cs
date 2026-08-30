@@ -1,5 +1,5 @@
+using OneCode.Core.Mcp;
 using OneCode.App.Services.Skills;
-using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Services;
 

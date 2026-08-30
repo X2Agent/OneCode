@@ -1,7 +1,8 @@
-using OneCode.Core.IO;
-using OneCode.Infrastructure;
-using OneCode.Infrastructure.Config;
 
+using OneCode.Core.Config;
+using OneCode.Infrastructure;
+
+using OneCode.Core.IO;
 namespace OneCode.App.Tui;
 
 /// <summary>

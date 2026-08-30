@@ -19,7 +19,6 @@ public sealed class AgentStatusBar : View
     private string? _teamModeLabel;
     private string _activity = "处理中";
     private string _model = "Opus";
-    private string _cost = "$0.00";
     private string _sandbox = "Sandbox";
     private int _lspServerCount;
     private int _lspErrorCount;
@@ -74,8 +73,6 @@ public sealed class AgentStatusBar : View
     }
 
     public void SetModel(string m) { _model = string.IsNullOrWhiteSpace(m) ? "Opus" : m; SetNeedsDraw(); }
-    public void SetCost(string c) { _cost = string.IsNullOrWhiteSpace(c) ? "$0.00" : c; SetNeedsDraw(); }
-    public string CurrentCost => _cost;
     public void SetSandboxMode(string s) { _sandbox = string.IsNullOrWhiteSpace(s) ? "Sandbox" : s; SetNeedsDraw(); }
 
     /// <summary>Transcript 导航模式指示（Ctrl+T 进入时点亮，避免用户在对话流中迷失）。</summary>
@@ -146,10 +143,6 @@ public sealed class AgentStatusBar : View
 
         SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
         AddStr(_model);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-        AddStr(" \u00b7 ");
-        SetAttribute(new Attribute(TuiPalette.Warning, TuiPalette.BgPrimary));
-        AddStr($"\U0001f4b0 {_cost}");
 
         if (_sandbox != "Normal")
         {

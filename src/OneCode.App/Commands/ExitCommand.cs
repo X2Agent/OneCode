@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using OneCode.App.Session;
-using OneCode.Core.Hooks;
 
 namespace OneCode.App.Commands;
 

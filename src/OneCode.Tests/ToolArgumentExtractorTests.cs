@@ -153,12 +153,24 @@ public sealed class ToolArgumentExtractorTests
     }
 
     [Fact]
-    public void ExtractInputString_PowerShellTool_ReturnsCommand()
+    public void ExtractInputString_MergedShellToolName_PowerShellIsNoLongerAToolName()
     {
+        // PowerShellTool 已并入 BashTool（shell 参数），"PowerShell" 不再是工具名
         using var doc = JsonDocument.Parse(@"{""command"":""Get-Process""}");
         var input = doc.RootElement.Clone();
 
         var result = ToolArgumentExtractor.ExtractInputString("PowerShell", input);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractInputString_BashToolWithPowerShellDialect_ReturnsCommand()
+    {
+        using var doc = JsonDocument.Parse(@"{""command"":""Get-Process"",""shell"":""powershell""}");
+        var input = doc.RootElement.Clone();
+
+        var result = ToolArgumentExtractor.ExtractInputString("Bash", input);
 
         result.Should().Be("Get-Process");
     }

@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using OneCode.App.Tui;
 
 namespace OneCode.App.Query;
 

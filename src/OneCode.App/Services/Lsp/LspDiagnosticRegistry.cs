@@ -1,5 +1,7 @@
-using OneCode.Core.Lsp;
+
 using OneCode.Infrastructure.Text;
+using OneCode.Core.Lsp;
+
 namespace OneCode.App.Services.Lsp;
 
 /// <summary>

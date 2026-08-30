@@ -4,8 +4,8 @@ namespace OneCode.Core.Goals;
 /// GOAL 模式预算模型（三级预算 + 100% 强制终止策略）。
 ///
 /// 设计目的：
-/// 防止 LLM 失控循环、成本失控、上下文窗口溢出三类风险。
-/// 单一 attempt 计数无法覆盖所有维度，因此引入 token / 时间 / 美元 三个维度。
+/// 防止 LLM 失控循环、token 失控、上下文窗口溢出三类风险。
+/// 单一 attempt 计数无法覆盖所有维度，因此引入 token / 时间两个维度。
 ///
 /// 触发策略：
 /// - 70% 预算消耗：TUI 显示黄色警告，继续执行
@@ -31,15 +31,9 @@ public sealed record GoalBudget
 
     /// <summary>
     /// 墙钟时间上限。null 表示不限制。
-    /// 默认 2 小时（防止用户启动后忘记，烧掉整晚 API 费用）。
+    /// 默认 2 小时（防止用户启动后忘记，后台持续消耗 token 与 API 配额）。
     /// </summary>
     public TimeSpan? MaxWallClock { get; init; } = TimeSpan.FromHours(2);
-
-    /// <summary>
-    /// 累计美元成本上限。null 表示不限制。
-    /// 默认 5.0 USD（适合中等粒度任务；系统级目标用户应显式调高）。
-    /// </summary>
-    public decimal? MaxCostUsd { get; init; } = 5.0m;
 
     /// <summary>
     /// 计算当前预算消耗比例（0.0 ~ 1.0）。
@@ -57,9 +51,6 @@ public sealed record GoalBudget
 
         if (MaxWallClock is { } timeLimit && usage.Elapsed > TimeSpan.Zero)
             ratios.Add(usage.Elapsed.Value.TotalSeconds / timeLimit.TotalSeconds);
-
-        if (MaxCostUsd is { } costLimit)
-            ratios.Add((double)usage.EstimatedCostUsd / (double)costLimit);
 
         return ratios.Count == 0 ? 0.0 : ratios.Max();
     }
@@ -89,8 +80,7 @@ public sealed record GoalBudget
 public sealed record GoalBudgetUsage(
     int TotalAttempts,
     long TotalTokens,
-    TimeSpan? Elapsed,
-    decimal EstimatedCostUsd);
+    TimeSpan? Elapsed);
 
 /// <summary>
 /// 预算警告级别。

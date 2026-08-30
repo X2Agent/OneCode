@@ -4,7 +4,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
-using OneCode.App.Tui;
 using OneCode.Core.Build;
 using OneCode.Core.PlanMode;
 using OneCode.Infrastructure.Agent;

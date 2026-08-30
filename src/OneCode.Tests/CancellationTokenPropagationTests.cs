@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Api;
 
@@ -24,12 +24,12 @@ public sealed class CancellationTokenPropagationTests
     public async Task BudgetGuard_RunAsync_CancellationPropagates_OperationCanceledException()
     {
         // Arrange: agent 内部模拟取消触发 — 验证中间件不吞掉 OperationCanceledException
-        var tracker = CreateTracker(initialCost: 0m);
+        var tracker = CreateTracker();
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var stubAgent = new CancelPropagatingAgent(cts.Token);
-        var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 100m, null);
+        var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetTokens: 100_000_000, null);
 
         // Act & Assert: 取消令牌已触发，agent 内部应抛 OperationCanceledException
         var act = () => runFunc([], null, null, stubAgent, cts.Token);
@@ -43,13 +43,13 @@ public sealed class CancellationTokenPropagationTests
     {
         // Arrange: 预先取消的 token，验证 BudgetGuard 预算未超支时放行到 agent，
         // agent 内部检查 ct 后抛 OperationCanceledException
-        var tracker = CreateTracker(initialCost: 0m);
+        var tracker = CreateTracker();
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var agentCallCount = 0;
         var stubAgent = new CountingAgent(() => agentCallCount++);
-        var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 100m, null);
+        var (runFunc, _) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetTokens: 100_000_000, null);
 
         // Act & Assert: 预算未超支时 BudgetGuard 必须放行，且预先取消的 token 要原样传播——
         // OCE 被吞掉或 token 被换成 None，两条断言各会失败一条
@@ -66,11 +66,11 @@ public sealed class CancellationTokenPropagationTests
     public async Task BudgetGuard_RunStreamingAsync_CancellationDuringStreaming_PropagatesException()
     {
         // Arrange: 流式枚举在中途被取消
-        var tracker = CreateTracker(initialCost: 0m);
+        var tracker = CreateTracker();
         var cts = new CancellationTokenSource();
 
         var streamingAgent = new StreamingCancelAgent(cts);
-        var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 100m, null);
+        var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetTokens: 100_000_000, null);
 
         // Act: 消费流式更新，第一个 update 后触发取消
         var consumedUpdates = new List<AgentResponseUpdate>();
@@ -94,12 +94,12 @@ public sealed class CancellationTokenPropagationTests
     public async Task BudgetGuard_RunStreamingAsync_PreCancelledToken_PropagatesBeforeEnumeration()
     {
         // Arrange: 预先取消的 token
-        var tracker = CreateTracker(initialCost: 0m);
+        var tracker = CreateTracker();
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
         var streamingAgent = new NeverEnumeratedAgent();
-        var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetUsd: 100m, null);
+        var (_, runStreamingFunc) = BudgetGuardRunMiddleware.Create(tracker, maxBudgetTokens: 100_000_000, null);
 
         // Act: 预先取消的 token 应在流式枚举开始前传播
         var act = async () =>
@@ -116,20 +116,12 @@ public sealed class CancellationTokenPropagationTests
 
     // Helpers
 
-    private static CostTracker CreateTracker(decimal initialCost = 0m)
+    private static TokenLedger CreateTracker(long initialTokens = 0)
     {
-        // Use $1/M pricing for exact decimal arithmetic
-        var pricing = new ModelPricing(1m, 1m, 0m, 0m);
-        var tracker = new CostTracker(configuredPricing: new Dictionary<string, ModelPricingTiered>
-        {
-            ["test-model"] = new ModelPricingTiered(pricing),
-        });
+        var tracker = new TokenLedger();
 
-        if (initialCost > 0m)
-        {
-            var inputTokens = (int)(initialCost * 1_000_000m);
-            tracker.RecordUsage(new UsageRecord("test-model", inputTokens, 0));
-        }
+        if (initialTokens > 0)
+            tracker.RecordUsage(new UsageRecord("test-model", (int)Math.Min(initialTokens, int.MaxValue), 0));
 
         return tracker;
     }

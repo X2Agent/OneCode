@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Workflows;
 
 namespace OneCode.App.Services.Coordinator;
 

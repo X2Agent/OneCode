@@ -1,12 +1,12 @@
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 
 namespace OneCode.App.Services.Observability;
 
 /// <summary>
-/// Token 使用量统计——CostTracker 的派生视图。
+/// Token 使用量统计——TokenLedger 的派生视图。
 ///
-/// Token 计数（Input/Output/CacheRead/CacheWrite）从 CostTracker 的 SessionCostInfo 读取，
-/// 避免双账本。仅保留 CostTracker 不具备的维度：QueryCount、CacheHitRate、CalibrationFactor、LastBreakdown。
+/// Token 计数（Input/Output/CacheRead/CacheWrite）从 ITokenLedger 的 SessionTokenUsage 读取，
+/// 避免双账本。仅保留账本不具备的维度：QueryCount、CacheHitRate、CalibrationFactor、LastBreakdown。
 ///
 /// sessionId 通过 <see cref="ISessionIdProvider"/> 延迟解析——SessionManager 实现该接口，
 /// 打破 SessionManager ↔ TokenUsageTracker 的循环依赖。
@@ -21,7 +21,7 @@ namespace OneCode.App.Services.Observability;
 /// </summary>
 public sealed class TokenUsageTracker : ITokenUsageTracker
 {
-    private readonly ICostTracker _costTracker;
+    private readonly ITokenLedger _tokenLedger;
     private readonly ISessionIdProvider _sessionIdProvider;
     private readonly object _gate = new();
     private int _queryCount;
@@ -32,28 +32,28 @@ public sealed class TokenUsageTracker : ITokenUsageTracker
     private readonly Queue<double> _calibrationRatios = new();
     private double _calibrationFactor = 1.0;
 
-    // Fallback accumulators (used when CostTracker or sessionId is not available)
+    // Fallback accumulators (used when the ledger or sessionId is not available)
     private long _fallbackInputTokens;
     private long _fallbackOutputTokens;
     private long _fallbackCacheReadTokens;
     private long _fallbackCacheWriteTokens;
 
     public TokenUsageTracker(
-        ICostTracker costTracker,
+        ITokenLedger tokenLedger,
         ISessionIdProvider sessionIdProvider)
     {
-        _costTracker = costTracker;
+        _tokenLedger = tokenLedger;
         _sessionIdProvider = sessionIdProvider;
     }
 
-    private SessionCostInfo? SessionInfo
+    private SessionTokenUsage? SessionInfo
     {
         get
         {
             var sessionId = _sessionIdProvider.CurrentSessionId;
             if (sessionId is null)
                 return null;
-            return _costTracker.GetSessionCost(sessionId.Value);
+            return _tokenLedger.GetSessionUsage(sessionId.Value);
         }
     }
 

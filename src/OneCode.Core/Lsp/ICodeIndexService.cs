@@ -1,4 +1,4 @@
-namespace OneCode.Infrastructure.Abstractions;
+namespace OneCode.Core.Lsp;
 
 /// <summary>
 /// Represents a code symbol found during indexing.

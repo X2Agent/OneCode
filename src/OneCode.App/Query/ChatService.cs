@@ -1,6 +1,5 @@
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
 using Microsoft.Extensions.AI;
 
 namespace OneCode.App.Query;
@@ -13,7 +12,7 @@ namespace OneCode.App.Query;
 /// </summary>
 /// <remarks>
 /// 实现 <see cref="IConversationRunner"/> 的原因：headless 触发器（CronJobExecutor 等）依赖接口而非
-/// 本具体类，以断开 ChatService → ToolCatalog → CronCreateTool → CronSchedulerService →
+/// 本具体类，以断开 ChatService → ToolCatalog → CronTool → CronSchedulerService →
 /// ICronJobExecutor → ChatService 的循环依赖。引擎在构造函数内组装（组合根模式，与 BuildRunGate 一致），
 /// 不单独注册 DI，避免扩大组合面。
 /// </remarks>
@@ -57,7 +56,7 @@ public sealed class ChatService : IConversationRunner, ICacheSafeParamsProvider
         Action<FileChange>? fileChangeCallback = null,
         IReadOnlyList<string>? imagePaths = null)
     {
-        var userMessage = QueryStreamEngine.BuildUserMessage(prompt, imagePaths, _logger);
+        var userMessage = QueryStreamHelpers.BuildUserMessage(prompt, imagePaths, _logger);
         var messages = new List<ChatMessage> { userMessage };
         return StreamQueryAsync(messages, systemPrompt, modelId, thinkingBudget, null, null, ct, workingMode, fileChangeCallback);
     }

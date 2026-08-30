@@ -1,4 +1,5 @@
 using System.Net;
+using OneCode.Core.Ai;
 using OneCode.Infrastructure;
 
 namespace OneCode.Tests;

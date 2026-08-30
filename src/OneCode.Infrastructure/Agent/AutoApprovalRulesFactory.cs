@@ -33,7 +33,7 @@ public static class AutoApprovalRulesFactory
 
                 if (profile.DenyAllNonReadOnly)
                 {
-                    if (fc.Name is "Bash" or "PowerShell" && profile.AutoApproveReadOnlyShell)
+                    if (fc.Name is "Bash" && profile.AutoApproveReadOnlyShell)
                     {
                         var input = fc.Arguments is not null
                             ? JsonSerializer.SerializeToElement(fc.Arguments)
@@ -47,7 +47,7 @@ public static class AutoApprovalRulesFactory
                 if (profile.AutoApproveFileWrites && ToolNames.FileWriteTools.Contains(fc.Name))
                     return new ValueTask<bool>(true);
 
-                if (fc.Name is "Bash" or "PowerShell" && profile.AutoApproveReadOnlyShell)
+                if (fc.Name is "Bash" && profile.AutoApproveReadOnlyShell)
                 {
                     var input = fc.Arguments is not null
                             ? JsonSerializer.SerializeToElement(fc.Arguments)

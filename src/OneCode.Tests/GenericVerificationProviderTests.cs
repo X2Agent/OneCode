@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+using OneCode.Core.IO;
+
 using OneCode.Infrastructure.Tools;
 
 namespace OneCode.Tests;

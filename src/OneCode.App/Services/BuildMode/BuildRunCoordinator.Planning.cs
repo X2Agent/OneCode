@@ -27,27 +27,6 @@ public sealed partial class BuildRunCoordinator
             [],
             scope.OutOfScope);
 
-    private static IReadOnlyList<BuildPlanTask> TopologicalOrder(
-        IReadOnlyList<BuildPlanTask> tasks)
-    {
-        var byId = tasks.ToDictionary(task => task.Id, StringComparer.OrdinalIgnoreCase);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var ordered = new List<BuildPlanTask>(tasks.Count);
-
-        void Visit(BuildPlanTask task)
-        {
-            if (!visited.Add(task.Id))
-                return;
-            foreach (var dependency in task.DependsOn)
-                Visit(byId[dependency]);
-            ordered.Add(task);
-        }
-
-        foreach (var task in tasks)
-            Visit(task);
-        return ordered;
-    }
-
     // internal：BuildResumePolicy（纯函数裁决器）复用同一计划比对规则
     internal static bool PlansMatch(BuildPlan persisted, BuildPlan prescribed)
         => string.Equals(persisted.Summary, prescribed.Summary, StringComparison.Ordinal)

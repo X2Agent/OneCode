@@ -1,4 +1,5 @@
-using OneCode.Infrastructure.Abstractions;
+
+using OneCode.Core.Lsp;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OneCode.Infrastructure;

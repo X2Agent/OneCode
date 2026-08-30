@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Commands;
@@ -18,7 +19,8 @@ using OneCode.App.Tui;
 using OneCode.Automation;
 using OneCode.Automation.Cron;
 using OneCode.Core.Build;
-using OneCode.Core.Cost;
+using OneCode.Infrastructure.Api;
+using OneCode.Core.Tokens;
 using OneCode.Core.Cron;
 using OneCode.Core.Goals;
 using OneCode.Core.Hooks.Notifications;
@@ -26,7 +28,6 @@ using OneCode.Core.Models;
 using OneCode.Core.Permissions.Yolo;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Api;
 using OneCode.Infrastructure.Build;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Goals;
@@ -45,15 +46,8 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<ModelManager>();
         services.AddSingleton<IModelManager>(sp => sp.GetRequiredService<ModelManager>());
 
-        services.AddSingleton<CostTracker>(sp =>
-        {
-            var logger = sp.GetRequiredService<ILogger<CostTracker>>();
-            var catalog = sp.GetRequiredService<IModelCatalog>();
-            var tracker = new CostTracker(logger, modelCatalog: catalog);
-            tracker.SyncPricingFromCatalog();
-            return tracker;
-        });
-        services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<CostTracker>());
+        services.AddSingleton<TokenLedger>();
+        services.AddSingleton<ITokenLedger>(sp => sp.GetRequiredService<TokenLedger>());
 
         RegisterHookSubsystem(services);
         RegisterPermissionSubsystem(services);

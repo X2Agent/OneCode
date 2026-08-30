@@ -12,7 +12,7 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | 子目录 | 职责 |
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
-| `Tools/` | AI 工具实现：Agent 调用的 50+ 工具（`sealed class` + `[Description]` + `AddTool<T>` 注册） |
+| `Tools/` | AI 工具实现：Agent 调用的 30 个工具（`sealed class` + `[Description]` + `AddTool<T>` 注册） |
 | `Services/` | 应用层服务：Memory、Agent、Swarm、Lsp、MCP 等 |
 | `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
@@ -144,7 +144,7 @@ services.AddTool<MyTool>("MyTool", nameof(MyTool.ExecuteAsync), ToolRisk.Destruc
 | `ReadOnly` | 只读操作，可并发 | `ReadTool`, `GlobTool`, `GrepTool` |
 | `Safe` | 修改但可回滚/可并发 | `TaskTool` |
 | `Destructive` | 不可逆修改，禁止并发 | `WriteTool`, `EditTool`, `BashTool` |
-| `Dynamic` | 风险取决于运行时输入 | `PowerShellTool`, `WebFetchTool` |
+| `Dynamic` | 风险取决于运行时输入 | `BashTool`（powershell 方言）、`WebFetchTool` |
 
 ### 三种注册模式
 

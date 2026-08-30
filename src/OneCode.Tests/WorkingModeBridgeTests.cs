@@ -2,7 +2,6 @@ using System.Text.Json;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
-using OneCode.App.Tui;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
 using OneCode.Tests.TestSupport;
@@ -43,12 +42,12 @@ public sealed class WorkingModeBridgeTests
     }
 
     [Fact]
-    public void PlanPermission_DeniesDynamicPowerShell()
+    public void PlanPermission_DeniesDynamicShell()
     {
         using var input = JsonDocument.Parse("""{"command":"Remove-Item -Recurse C:\\"}""");
         var result = PermissionProfiles.Check(
             PermissionMode.Plan,
-            "PowerShell",
+            "Bash",
             input.RootElement,
             new ToolPermissionContext { Mode = PermissionMode.Plan });
 

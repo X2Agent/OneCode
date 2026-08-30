@@ -1,5 +1,7 @@
 using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
+
+
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Tui;
@@ -66,12 +68,6 @@ public sealed partial class OneCodeToplevel
                 _lastRoundInputTokens = _inputTokens;
                 _shell.SessionContextBar.SetTokens(_inputTokens, _outputTokens);
                 _shell.SessionContextBar.SetContextUsage(_maxContextTokens, _lastRoundInputTokens);
-
-                if (_ctx.RecordCost is { } recordCost)
-                {
-                    var costStr = recordCost();
-                    _shell.AgentStatusBar.SetCost(costStr);
-                }
 
                 // Render terminal reason distinctly
                 switch (reason)
@@ -279,14 +275,14 @@ public sealed partial class OneCodeToplevel
 
         var (title, message) = toolName switch
         {
-            "Bash" or "PowerShell" => BuildShellPrompt(toolName, parsed.Input),
+            "Bash" => BuildShellPrompt(toolName, parsed.Input),
             _ when ToolNames.FileWriteTools.Contains(toolName) => BuildFilePrompt(toolName, parsed.Input),
             _ => BuildGenericPrompt(toolName, parsed.Input),
         };
         return (title, message, true);
     }
 
-    private static (string, string) BuildShellPrompt(string toolName, System.Text.Json.JsonElement input)
+    internal static (string, string) BuildShellPrompt(string toolName, System.Text.Json.JsonElement input)
     {
         var command = GetStringProp(input, "command") ?? "";
         var display = command.Length > 200 ? command[..200] + "\u2026" : command;
@@ -301,7 +297,9 @@ public sealed partial class OneCodeToplevel
             sb.Append("\n>>> 危险：").Append(warning).Append(" <<<");
         sb.Append("\n命令：\n  $ ").Append(display);
 
-        return (warning != null ? "！ 危险命令 !" : "$ Shell 命令", sb.ToString());
+        // 标题使用真实工具名（Bash），与执行后对话列表里的工具行一致——
+        // 旧实现硬编码 "Shell 命令"，审批提示与调用记录对不上。
+        return (warning != null ? "！ 危险命令 !" : $"$ {toolName} 命令", sb.ToString());
     }
 
     private static (string, string) BuildFilePrompt(string toolName, System.Text.Json.JsonElement input)
@@ -335,8 +333,6 @@ public sealed partial class OneCodeToplevel
     /// </summary>
     private static bool IsShellTool(string toolName)
         => toolName.Equals("Bash", StringComparison.OrdinalIgnoreCase)
-        || toolName.Equals("PowerShell", StringComparison.OrdinalIgnoreCase)
-        || toolName.Equals("powershell", StringComparison.OrdinalIgnoreCase)
         || toolName.Equals("bash", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>提取文本前 N 行（用于 Shell 工具输出预览）。</summary>

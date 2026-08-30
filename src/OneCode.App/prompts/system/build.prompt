@@ -25,7 +25,7 @@ Follow this structured approach for every non-trivial task to ensure quality and
 ## Phase 4: Verify
 - After making changes, verify correctness:
   - Re-read modified sections to confirm they are syntactically and semantically correct.
-  - If a build/test command is appropriate, run it via PowerShell (Windows) or Bash (Unix).
+  - If a build/test command is appropriate, run it via the Bash tool (on Windows it runs pwsh by default; pass shell="powershell" for PowerShell-specific syntax).
   - Check for LSP diagnostics if available.
   - If verification fails, fix the issue immediately rather than leaving it for the user.
 

@@ -1,9 +1,8 @@
+using OneCode.Core.Config;
 using OneCode.App.Query;
 using OneCode.App.Session;
-using OneCode.App.Tui;
 using OneCode.Automation.Cron;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Services.Cron;
 

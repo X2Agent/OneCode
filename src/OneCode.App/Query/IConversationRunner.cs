@@ -1,4 +1,3 @@
-using OneCode.App.Tui;
 using OneCode.Core.Build;
 
 namespace OneCode.App.Query;
@@ -18,7 +17,7 @@ public sealed record WorkflowRunRequest(
 /// </summary>
 /// <remarks>
 /// 本接口是断开循环依赖的两步之一：
-/// <c>ChatService → ToolCatalog → CronCreateTool → CronSchedulerService
+/// <c>ChatService → ToolCatalog → CronTool → CronSchedulerService
 /// → ICronJobExecutor → CronJobExecutor → ChatService</c>。
 /// <list type="number">
 /// <item><b>本接口（解耦消费侧）</b>：<c>CronJobExecutor</c> 依赖 <see cref="IConversationRunner"/>
@@ -26,7 +25,7 @@ public sealed record WorkflowRunRequest(
 /// hook 触发、token 统计等交互式职责。当前实现为 <c>ChatService</c>，未来可替换为更精简的
 /// headless executor，只需改 DI 绑定。</item>
 /// <item><b>ToolCatalog 惰性构建（消除构造期根因）</b>：环的根因是 <c>ToolCatalog</c> 构造期
-/// 急切调用 <c>BuildStaticTools</c> 解析全部工具 POCO（含 <c>CronCreateTool</c>），递归回
+/// 急切调用 <c>BuildStaticTools</c> 解析全部工具 POCO（含 <c>CronTool</c>），递归回
 /// <c>ChatService</c>。<c>ToolCatalog</c> 已改为首次访问 <c>Tools</c> 时按需构建，构造图变 DAG，
 /// <c>ChatService</c> 得以恢复正常构造注入 <c>ToolCatalog</c>，无需 service locator。</item>
 /// </list>

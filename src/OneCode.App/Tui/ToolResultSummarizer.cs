@@ -24,7 +24,6 @@ public static class ToolResultSummarizer
             "read" or "readtool" => SummarizeRead(result, toolInput),
             "edit" or "edittool" => SummarizeEdit(result, toolInput),
             "bash" or "bashtool" => SummarizeBash(result, toolInput),
-            "powershell" or "powershelltool" => SummarizePowerShell(result, toolInput),
             "grep" or "greptool" => SummarizeGrep(result, toolInput),
             "glob" or "globtool" => SummarizeGlob(result, toolInput),
             "task" => SummarizeTask(result, toolInput),
@@ -72,21 +71,6 @@ public static class ToolResultSummarizer
         }
 
         // 或者显示输出行数
-        var lines = result.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Length;
-        if (lines > 1)
-            return $"{lines} lines output";
-        return null;
-    }
-
-    private static string? SummarizePowerShell(string result, string? toolInput)
-    {
-        if (!string.IsNullOrEmpty(toolInput))
-        {
-            var cmd = ExtractCommandFromInput(toolInput);
-            if (!string.IsNullOrEmpty(cmd))
-                return Truncate(cmd, 40);
-        }
-
         var lines = result.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Length;
         if (lines > 1)
             return $"{lines} lines output";

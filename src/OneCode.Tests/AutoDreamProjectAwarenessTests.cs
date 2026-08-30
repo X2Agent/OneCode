@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -7,7 +8,6 @@ using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
-using OneCode.Infrastructure.Config;
 using System.Diagnostics;
 using System.Text.Json;
 

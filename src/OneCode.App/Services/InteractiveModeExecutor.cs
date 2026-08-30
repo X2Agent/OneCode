@@ -1,4 +1,4 @@
-using OneCode.Infrastructure.Mcp;
+using OneCode.Core.Mcp;
 
 namespace OneCode.App.Services;
 

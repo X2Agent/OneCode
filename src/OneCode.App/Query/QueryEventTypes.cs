@@ -38,7 +38,6 @@ public sealed record BuildRunStateEvent(
     OneCode.Core.Build.BuildValidationStatus? ValidationStatus = null,
     int ChangedFiles = 0,
     int TurnsCompleted = 0,
-    decimal? EstimatedCost = null,
     int ActiveTasks = 0,
     int BlockedTasks = 0) : QueryEvent
 {
@@ -55,7 +54,6 @@ public sealed record BuildRunStateEvent(
         run.Validations.LastOrDefault()?.Status,
         run.ChangedFiles.Count,
         run.Metrics.TurnsCompleted,
-        run.Metrics.EstimatedCost,
         run.Plan?.Tasks.Count(task => task.Status == OneCode.Core.Build.BuildTaskStatus.InProgress) ?? 0,
         run.Plan?.Tasks.Count(task => task.Status == OneCode.Core.Build.BuildTaskStatus.Pending
             && task.DependsOn.Count > 0) ?? 0);

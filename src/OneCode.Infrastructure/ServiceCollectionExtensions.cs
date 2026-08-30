@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using OneCode.Core.Ai;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Ai;
 using OneCode.Infrastructure.Config;
@@ -50,6 +51,7 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddChatHttpClients(this IServiceCollection services)
     {
         services.AddTransient<OpenAiResponseSanitizingHandler>();
+        services.AddTransient<OpenAiReasoningPassbackHandler>();
         services.AddTransient<OneCodeIdentityHandler>();
 
         services.AddHttpClient(Constants.HttpClientNames.Ollama)
@@ -58,10 +60,13 @@ public static class InfrastructureServiceCollectionExtensions
             .ConfigureHttpClient(static client => client.Timeout = Timeout.InfiniteTimeSpan);
 
         // Handler order: last AddHttpMessageHandler is outermost.
-        // Desired: Identity → Sanitizing → Proxy HttpClientHandler
+        // Desired: Identity → Passback → Sanitizing → Proxy HttpClientHandler
+        // （Passback 在请求侧为 DeepSeek thinking 补写 reasoning_content，
+        // 位于 Sanitizing 外层，不影响响应侧清洗。）
         services.AddHttpClient(Constants.HttpClientNames.OpenAI)
             .ConfigurePrimaryHttpMessageHandler(CreateProxyAwareHandler)
             .AddHttpMessageHandler<OpenAiResponseSanitizingHandler>()
+            .AddHttpMessageHandler<OpenAiReasoningPassbackHandler>()
             .AddHttpMessageHandler<OneCodeIdentityHandler>()
             .ConfigureHttpClient(static client => client.Timeout = Timeout.InfiniteTimeSpan);
 

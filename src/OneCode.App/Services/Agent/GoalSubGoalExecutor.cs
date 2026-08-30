@@ -6,10 +6,13 @@ using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
-using OneCode.Core.IO;
-using OneCode.Core.Lsp;
+
+
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
+
+using OneCode.Core.IO;
+using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Agent;
 

@@ -68,10 +68,7 @@ public sealed record GoalBudgetSnapshot(
     int TotalAttempts,
     long TotalInputTokens,
     long TotalOutputTokens,
-    decimal EstimatedCostUsd,
     DateTimeOffset StartedAt,
-    // Fix-2/N-02：Bind 时记录一次的进程级成本基线；resume 沿用持久化值，禁止二次减 EstimatedCostUsd。0 表示尚未建立。
-    decimal CostBaselineUsd = 0m,
     // Fix-7：仅累计运行区间的墙钟（Paused/离线时间不计入）。零值且无 LastActivityAt 时回退 UtcNow-StartedAt 兼容旧快照。
     TimeSpan AccumulatedElapsed = default,
     // 上次活动时间戳，用于增量累计 AccumulatedElapsed。
@@ -114,7 +111,7 @@ public sealed record GoalRun
     public IReadOnlyList<GoalStepSnapshot> Plan { get; init; } = [];
     public IReadOnlyList<GoalStepExecutionEvidence> Executions { get; init; } = [];
     public bool HasReplanned { get; init; }
-    public GoalBudgetSnapshot Budget { get; init; } = new(0, 0, 0, 0m, DateTimeOffset.UtcNow);
+    public GoalBudgetSnapshot Budget { get; init; } = new(0, 0, 0, DateTimeOffset.UtcNow);
     public IReadOnlyList<GoalGateEvidence> FinalValidation { get; init; } = [];
     public GoalWorkspaceSnapshot? Workspace { get; init; }
     public GoalPublishReceipt? PublishReceipt { get; init; }

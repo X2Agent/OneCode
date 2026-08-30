@@ -1,5 +1,5 @@
 using OneCode.Core.Coordinator;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware.Contracts;
 
@@ -16,7 +16,7 @@ internal static class PipelineSecurityContextBuilder
         PermissionMode permissionMode,
         IHookExecutionService? hook,
         IPermissionChecker? permissionChecker,
-        ICostTracker? costTracker,
+        ITokenLedger? tokenLedger,
         IReadOnlyDictionary<string, PermissionRuleGroup>? rulesBySource = null,
         IReadOnlyDictionary<string, AdditionalWorkingDirectory>? additionalWorkingDirectories = null,
         HashSet<string>? sessionAllowlist = null,
@@ -29,7 +29,7 @@ internal static class PipelineSecurityContextBuilder
         IReadOnlyList<FileEditContract>? behaviorContracts = null,
         EditTransaction? editTransaction = null,
         SessionId? conversationId = null,
-        decimal? maxBudgetUsd = null)
+        long? maxBudgetTokens = null)
         => new(
             WorkingDirectory: workingDirectory,
             PermissionMode: permissionMode,
@@ -46,7 +46,7 @@ internal static class PipelineSecurityContextBuilder
             BehaviorContracts: behaviorContracts,
             EditTransaction: editTransaction,
             PermissionChecker: permissionChecker,
-            CostTracker: costTracker,
+            TokenLedger: tokenLedger,
             ConversationId: conversationId,
-            MaxBudgetUsd: maxBudgetUsd);
+            MaxBudgetTokens: maxBudgetTokens);
 }

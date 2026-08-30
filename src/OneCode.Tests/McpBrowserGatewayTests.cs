@@ -1,7 +1,7 @@
+using OneCode.Core.Mcp;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Tools;
-using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.Tests;
 
@@ -12,8 +12,8 @@ public sealed class McpBrowserGatewayTests
     {
         var ct = TestContext.Current.CancellationToken;
         var mcp = Substitute.For<IMcpConnectionManager>();
-        mcp.GetClient(McpBrowserGateway.DefaultServerName).Returns((McpClient?)null);
-        mcp.GetConnectedClients().Returns(Array.Empty<(string Name, McpClient Client)>());
+        mcp.GetClient(McpBrowserGateway.DefaultServerName).Returns((IMcpClient?)null);
+        mcp.GetConnectedClients().Returns(Array.Empty<(string Name, IMcpClient Client)>());
         mcp.ConnectOneAsync(McpBrowserGateway.DefaultServerName, Arg.Any<CancellationToken>())
             .Returns(System.Threading.Tasks.Task.FromResult(false));
 
@@ -31,8 +31,8 @@ public sealed class McpBrowserGatewayTests
     {
         var ct = TestContext.Current.CancellationToken;
         var mcp = Substitute.For<IMcpConnectionManager>();
-        mcp.GetClient(McpBrowserGateway.DefaultServerName).Returns((McpClient?)null);
-        mcp.GetConnectedClients().Returns(Array.Empty<(string Name, McpClient Client)>());
+        mcp.GetClient(McpBrowserGateway.DefaultServerName).Returns((IMcpClient?)null);
+        mcp.GetConnectedClients().Returns(Array.Empty<(string Name, IMcpClient Client)>());
         mcp.ConnectOneAsync(McpBrowserGateway.DefaultServerName, Arg.Any<CancellationToken>())
             .Returns<System.Threading.Tasks.Task<bool>>(_ => throw new InvalidOperationException("boom"));
 

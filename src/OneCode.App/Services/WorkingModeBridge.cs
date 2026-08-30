@@ -1,7 +1,6 @@
 namespace OneCode.App.Services;
 
 using OneCode.App.Services.PlanMode;
-using OneCode.App.Tui;
 using OneCode.Core.Permissions;
 
 /// <summary>

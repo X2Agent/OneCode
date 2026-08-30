@@ -1,6 +1,9 @@
 using NSubstitute;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
+using OneCode.Infrastructure;
+using OneCode.Core.IO;
+
 
 namespace OneCode.Tests;
 
@@ -34,6 +37,17 @@ public sealed class BashToolTests : IDisposable
         return wd;
     }
 
+    private static IProcessRunner CreateRunner(bool hasPwsh = true)
+    {
+        var runner = Substitute.For<IProcessRunner>();
+        runner.CommandExistsAsync("pwsh")
+            .Returns(Task.FromResult(hasPwsh));
+        return runner;
+    }
+
+    private static BashTool CreateTool(IWorkingDirectoryAccessor wd, IProcessRunner? runner = null)
+        => new(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, runner ?? Substitute.For<IProcessRunner>());
+
     // Input validation
 
     [Theory]
@@ -43,7 +57,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_EmptyOrWhitespaceCommand_ReturnsError(string command)
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync(command, ct: ct);
 
@@ -55,7 +69,7 @@ public sealed class BashToolTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         var missingDir = Path.Combine(_sandboxDir, "does-not-exist");
-        var sut = new BashTool(CreateWd(missingDir), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd(missingDir));
 
         var result = await sut.ExecuteAsync("ls", ct: ct);
 
@@ -69,7 +83,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_TraversalPathInCommand_ReturnsPathError()
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync("cat ../../../outside/secret.txt", ct: ct);
 
@@ -108,7 +122,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_DestructiveSedPattern_ReturnsErrorBeforeExecution()
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync("sed 's/.*/x/' file.txt", ct: ct);
 
@@ -119,7 +133,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_SedInPlaceWithoutBackup_ReturnsWarningBeforeExecution()
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync("sed -i 's/a/b/' file.txt", ct: ct);
 
@@ -133,7 +147,7 @@ public sealed class BashToolTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         // sed -i.bak passes the sed guard; with no real file it will fail at the
         // process level, but the error must NOT be a sed-guard rejection.
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync("sed -i.bak 's/a/b/' nonexistent.txt", ct: ct);
 
@@ -150,7 +164,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_RealEchoCommand_ReturnsEchoedText()
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         var result = await sut.ExecuteAsync("echo hello", ct: ct);
 
@@ -163,7 +177,7 @@ public sealed class BashToolTests : IDisposable
     public async Task ExecuteAsync_RealFailingCommand_ReturnsNonZeroExit()
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = new BashTool(CreateWd(), ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var sut = CreateTool(CreateWd());
 
         // `false` is a bash builtin that exits with code 1; on Windows the
         // BashTool delegates to PowerShell where `exit 1` achieves the same.
@@ -172,5 +186,133 @@ public sealed class BashToolTests : IDisposable
             ct: ct);
 
         result.Content.Should().Contain("Exit code: 1");
+    }
+
+    // PowerShell dialect (shell="powershell") — migrated from the former PowerShellTool
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellMissingWorkingDirectory_ReturnsError()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var missingDir = Path.Combine(_sandboxDir, "does-not-exist");
+        var sut = CreateTool(CreateWd(missingDir), CreateRunner());
+
+        var result = await sut.ExecuteAsync("Get-Process", "powershell", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().StartWith("Error: working directory not found:");
+        result.Content.Should().Contain(missingDir);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellTraversalPathInCommand_ReturnsPathError()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Get-Content positional path is extracted by PowerShellCommandClassifier;
+        // a path that escapes the working directory must be rejected before
+        // any process is started.
+        var sut = CreateTool(CreateWd(), CreateRunner());
+
+        var result = await sut.ExecuteAsync("Get-Content ../../../outside/secret.txt", "powershell", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().StartWith("Error: command references path outside the working directory");
+        result.Content.Should().Contain("../../../outside/secret.txt");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellAbsolutePathOutsideWorkingDir_ReturnsPathError()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var outside = Path.Combine(_sandboxDir, "outside");
+        Directory.CreateDirectory(outside);
+        var sut = CreateTool(CreateWd(), CreateRunner());
+
+        var result = await sut.ExecuteAsync($"Get-Content {outside}/secret.txt", "powershell", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().StartWith("Error: command references path outside the working directory");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellDestructiveCommand_ReturnsFormattedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Remove-Item with a path that exists inside the working dir so we pass
+        // path validation but trigger the destructive-command warning path.
+        // The destructive warning is prepended to the real process output, so we
+        // must run a real command to observe the full pipeline.
+        var runner = new ProcessRunner();
+        var hasPwsh = await runner.CommandExistsAsync("pwsh");
+        if (!OperatingSystem.IsWindows() && !hasPwsh)
+        {
+            Assert.Skip("PowerShell not available on this Unix host");
+        }
+
+        var target = Path.Combine(_projectDir, "victim.txt");
+        await File.WriteAllTextAsync(target, "x", ct);
+        var sut = CreateTool(CreateWd(), runner);
+
+        var result = await sut.ExecuteAsync($"Remove-Item -Force {target}", "powershell", ct: ct);
+
+        // The destructive warning is prepended to the process output. Either the
+        // file was removed (exit 0) or the command was blocked by policy — either
+        // way the warning must appear in the result.
+        result.Content.Should().Contain("[warning]");
+        result.Content.Should().Contain("Command: Remove-Item");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellRealWriteOutputCommand_ReturnsEchoedText()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var runner = new ProcessRunner();
+        var hasPwsh = await runner.CommandExistsAsync("pwsh");
+        if (!OperatingSystem.IsWindows() && !hasPwsh)
+        {
+            Assert.Skip("PowerShell not available — skip smoke test on Unix without pwsh");
+        }
+
+        var sut = CreateTool(CreateWd(), runner);
+
+        var result = await sut.ExecuteAsync("Write-Output hello", "powershell", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("Exit code: 0");
+        result.Content.Should().Contain("hello");
+        result.Content.Should().StartWith("Command: Write-Output hello");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PowerShellRealCommandFailingExitCode_ReturnsNonZeroExit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var runner = new ProcessRunner();
+        var hasPwsh = await runner.CommandExistsAsync("pwsh");
+        if (!OperatingSystem.IsWindows() && !hasPwsh)
+        {
+            Assert.Skip("PowerShell not available on this Unix host");
+        }
+
+        var sut = CreateTool(CreateWd(), runner);
+
+        // 'throw' forces a non-zero exit code and writes to stderr.
+        var result = await sut.ExecuteAsync("throw 'boom'", "powershell", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("Exit code: 1");
+        result.Content.Should().Contain("boom");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnknownShellName_ReturnsError()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var sut = CreateTool(CreateWd());
+
+        var result = await sut.ExecuteAsync("echo hi", "zsh", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("unsupported shell");
     }
 }

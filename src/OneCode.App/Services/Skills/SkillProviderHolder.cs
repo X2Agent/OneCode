@@ -16,7 +16,7 @@ public sealed class SkillProviderHolder : IDisposable
 {
     private volatile AgentSkillsProvider? _current;
 
-    public SkillProviderHolder(AgentSkillsProvider initial) => _current = initial;
+    public SkillProviderHolder(AgentSkillsProvider? initial = null) => _current = initial;
 
     /// <summary>Gets the current provider. May be null briefly during replacement.</summary>
     public AgentSkillsProvider? Current => _current;

@@ -1,14 +1,14 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.Infrastructure.Agent.RunMiddleware;
 
 /// <summary>
 /// Agent Run 级预算守卫中间件 — 在 MAF Agent Run 层执行 <b>pre-execution</b> 预算检查，
-/// 当 <see cref="ICostTracker"/> 累计成本已达到或超过 <c>MaxBudgetUsd</c> 时短路返回错误响应，
-/// 不发起 LLM 调用，从而防止超支后继续消费。
+/// 当 <see cref="ITokenLedger"/> 累计 token（输入 + 输出）已达到或超过 <c>MaxBudgetTokens</c> 时
+/// 短路返回错误响应，不发起 LLM 调用，从而防止失控循环继续消耗。
 ///
 /// <para>
 /// <b>三层中间件定位</b>（MAF 1.13 官方设计）：
@@ -33,10 +33,10 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 /// <b>与 UsageTrackingRunMiddleware 的协作</b>：
 /// <list type="bullet">
 ///   <item>BudgetGuard（外层）：pre-execution 检查 → 短路或放行</item>
-///   <item>UsageTracking（内层）：post-execution 记录 → 写入 ICostTracker</item>
+///   <item>UsageTracking（内层）：post-execution 记录 → 写入 ITokenLedger</item>
 /// </list>
 /// 当 BudgetGuard 放行后，UsageTracking 记录本次 run 的实际 usage；
-/// 下一次 run 时 BudgetGuard 读取更新后的 <see cref="ICostTracker.GetTotalCost"/> 进行检查。
+/// 下一次 run 时 BudgetGuard 读取更新后的 <see cref="ITokenLedger.GetTotalTokens"/> 进行检查。
 /// </para>
 /// </summary>
 public static class BudgetGuardRunMiddleware
@@ -45,18 +45,17 @@ public static class BudgetGuardRunMiddleware
     /// 创建 Agent Run 级预算守卫中间件的 (runFunc, runStreamingFunc) 委托对。
     /// 传给 <see cref="AIAgentBuilder.Use(System.Func{Microsoft.Agents.AI.AIAgent, Microsoft.Agents.AI.AIAgent})"/> 的 Run 中间件重载。
     /// </summary>
-    /// <param name="costTracker">ICostTracker 实例（null 时不执行预算检查）。</param>
-    /// <param name="maxBudgetUsd">预算上限（USD）。null 时不执行预算检查。</param>
+    /// <param name="tokenLedger">ITokenLedger 实例（null 时不执行预算检查）。</param>
+    /// <param name="maxBudgetTokens">token 预算上限（输入 + 输出）。null 时不执行预算检查。</param>
     /// <param name="logger">日志器（可选）。</param>
-    /// <param name="modelId">当前模型 ID（可选，用于检测未定价模型）。</param>
     /// <returns>(runFunc, runStreamingFunc) 委托对。</returns>
     public static (
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, Task<AgentResponse>>,
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, IAsyncEnumerable<AgentResponseUpdate>>
-        ) Create(ICostTracker? costTracker, decimal? maxBudgetUsd, ILogger? logger, string? modelId = null)
+        ) Create(ITokenLedger? tokenLedger, long? maxBudgetTokens, ILogger? logger)
     {
-        // 无 ICostTracker 或无预算上限 → 不执行预算检查（测试/无预算场景）
-        if (costTracker is null || maxBudgetUsd is null)
+        // 无 ITokenLedger 或无预算上限 → 不执行预算检查（测试/无预算场景）
+        if (tokenLedger is null || maxBudgetTokens is null)
         {
             return (PassThroughRun, PassThroughRunStreaming);
 
@@ -71,45 +70,40 @@ public static class BudgetGuardRunMiddleware
                 => agent.RunStreamingAsync(messages, session, options, ct);
         }
 
-        var budgetLimit = maxBudgetUsd.Value;
-        var unpricedWarned = false;
+        var budgetLimit = maxBudgetTokens.Value;
         return (RunCore, RunStreamingCore);
 
-        async Task<AgentResponse> RunCore(
+        Task<AgentResponse> RunCore(
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, CancellationToken ct)
         {
-            var currentCost = costTracker.GetTotalCost();
-            if (currentCost >= budgetLimit)
+            var currentTokens = tokenLedger.GetTotalTokens();
+            if (currentTokens >= budgetLimit)
             {
-                var message = FormatBudgetExceededMessage(currentCost, budgetLimit);
+                var message = FormatBudgetExceededMessage(currentTokens, budgetLimit);
                 logger?.LogWarning(
-                    "BudgetGuard: pre-execution budget exceeded — ${Current:F4} >= ${Limit:F4}, short-circuiting agent run",
-                    currentCost, budgetLimit);
-                return CreateBudgetExceededResponse(message);
+                    "BudgetGuard: pre-execution budget exceeded — {Current:N0} >= {Limit:N0} tokens, short-circuiting agent run",
+                    currentTokens, budgetLimit);
+                return Task.FromResult(CreateBudgetExceededResponse(message));
             }
 
-            WarnIfUnpriced(costTracker, modelId, budgetLimit, logger, ref unpricedWarned);
-
-            return await agent.RunAsync(messages, session, options, ct).ConfigureAwait(false);
+            return agent.RunAsync(messages, session, options, ct);
         }
 
         async IAsyncEnumerable<AgentResponseUpdate> RunStreamingCore(
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, [EnumeratorCancellation] CancellationToken ct)
         {
-            var currentCost = costTracker.GetTotalCost();
-            if (currentCost >= budgetLimit)
+            var currentTokens = tokenLedger.GetTotalTokens();
+            if (currentTokens >= budgetLimit)
             {
-                var message = FormatBudgetExceededMessage(currentCost, budgetLimit);
+                var message = FormatBudgetExceededMessage(currentTokens, budgetLimit);
                 logger?.LogWarning(
-                    "BudgetGuard: pre-execution budget exceeded (streaming) — ${Current:F4} >= ${Limit:F4}, short-circuiting agent run",
-                    currentCost, budgetLimit);
+                    "BudgetGuard: pre-execution budget exceeded (streaming) — {Current:N0} >= {Limit:N0} tokens, short-circuiting agent run",
+                    currentTokens, budgetLimit);
                 yield return CreateBudgetExceededUpdate(message);
                 yield break;
             }
-
-            WarnIfUnpriced(costTracker, modelId, budgetLimit, logger, ref unpricedWarned);
 
             await foreach (var update in agent.RunStreamingAsync(messages, session, options, ct).ConfigureAwait(false))
             {
@@ -121,33 +115,10 @@ public static class BudgetGuardRunMiddleware
     /// <summary>
     /// 构造预算超支提示消息。
     /// </summary>
-    internal static string FormatBudgetExceededMessage(decimal currentCost, decimal budgetLimit)
-        => $"[Budget Exceeded] Cumulative cost ${currentCost:F4} has reached the budget limit ${budgetLimit:F4}. "
-           + "Agent run was not executed to prevent overspending. "
-           + "Increase --max-budget-usd or reset the session to continue.";
-
-    /// <summary>
-    /// 当模型未配置定价时发出一次性警告。
-    /// 未定价模型的费用始终为零，BudgetGuard 的预算熔断对该模型静默失效，
-    /// 需提醒用户通过 settings.json 或 ModelCatalog 配置定价。
-    /// </summary>
-    private static void WarnIfUnpriced(
-        ICostTracker costTracker, string? modelId, decimal budgetLimit,
-        ILogger? logger, ref bool warned)
-    {
-        if (warned || string.IsNullOrEmpty(modelId) || logger is null)
-            return;
-
-        if (!costTracker.HasPricing(modelId))
-        {
-            warned = true;
-            logger.LogWarning(
-                "BudgetGuard: model {ModelId} has no pricing configured — cost will be recorded as zero, " +
-                "budget limit ${Limit:F4} cannot be enforced for this model. " +
-                "Configure pricing via settings.json or ensure the model exists in ModelCatalog.",
-                modelId, budgetLimit);
-        }
-    }
+    internal static string FormatBudgetExceededMessage(long currentTokens, long budgetLimit)
+        => $"[Budget Exceeded] Cumulative token usage {currentTokens:N0} (input + output) has reached the budget limit {budgetLimit:N0}. "
+           + "Agent run was not executed to prevent runaway usage. "
+           + "Increase --max-budget-tokens or reset the session to continue.";
 
     /// <summary>
     /// 创建预算超支的短路 <see cref="AgentResponse"/>。

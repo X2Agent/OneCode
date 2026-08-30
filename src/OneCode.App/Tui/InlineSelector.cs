@@ -114,23 +114,40 @@ public sealed class InlineSelector
     {
         var lines = useInformationRequestCard
             ? QuestionCardRenderer.RenderHeader(title, prompt, viewWidth: viewWidth)
-            : RenderStandardHeader(title, prompt);
+            : RenderStandardHeader(title, prompt, viewWidth);
 
-        // Options — bullet + label + description on same line
+        // Options — bullet + label + description on same line.
+        // 选项行是可选择的单行，折行会破坏行-选项映射：超宽时按显示宽度
+        // 截断（描述优先让位，隐藏内容存在，省略号语义成立）。
+        var rowBudget = Math.Max(8, viewWidth - 4);
         for (var i = 0; i < options.Count; i++)
         {
             var isSelected = i == selectedIndex;
             var bullet = isSelected ? TuiGlyphs.RoleBullet : TuiGlyphs.Pending;
             var labelColor = isSelected ? TuiPalette.Accent : TuiPalette.FgPrimary;
 
+            var label = options[i].Label;
+            var desc = options[i].Description;
+            if (TextWidthHelper.GetDisplayWidth(label) > rowBudget)
+            {
+                label = TextWidthHelper.TruncateByWidth(label, rowBudget);
+                desc = null;
+            }
+            else if (desc is { } d
+                     && 2 + TextWidthHelper.GetDisplayWidth(label) + 2 + TextWidthHelper.GetDisplayWidth(d) > rowBudget)
+            {
+                desc = TextWidthHelper.TruncateByWidth(
+                    d, Math.Max(1, rowBudget - TextWidthHelper.GetDisplayWidth(label) - 4));
+            }
+
             var segs = new List<LineSegment>
             {
                 new("  ", TuiPalette.BgPrimary),
                 new($"{bullet} ", isSelected ? TuiPalette.Accent : TuiPalette.FgMuted),
-                new(options[i].Label, labelColor),
+                new(label, labelColor),
             };
 
-            if (options[i].Description is { Length: > 0 } desc)
+            if (desc is { Length: > 0 })
                 segs.Add(new($"  {desc}", TuiPalette.FgMuted));
 
             lines.Add(FormattedLine.FromSegments(segs.ToArray()));
@@ -153,7 +170,7 @@ public sealed class InlineSelector
         return lines;
     }
 
-    private static List<FormattedLine> RenderStandardHeader(string title, string? prompt)
+    private static List<FormattedLine> RenderStandardHeader(string title, string? prompt, int viewWidth)
     {
         var lines = new List<FormattedLine>
         {
@@ -165,7 +182,11 @@ public sealed class InlineSelector
             }),
         };
         if (!string.IsNullOrWhiteSpace(prompt))
-            lines.Add(FormattedLine.Plain($"  {prompt}", TuiPalette.FgPrimary));
+        {
+            var available = Math.Max(8, viewWidth - 2);
+            foreach (var wrapped in TextWidthHelper.WordWrapByWidth(prompt, available))
+                lines.Add(FormattedLine.Plain($"  {wrapped}", TuiPalette.FgPrimary));
+        }
         lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
         return lines;
     }

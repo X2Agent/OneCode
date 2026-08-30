@@ -1,10 +1,10 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OneCode.App.Commands;
 using OneCode.App.Logging;
 using OneCode.App.Services;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App;
 

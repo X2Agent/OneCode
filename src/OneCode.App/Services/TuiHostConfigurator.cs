@@ -1,9 +1,9 @@
+using OneCode.Core.Mcp;
+using OneCode.Core.Config;
 using System.Text;
 using OneCode.App.Commands;
 using OneCode.App.Tui;
 using OneCode.Core.PlanMode;
-using OneCode.Infrastructure.Config;
-using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Services;
 

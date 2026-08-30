@@ -48,7 +48,7 @@ public sealed class CronSchedulerService : BackgroundService
 
         // Always create the directory so the watcher can observe it. If the directory
         // doesn't exist at startup, FileSystemWatcher silently does nothing — durable
-        // jobs created later via CronCreateTool would never trigger ReloadJobs.
+        // jobs created later via CronTool would never trigger ReloadJobs.
         Directory.CreateDirectory(_cronDir);
 
         _watcher = new FileSystemWatcher(_cronDir, "*.json")
@@ -64,7 +64,7 @@ public sealed class CronSchedulerService : BackgroundService
 
     public IReadOnlyList<CronJobEntry> GetJobs()
     {
-        // Snapshot under the lock: callers (CronListTool, CronCommand) iterate the
+        // Snapshot under the lock: callers (CronTool, CronCommand) iterate the
         // returned collection, and concurrent ReloadJobs / AddJob / TryRemoveJob
         // mutations would otherwise throw InvalidOperationException on List<T>
         // enumeration. AsReadOnly() wraps the live list, not a copy, so it is NOT

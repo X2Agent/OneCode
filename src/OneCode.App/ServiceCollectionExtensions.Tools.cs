@@ -1,3 +1,4 @@
+using OneCode.Core.Mcp;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
@@ -6,10 +7,10 @@ using OneCode.App.Services.Context;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Mcp;
 using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Search;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Automation;
-using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App;
 
@@ -17,6 +18,7 @@ public static partial class ServiceCollectionExtensions
 {
     public static IServiceCollection RegisterToolServices(this IServiceCollection services)
     {
+        services.AddSingleton<ITextSearchService, TextSearchService>();
         services.AddSingleton<WebFetchCache>();
         services.AddSingleton<LspDiagnosticRegistry>();
         services.AddSingleton<EnhancedLspService>();
@@ -62,11 +64,10 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<ISessionWorkingDirectory>(sp => sp.GetRequiredService<SessionManager>());
 
         services.AddTool<BashTool>("Bash", nameof(BashTool.ExecuteAsync), ToolRisk.Dynamic,
-            aliases: ["shell", "sh"], concurrency: false, searchHint: "execute a Unix/Linux shell command");
+            aliases: ["shell", "sh", "ps"], concurrency: false,
+            searchHint: "execute a shell command (bash or PowerShell via shell parameter)");
         services.AddSingleton<ConversationShellExecutorManager>();
         services.AddSingleton<IShellExecutorCleanup>(sp => sp.GetRequiredService<ConversationShellExecutorManager>());
-        services.AddTool<PowerShellTool>("PowerShell", nameof(PowerShellTool.ExecuteAsync), ToolRisk.Dynamic,
-            aliases: ["ps"], concurrency: false, searchHint: "execute a PowerShell command");
 
         services.AddTool<ReadTool>("Read", nameof(ReadTool.ReadAsync), ToolRisk.ReadOnly, searchHint: "read file contents with offset/limit");
         services.AddTool<WriteTool>("Write", nameof(WriteTool.WriteAsync), ToolRisk.Destructive, concurrency: false, searchHint: "create or overwrite a file",
@@ -132,12 +133,11 @@ public static partial class ServiceCollectionExtensions
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed | ToolCategory.PlanExclusive);
 
         // Approved Build runs must persist structured progress and verification evidence.
+        // CompletePlanExecution is auto-derived by the orchestration layer (see PlanExecutionTool)
+        // when every step reaches a terminal state — no longer exposed to the LLM.
         services.AddTool<PlanExecutionTool>("UpdatePlanStep", nameof(PlanExecutionTool.UpdatePlanStepAsync), ToolRisk.Safe,
             searchHint: "update approved plan step execution status", loadPolicy: ToolLoadPolicy.Always,
             keywords: ["plan", "step", "progress"]);
-        services.AddTool<PlanExecutionTool>("CompletePlanExecution", nameof(PlanExecutionTool.CompletePlanExecutionAsync), ToolRisk.Safe,
-            searchHint: "finish approved plan execution and start verification", loadPolicy: ToolLoadPolicy.Always,
-            keywords: ["plan", "complete", "verify"]);
         services.AddTool<PlanExecutionTool>("CompletePlanVerification", nameof(PlanExecutionTool.CompletePlanVerificationAsync), ToolRisk.Safe,
             searchHint: "persist approved plan verification evidence", loadPolicy: ToolLoadPolicy.Always,
             keywords: ["plan", "verification", "evidence"]);

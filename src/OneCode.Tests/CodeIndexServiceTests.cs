@@ -1,5 +1,6 @@
 using OneCode.Infrastructure;
 
+
 namespace OneCode.Tests;
 
 /// <summary>
@@ -304,7 +305,7 @@ public sealed class CodeIndexServiceTests : IDisposable
         return path;
     }
 
-    private IReadOnlyList<OneCode.Infrastructure.Abstractions.CodeSymbolMatch> Search(
+    private IReadOnlyList<OneCode.Core.Lsp.CodeSymbolMatch> Search(
         string query, int maxResults = 50) => _svc.Search(query, maxResults);
 }
 

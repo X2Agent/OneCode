@@ -11,7 +11,7 @@ public sealed partial class ResourceInvariant : ISafetyInvariant
     /// <summary>Shell 类工具名称。</summary>
     private static readonly HashSet<string> ShellTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Bash", "PowerShell", "Shell",
+        "Bash", "Shell",
     };
 
     public ValueTask<InvariantCheckResult> CheckAsync(

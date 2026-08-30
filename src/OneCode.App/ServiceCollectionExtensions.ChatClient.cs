@@ -1,9 +1,10 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
+using OneCode.Core.Ai;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Ai;
-using OneCode.Infrastructure.Config;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App;

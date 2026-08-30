@@ -1,5 +1,5 @@
+using OneCode.Core.Config;
 using OneCode.App.Session;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Tui;
 

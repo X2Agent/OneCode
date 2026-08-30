@@ -1,7 +1,7 @@
+using OneCode.Core.Config;
 using OneCode.App.Services.Compact;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 using IAppStateAccessor = OneCode.Core.Domain.IAppStateAccessor;
 
 namespace OneCode.App.Services.Streaming;

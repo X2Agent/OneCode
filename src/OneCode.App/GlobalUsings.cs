@@ -7,6 +7,8 @@
 // Note: Tui-specific global usings are in Tui/TuiGlobalUsings.cs
 
 global using Microsoft.Extensions.Logging;
+global using OneCode.App.Modes;
+global using OneCode.Core.Workflows;
 global using OneCode.Core.Commands;
 global using OneCode.Core.Domain;
 global using OneCode.Core.Hooks;

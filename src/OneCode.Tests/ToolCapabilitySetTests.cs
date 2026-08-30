@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
-using OneCode.App.Tui;
 using OneCode.Core.Tools;
 using NSubstitute;
 

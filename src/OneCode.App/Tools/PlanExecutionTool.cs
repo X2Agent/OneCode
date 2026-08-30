@@ -56,6 +56,28 @@ public sealed class PlanExecutionTool(
                 projectedTask,
                 execution,
                 $"{result.Workflow.Id}:{result.Workflow.Version}:{stepId}");
+
+            // CompletePlanExecution 已收敛为编排层自动推导：所有 step 达到终态
+            // （且 Completed 均有 evidence）时自动 Executing → Verifying。
+            if (result.Workflow.State == PlanWorkflowState.Executing && IsAllStepsTerminal(result.Workflow))
+            {
+                var completion = await workflowService.CompleteExecutionAsync(new CompletePlanExecutionCommand(
+                    Guid.NewGuid().ToString("N"),
+                    context.SessionId,
+                    result.Workflow.Id,
+                    context.RunId,
+                    BuildExecutionSummary(result.Workflow)), ct).ConfigureAwait(false);
+                publisher.Publish(completion.Workflow);
+                return ToolResult.JsonSuccess(new
+                {
+                    status = "verification_required",
+                    planId = completion.Workflow.Id.ToString(),
+                    stepId,
+                    stepStatus = parsed.Value.ToString(),
+                    workflowVersion = completion.Workflow.Version,
+                });
+            }
+
             publisher.Publish(result.Workflow);
             return ToolResult.JsonSuccess(new
             {
@@ -72,32 +94,20 @@ public sealed class PlanExecutionTool(
         }
     }
 
-    [Description("Move an approved plan from Executing to Verifying after every step has a terminal status and evidence.")]
-    public async Task<ToolResult> CompletePlanExecutionAsync(
-        [Description("Summary of implemented changes and completed steps.")] string summary,
-        CancellationToken ct = default)
+    private static bool IsAllStepsTerminal(PlanWorkflow workflow) =>
+        workflow.StepExecutions.Count > 0
+        && workflow.StepExecutions.All(step =>
+            step.Status is PlanStepExecutionStatus.Completed or PlanStepExecutionStatus.Skipped
+            && (step.Status != PlanStepExecutionStatus.Completed || !string.IsNullOrWhiteSpace(step.Evidence)));
+
+    /// <summary>从各 step 证据拼出执行摘要（自动推导 CompleteExecution 时替代 LLM 提供的 summary）。</summary>
+    private static string BuildExecutionSummary(PlanWorkflow workflow)
     {
-        var context = await ResolveContextAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var result = await workflowService.CompleteExecutionAsync(new CompletePlanExecutionCommand(
-                Guid.NewGuid().ToString("N"),
-                context.SessionId,
-                context.Workflow.Id,
-                context.RunId,
-                summary), ct).ConfigureAwait(false);
-            publisher.Publish(result.Workflow);
-            return ToolResult.JsonSuccess(new
-            {
-                status = "verification_required",
-                planId = result.Workflow.Id.ToString(),
-                workflowVersion = result.Workflow.Version,
-            });
-        }
-        catch (Exception ex) when (ex is PlanTransitionException or PlanValidationException)
-        {
-            return ToolResult.Error(ex.Message);
-        }
+        var lines = workflow.StepExecutions
+            .Where(step => step.Status == PlanStepExecutionStatus.Completed && !string.IsNullOrWhiteSpace(step.Evidence))
+            .Select(step => $"{step.StepId}: {step.Evidence}");
+        var summary = string.Join("\n", lines);
+        return summary.Length <= 2000 ? summary : summary[..2000];
     }
 
     [Description("Finish plan verification. A passing result requires concrete build/test/check evidence.")]
@@ -154,23 +164,25 @@ public sealed class PlanExecutionTool(
             StringComparer.Ordinal)
             ?? throw new PlanTransitionException(
                 $"Plan '{workflow.Id}' has no approved step definitions for Build task reconciliation.");
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var ordered = new List<string>(definitions.Count);
 
-        void Visit(string id)
+        // 执行引用的 step 必须已定义（与原 Visit 抛错语义一致）
+        foreach (var execution in workflow.StepExecutions)
         {
-            if (!visited.Add(id))
-                return;
-            if (!definitions.TryGetValue(id, out var definition))
-                throw new PlanTransitionException($"Approved plan step '{id}' was not found during reconciliation.");
-            foreach (var dependency in definition.DependsOn)
-                Visit(dependency);
-            ordered.Add(id);
+            if (!definitions.ContainsKey(execution.StepId))
+                throw new PlanTransitionException(
+                    $"Approved plan step '{execution.StepId}' was not found during reconciliation.");
         }
 
-        foreach (var execution in workflow.StepExecutions)
-            Visit(execution.StepId);
-        return ordered;
+        var result = WorkflowTopology.DepthFirstOrder(
+            workflow.StepExecutions,
+            execution => execution.StepId,
+            execution => definitions.TryGetValue(execution.StepId, out var definition)
+                ? definition.DependsOn
+                : []);
+        if (result.MissingDependencies is { Count: > 0 })
+            throw new PlanTransitionException(
+                $"Approved plan step '{result.MissingDependencies[0]}' was not found during reconciliation.");
+        return result.Ordered.Select(execution => execution.StepId).ToArray();
     }
 
     private TaskItem GetLinkedBuildTask(SessionId sessionId, string stepId)

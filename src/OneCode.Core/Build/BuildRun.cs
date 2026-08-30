@@ -238,10 +238,9 @@ public sealed record BuildRunMetrics(
     int ToolCalls,
     long InputTokens,
     long OutputTokens,
-    decimal? EstimatedCost,
     TimeSpan? Duration)
 {
-    public static readonly BuildRunMetrics Empty = new(0, 0, 0, 0, null, null);
+    public static readonly BuildRunMetrics Empty = new(0, 0, 0, 0, null);
 }
 
 /// <summary>

@@ -2,8 +2,11 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Build;
 using OneCode.Core.Goals;
+
+
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
+
 namespace OneCode.App.Services.GoalMode;
 
 internal interface IGoalCompletionService

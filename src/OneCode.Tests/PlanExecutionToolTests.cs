@@ -35,6 +35,14 @@ public sealed class PlanExecutionToolTests
                 Arg.Any<UpdatePlanStepCommand>(),
                 Arg.Any<CancellationToken>())
             .Returns(new PlanTransitionResult(updatedWorkflow));
+        workflowService.CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(updatedWorkflow with
+            {
+                State = PlanWorkflowState.Verifying,
+                Version = updatedWorkflow.Version + 1,
+            }));
         var tasks = new TaskService();
         var task = tasks.CreateTask(
             "Implement",
@@ -153,6 +161,14 @@ public sealed class PlanExecutionToolTests
                 Arg.Any<UpdatePlanStepCommand>(),
                 Arg.Any<CancellationToken>())
             .Returns(new PlanTransitionResult(workflow));
+        workflowService.CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(workflow with
+            {
+                State = PlanWorkflowState.Verifying,
+                Version = workflow.Version + 1,
+            }));
         var tasks = new TaskService();
         var task = tasks.CreateTask(
             "Implement",
@@ -212,6 +228,14 @@ public sealed class PlanExecutionToolTests
                 Arg.Any<UpdatePlanStepCommand>(),
                 Arg.Any<CancellationToken>())
             .Returns(new PlanTransitionResult(updatedWorkflow));
+        workflowService.CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(updatedWorkflow with
+            {
+                State = PlanWorkflowState.Verifying,
+                Version = updatedWorkflow.Version + 1,
+            }));
         var tasks = new TaskService();
         var task = tasks.CreateTask(
             "Implement",
@@ -243,10 +267,150 @@ public sealed class PlanExecutionToolTests
         }
     }
 
+    private static TaskItem CreateMappedTask(
+        TaskService tasks,
+        SessionId sessionId,
+        string buildRunId,
+        string stepId)
+        => tasks.CreateTask(
+            stepId,
+            stepId,
+            status: TaskStatus.InProgress,
+            metadata: new TaskMetadata(
+                ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["BuildPlanTaskId"] = stepId,
+                }),
+            conversationId: sessionId.ToString(),
+            buildRunId: buildRunId);
+
+    [Fact]
+    public async Task UpdatePlanStepAsync_LastTerminalStep_AutoDerivesVerificationTransition()
+    {
+        var sessionId = SessionId.NewId();
+        const string runId = "approved-build-run";
+        const string buildRunId = "br-test";
+        var workflow = CreateWorkflow(sessionId, runId, "implementation", "verification");
+        var verifyingWorkflow = workflow with
+        {
+            State = PlanWorkflowState.Verifying,
+            Version = 2,
+            StepExecutions =
+            [
+                workflow.StepExecutions[0] with
+                {
+                    Status = PlanStepExecutionStatus.Completed,
+                    Evidence = "impl evidence",
+                },
+                workflow.StepExecutions[1] with
+                {
+                    Status = PlanStepExecutionStatus.Completed,
+                    Evidence = "test evidence",
+                },
+            ],
+        };
+        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
+        workflowService.UpdateStepAsync(
+                Arg.Any<UpdatePlanStepCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(verifyingWorkflow with
+            {
+                State = PlanWorkflowState.Executing,
+                Version = 1,
+            }));
+        workflowService.CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(verifyingWorkflow));
+        var tasks = new TaskService();
+        CreateMappedTask(tasks, sessionId, buildRunId, "implementation");
+        var verificationTask = CreateMappedTask(tasks, sessionId, buildRunId, "verification");
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        ToolActivationContext.CurrentConversationId = sessionId.ToString();
+        OneCodeAgentRunContext.CurrentRunId = runId;
+        OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
+        try
+        {
+            var result = await sut.UpdatePlanStepAsync(
+                "verification",
+                "completed",
+                "test evidence",
+                ct: TestContext.Current.CancellationToken);
+
+            result.IsError.Should().BeFalse();
+            result.Content.Should().Contain("verification_required");
+            await workflowService.Received(1).CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            ToolActivationContext.CurrentConversationId = null;
+            OneCodeAgentRunContext.CurrentRunId = null;
+            OneCodeAgentRunContext.CurrentBuildRunId = null;
+        }
+    }
+
+    [Fact]
+    public async Task UpdatePlanStepAsync_StepsStillIncomplete_DoesNotAutoDerive()
+    {
+        var sessionId = SessionId.NewId();
+        const string runId = "approved-build-run";
+        const string buildRunId = "br-test";
+        var workflow = CreateWorkflow(sessionId, runId, "implementation", "verification");
+        var updatedWorkflow = workflow with
+        {
+            Version = 2,
+            StepExecutions =
+            [
+                workflow.StepExecutions[0] with
+                {
+                    Status = PlanStepExecutionStatus.Completed,
+                    Evidence = "impl evidence",
+                },
+                workflow.StepExecutions[1],
+            ],
+        };
+        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
+        workflowService.UpdateStepAsync(
+                Arg.Any<UpdatePlanStepCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(updatedWorkflow));
+        var tasks = new TaskService();
+        CreateMappedTask(tasks, sessionId, buildRunId, "implementation");
+        CreateMappedTask(tasks, sessionId, buildRunId, "verification");
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        ToolActivationContext.CurrentConversationId = sessionId.ToString();
+        OneCodeAgentRunContext.CurrentRunId = runId;
+        OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
+        try
+        {
+            var result = await sut.UpdatePlanStepAsync(
+                "implementation",
+                "completed",
+                "impl evidence",
+                ct: TestContext.Current.CancellationToken);
+
+            result.IsError.Should().BeFalse();
+            result.Content.Should().Contain("step_updated");
+            await workflowService.DidNotReceive().CompleteExecutionAsync(
+                Arg.Any<CompletePlanExecutionCommand>(),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            ToolActivationContext.CurrentConversationId = null;
+            OneCodeAgentRunContext.CurrentRunId = null;
+            OneCodeAgentRunContext.CurrentBuildRunId = null;
+        }
+    }
+
     private static PlanWorkflow CreateWorkflow(
         SessionId sessionId,
         string runId,
-        string stepId)
+        params string[] stepIds)
     {
         var now = DateTimeOffset.UtcNow;
         var created = PlanWorkflow.Create(sessionId);
@@ -262,7 +426,7 @@ public sealed class PlanExecutionToolTests
                 SessionId = sessionId,
                 Revision = 1,
                 Markdown = "# Approved plan",
-                Steps = [new PlanStepDefinition
+                Steps = stepIds.Select(stepId => new PlanStepDefinition
                 {
                     Id = stepId,
                     Title = stepId,
@@ -271,17 +435,17 @@ public sealed class PlanExecutionToolTests
                     AcceptanceCriteria = ["done"],
                     DependsOn = [],
                     Risk = PlanStepRisk.Low,
-                }],
+                }).ToArray(),
                 ContentHash = "sha256-test",
                 ApprovedBy = "user",
                 ApprovedAt = now,
             },
-            StepExecutions = [new PlanStepExecution
+            StepExecutions = stepIds.Select(stepId => new PlanStepExecution
             {
                 StepId = stepId,
                 Status = PlanStepExecutionStatus.InProgress,
                 UpdatedAt = now,
-            }],
+            }).ToArray(),
             UpdatedAt = now,
         };
     }

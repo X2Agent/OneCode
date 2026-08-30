@@ -1,8 +1,11 @@
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Coordinator;
+
+
+using OneCode.Infrastructure.Agent;
+
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
-using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Coordinator;
 

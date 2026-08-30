@@ -1,8 +1,10 @@
 using OneCode.App.Tui;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Product;
-using OneCode.Core.IO;
+
 using OneCode.Core.Coordinator;
+
+using OneCode.Core.IO;
 
 namespace OneCode.App.Services;
 
@@ -118,7 +120,6 @@ public sealed class TuiContextFactory(
             GetKeybindingWarnings: () => tuiDeps.KeybindingLoader.CachedWarnings,
             TrustService: tuiDeps.TrustService,
             ImagePipeline: tuiDeps.ImagePipeline,
-            RecordCost: () => tuiDeps.CostTracker.FormatCost(),
             Clipboard: clipboard,
             GetToolNames: () => catalog.ToolCatalog.GetVisibleToolNames(),
             GetShowThinking: () => catalog.AppState.Current.ShowThinking,

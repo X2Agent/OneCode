@@ -203,10 +203,15 @@ public static partial class ChatBlockRenderers
         string? markdown = null,
         string? documentPath = null)
     {
+        var headerPrefix = "  \U0001f4cb  ";
+        var titleBudget = Math.Max(8, viewWidth - TextWidthHelper.GetDisplayWidth(headerPrefix) - 1);
+        var displayTitle = TextWidthHelper.GetDisplayWidth(title) > titleBudget
+            ? TextWidthHelper.TruncateByWidth(title, titleBudget)
+            : title;
         var list = new List<FormattedLine>
         {
             FormattedLine.Plain("", TuiPalette.BgPrimary),
-            FormattedLine.WithBackground($"  \U0001f4cb  {title}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader),
+            FormattedLine.WithBackground($"{headerPrefix}{displayTitle}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader),
             FormattedLine.Plain("", TuiPalette.BgPrimary),
         };
         if (!string.IsNullOrWhiteSpace(documentPath))
@@ -249,7 +254,12 @@ public static partial class ChatBlockRenderers
             };
             if (string.IsNullOrWhiteSpace(s.Assignee))
             {
-                list.Add(FormattedLine.Plain($"  {num} {s.Label}", lc));
+                // 无归属标签的步骤行同样按显示宽度截断——长步骤名直出会溢出视口。
+                var plainBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(num) - 1);
+                var plainLabel = TextWidthHelper.GetDisplayWidth(s.Label) > plainBudget
+                    ? TextWidthHelper.TruncateByWidth(s.Label, plainBudget)
+                    : s.Label;
+                list.Add(FormattedLine.Plain($"  {num} {plainLabel}", lc));
             }
             else
             {

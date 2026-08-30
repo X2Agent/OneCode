@@ -1,7 +1,7 @@
-namespace OneCode.App.Tui;
+namespace OneCode.App.Modes;
 
 /// <summary>
-/// Four working modes supported by the TUI.
+/// Four working modes supported by the app.
 ///
 /// Design-spec §1.1:
 /// - <see cref="Build"/>: Agent directly analyzes and executes the request.
@@ -63,7 +63,7 @@ public sealed class WorkingModeController
         return Mode;
     }
 
-    /// <summary>Uppercase short tag displayed by <see cref="AgentStatusBar"/>.</summary>
+    /// <summary>Uppercase short tag displayed by <see cref="OneCode.App.Tui.AgentStatusBar"/>.</summary>
     public string ModeTag => Mode switch
     {
         WorkingMode.Build => "BUILD",

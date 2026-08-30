@@ -1,6 +1,6 @@
+using OneCode.Core.Config;
 using System.Text;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Commands;
 

@@ -114,11 +114,4 @@ internal static class MessageRenderer
     /// </summary>
     private static string FormatResultContent(string result)
         => OneCode.Core.Tools.DisplayJsonSerializer.NormalizeForDisplay(result);
-
-    /// <summary>按显示宽度截断文本（处理 CJK 双宽字符）。</summary>
-    public static string TruncateVisual(string text, int maxWidth)
-    {
-        if (maxWidth <= 0) return "";
-        return TextWidthHelper.TruncateByWidth(text, maxWidth);
-    }
 }

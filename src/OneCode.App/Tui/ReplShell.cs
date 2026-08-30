@@ -43,8 +43,9 @@ public sealed partial class ReplShell : View
     private int _lastShellWidth = -1;
     private int _lastShellHeight = -1;
 
+    // 预留 1 列滚动条，与 MessageListView 绘制期 contentWidth 对齐（见 ChatTranscriptView.ContentWidth）。
     private int ContentWidth => TuiSpacing.GetContentColumnWidth(
-        _transcript.Viewport.Width > 0 ? _transcript.Viewport.Width : Viewport.Width);
+        Math.Max(0, (_transcript.Viewport.Width > 0 ? _transcript.Viewport.Width : Viewport.Width) - 1));
 
     public ChatInputView ChatInput => _chatInput;
     public ChatTranscriptView Transcript => _transcript;

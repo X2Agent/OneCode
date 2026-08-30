@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace OneCode.Infrastructure.Mcp;
+namespace OneCode.Core.Mcp;
 
 /// <summary>
 /// MCP connection manager abstraction.
@@ -31,9 +31,9 @@ public interface IMcpConnectionManager : IAsyncDisposable
     IReadOnlyList<string> GetServerNames();
 
     /// <summary>Lookup a connected client by server name (null if not connected).</summary>
-    McpClient? GetClient(string name);
+    IMcpClient? GetClient(string name);
 
-    IReadOnlyList<(string Name, McpClient Client)> GetConnectedClients();
+    IReadOnlyList<(string Name, IMcpClient Client)> GetConnectedClients();
 
     IReadOnlyList<(string Name, McpServerDefinition Definition)> GetServerDefinitions();
 

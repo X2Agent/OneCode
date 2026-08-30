@@ -1,4 +1,4 @@
-using OneCode.Infrastructure.Config;
+using OneCode.Core.Config;
 using IAppStateAccessor = OneCode.Core.Domain.IAppStateAccessor;
 
 namespace OneCode.App.Services;

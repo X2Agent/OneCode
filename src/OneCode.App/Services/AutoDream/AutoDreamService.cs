@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Hosting;
@@ -6,7 +7,6 @@ using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Invariants;
 using System.Threading.Channels;
@@ -30,7 +30,7 @@ namespace OneCode.App.Services.AutoDream;
 /// </list>
 /// <para>不写入 AGENTS.md——那是人工维护的规范，自动改写会污染它。</para>
 /// </remarks>
-public sealed partial class AutoDreamService : BackgroundService
+public sealed class AutoDreamService : BackgroundService
 {
     // 内部常量（非用户配置，实现细节）
 
@@ -49,17 +49,8 @@ public sealed partial class AutoDreamService : BackgroundService
     /// <summary>AutoDream Agent 最大工具调用次数（防止无限循环）。</summary>
     private const int MaxToolCalls = 30;
 
-    /// <summary>整合锁文件最大存活时间：超过则视为僵尸锁，可安全抢占。</summary>
-    private static readonly TimeSpan StaleLockTimeout = TimeSpan.FromHours(2);
-
     /// <summary>AutoDream 允许使用的工具白名单（仅只读工具，用于扫描会话目录）。</summary>
     private static readonly string[] AllowedTools = ["Read", "Glob", "Grep"];
-
-    // 状态文件名
-
-    private const string ConsolidationLockFile = "autodream.lock";
-    private const string LastConsolidatedAtFile = "last_consolidated_at";
-    private const string LastSessionScanAtFile = "last_session_scan_at";
 
     // 依赖
 
@@ -87,6 +78,7 @@ public sealed partial class AutoDreamService : BackgroundService
     private readonly string _globalConfigDir;
     
     private readonly AutoDreamSessionScanner _sessionScanner;
+    private readonly AutoDreamStateStore _stateStore;
 
     public AutoDreamService(
         ILogger<AutoDreamService> logger,
@@ -106,6 +98,7 @@ public sealed partial class AutoDreamService : BackgroundService
         _wdAccessor = storage.WorkingDirectory;
         _globalConfigDir = globalConfigDirOverride ?? PathsHelper.GetUserConfigDir();
         _sessionScanner = new AutoDreamSessionScanner(logger, _globalConfigDir);
+        _stateStore = new AutoDreamStateStore(logger, GetProjectStateDir);
     }
 
     // BackgroundService 主循环
@@ -209,7 +202,7 @@ public sealed partial class AutoDreamService : BackgroundService
         }
 
         // 获取跨进程锁（FileStream 独占，原子获取）
-        var lockStream = TryAcquireConsolidationLock();
+        var lockStream = _stateStore.TryAcquireConsolidationLock();
         if (lockStream is null)
         {
             _logger.LogDebug("AutoDream consolidation lock not acquired (another process is running)");
@@ -528,46 +521,13 @@ public sealed partial class AutoDreamService : BackgroundService
 
     // 状态持久化
 
-    internal DateTimeOffset GetLastConsolidatedAt() => ReadStateFile(LastConsolidatedAtFile);
+    internal DateTimeOffset GetLastConsolidatedAt() => _stateStore.GetLastConsolidatedAt();
 
-    internal void SetLastConsolidatedAt(DateTimeOffset time) =>
-        WriteStateFile(LastConsolidatedAtFile, time.ToString("O", CultureInfo.InvariantCulture));
+    internal void SetLastConsolidatedAt(DateTimeOffset time) => _stateStore.SetLastConsolidatedAt(time);
 
-    internal DateTimeOffset GetLastSessionScanAt() => ReadStateFile(LastSessionScanAtFile);
+    internal DateTimeOffset GetLastSessionScanAt() => _stateStore.GetLastSessionScanAt();
 
-    internal void SetLastSessionScanAt(DateTimeOffset time) =>
-        WriteStateFile(LastSessionScanAtFile, time.ToString("O", CultureInfo.InvariantCulture));
-
-    private DateTimeOffset ReadStateFile(string fileName)
-    {
-        var filePath = GetStateFilePath(fileName);
-        if (!File.Exists(filePath)) return DateTimeOffset.MinValue;
-        try
-        {
-            var text = File.ReadAllText(filePath).Trim();
-            return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal, out var dt) ? dt : DateTimeOffset.MinValue;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to read state from {FilePath}", filePath);
-            return DateTimeOffset.MinValue;
-        }
-    }
-
-    private void WriteStateFile(string fileName, string content)
-    {
-        var filePath = GetStateFilePath(fileName);
-        try
-        {
-            EnsureConfigDir();
-            File.WriteAllText(filePath, content);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to write state file {FilePath}", filePath);
-        }
-    }
+    internal void SetLastSessionScanAt(DateTimeOffset time) => _stateStore.SetLastSessionScanAt(time);
 
     internal int CountNewSessionsSince(DateTimeOffset since) =>
         _sessionScanner.CountNewSessionsSince(since, GetCurrentProjectRoot());
@@ -575,60 +535,6 @@ public sealed partial class AutoDreamService : BackgroundService
     internal bool IsSessionForProject(string sessionFile, string projectRoot) =>
         _sessionScanner.IsSessionForProject(sessionFile, projectRoot);
 
-
-    // 跨进程文件锁（原子获取）
-
-    /// <summary>
-    /// 原子地获取跨进程整合锁。
-    /// 使用 FileStream + FileShare.None，多进程同时调用时仅一个成功。
-    /// 僵尸锁（超 2 小时）可安全抢占。返回的 FileStream 持有锁，Dispose 即释放。
-    /// </summary>
-    private FileStream? TryAcquireConsolidationLock()
-    {
-        var lockPath = GetStateFilePath(ConsolidationLockFile);
-        EnsureConfigDir();
-
-        try
-        {
-            var stream = new FileStream(lockPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            using (var writer = new StreamWriter(stream, leaveOpen: true))
-            {
-                writer.Write(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-                writer.Flush();
-            }
-            stream.Seek(0, SeekOrigin.Begin);
-            return stream;
-        }
-        catch (IOException)
-        {
-            // 文件被其他进程独占——检查是否为僵尸锁
-            try
-            {
-                var content = File.ReadAllText(lockPath).Trim();
-                if (DateTimeOffset.TryParse(content, CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal, out var lockTime))
-                {
-                    if (DateTimeOffset.UtcNow - lockTime > StaleLockTimeout)
-                    {
-                        _logger.LogWarning("AutoDream stale lock (age {Age:F1}h), forcing takeover",
-                            (DateTimeOffset.UtcNow - lockTime).TotalHours);
-                        File.Delete(lockPath);
-                        return TryAcquireConsolidationLock();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to inspect stale lock at {LockPath}", lockPath);
-            }
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to acquire consolidation lock at {LockPath}", lockPath);
-            return null;
-        }
-    }
 
     // Prompt 构建
 
@@ -669,19 +575,4 @@ public sealed partial class AutoDreamService : BackgroundService
 
     internal string GetStateFilePath(string fileName) =>
         Path.Combine(GetProjectStateDir(), fileName);
-
-    private void EnsureConfigDir()
-    {
-        var dir = GetProjectStateDir();
-        if (!Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-    }
 }
-
-/// <summary>Agent 输出的单条增量变更（待合并写入 MEMORY.md）。</summary>
-internal sealed record ConsolidationChange(
-    string Action,
-    string Scope,
-    string Key,
-    string? Value,
-    int? TtlHours);

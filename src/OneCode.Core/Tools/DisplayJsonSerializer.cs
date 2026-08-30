@@ -1,4 +1,5 @@
 using System.Text.Encodings.Web;
+using System.Text.Json.Nodes;
 
 namespace OneCode.Core.Tools;
 
@@ -65,12 +66,50 @@ public static class DisplayJsonSerializer
                 }
 
                 return JsonSerializer.Serialize(
-                    root.RootElement,
+                    RewriteForDisplay(root.RootElement),
                     writeIndented ? IndentedOptions : CompactOptions);
             }
         }
 
         return DecodeUnicodeEscapes(value);
+    }
+
+    /// <summary>
+    /// 重建 JSON 树以供人读显示：字符串字段若整体是一个 JSON 文档则解包展开为结构
+    /// （如工具把结果 JSON 序列化成字符串塞进 content 字段），否则解码其中的
+    /// \uXXXX 转义，保证中文等非 ASCII 字符直接可读。其余值类型保持原样。
+    /// </summary>
+    private static JsonNode? RewriteForDisplay(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var obj = new JsonObject();
+                foreach (var property in element.EnumerateObject())
+                    obj[property.Name] = RewriteForDisplay(property.Value);
+                return obj;
+
+            case JsonValueKind.Array:
+                var array = new JsonArray();
+                foreach (var item in element.EnumerateArray())
+                    array.Add(RewriteForDisplay(item));
+                return array;
+
+            case JsonValueKind.String:
+                var text = element.GetString() ?? string.Empty;
+                var trimmed = text.TrimStart();
+                if (trimmed.Length > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+                    && TryParseJson(trimmed, out var nested))
+                {
+                    using (nested)
+                        return RewriteForDisplay(nested.RootElement);
+                }
+
+                return JsonValue.Create(DecodeUnicodeEscapes(text));
+
+            default:
+                return JsonNode.Parse(element.GetRawText());
+        }
     }
 
     private static bool TryParseJson(string value, out JsonDocument document)

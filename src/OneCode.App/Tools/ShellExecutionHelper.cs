@@ -54,7 +54,7 @@ public static class ShellExecutionHelper
 
     /// <summary>
     /// Converts a <see cref="ShellResult"/> + optional warning into a <see cref="ToolResult"/>.
-    /// Shared by BashTool and PowerShellTool for both local and SSH execution paths.
+    /// Shared by BashTool (both dialects) for local and SSH execution paths.
     /// </summary>
     public static ToolResult ToToolResult(ShellResult shellResult, string command, string? warning = null)
     {
@@ -72,7 +72,7 @@ public static class ShellExecutionHelper
 
     /// <summary>
     /// Executes a shell command via SSH using <see cref="SshShellExecutor"/>.
-    /// Shared by BashTool and PowerShellTool — eliminates the duplicated
+    /// Shared by the shell tool — eliminates the duplicated
     /// <c>ExecuteViaSshAsync</c> private method from both tools.
     /// </summary>
     public static async Task<ToolResult> ExecuteViaSshAsync(

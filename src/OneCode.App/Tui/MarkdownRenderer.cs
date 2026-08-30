@@ -39,7 +39,7 @@ internal static partial class MarkdownRenderer
         switch (block)
         {
             case HeadingBlock heading:
-                RenderHeading(heading, lines);
+                RenderHeading(heading, lines, viewWidth);
                 break;
 
             case FencedCodeBlock code:
@@ -68,7 +68,7 @@ internal static partial class MarkdownRenderer
                 break;
 
             case HtmlBlock html:
-                RenderHtmlBlock(html, lines);
+                RenderHtmlBlock(html, lines, viewWidth);
                 break;
 
             case Table table:
@@ -85,7 +85,7 @@ internal static partial class MarkdownRenderer
         }
     }
 
-    private static void RenderHeading(HeadingBlock heading, List<ConvLine> lines)
+    private static void RenderHeading(HeadingBlock heading, List<ConvLine> lines, int viewWidth)
     {
         var text = ExtractInlineText(heading.Inline);
         var prefix = heading.Level switch
@@ -95,7 +95,10 @@ internal static partial class MarkdownRenderer
             _ => "  ",
         };
         var role = heading.Level <= 2 ? LineRole.System : LineRole.Assistant;
-        lines.Add(new ConvLine(role, $"{prefix}{text}"));
+        // 标题与正文同规则按视口宽度换行——长标题直出会被绘制层裁掉尾部。
+        var available = Math.Max(10, viewWidth - prefix.Length);
+        foreach (var ln in WordWrap(text, maxWidth: available))
+            lines.Add(new ConvLine(role, $"{prefix}{ln}"));
     }
 
     private static void RenderQuote(QuoteBlock quote, List<ConvLine> lines, int viewWidth)
@@ -130,14 +133,17 @@ internal static partial class MarkdownRenderer
             lines.Add(new ConvLine(LineRole.Assistant, $"{prefix}{ln}"));
     }
 
-    private static void RenderHtmlBlock(HtmlBlock html, List<ConvLine> lines)
+    private static void RenderHtmlBlock(HtmlBlock html, List<ConvLine> lines, int viewWidth)
     {
         var slice = html.Lines;
         var text = slice.ToString();
+        var available = Math.Max(10, viewWidth - 2);
         foreach (var ln in text.Replace("\r\n", "\n").Split('\n'))
         {
-            if (!string.IsNullOrEmpty(ln))
-                lines.Add(new ConvLine(LineRole.Assistant, $"  {ln}"));
+            if (string.IsNullOrEmpty(ln))
+                continue;
+            foreach (var wrapped in WordWrap(ln, maxWidth: available))
+                lines.Add(new ConvLine(LineRole.Assistant, $"  {wrapped}"));
         }
     }
 

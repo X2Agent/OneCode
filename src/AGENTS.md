@@ -333,17 +333,19 @@ public void DoWork() {
 #### 4.1 IOptions\<T> 与 Keyed Services
 
 - **所有配置注入必须使用 `IOptions<TOptions>` 或 `IOptionsMonitor<TOptions>`**，不直接注入裸 POCO
-- **多实现注册**（如多个 `IHookExecutor`）使用 .NET 8+ Keyed Services：
+- **多实现注册**（如多个 `IHookExecutor`）默认使用 `IEnumerable<T>` 注入——适用于"遍历全部实现"的场景（如 Hook 执行器按 Type 分发）：
   ```csharp
-  services.AddKeyedSingleton<IHookExecutor, CommandHookExecutor>(HookType.Command);
-  services.AddKeyedSingleton<IHookExecutor, NotificationHookExecutor>(HookType.Notification);
-  services.AddKeyedSingleton<IHookExecutor, HttpHookExecutor>(HookType.Http);
+  services.AddSingleton<IHookExecutor, CommandHookExecutor>();
+  services.AddSingleton<IHookExecutor, NotificationHookExecutor>();
+  services.AddSingleton<IHookExecutor, HttpHookExecutor>();
+  // 注入时：遍历全部实现
+  public HookExecutionService(IEnumerable<IHookExecutor> executors, ...) { }
+  ```
+- **Keyed Services**（.NET 8+）仅在需要"按 Key 显式取指定实现"时使用，不作默认要求：
+  ```csharp
+  services.AddKeyedSingleton<IExchangeClient, BinanceClient>(MarketNames.Binance);
   // 注入时：
-  public HookExecutionService(
-      [FromKeyedServices(HookType.Command)] IHookExecutor commandExecutor,
-      [FromKeyedServices(HookType.Notification)] IHookExecutor notificationExecutor,
-      [FromKeyedServices(HookType.Http)] IHookExecutor httpExecutor,
-      ...) { }
+  public SomeService([FromKeyedServices(MarketNames.Binance)] IExchangeClient client) { }
   ```
 
 ### 5. 错误处理
@@ -553,7 +555,7 @@ public sealed class PermissionCheckerTests
 
 ### 必须遵守（OWASP Top 10 缓解措施）
 
-1. **命令注入防护** — `BashTool`/`PowerShellTool` 不得使用字符串拼接构造命令
+1. **命令注入防护** — `BashTool`（含 powershell 方言）不得使用字符串拼接构造命令
    ```csharp
    // ✅ 正确：通过 ProcessStartInfo.ArgumentList 传参
    var psi = new ProcessStartInfo("bash") { ArgumentList = { "-c", userCommand } };
@@ -753,7 +755,7 @@ var maxTurns = options.MaxTurns ?? 100;  // ← 为什么默认 100？
 | 环境变量名 | [Core.Constants.EnvVars](OneCode.Core/Constants.cs) | `OneCodeApiKey`, `OneCodeBaseUrl`, `OneCodeModel` |
 | 配置 JSON 字段名 | [Core.Constants.ConfigKeys](OneCode.Core/Constants.cs) | `ApiKey`, `Model`, `Provider`, `MaxTurns` |
 | Model Provider 标识 | [Core.Constants.ModelProviders](OneCode.Core/Constants.cs) | `Anthropic`, `OpenAI`, `Ollama` |
-| 会话默认值 | [Core.Constants.Session](OneCode.Core/Constants.cs) | `MaxTurnsDefault`, `MaxBudgetUsdDefault` |
+| 会话默认值 | [Core.Constants.Session](OneCode.Core/Constants.cs) | `MaxTurnsDefault`, `MaxBudgetTokensDefault` |
 | Permission 模式 | [Core.Constants.PermissionModes](OneCode.Core/Constants.cs) | `Default`, `BypassPermissions`, `Plan` |
 | 消息类型 | [Core.Constants.MessageTypes](OneCode.Core/Constants.cs) | `User`, `Assistant`, `Result` |
 | HttpClient 注册名 | [Infrastructure.Constants.HttpClientNames](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |

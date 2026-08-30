@@ -1,9 +1,9 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using OneCode.App.Services.Hooks;
 using OneCode.Core.Hooks;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests;
 

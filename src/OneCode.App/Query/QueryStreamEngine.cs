@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services;
 using OneCode.App.Services.Hooks;
@@ -7,9 +8,7 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
-using OneCode.App.Tui;
 using OneCode.Core.Build;
-using OneCode.Infrastructure.Config;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -23,7 +22,7 @@ namespace OneCode.App.Query;
 /// （与 <see cref="BuildRunGate"/> 相同的组合根模式），不单独注册 DI，也绝不反向引用
 /// <see cref="ChatService"/>。可变流式状态收敛在 <see cref="StreamingSession"/>。
 /// </summary>
-internal sealed partial class QueryStreamEngine
+internal sealed class QueryStreamEngine
 {
     private readonly ILogger _logger;
     private readonly IMainAgentRunner _mainAgentRunner;
@@ -37,6 +36,10 @@ internal sealed partial class QueryStreamEngine
     private readonly ISessionToolSetManager _sessionToolSetManager;
     private readonly IToolCapabilityResolver _toolCapabilityResolver;
     private readonly BuildRunGate _buildRunGate;
+    private readonly TranscriptPersistence _transcriptPersistence;
+    private readonly ToolAssembler _toolAssembler;
+    private readonly BuildPreambleRunner _buildPreambleRunner;
+    private readonly HookDispatcher _hookDispatcher;
 
     /// <summary>Latest cache-safe snapshot for sub-agent spawning; owned here so the facade can delegate.</summary>
     public CacheSafeParams? LastCacheSafeParams { get; private set; }
@@ -82,6 +85,11 @@ internal sealed partial class QueryStreamEngine
         _tokenUsageTracker = observability.TokenUsageTracker;
         _tokenBreakdownEstimator = observability.TokenBreakdownEstimator;
         _notifierService = observability.NotifierService;
+        _transcriptPersistence = new TranscriptPersistence(session.SessionManager, logger);
+        _toolAssembler = new ToolAssembler(
+            _toolCatalog, _configManager, _sessionToolSetManager, _toolCapabilityResolver, _logger);
+        _buildPreambleRunner = new BuildPreambleRunner(_buildRunGate, _toolAssembler);
+        _hookDispatcher = new HookDispatcher(_hookExecutionService, _configManager, _notifierService);
     }
 
     /// <summary>
@@ -114,7 +122,7 @@ internal sealed partial class QueryStreamEngine
 
         // UserPromptSubmit hook：在 LoadHistoryAsync 之前触发——被阻断的 prompt 不进入运行循环、
         // 也不落会话历史（exit code 2 阻断；AdditionalContexts 以 user 消息并入本轮输入）。
-        var promptHook = await FireHookAsync(
+        var promptHook = await _hookDispatcher.FireHookAsync(
             HookEvent.UserPromptSubmit,
             sessionId,
             workingDirectory,
@@ -142,7 +150,7 @@ internal sealed partial class QueryStreamEngine
         }
 
         var capabilities = _toolCapabilityResolver.Resolve(workingMode);
-        var localTools = AssembleTools(userPrompt, capabilities, conversationId);
+        var localTools = _toolAssembler.AssembleTools(userPrompt, capabilities, conversationId);
 
         var agentRunId = Guid.NewGuid().ToString("N");
         var request = new QueryStreamRequest(
@@ -153,7 +161,7 @@ internal sealed partial class QueryStreamEngine
             WorkingMode: workingMode,
             FileChangeCallback: fileChangeCallback);
 
-        await foreach (var e in WithActivationContextAsync(
+        await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
             conversationId?.ToString(), capabilities, agentRunId,
             () => StreamCoreAsync(request, ct), ct).ConfigureAwait(false))
         {
@@ -170,7 +178,7 @@ internal sealed partial class QueryStreamEngine
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var capabilities = _toolCapabilityResolver.Resolve(request.WorkingMode);
-        var localTools = AssembleTools(request.Instruction, capabilities, request.SessionId);
+        var localTools = _toolAssembler.AssembleTools(request.Instruction, capabilities, request.SessionId);
 
         var streamRequest = new QueryStreamRequest(
             request.SystemPrompt,
@@ -191,7 +199,7 @@ internal sealed partial class QueryStreamEngine
             FileChangeCallback: null,
             PrescribedBuildPlan: request.PrescribedBuildPlan);
 
-        await foreach (var e in WithActivationContextAsync(
+        await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
             request.SessionId.ToString(), capabilities, request.RunId,
             () => StreamCoreAsync(streamRequest, ct), ct).ConfigureAwait(false))
         {
@@ -214,43 +222,12 @@ internal sealed partial class QueryStreamEngine
             userPrompt);
     }
 
-    /// <summary>
-    /// Sets the ambient activation context around a deferred stream so ToolSearch/动态激活
-    /// only sees the current run's capability boundary, restoring previous values in finally —
-    /// cancellation, error yield-break and consumer abandonment all skip the success tail.
-    /// </summary>
-    private static async IAsyncEnumerable<QueryEvent> WithActivationContextAsync(
-        string? sessionKey,
-        ToolCapabilitySet capabilities,
-        string runId,
-        Func<IAsyncEnumerable<QueryEvent>> streamFactory,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var previousConversationId = ToolActivationContext.CurrentConversationId;
-        var previousCapabilities = ToolActivationContext.CurrentCapabilities;
-        var previousRunId = OneCodeAgentRunContext.CurrentRunId;
-        ToolActivationContext.CurrentConversationId = sessionKey;
-        ToolActivationContext.CurrentCapabilities = capabilities;
-        OneCodeAgentRunContext.CurrentRunId = runId;
-        try
-        {
-            await foreach (var item in streamFactory().ConfigureAwait(false))
-                yield return item;
-        }
-        finally
-        {
-            OneCodeAgentRunContext.CurrentRunId = previousRunId;
-            ToolActivationContext.CurrentCapabilities = previousCapabilities;
-            ToolActivationContext.CurrentConversationId = previousConversationId;
-        }
-    }
-
     private async IAsyncEnumerable<QueryEvent> StreamCoreAsync(
         QueryStreamRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var preambleState = new BuildPreambleState();
-        await foreach (var gateEvent in EnsureBuildRunPreambleAsync(request, preambleState, ct).ConfigureAwait(false))
+        await foreach (var gateEvent in _buildPreambleRunner.EnsureBuildRunPreambleAsync(request, preambleState, ct).ConfigureAwait(false))
             yield return gateEvent;
         if (preambleState.EarlyDone)
             yield break;
@@ -284,7 +261,7 @@ internal sealed partial class QueryStreamEngine
                     request.AgentRunId,
                     request.IncludeNextPrompt,
                     _logger,
-                    name => TryAutoActivateUnknownTool(name, request.LocalTools));
+                    name => _toolAssembler.TryAutoActivateUnknownTool(name, request.LocalTools));
                 var options = BuildAgentRunOptions(request) with
                 {
                     // 首轮用原始输入；纠偏轮以阻断反馈重入同一 MAF session（增量 user 消息）。
@@ -332,13 +309,13 @@ internal sealed partial class QueryStreamEngine
                 // 跨纠偏轮聚合文本 / 轮次 / 用量，并逐轮持久化 transcript
                 aggregatedText.Append(session.FinalText);
                 aggregatedTurns += session.TurnCount;
-                aggregatedUsage = SumUsage(aggregatedUsage, session.FinalUsage);
-                await PersistTranscriptAsync(
+                aggregatedUsage = QueryStreamHelpers.SumUsage(aggregatedUsage, session.FinalUsage);
+                await _transcriptPersistence.PersistAsync(
                     request, session, session.FinalText, session.FinalUsage, ct).ConfigureAwait(false);
 
                 // Stop hook：终因提前解析，TerminalReason 同时进入 payload 与 matcher 值
-                outcome = ResolveTerminalOutcome(session, options, runResult, session.FinalText);
-                var stopResult = await FireHookAsync(
+                outcome = QueryStreamHelpers.ResolveTerminalOutcome(session, options, runResult, session.FinalText);
+                var stopResult = await _hookDispatcher.FireHookAsync(
                     HookEvent.Stop,
                     request.SessionId,
                     request.WorkingDirectory,
@@ -423,19 +400,6 @@ internal sealed partial class QueryStreamEngine
     /// <summary>Stop hook 连续阻断上限——超过后降级为警告并照常终结（防死循环）。</summary>
     private const int MaxStopCorrections = 3;
 
-    /// <summary>聚合跨纠偏轮的 TokenUsage（左侧为 null 时直接返回右侧）。</summary>
-    private static TokenUsage SumUsage(TokenUsage? left, TokenUsage right) =>
-        left is null
-            ? right
-            : new TokenUsage(
-                left.InputTokens + right.InputTokens,
-                left.OutputTokens + right.OutputTokens,
-                left.CacheReadTokens + right.CacheReadTokens,
-                left.CacheWriteTokens + right.CacheWriteTokens,
-                left.TotalCostUsd is null && right.TotalCostUsd is null
-                    ? null
-                    : (left.TotalCostUsd ?? 0m) + (right.TotalCostUsd ?? 0m));
-
     private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)
     {
         return new MainAgentRunOptions
@@ -448,7 +412,7 @@ internal sealed partial class QueryStreamEngine
             WorkingDirectory = request.WorkingDirectory,
             // 优先从 IConfigManager.Current.Effective.MaxTurns 动态读取（支持运行时 /config 修改），
             // 回退到构造函数参数。
-            MaxTurns = ResolveMaxTurns(),
+            MaxTurns = _toolAssembler.ResolveMaxTurns(),
             EnableThinking = request.ThinkingBudget > 0,
             ThinkingBudgetTokens = request.ThinkingBudget ?? 0,
             Tools = request.LocalTools.Cast<AITool>().ToList(),
@@ -457,11 +421,10 @@ internal sealed partial class QueryStreamEngine
             FileChangeCallback = request.FileChangeCallback,
             ConversationId = request.ConversationId,
             AgentRunId = request.AgentRunId,
-            // 从 IConfigManager.Current.Effective.MaxBudgetUsd 动态读取。
-            // AppSettings.MaxBudgetUsd 是 double，MainAgentRunOptions.MaxBudgetUsd 是 decimal?，需转换。
-            MaxBudgetUsd = ResolveMaxBudgetUsd(),
+            // 从 IConfigManager.Current.Effective.MaxBudgetTokens 动态读取（支持运行时 /config 修改）。
+            MaxBudgetTokens = _toolAssembler.ResolveMaxBudgetTokens(),
             // Notification hook：权限审批挂起时在 TUI 审批请求下发前触发（matcher=permission_prompt）
-            OnPermissionPrompt = OnPermissionPromptHook(request),
+            OnPermissionPrompt = _hookDispatcher.OnPermissionPromptHook(request),
         };
     }
 
@@ -501,7 +464,7 @@ internal sealed partial class QueryStreamEngine
     private async Task OnRunFailedAsync(QueryStreamRequest request, Exception runException, CancellationToken ct)
     {
         var errorCategory = HookStopFailureClassifier.Classify(runException);
-        await FireHookAsync(
+        await _hookDispatcher.FireHookAsync(
             HookEvent.StopFailure,
             request.SessionId,
             request.WorkingDirectory,
@@ -512,7 +475,7 @@ internal sealed partial class QueryStreamEngine
                 p.ErrorCategory = errorCategory;
                 p.UserMessage = runException.Message;
             }).ConfigureAwait(false);
-        await NotifyAsync("OneCode 任务执行失败", runException.Message, ct).ConfigureAwait(false);
+        await _hookDispatcher.NotifyAsync("OneCode 任务执行失败", runException.Message, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -537,7 +500,7 @@ internal sealed partial class QueryStreamEngine
             session.ToolBatchCollector.HasOpenBatch,
             ct).ConfigureAwait(false);
 
-        await NotifyAsync(
+        await _hookDispatcher.NotifyAsync(
             "OneCode 任务执行完成",
             finalText.Length > 200 ? finalText[..200] + "…" : finalText,
             ct).ConfigureAwait(false);
@@ -559,48 +522,6 @@ internal sealed partial class QueryStreamEngine
         UpdateCacheSafeParams(request, request.LocalTools);
     }
 
-    private async Task PersistTranscriptAsync(
-        QueryStreamRequest request,
-        StreamingSession session,
-        string finalText,
-        TokenUsage finalUsage,
-        CancellationToken ct)
-    {
-        try
-        {
-            if (request.ConversationId is { } completedConversationId)
-            {
-                if (session.ToolBatchCollector.CompletedBatches.Count > 0)
-                {
-                    await _sessionManager.AppendCompletedToolBatchesAsync(
-                            completedConversationId,
-                            session.ToolBatchCollector.CompletedBatches,
-                            ct)
-                        .ConfigureAwait(false);
-                }
-
-                if (session.ToolBatchCollector.HasOpenBatch)
-                {
-                    _logger.LogWarning(
-                        "Dropping incomplete tool batch for conversation {SessionId}, run {RunId}",
-                        completedConversationId,
-                        request.AgentRunId);
-                }
-
-                await _sessionManager.AppendAssistantMessageAsync(
-                        completedConversationId,
-                        finalText,
-                        finalUsage,
-                        ct)
-                    .ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist assistant transcript for session {SessionId}", request.SessionId);
-        }
-    }
-
     private void RecordUsage(
         QueryStreamRequest request,
         StreamingSession session,
@@ -613,34 +534,6 @@ internal sealed partial class QueryStreamEngine
         var breakdown = _tokenBreakdownEstimator.Estimate(
             request.SystemPrompt, toolsForBreakdown, messagesForBreakdown, session.TotalInputTokens);
         _tokenUsageTracker.Record(finalUsage, breakdown);
-    }
-
-    private static TerminalOutcomeState ResolveTerminalOutcome(
-        StreamingSession session,
-        MainAgentRunOptions options,
-        MainAgentRunResult? runResult,
-        string finalText)
-    {
-        // Compute real terminal reason: combine runner result with turn-limit detection.
-        var outcome = new TerminalOutcomeState
-        {
-            Reason = runResult?.TerminalReason ?? BuildTerminalReason.Completed,
-            TransactionRolledBack = runResult?.TransactionRolledBack ?? false,
-            ValidationFailureSummary = runResult?.ValidationFailureSummary,
-        };
-
-        // If the agent didn't explicitly signal a terminal reason, check turn limit.
-        if (outcome.Reason == BuildTerminalReason.Completed && session.TurnCount >= options.MaxTurns)
-            outcome.Reason = BuildTerminalReason.TurnLimitReached;
-
-        // Detect budget exceeded from final text (BudgetGuard middleware short-circuits with a text marker).
-        if (outcome.Reason == BuildTerminalReason.Completed
-            && finalText.Contains("[Budget Exceeded]", StringComparison.OrdinalIgnoreCase))
-        {
-            outcome.Reason = BuildTerminalReason.BudgetExceeded;
-        }
-
-        return outcome;
     }
 
     /// <summary>
@@ -665,37 +558,21 @@ internal sealed partial class QueryStreamEngine
         if (reloaded.State == BuildRunState.Completed)
             yield return new BuildRunCompletedEvent(BuildRunGate.CreateBuildRunResult(reloaded, finalText));
     }
-}
 
-/// <summary>
-/// Parameter object for one streaming run through <see cref="QueryStreamEngine.StreamCoreAsync"/>
-/// — converges the former 17-parameter core signature into named, self-documenting fields.
-/// </summary>
-internal sealed record QueryStreamRequest(
-    string SystemPrompt,
-    string ModelId,
-    int? ThinkingBudget,
-    SessionId? SessionId,
-    string? WorkingDirectory,
-    SessionId? ConversationId,
-    string UserPrompt,
-    bool IsMultimodal,
-    ChatMessage? LastUserMessage,
-    IReadOnlyList<ChatMessage>? HistoryMessages,
-    bool IncludeNextPrompt,
-    IReadOnlyList<AIFunction> LocalTools,
-    string AgentRunId,
-    bool ControlledExecution,
-    WorkingMode WorkingMode,
-    Action<FileChange>? FileChangeCallback,
-    BuildPlan? PrescribedBuildPlan = null);
+    private void UpdateCacheSafeParams(QueryStreamRequest request, IReadOnlyList<AIFunction> localTools)
+    {
+        // 使用 localTools 的冻结快照——子代理通过 CacheSafeParams.Tools 获取工具列表，
+        // 必须是独立副本而非共享可变引用（SessionToolSet 在后续轮次可能继续追加工具）。
+        var toolList = localTools.Cast<AITool>().ToList();
 
-/// <summary>Mutable terminal-reason carrier rewritten by the durable BuildRun reload.</summary>
-internal sealed class TerminalOutcomeState
-{
-    public required BuildTerminalReason Reason { get; set; }
-
-    public bool TransactionRolledBack { get; set; }
-
-    public string? ValidationFailureSummary { get; set; }
+        LastCacheSafeParams = new CacheSafeParams
+        {
+            SystemPrompt = request.SystemPrompt,
+            ModelId = request.ModelId,
+            ThinkingBudget = request.ThinkingBudget,
+            Tools = toolList.Count > 0 ? toolList : null,
+            ToolCapabilities = ToolActivationContext.CurrentCapabilities,
+            Metadata = new Dictionary<string, object?> { ["turn"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }
+        };
+    }
 }

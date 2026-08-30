@@ -80,7 +80,7 @@ public static class StateMachineMiddleware
                 DateTimeOffset.UtcNow,
                 sw.Elapsed));
 
-            if (toolName is "Bash" or "PowerShell")
+            if (toolName is "Bash")
                 stateBag.ResetEditsSinceLastBuild();
 
             // 3-strike guidance injection (Main path only).

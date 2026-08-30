@@ -1,8 +1,8 @@
+using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Services.AutoDream;
 

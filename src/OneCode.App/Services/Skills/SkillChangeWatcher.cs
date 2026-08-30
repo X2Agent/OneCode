@@ -48,7 +48,21 @@ public sealed class SkillChangeWatcher : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         SetupWatchers();
+        await InitializeProviderAsync().ConfigureAwait(false);
         await ProcessChangesAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    private async Task InitializeProviderAsync()
+    {
+        try
+        {
+            _holder.Replace(await _providerFactory().ConfigureAwait(false));
+            _logger.LogInformation("AgentSkillsProvider initialized (including MCP skills)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize AgentSkillsProvider");
+        }
     }
 
     private void SetupWatchers()

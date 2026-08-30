@@ -35,20 +35,6 @@ public sealed class ModelCatalog
                     context = ReadInt(contextProp);
                 }
 
-                ModelCostInfo? cost = null;
-                if (modelValue.TryGetProperty("cost", out var costProp))
-                {
-                    var input = ReadDecimal(costProp, "input");
-                    var output = ReadDecimal(costProp, "output");
-                    if (input > 0 || output > 0)
-                    {
-                        cost = new ModelCostInfo(
-                            input, output,
-                            ReadDecimal(costProp, "cache_read"),
-                            ReadDecimal(costProp, "cache_write"));
-                    }
-                }
-
                 var supportsAttachment = modelValue.TryGetProperty("attachment", out var attachProp)
                     && attachProp.ValueKind == System.Text.Json.JsonValueKind.True;
 
@@ -82,10 +68,10 @@ public sealed class ModelCatalog
                         reasoningOptions = opts;
                 }
 
-                if (context <= 0 && cost is null) continue;
+                if (context <= 0) continue;
 
                 var fullId = $"{providerId}/{modelId}";
-                var entry = new ModelEntry(fullId, context, cost, supportsAttachment,
+                var entry = new ModelEntry(fullId, context, supportsAttachment,
                     supportsReasoning, reasoningOptions);
 
                 // "anthropic/claude-sonnet-4-20250514" → entry（精确覆盖）
@@ -108,18 +94,6 @@ public sealed class ModelCatalog
     /// <summary>Returns the reasoning options for the model (e.g., effort levels), or empty if none.</summary>
     public IReadOnlyList<ReasoningOption> GetReasoningOptions(string? modelId)
         => Resolve(modelId)?.ReasoningOptions ?? [];
-
-    public ModelCostInfo? GetCost(string? modelId) => Resolve(modelId)?.Cost;
-
-    /// <summary>获取所有含定价信息的条目（用于 CostTracker 批量注册）。</summary>
-    public IEnumerable<KeyValuePair<string, ModelCostInfo>> GetAllCosts()
-    {
-        foreach (var (key, entry) in _models)
-        {
-            if (entry.Cost is { } c)
-                yield return new(key, c);
-        }
-    }
 
     public int Count => _models.Values.Select(e => e.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count();
 
@@ -213,19 +187,12 @@ public sealed class ModelCatalog
         return 0;
     }
 
-    private static decimal ReadDecimal(System.Text.Json.JsonElement parent, string propertyName)
-    {
-        if (!parent.TryGetProperty(propertyName, out var prop)) return 0m;
-        if (prop.ValueKind != System.Text.Json.JsonValueKind.Number) return 0m;
-        return prop.TryGetDecimal(out var val) ? val : 0m;
-    }
 }
 
 /// <summary>单个模型的目录条目。</summary>
 public sealed record ModelEntry(
     string Id,
     int ContextWindow,
-    ModelCostInfo? Cost,
     bool SupportsAttachment = false,
     bool SupportsReasoning = false,
     IReadOnlyList<ReasoningOption>? ReasoningOptions = null);
@@ -236,9 +203,3 @@ public sealed record ModelEntry(
 /// </summary>
 public sealed record ReasoningOption(string Type, IReadOnlyList<string> Values);
 
-/// <summary>模型定价（美元/百万 token），来自 models.dev API。</summary>
-public sealed record ModelCostInfo(
-    decimal InputPerMillion,
-    decimal OutputPerMillion,
-    decimal CacheReadPerMillion = 0m,
-    decimal CacheWritePerMillion = 0m);

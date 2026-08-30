@@ -7,10 +7,10 @@
 
 ## 层职责定义
 
-Automation 层是系统的**后台调度与启动加载层**，承载所有以 `BackgroundService` / `IHostedService` 形式运行、且**仅依赖 Core 抽象**的周期性或启动期任务。
+Automation 层是系统的**后台调度与启动加载层**，承载所有以 `BackgroundService` / `IHostedService` 形式运行、且依赖 Core + Infrastructure 的周期性或启动期任务。
 
 定位判断准则：
-- **下沉到 Automation**：服务是后台调度/启动加载性质，且依赖面仅限 Core 抽象（如 `ICronParser`、`IModelCatalogCache`、`YoloRuleStore`）。
+- **下沉到 Automation**：服务是后台调度/启动加载性质，且依赖面限于 Core 抽象与 Infrastructure 实现（如 `ICronParser`、`IModelCatalogCache`、`YoloRuleStore`）。
 - **不下沉到 Infrastructure**：Infrastructure 是"外部系统适配层"（SDK / IO / 协议），Automation 是"后台调度层"。两者职责不同，不可混用。
 - **不下沉到 App**：App 层聚焦业务编排 + TUI，后台调度逻辑独立成层可减少 App 的依赖面与启动开销。
 

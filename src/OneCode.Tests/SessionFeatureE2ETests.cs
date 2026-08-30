@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Session;
 using NSubstitute;
 
+
 namespace OneCode.Tests;
 
 /// <summary>
@@ -119,7 +120,8 @@ public sealed class SessionFeatureE2ETests : IDisposable
             wd,
             ssh: null!,
             shellExecutorManager: _shellManager,
-            sessionManager: _sessionManager);
+            sessionManager: _sessionManager,
+            processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
 
         var cdCommand = OperatingSystem.IsWindows()
             ? $"Set-Location -Path '{subDir.Replace("'", "''")}'"

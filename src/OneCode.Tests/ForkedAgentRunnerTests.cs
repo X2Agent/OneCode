@@ -29,7 +29,7 @@ public sealed class ForkedAgentRunnerTests
             Substitute.For<IVerificationProvider>(),
             modeProvider,
             Substitute.For<IPermissionChecker>(),
-            new CostTracker());
+            new TokenLedger());
 
         var promptManager = new PromptManager();
         promptManager.RegisterTemplate(new PromptTemplate(
@@ -49,7 +49,7 @@ public sealed class ForkedAgentRunnerTests
                 Substitute.For<IVerificationProvider>(),
                 Substitute.For<IPermissionChecker>(),
                 Substitute.For<IAppStateAccessor>(),
-                new CostTracker(),
+                new TokenLedger(),
                 configManager),
             runtime: new ForkedAgentRuntimeDependencies(
                 null!,

@@ -15,7 +15,8 @@ public sealed class BuildTaskLinker(ITaskService taskService)
     public BuildPlan LinkPlanTasks(BuildRun run, BuildPlan plan)
     {
         var linked = new Dictionary<string, TaskItem>(StringComparer.OrdinalIgnoreCase);
-        foreach (var planTask in TopologicalOrder(plan.Tasks))
+        foreach (var planTask in WorkflowTopology.DepthFirstOrder(
+            plan.Tasks, task => task.Id, task => task.DependsOn).Ordered)
         {
             var dependencies = planTask.DependsOn
                 .Select(id => linked[id].Id)
@@ -164,27 +165,4 @@ public sealed class BuildTaskLinker(ITaskService taskService)
         }
     }
 
-    private static IReadOnlyList<BuildPlanTask> TopologicalOrder(IReadOnlyList<BuildPlanTask> tasks)
-    {
-        // 与原 Planning partial 实现一致：DFS 稳定拓扑序
-        var byId = tasks.ToDictionary(t => t.Id, StringComparer.OrdinalIgnoreCase);
-        var ordered = new List<BuildPlanTask>(tasks.Count);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void Visit(BuildPlanTask task)
-        {
-            if (!visited.Add(task.Id))
-                return;
-            foreach (var dep in task.DependsOn)
-            {
-                if (byId.TryGetValue(dep, out var dependency))
-                    Visit(dependency);
-            }
-            ordered.Add(task);
-        }
-
-        foreach (var task in tasks)
-            Visit(task);
-        return ordered;
-    }
 }

@@ -2,7 +2,7 @@ using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Contracts;
 using OneCode.Infrastructure.Middleware.Invariants;
 using OneCode.Infrastructure.Agent.RunMiddleware;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Permissions;
@@ -113,27 +113,27 @@ public sealed record AgentPipelineOptions
     public string? ProviderId { get; init; }
 
     /// <summary>
-    /// ICostTracker 实例（可选）。当设置时，UsageTrackingRunMiddleware 会在
-    /// Agent Run 级统一拦截 LLM 返回的 Usage 并写入 ICostTracker，确保所有路径
-    /// （流式/非流式/Goal/Team/headless）的 token 成本都被记录，使
-    /// <c>--max-budget-usd</c> 预算熔断在所有路径下生效。
+    /// ITokenLedger 实例（可选）。当设置时，UsageTrackingRunMiddleware 会在
+    /// Agent Run 级统一拦截 LLM 返回的 Usage 并写入 ITokenLedger，确保所有路径
+    /// （流式/非流式/Goal/Team/headless）的 token 用量都被记录，使
+    /// <c>--max-budget-tokens</c> 预算熔断在所有路径下生效。
     /// </summary>
-    public ICostTracker? CostTracker { get; init; }
+    public ITokenLedger? TokenLedger { get; init; }
 
     /// <summary>
-    /// 当前会话 ID。传递给 UsageTrackingRunMiddleware，使 ICostTracker 的 per-session
-    /// 成本能正确记录，TokenUsageTracker 能从 ICostTracker 读取 session 级 token 计数。
+    /// 当前会话 ID。传递给 UsageTrackingRunMiddleware，使 ITokenLedger 的 per-session
+    /// 用量能正确记录，TokenUsageTracker 能从 ITokenLedger 读取 session 级 token 计数。
     /// </summary>
     public SessionId? ConversationId { get; init; }
 
     /// <summary>
-    /// 预算上限（USD，可选）。当设置且 <see cref="ICostTracker"/> 非空时，
+    /// 预算上限（token 数，输入 + 输出，可选）。当设置且 <see cref="ITokenLedger"/> 非空时，
     /// BudgetGuardRunMiddleware 会在 Agent Run 级执行 <b>pre-execution</b> 预算检查：
-    /// 若 <see cref="ICostTracker.GetTotalCost"/> 已达到或超过此值，短路返回错误响应，
+    /// 若 <see cref="ITokenLedger.GetTotalTokens"/> 已达到或超过此值，短路返回错误响应，
     /// 不发起 LLM 调用。null 表示不限制预算（不执行 pre-execution 检查）。
     /// post-execution 的预算状态报告仍由 MainAgentRunner 负责。
     /// </summary>
-    public decimal? MaxBudgetUsd { get; init; }
+    public long? MaxBudgetTokens { get; init; }
 
 }
 
@@ -187,28 +187,27 @@ public static class AgentPipelineBuilder
         var builder = agent.AsBuilder();
 
         // Agent Run 级中间件（最外层）：BudgetGuard 预算守卫
-        // pre-execution 检查：若 ICostTracker 累计成本已达 MaxBudgetUsd，短路返回错误响应，
-        // 不发起 LLM 调用，防止超支后继续消费。位于 UsageTracking 外层，确保在任何
+        // pre-execution 检查：若 ITokenLedger 累计 token 已达 MaxBudgetTokens，短路返回错误响应，
+        // 不发起 LLM 调用，防止失控后继续消耗。位于 UsageTracking 外层，确保在任何
         // LLM 调用前拦截；短路时不产生 Usage，UsageTracking 内层不会被调用。
-        if (options.CostTracker is not null && options.MaxBudgetUsd is not null)
+        if (options.TokenLedger is not null && options.MaxBudgetTokens is not null)
         {
             var (guardRun, guardStream) = BudgetGuardRunMiddleware.Create(
-                options.CostTracker,
-                options.MaxBudgetUsd,
-                loggerFactory.CreateLogger("BudgetGuardRunMiddleware"),
-                options.ModelId);
+                options.TokenLedger,
+                options.MaxBudgetTokens,
+                loggerFactory.CreateLogger("BudgetGuardRunMiddleware"));
             builder = builder.Use(guardRun, guardStream);
         }
 
         // Agent Run 级中间件（次外层）：Usage 追踪
         // 统一拦截所有 agent run（流式/非流式/Goal/Team/headless）的 LLM Usage，
-        // 写入 ICostTracker，确保 --max-budget-usd 预算熔断在所有路径下生效。
+        // 写入 ITokenLedger，确保 --max-budget-tokens 预算熔断在所有路径下生效。
         // 放在 BudgetGuard 内层：BudgetGuard 放行后，本层记录本次 run 的实际 usage；
-        // 下一次 run 时 BudgetGuard 读取更新后的累计成本进行检查。
-        if (options.CostTracker is not null)
+        // 下一次 run 时 BudgetGuard 读取更新后的累计 token 进行检查。
+        if (options.TokenLedger is not null)
         {
             var (runFunc, runStreamingFunc) = UsageTrackingRunMiddleware.Create(
-                options.CostTracker,
+                options.TokenLedger,
                 options.ModelId,
                 loggerFactory.CreateLogger("UsageTrackingRunMiddleware"),
                 options.ConversationId);

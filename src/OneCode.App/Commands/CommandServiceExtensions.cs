@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
+
 namespace OneCode.App.Commands;
 
 public static class CommandServiceExtensions
@@ -18,6 +19,8 @@ public static class CommandServiceExtensions
         RegisterAllCommands(services);
 
         services.AddSingleton<ICommandRegistry, CommandRegistry>();
+        // HelpCommand 注入 Func<ICommandRegistry> 以打破 CommandRegistry → IEnumerable<ICommand> → HelpCommand 循环
+        services.AddSingleton<Func<ICommandRegistry>>(sp => () => (ICommandRegistry)sp.GetRequiredService(typeof(ICommandRegistry)));
         services.AddSingleton<IAppStateAccessor, AppStateAccessor>();
 
         return services;
@@ -28,18 +31,19 @@ public static class CommandServiceExtensions
         AddBuiltinCommands(services);
         AddSessionCommands(services);
         AddDiagnosticCommands(services);
+        AddSkillCommands(services);
         AddGitCommands(services);
-        AddMiscCommands(services);
     }
 
     private static void AddBuiltinCommands(IServiceCollection s)
     {
         s.AddSingleton<ICommand, AddDirCommand>();
         s.AddSingleton<ICommand, CompactCommand>();
+        s.AddSingleton<ICommand, ConfigCommand>();
         s.AddSingleton<ICommand, CopyCommand>();
         s.AddSingleton<ICommand, CronCommand>();
         s.AddSingleton<ICommand, DesignInitCommand>();
-        s.AddSingleton<ICommand, ExportCommand>();
+        s.AddSingleton<ICommand, ExitCommand>();
         s.AddSingleton<ICommand, FastModelCommand>();
         s.AddSingleton<ICommand, FilesCommand>();
         s.AddSingleton<ICommand, HelpCommand>();
@@ -49,20 +53,24 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, LspCommand>();
         s.AddSingleton<ICommand, ModelCommand>();
         s.AddSingleton<ICommand, PermissionsCommand>();
-        s.AddSingleton<ICommand, QueueCommand>();
-        s.AddSingleton<ICommand, ReviewCommand>();
+        s.AddSingleton<ICommand, PromptsCommand>();
+        s.AddSingleton<ICommand, SkillsCommand>();
+        s.AddSingleton<ICommand, TeamCommand>();
         s.AddSingleton<ICommand, ThinkCommand>();
         s.AddSingleton<ICommand, UpgradeCommand>();
         s.AddSingleton<ICommand, VersionCommand>();
-        s.AddSingleton<ICommand, PromptsCommand>();
     }
 
     private static void AddSessionCommands(IServiceCollection s)
     {
+        s.AddSingleton<ICommand, CheckpointCommand>();
+        s.AddSingleton<ICommand, ExportCommand>();
+        s.AddSingleton<ICommand, FindCommand>();
         s.AddSingleton<ICommand, InsightsCommand>();
         s.AddSingleton<ICommand, MemoryCommand>();
+        s.AddSingleton<ICommand, QueueCommand>();
         s.AddSingleton<ICommand, RenameCommand>();
-        s.AddSingleton<ICommand, FindCommand>();
+        s.AddSingleton<ICommand, ResumeCommand>();
 
         // SessionCommand 注入具体类型以委托 new/close 子命令，
         // 因此具体注册 + ICommand 转发保证两个视角共享同一单例。
@@ -71,8 +79,6 @@ public static class CommandServiceExtensions
         s.AddSingleton<CloseCommand>();
         s.AddSingleton<ICommand>(sp => sp.GetRequiredService<CloseCommand>());
         s.AddSingleton<ICommand, SessionCommand>();
-        s.AddSingleton<ICommand, CheckpointCommand>();
-        s.AddSingleton<ICommand, ResumeCommand>();
     }
 
     private static void AddDiagnosticCommands(IServiceCollection s)
@@ -82,22 +88,19 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, GcStatsCommand>();
     }
 
+    private static void AddSkillCommands(IServiceCollection s)
+    {
+        s.AddSingleton<ICommand, InstallCommand>();
+        s.AddSingleton<ICommand, McpCommand>();
+    }
+
     private static void AddGitCommands(IServiceCollection s)
     {
         s.AddSingleton<ICommand, BranchCommand>();
         s.AddSingleton<ICommand, CommitCommand>();
         s.AddSingleton<ICommand, DiffCommand>();
         s.AddSingleton<ICommand, RebaseCommand>();
+        s.AddSingleton<ICommand, ReviewCommand>();
         s.AddSingleton<ICommand, StashCommand>();
-    }
-
-    private static void AddMiscCommands(IServiceCollection s)
-    {
-        s.AddSingleton<ICommand, ConfigCommand>();
-        s.AddSingleton<ICommand, ExitCommand>();
-        s.AddSingleton<ICommand, InstallCommand>();
-        s.AddSingleton<ICommand, McpCommand>();
-        s.AddSingleton<ICommand, SkillsCommand>();
-        s.AddSingleton<ICommand, TeamCommand>();
     }
 }

@@ -1,5 +1,5 @@
+using OneCode.Core.Mcp;
 using Microsoft.Extensions.AI;
-using OneCode.Infrastructure.Mcp;
 using System.Reflection;
 
 namespace OneCode.App.Tools;

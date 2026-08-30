@@ -31,39 +31,23 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Register cron tool POCOs (Create/List/Delete/Pause/Resume) with custom DI factories
-    /// AND Catalog metadata (via <see cref="ToolServiceCollectionExtensions.AddTool{T}"/>).
-    /// One call per tool completes both DI registration and Catalog metadata registration,
-    /// eliminating the previous two-place maintenance (DI here + Catalog in ToolCatalog).
+    /// Register the unified cron tool POCO with a custom DI factory AND Catalog metadata
+    /// (via <see cref="ToolServiceCollectionExtensions.AddTool{T}"/>).
+    /// One call completes both DI registration and Catalog metadata registration.
     /// </summary>
     public static IServiceCollection AddCronTools(this IServiceCollection services)
     {
-        // 自定义 DI 工厂（CronCreateTool 依赖 ICronParser + CronSchedulerService）
+        // 自定义 DI 工厂（CronTool 依赖 ICronParser + CronSchedulerService）
         // GetRequiredService: AddCronTools 必须与 AddCronScheduler 配合使用，
         // 未注册调度器时 fail-fast 而非静默返回 null。
-        services.AddSingleton<CronCreateTool>(sp => new CronCreateTool(
+        services.AddSingleton<CronTool>(sp => new CronTool(
             sp.GetRequiredService<ICronParser>(),
-            sp.GetRequiredService<CronSchedulerService>()));
-        services.AddSingleton<CronDeleteTool>(sp => new CronDeleteTool(
-            sp.GetRequiredService<CronSchedulerService>()));
-        services.AddSingleton<CronListTool>(sp => new CronListTool(
-            sp.GetRequiredService<CronSchedulerService>()));
-        services.AddSingleton<CronPauseTool>(sp => new CronPauseTool(
-            sp.GetRequiredService<CronSchedulerService>()));
-        services.AddSingleton<CronResumeTool>(sp => new CronResumeTool(
             sp.GetRequiredService<CronSchedulerService>()));
 
         // Catalog 元数据注册（TryAddSingleton 不会覆盖上面的自定义工厂）
         // Deferred 层：cron 工具低频但高风险，不自动加载，仅通过 ToolSearch 显式激活
-        services.AddTool<CronCreateTool>("CronCreate", nameof(CronCreateTool.CreateAsync), ToolRisk.Safe, searchHint: "create a cron job",
-            loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
-        services.AddTool<CronListTool>("CronList", nameof(CronListTool.ListAsync), ToolRisk.ReadOnly, searchHint: "list cron jobs",
-            loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
-        services.AddTool<CronDeleteTool>("CronDelete", nameof(CronDeleteTool.Delete), ToolRisk.Destructive, concurrency: false, searchHint: "delete a cron job",
-            loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
-        services.AddTool<CronPauseTool>("CronPause", nameof(CronPauseTool.PauseAsync), ToolRisk.Safe, concurrency: false, searchHint: "pause a cron job",
-            loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
-        services.AddTool<CronResumeTool>("CronResume", nameof(CronResumeTool.ResumeAsync), ToolRisk.Safe, concurrency: false, searchHint: "resume a paused cron job",
+        services.AddTool<CronTool>("Cron", nameof(CronTool.ExecuteAsync), ToolRisk.Safe,
+            searchHint: "manage scheduled cron jobs (create/list/delete/pause/resume)",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
         return services;
     }

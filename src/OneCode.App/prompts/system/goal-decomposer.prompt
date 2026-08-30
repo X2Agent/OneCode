@@ -8,7 +8,7 @@ For each sub-goal provide:
    Use tool names from this catalog (case-sensitive):
    - Read, Glob, Grep, LS, WebFetch, WebSearch (read-only tools)
    - Write, Edit (file editing tools)
-   - Bash, PowerShell (shell execution tools)
+   - Bash (shell execution; supports the PowerShell dialect via the shell parameter)
    - Agent, ParallelAgents (sub-agent delegation tools)
    - Lsp (specialized tool)
    Use ["*"] to allow all tools (default when omitted or empty).

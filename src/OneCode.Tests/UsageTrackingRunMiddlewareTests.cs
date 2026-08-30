@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OneCode.Core.Cost;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Api;
 
@@ -9,20 +8,12 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Unit tests for <see cref="UsageTrackingRunMiddleware"/>.
-/// 验证 Agent Run 级中间件正确提取 LLM Usage 并写入 CostTracker，
-/// 覆盖流式/非流式路径、cache token 提取、reasoning token 提取、null CostTracker 等场景。
+/// 验证 Agent Run 级中间件正确提取 LLM Usage 并写入 TokenLedger，
+/// 覆盖流式/非流式路径、cache token 提取、null TokenLedger 等场景。
 /// </summary>
 public sealed class UsageTrackingRunMiddlewareTests
 {
-    private static readonly ModelPricing SonnetPricing = new(3m, 15m, 1.5m, 3.75m);
-
-    private static CostTracker CreateTracker()
-    {
-        return new CostTracker(configuredPricing: new Dictionary<string, ModelPricingTiered>
-        {
-            ["claude-sonnet-4"] = new ModelPricingTiered(SonnetPricing),
-        });
-    }
+    private static TokenLedger CreateTracker() => new();
 
     private static AgentResponse CreateResponse(UsageDetails? usage)
     {
@@ -68,18 +59,18 @@ public sealed class UsageTrackingRunMiddlewareTests
     // Non-streaming (RunAsync)
 
     [Fact]
-    public async Task RunAsync_RecordsUsageToCostTracker()
+    public async Task RunAsync_RecordsUsageToTokenLedger()
     {
         var tracker = CreateTracker();
-        // InputTokens=1.5M 已含 CacheReadTokens=0.5M 子集（MEAI 契约）；非缓存部分 = 1M
+        // InputTokens=1.5M 已含 CacheReadTokens=0.5M 子集（MEAI 契约）
         var usage = CreateUsage(input: 1_500_000, output: 1_000_000, cacheRead: 500_000, cacheWrite: 200_000);
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        // 非缓存 Input: 1M * 3/M = 3.00 + Output: 15.00 + CacheRead: 0.75 + CacheWrite: 0.75 = 19.50
-        tracker.GetTotalCost().Should().Be(19.50m);
+        // 输入 + 输出 = 1.5M + 1M（缓存读取计入输入，不重复相加）
+        tracker.GetTotalTokens().Should().Be(2_500_000);
     }
 
     [Fact]
@@ -92,12 +83,12 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        // Input: 1M * 3/M = 3.00 + CacheWrite: 1M * 3.75/M = 3.75 = 6.75
-        tracker.GetTotalCost().Should().Be(6.75m);
+        // CacheWrite 独立提取，不并入输入/输出：总 token = 1M
+        tracker.GetTotalTokens().Should().Be(1_000_000);
     }
 
     [Fact]
-    public async Task RunAsync_ExtractsReasoningTokens()
+    public async Task RunAsync_ReasoningTokensDoNotDoubleCount()
     {
         var tracker = CreateTracker();
         var usage = CreateUsage(input: 1_000_000, output: 0, reasoning: 500_000);
@@ -106,17 +97,12 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        // Reasoning tokens are counted as output tokens for cost purposes (via UsageRecord.ReasoningTokens).
-        // CostTracker charges them at OutputPerMillion rate.
-        // Actually, ReasoningTokens don't have separate pricing — they're metadata only.
-        // CostTracker.RecordUsage charges InputTokens at InputPerMillion and OutputTokens at OutputPerMillion.
-        // ReasoningTokens are recorded but not charged separately (they're part of output).
-        // So: Input 1M * 3/M = 3.00, Output 0, total = 3.00
-        tracker.GetTotalCost().Should().Be(3.00m);
+        // ReasoningTokens 是 OutputTokens 的子集（此处 output=0），不单独入账
+        tracker.GetTotalTokens().Should().Be(1_000_000);
     }
 
     [Fact]
-    public async Task RunAsync_NullCostTracker_PassThroughWithoutError()
+    public async Task RunAsync_NullTokenLedger_PassThroughWithoutError()
     {
         var usage = CreateUsage(input: 100, output: 50);
         var stubAgent = new StubAgent(CreateResponse(usage));
@@ -137,7 +123,7 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        tracker.GetTotalCost().Should().Be(0m);
+        tracker.GetTotalTokens().Should().Be(0);
     }
 
     [Fact]
@@ -150,7 +136,7 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        tracker.GetTotalCost().Should().Be(0m);
+        tracker.GetTotalTokens().Should().Be(0);
     }
 
     // Streaming (RunStreamingAsync)
@@ -174,8 +160,8 @@ public sealed class UsageTrackingRunMiddlewareTests
             results.Add(update);
 
         results.Should().HaveCount(3);
-        // 非缓存 Input: 1M * 3/M = 3.00 + Output: 7.50 + CacheRead: 0.30 + CacheWrite: 0.375 = 11.175
-        tracker.GetTotalCost().Should().BeApproximately(11.175m, 0.001m);
+        // 输入 1.2M（含 0.2M 缓存读取）+ 输出 0.5M = 1.7M
+        tracker.GetTotalTokens().Should().Be(1_700_000);
     }
 
     [Fact]
@@ -193,7 +179,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         await foreach (var _ in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
         { }
 
-        tracker.GetTotalCost().Should().Be(0m);
+        tracker.GetTotalTokens().Should().Be(0);
     }
 
     [Fact]
@@ -230,9 +216,6 @@ public sealed class UsageTrackingRunMiddlewareTests
         record.OutputTokens.Should().Be(500);
         record.CacheReadTokens.Should().Be(200);
         record.CacheWriteTokens.Should().Be(100);
-        record.ReasoningTokens.Should().Be(50);
-        // ContextTokens = InputTokens（MEAI 契约：InputTokenCount 已含 CachedInputTokenCount 子集）
-        record.ContextTokens.Should().Be(1000);
     }
 
     [Fact]
@@ -266,7 +249,7 @@ public sealed class UsageTrackingRunMiddlewareTests
     // Accumulation across multiple runs
 
     [Fact]
-    public async Task MultipleRuns_AccumulateCostInTracker()
+    public async Task MultipleRuns_AccumulateTokensInTracker()
     {
         var tracker = CreateTracker();
         var usage = CreateUsage(input: 1_000_000, output: 0);
@@ -276,13 +259,13 @@ public sealed class UsageTrackingRunMiddlewareTests
         await runFunc([], null, null, stubAgent, CancellationToken.None);
         await runFunc([], null, null, stubAgent, CancellationToken.None);
 
-        // Two runs: 3.00 + 3.00 = 6.00
-        tracker.GetTotalCost().Should().Be(6.00m);
+        // Two runs: 1M + 1M
+        tracker.GetTotalTokens().Should().Be(2_000_000);
     }
 
     // Exception path
-    // 验证流式传输因异常中断时，已收到的 usage 仍被写入 CostTracker，
-    // 确保 BudgetGuard 的 pre-execution 预算熔断不会因累计成本偏低而失效。
+    // 验证流式传输因异常中断时，已收到的 usage 仍被写入 TokenLedger，
+    // 确保 BudgetGuard 的 pre-execution 预算熔断不会因累计 token 偏低而失效。
 
     [Fact]
     public async Task RunStreamingAsync_ExceptionAfterUsage_StillRecordsUsageAndPropagates()
@@ -303,11 +286,10 @@ public sealed class UsageTrackingRunMiddlewareTests
         await act.Should().ThrowAsync<InvalidOperationException>(
             "streaming exceptions must propagate through the middleware without being swallowed");
 
-        // 异常前已收到的 usage 仍被记录
-        // Input: 1M * 3/M = 3.00 + Output: 500K * 15/M = 7.50 = 10.50
+        // 异常前已收到的 usage 仍被记录：输入 1M + 输出 0.5M
         texts.Should().HaveCount(2, "the two updates before the exception must still be yielded");
-        tracker.GetTotalCost().Should().Be(10.50m,
-            "usage received before the exception must still be recorded so BudgetGuard can enforce --max-budget-usd");
+        tracker.GetTotalTokens().Should().Be(1_500_000,
+            "usage received before the exception must still be recorded so BudgetGuard can enforce --max-budget-tokens");
     }
 
     [Fact]
@@ -327,8 +309,8 @@ public sealed class UsageTrackingRunMiddlewareTests
         await act.Should().ThrowAsync<InvalidOperationException>(
             "streaming exceptions must propagate even when no usage was received");
 
-        tracker.GetTotalCost().Should().Be(0m,
-            "no usage received means nothing to record — cost stays at zero");
+        tracker.GetTotalTokens().Should().Be(0,
+            "no usage received means nothing to record — usage stays at zero");
     }
 
     /// <summary>产出一个 text update + 一个 usage update，然后抛异常（模拟流中断）。</summary>

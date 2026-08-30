@@ -2,7 +2,10 @@ using NSubstitute;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+using OneCode.Core.IO;
+
+using Microsoft.Extensions.Logging.Abstractions;
+using OneCode.App.Services.Search;
 
 namespace OneCode.Tests;
 
@@ -216,7 +219,7 @@ public sealed class PathTraversalTests
         var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(processRunner, fileSystem, wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var outsideSearchPath = Path.Combine(outsideDir, "subdir");
@@ -242,7 +245,7 @@ public sealed class PathTraversalTests
         var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(processRunner, fileSystem, wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var result = await tool.SearchAsync("pattern", path: "../../outside", ct: TestContext.Current.CancellationToken);
@@ -270,7 +273,7 @@ public sealed class PathTraversalTests
                   .Returns(new List<string> { Path.Combine(projectDir, "subdir", "file.cs") });
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(processRunner, fileSystem, wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var result = await tool.SearchAsync("Hello", path: "subdir", ct: TestContext.Current.CancellationToken);
@@ -358,7 +361,7 @@ public sealed class PathTraversalTests
         var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(processRunner, fileSystem, wd, null!, null!, null!);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
         try
         {
             var result = await tool.FindAsync("MySymbol", path: "../../outside", ct: TestContext.Current.CancellationToken);
@@ -380,7 +383,7 @@ public sealed class PathTraversalTests
         var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(processRunner, fileSystem, wd, null!, null!, null!);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
         try
         {
             var result = await tool.FindAsync("MySymbol", path: outsideDir, ct: TestContext.Current.CancellationToken);
@@ -409,7 +412,7 @@ public sealed class PathTraversalTests
                   .Returns(new List<string> { Path.Combine(projectDir, "subdir", "file.cs") });
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(processRunner, fileSystem, wd, null!, null!, null!);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
         try
         {
             // Search in "subdir" (strictly inside working dir) to avoid "." edge case
@@ -565,7 +568,7 @@ public sealed class PathTraversalTests
         var projectDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
         try
         {
             var result = await tool.ExecuteAsync(command, ct: TestContext.Current.CancellationToken);
@@ -591,7 +594,7 @@ public sealed class PathTraversalTests
 
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!);
+        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
         try
         {
             var result = await tool.ExecuteAsync($"cat {outsideFile}", ct: TestContext.Current.CancellationToken);

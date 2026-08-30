@@ -13,6 +13,8 @@ public sealed partial class MessageListView
     /// </summary>
     public void ReflowExpandedToolDetails(int viewportWidth)
     {
+        // 调用方需传入预留滚动条列后的宽度（与绘制期 contentWidth 对齐），
+        // 避免展开详情比绘制可用宽度宽 1 列而被绘制层截断。
         var contentWidth = TuiSpacing.GetContentColumnWidth(viewportWidth);
         if (contentWidth <= 0 || contentWidth == _toolDetailLayoutWidth)
             return;
@@ -124,7 +126,7 @@ public sealed partial class MessageListView
             var newSegments = MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: false);
             _lines[lineIdx] = new LineEntry(entry.Text, entry.Color, newSegments, entry.Bg, expanded);
 
-            _toolDetailLayoutWidth = TuiSpacing.GetContentColumnWidth(Viewport.Width);
+            _toolDetailLayoutWidth = ContentWidth;
             var detailLines = MessageRenderer.BuildToolDetailLines(expanded, _toolDetailLayoutWidth);
             _lines.InsertRange(lineIdx + 1, detailLines);
         }
@@ -172,7 +174,7 @@ public sealed partial class MessageListView
         if (existing > 0)
             _lines.RemoveRange(lineIdx + 1, existing);
 
-        var maxContentWidth = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - ConversationRenderer.ContentIndent - 2);
+        var maxContentWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
         var details = new List<LineEntry>();
         foreach (var line in expanded.Content
             .Replace("\r\n", "\n", StringComparison.Ordinal)
@@ -228,7 +230,7 @@ public sealed partial class MessageListView
                 MessageRenderer.ReplaceTriangleSymbol(entry.Segments, collapsed: false),
                 entry.Bg, expanded);
 
-            var maxContentWidth = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - ConversationRenderer.ContentIndent - 2);
+            var maxContentWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
             var details = new List<LineEntry>();
             var contentLines = expanded.Content
                 .Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
@@ -238,7 +240,7 @@ public sealed partial class MessageListView
             if (contentLines.Length > 0)
             {
                 var first = contentLines[0];
-                var summaryBudget = Math.Max(20, TuiSpacing.GetContentColumnWidth(Viewport.Width) - 6);
+                var summaryBudget = Math.Max(20, ContentWidth - 6);
                 if (first.Length <= summaryBudget - 6)
                     startIdx = 1;
             }

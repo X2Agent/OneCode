@@ -1,26 +1,22 @@
 using System.ComponentModel;
-using System.Text.RegularExpressions;
+using OneCode.App.Services.Search;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
-using Microsoft.Extensions.FileSystemGlobbing;
 
 namespace OneCode.App.Tools;
 
 /// <summary>
 /// Search file contents with regex using ripgrep (or native C# fallback).
+/// 搜索内核委托给 <see cref="ITextSearchService"/>，本类负责路径安全校验、分页与结果格式化。
 /// </summary>
 public sealed class GrepTool
 {
     private const int DefaultHeadLimit = 250;
 
-    private readonly IProcessRunner _processRunner;
-    private readonly IFileSystem _fileSystem;
+    private readonly ITextSearchService _textSearch;
     private readonly IWorkingDirectoryAccessor _wd;
-    private readonly ILogger<GrepTool> _logger;
 
-    public GrepTool(IProcessRunner processRunner, IFileSystem fileSystem, IWorkingDirectoryAccessor wd, ILogger<GrepTool>? logger = null)
-        => (_processRunner, _fileSystem, _wd, _logger) = (processRunner, fileSystem, wd,
-            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<GrepTool>.Instance);
+    public GrepTool(ITextSearchService textSearch, IWorkingDirectoryAccessor wd)
+        => (_textSearch, _wd) = (textSearch, wd);
 
     [Description("Search file contents by regex, returning matching files, lines, or counts. " +
                  "Engine: uses ripgrep (rg) when available for speed and native regex semantics; falls back to a C# Regex-based scanner otherwise. " +
@@ -46,13 +42,8 @@ public sealed class GrepTool
         [Description("Skip the first N entries before applying head_limit. Use for pagination.")] int offset = 0,
         CancellationToken ct = default)
     {
-        var caseInsensitive = i;
         var om = output_mode ?? "files_with_matches";
-
         var contextSymmetric = C;
-        var contextBefore = contextSymmetric ?? (B ?? 0);
-        var contextAfter = contextSymmetric ?? (A ?? 0);
-        if (om != "content") { contextBefore = 0; contextAfter = 0; }
 
         var workingDir = _wd.WorkingDirectory;
         var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
@@ -66,8 +57,18 @@ public sealed class GrepTool
         List<string> results;
         try
         {
-            results = await SearchAsync(searchPath, pattern, glob, exclude_glob, caseInsensitive, multiline,
-                om, contextBefore, contextAfter, ct);
+            var request = new TextSearchRequest(
+                SearchPath: searchPath,
+                Pattern: pattern,
+                Glob: glob,
+                ExcludeGlob: exclude_glob,
+                CaseInsensitive: i,
+                Multiline: multiline,
+                OutputMode: om,
+                ContextBefore: contextSymmetric ?? (B ?? 0),
+                ContextAfter: contextSymmetric ?? (A ?? 0));
+
+            results = [.. await _textSearch.SearchAsync(request, ct).ConfigureAwait(false)];
         }
         catch (OperationCanceledException)
         {
@@ -80,251 +81,6 @@ public sealed class GrepTool
 
         var (limitedResults, appliedLimit, totalCount) = ApplyHeadLimit(results, head_limit, offset);
         return ToolResult.Success(FormatOutput(limitedResults, om, appliedLimit, totalCount, searchPath));
-    }
-
-    private async Task<List<string>> SearchAsync(
-        string searchPath, string pattern, string? glob, string? excludeGlob, bool caseInsensitive,
-        bool multiline, string outputMode, int contextBefore, int contextAfter,
-        CancellationToken ct)
-    {
-        if (await _processRunner.CommandExistsAsync("rg").ConfigureAwait(false))
-            return await SearchRipgrepAsync(searchPath, pattern, glob, excludeGlob, caseInsensitive, multiline,
-                outputMode, contextBefore, contextAfter, ct);
-        return await SearchNativeAsync(searchPath, pattern, glob, excludeGlob, caseInsensitive, multiline,
-            outputMode, contextBefore, contextAfter, ct);
-    }
-
-    private async Task<List<string>> SearchRipgrepAsync(
-        string searchPath, string pattern, string? glob, string? excludeGlob, bool caseInsensitive,
-        bool multiline, string outputMode, int contextBefore, int contextAfter,
-        CancellationToken ct)
-    {
-        var args = new List<string> { "--hidden", "--glob", "!.git", "--glob", "!.svn", "--glob", "!node_modules", "--max-columns", "500" };
-        if (caseInsensitive) args.Add("-i");
-        if (multiline) args.Add("--multiline");
-        switch (outputMode)
-        {
-            case "files_with_matches": args.Add("-l"); break;
-            case "count": args.Add("-c"); break;
-            default:
-                if (contextBefore > 0 && contextAfter > 0 && contextBefore == contextAfter)
-                { args.Add("--context"); args.Add(contextBefore.ToString(CultureInfo.InvariantCulture)); }
-                else
-                {
-                    if (contextBefore > 0) { args.Add("--before-context"); args.Add(contextBefore.ToString(CultureInfo.InvariantCulture)); }
-                    if (contextAfter > 0) { args.Add("--after-context"); args.Add(contextAfter.ToString(CultureInfo.InvariantCulture)); }
-                }
-                break;
-        }
-        if (pattern.StartsWith("-", StringComparison.Ordinal)) { args.Add("-e"); }
-        args.Add(pattern);
-
-        if (!string.IsNullOrEmpty(glob))
-        {
-            foreach (var g in glob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            { args.Add("--glob"); args.Add(g); }
-        }
-        if (!string.IsNullOrEmpty(excludeGlob))
-        {
-            foreach (var eg in excludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            { args.Add("--glob"); args.Add($"!{eg}"); }
-        }
-
-        var result = await _processRunner.ExecuteAsync("rg", args.ToArray(), searchPath, ct: ct);
-        if (result == null)
-            return [];
-
-        // ripgrep exit code 1 = no matches (not an error), exit code 2+ = actual error
-        if (!result.Success)
-        {
-            var errMsg = result.Stderr?.Trim();
-            if (!string.IsNullOrEmpty(errMsg))
-                throw new InvalidOperationException($"ripgrep error: {errMsg}");
-            return [];
-        }
-
-        var lines = result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var prefix = searchPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return lines.Select(l => l.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? l[prefix.Length..] : l).ToList();
-    }
-
-    private async Task<List<string>> SearchNativeAsync(
-        string searchPath, string pattern, string? glob, string? excludeGlob, bool caseInsensitive,
-        bool multiline, string outputMode, int contextBefore, int contextAfter,
-        CancellationToken ct)
-    {
-        List<string> results = [];
-        var regexOptions = caseInsensitive ? RegexOptions.IgnoreCase | RegexOptions.Compiled : RegexOptions.Compiled;
-        if (multiline) regexOptions |= RegexOptions.Singleline;
-        Regex regex;
-        try { regex = new Regex(pattern, regexOptions); }
-        catch (ArgumentException ex) { return new List<string> { $"Invalid regex: {ex.Message}" }; }
-
-        var excludePatterns = string.IsNullOrEmpty(excludeGlob)
-            ? []
-            : excludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        var searchPattern = string.IsNullOrEmpty(glob) ? null : glob;
-        var defaultExcludes = new[] { ".git", ".svn", "node_modules", "bin", "obj" };
-        var files = _fileSystem.FindFiles(searchPath, searchPattern, defaultExcludes);
-
-        if (excludePatterns.Length > 0)
-        {
-            files = files.Where(f =>
-            {
-                var rel = GetRelativePath(f, searchPath).Replace('\\', '/');
-                return !excludePatterns.Any(ep => IsGlobMatch(rel, ep));
-            }).ToList();
-        }
-
-        foreach (var file in files)
-        {
-            try
-            {
-                var relativePath = GetRelativePath(file, searchPath);
-                if (multiline)
-                {
-                    results.AddRange(await SearchNativeMultilineAsync(file, relativePath, regex, outputMode, ct).ConfigureAwait(false));
-                    continue;
-                }
-                if (outputMode == "files_with_matches")
-                {
-                    var found = false;
-                    await foreach (var line in File.ReadLinesAsync(file, ct).ConfigureAwait(false))
-                    {
-                        if (regex.IsMatch(line)) { found = true; break; }
-                    }
-                    if (found) results.Add(relativePath);
-                    continue;
-                }
-                if (outputMode == "count")
-                {
-                    var count = 0;
-                    await foreach (var line in File.ReadLinesAsync(file, ct).ConfigureAwait(false))
-                        count += regex.Matches(line).Count;
-                    if (count > 0) results.Add($"{relativePath}:{count}");
-                    continue;
-                }
-                if (contextBefore == 0 && contextAfter == 0)
-                {
-                    var lineIndex = 0;
-                    await foreach (var line in File.ReadLinesAsync(file, ct).ConfigureAwait(false))
-                    {
-                        lineIndex++;
-                        if (regex.IsMatch(line)) results.Add($"{relativePath}:{lineIndex}:{line}");
-                    }
-                }
-                else
-                {
-                    results.AddRange(await SearchNativeWithContextAsync(file, relativePath, regex, contextBefore, contextAfter, ct).ConfigureAwait(false));
-                }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "GrepTool: skipping unreadable file {File}", file);
-            }
-        }
-        return results;
-    }
-
-    private async Task<List<string>> SearchNativeMultilineAsync(
-        string file, string relativePath, Regex regex, string outputMode, CancellationToken ct)
-    {
-        string content;
-        try { content = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "GrepTool.SearchNativeMultiline: unreadable {File}", file);
-            return [];
-        }
-
-        var results = new List<string>();
-        var matches = regex.Matches(content);
-        if (matches.Count == 0) return results;
-
-        if (outputMode == "files_with_matches") { results.Add(relativePath); return results; }
-        if (outputMode == "count") { results.Add($"{relativePath}:{matches.Count}"); return results; }
-
-        foreach (Match m in matches)
-        {
-            var lineNum = 1;
-            for (var i = 0; i < m.Index && i < content.Length; i++)
-                if (content[i] == '\n') lineNum++;
-
-            var matchText = m.Value;
-            var newlineIdx = matchText.IndexOf('\n');
-            var snippet = newlineIdx >= 0 ? matchText[..newlineIdx] + "..." : matchText;
-            results.Add($"{relativePath}:{lineNum}:{snippet}");
-        }
-        return results;
-    }
-
-    private static async Task<List<string>> SearchNativeWithContextAsync(
-        string file, string relativePath, Regex regex, int contextBefore, int contextAfter,
-        CancellationToken ct)
-    {
-        var allLines = await File.ReadAllLinesAsync(file, ct).ConfigureAwait(false);
-        var matchLineNums = new HashSet<int>();
-
-        for (var i = 0; i < allLines.Length; i++)
-        {
-            if (regex.IsMatch(allLines[i]))
-                matchLineNums.Add(i);
-        }
-
-        var results = new List<string>();
-        if (matchLineNums.Count == 0) return results;
-
-        var ranges = BuildContextRanges(matchLineNums, contextBefore, contextAfter, allLines.Length);
-
-        var firstGroup = true;
-        foreach (var (start, end) in ranges)
-        {
-            if (!firstGroup) results.Add("--");
-            firstGroup = false;
-
-            for (var i = start; i <= end; i++)
-            {
-                var lineNum = i + 1;
-                var sep = matchLineNums.Contains(i) ? ":" : "-";
-                results.Add($"{relativePath}{sep}{lineNum}{sep}{allLines[i]}");
-            }
-        }
-        return results;
-    }
-
-    private static List<(int Start, int End)> BuildContextRanges(
-        HashSet<int> matchLines, int before, int after, int totalLines)
-    {
-        var ranges = matchLines
-            .Select(m => (Start: Math.Max(0, m - before), End: Math.Min(totalLines - 1, m + after)))
-            .OrderBy(r => r.Start)
-            .ToList();
-
-        List<(int Start, int End)> merged = [];
-        foreach (var (s, e) in ranges)
-        {
-            if (merged.Count > 0 && s <= merged[^1].End + 1)
-                merged[^1] = (merged[^1].Start, Math.Max(merged[^1].End, e));
-            else
-                merged.Add((s, e));
-        }
-        return merged;
-    }
-
-    private string GetRelativePath(string fullPath, string searchPath)
-    {
-        try { return Path.GetRelativePath(searchPath, fullPath); }
-        catch (Exception ex)
-        {
-            if (_logger is not null)
-                _logger.LogDebug(ex, "GrepTool.GetRelativePath failed for {FullPath} under {SearchPath}", fullPath, searchPath);
-            else
-                System.Diagnostics.Debug.WriteLine($"GrepTool.GetRelativePath failed for {fullPath} under {searchPath}: {ex.Message}");
-            return fullPath;
-        }
     }
 
     private static (List<string> Items, int? AppliedLimit, int TotalCount) ApplyHeadLimit(List<string> items, int headLimit, int offset)
@@ -355,12 +111,5 @@ public sealed class GrepTool
         }
         if (items.Count == 0) return "No matches found";
         return string.Join("\n", items) + (appliedLimit.HasValue ? $"\n[Truncated: showing {appliedLimit} of {totalCount} results. Use offset to page.]" : "");
-    }
-
-    private static bool IsGlobMatch(string relativePath, string pattern)
-    {
-        var matcher = new Matcher();
-        matcher.AddInclude(pattern.Replace('\\', '/'));
-        return matcher.Match(relativePath.Replace('\\', '/')).HasMatches;
     }
 }

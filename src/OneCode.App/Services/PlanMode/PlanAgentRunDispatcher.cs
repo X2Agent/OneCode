@@ -319,7 +319,7 @@ public sealed class PlanAgentRunDispatcher(
             ## Required workflow protocol
             Active run id: {runId}
             1. Call UpdatePlanStep for every state change. Completed steps require concrete evidence.
-            2. When all steps are completed or explicitly skipped, call CompletePlanExecution unless the workflow is already Verifying.
+            2. When all steps are completed or explicitly skipped, the workflow automatically enters Verifying.
             3. Run the required build/tests/checks, then call CompletePlanVerification with command output as evidence.
             4. Do not claim completion unless CompletePlanVerification returns a completed workflow.
             """;

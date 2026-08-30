@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using OneCode.App.Query;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.Notifier;
@@ -5,7 +6,6 @@ using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Session;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Services;
 

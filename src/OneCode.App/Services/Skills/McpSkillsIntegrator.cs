@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using OneCode.Core.Mcp;
 using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Services.Skills;
@@ -28,7 +29,10 @@ public sealed class McpSkillsIntegrator
     {
         foreach (var (serverName, client) in _mcpManager.GetConnectedClients())
         {
-            var sdkClient = client.SdkClient;
+            if (client is not McpClient concreteClient)
+                continue;
+
+            var sdkClient = concreteClient.SdkClient;
             if (sdkClient is null)
                 continue;
 
@@ -52,7 +56,7 @@ public sealed class McpSkillsIntegrator
         }
     }
 
-    private async Task<bool> HasSkillIndexAsync(McpClient client, CancellationToken ct)
+    private async Task<bool> HasSkillIndexAsync(IMcpClient client, CancellationToken ct)
     {
         try
         {

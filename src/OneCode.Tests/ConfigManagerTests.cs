@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using System.Text.Json;
 using OneCode.Infrastructure.Config;
 
@@ -167,8 +168,7 @@ public sealed class ConfigManagerTests : IDisposable
                 "maxSubGoalAttempts": 7,
                 "maxTurnsPerSubGoal": 30,
                 "maxTotalTokens": 150000,
-                "maxWallClockHours": 1.5,
-                "maxCostUsd": 2.5
+                "maxWallClockHours": 1.5
               }
             }
             """);
@@ -177,7 +177,6 @@ public sealed class ConfigManagerTests : IDisposable
         sut.Current.Effective.Get("autodream.enabled", true).Should().BeFalse();
         sut.Current.Effective.Get("goal.maxSubGoalAttempts", 20).Should().Be(7);
         sut.Current.Effective.Get<long>("goal.maxTotalTokens").Should().Be(150_000L);
-        sut.Current.Effective.Get<decimal>("goal.maxCostUsd").Should().Be(2.5m);
 
         var result = await sut.ApplyAsync(
             ConfigPatch.Set(ConfigScope.User, "autodream.minHours", 8),

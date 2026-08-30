@@ -122,6 +122,41 @@ public static class TextWidthHelper
     }
 
     /// <summary>
+    /// Clips text to the given display width without appending an ellipsis.
+    /// A wide character (CJK / surrogate pair) that would straddle the boundary
+    /// is dropped whole. Unlike <see cref="TruncateByWidth"/>, no column is
+    /// reserved for an ellipsis: this is the draw-pass hard clip, where a row
+    /// exactly at the content width must keep every character — the reserved
+    /// ellipsis column would replace the last real character with "…" and make
+    /// hard-wrapped rows (tool JSON details) look truncated on every line.
+    /// </summary>
+    public static string ClipByWidth(string text, int maxDisplayWidth)
+    {
+        if (maxDisplayWidth <= 0) return "";
+        if (string.IsNullOrEmpty(text)) return text;
+
+        var width = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                if (width + 2 > maxDisplayWidth) return text[..i];
+                width += 2;
+                i++; // skip low surrogate
+                continue;
+            }
+
+            var charWidth = GetCharDisplayWidth(c);
+            if (width + charWidth > maxDisplayWidth) return text[..i];
+            width += charWidth;
+        }
+
+        return text;
+    }
+
+    /// <summary>
     /// Word-wraps text to fit within maxWidth terminal columns, using display
     /// width (not character count) for measurement. Handles:
     /// - Explicit newlines (\n) preserved as line breaks

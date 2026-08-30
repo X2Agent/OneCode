@@ -31,8 +31,6 @@ public static partial class ServiceCollectionExtensions
             };
         });
 
-        services.AddSingleton<AgentSkillsProvider>(sp =>
-            sp.GetRequiredService<Func<Task<AgentSkillsProvider>>>()().GetAwaiter().GetResult());
         services.AddSingleton<SkillProviderHolder>();
 
         services.AddSingleton<McpSkillsIntegrator>();

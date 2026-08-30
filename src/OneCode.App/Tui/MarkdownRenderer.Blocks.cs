@@ -75,27 +75,34 @@ internal static partial class MarkdownRenderer
         };
         lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
 
-        // Code body lines
+        // Code body lines — 超宽行按 innerWidth 硬换行成多行盒内片段，
+        // 否则右侧边框被推出视口、代码尾部不可见。
         foreach (var ln in codeLines)
         {
             var role = DetectDiffLineRole(ln);
-            var displayWidth = TextWidthHelper.GetDisplayWidth(ln);
-            var padding = Math.Max(0, innerWidth - displayWidth);
-            var paddedLine = ln + new string(' ', padding);
-            var codeColor = role switch
+            var fragments = TextWidthHelper.WordWrapByWidth(ln, innerWidth);
+            if (fragments.Count == 0)
+                fragments = [""];
+            foreach (var fragment in fragments)
             {
-                LineRole.DiffAdded => TuiPalette.DiffAdded,
-                LineRole.DiffRemoved => TuiPalette.DiffRemoved,
-                LineRole.DiffHunk => TuiPalette.DiffHunk,
-                _ => TuiPalette.FgPrimary,
-            };
-            lines.Add(new ConvLine(role,
-                $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}",
-                new[] {
-                    new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
-                    new LineSegment(paddedLine, codeColor),
-                    new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border),
-                }));
+                var displayWidth = TextWidthHelper.GetDisplayWidth(fragment);
+                var padding = Math.Max(0, innerWidth - displayWidth);
+                var paddedLine = fragment + new string(' ', padding);
+                var codeColor = role switch
+                {
+                    LineRole.DiffAdded => TuiPalette.DiffAdded,
+                    LineRole.DiffRemoved => TuiPalette.DiffRemoved,
+                    LineRole.DiffHunk => TuiPalette.DiffHunk,
+                    _ => TuiPalette.FgPrimary,
+                };
+                lines.Add(new ConvLine(role,
+                    $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}",
+                    new[] {
+                        new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
+                        new LineSegment(paddedLine, codeColor),
+                        new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border),
+                    }));
+            }
         }
 
         // Bottom border
@@ -121,21 +128,28 @@ internal static partial class MarkdownRenderer
         foreach (var ln in codeLines)
         {
             var role = DetectDiffLineRole(ln);
-            var displayWidth = TextWidthHelper.GetDisplayWidth(ln);
-            var padding = Math.Max(0, innerWidth - displayWidth);
-            var paddedLine = ln + new string(' ', padding);
-            var lineText = $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}";
-            var codeColor = role switch
+            // 超宽行按 innerWidth 硬换行——缩进代码块同样受视口约束。
+            var fragments = TextWidthHelper.WordWrapByWidth(ln, innerWidth);
+            if (fragments.Count == 0)
+                fragments = [""];
+            foreach (var fragment in fragments)
             {
-                LineRole.DiffAdded => TuiPalette.DiffAdded,
-                LineRole.DiffRemoved => TuiPalette.DiffRemoved,
-                LineRole.DiffHunk => TuiPalette.DiffHunk,
-                _ => TuiPalette.FgPrimary,
-            };
-            lines.Add(new ConvLine(role, lineText,
-                new[] { new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
-                        new LineSegment(paddedLine, codeColor),
-                        new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border) }));
+                var displayWidth = TextWidthHelper.GetDisplayWidth(fragment);
+                var padding = Math.Max(0, innerWidth - displayWidth);
+                var paddedLine = fragment + new string(' ', padding);
+                var lineText = $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}";
+                var codeColor = role switch
+                {
+                    LineRole.DiffAdded => TuiPalette.DiffAdded,
+                    LineRole.DiffRemoved => TuiPalette.DiffRemoved,
+                    LineRole.DiffHunk => TuiPalette.DiffHunk,
+                    _ => TuiPalette.FgPrimary,
+                };
+                lines.Add(new ConvLine(role, lineText,
+                    new[] { new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
+                            new LineSegment(paddedLine, codeColor),
+                            new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border) }));
+            }
         }
     }
 
@@ -216,34 +230,57 @@ internal static partial class MarkdownRenderer
             var scale = (double)maxTableWidth / totalWidth;
             for (var i = 0; i < colWidths.Length; i++)
                 colWidths[i] = Math.Max(4, (int)(colWidths[i] * scale));
+
+            // Math.Max(4, …) 的下限会在"多窄列"场景把总宽重新顶回上限之上
+            // （缩放后不足 4 列的列被抬到 4），逐列从最宽者收缩保证网格不超宽。
+            while (colWidths.Sum() + (colCount + 1) * 3 + 2 > maxTableWidth)
+            {
+                var widest = 0;
+                for (var i = 1; i < colWidths.Length; i++)
+                    if (colWidths[i] > colWidths[widest]) widest = i;
+                if (colWidths[widest] <= 1) break;
+                colWidths[widest]--;
+            }
         }
 
-        var isFirst = true;
+        // 单元格内容按列宽 wrap 成多行——表格列宽有限，截断会让长文本
+        // （对照表、规则说明等）完全不可读。空缺行以空格补齐保持列对齐。
+        var isFirstRow = true;
         foreach (TableRow? row in table)
         {
-            var cells = new string[colCount];
+            var cellLines = new string[colCount][];
+            var maxLineCount = 1;
             for (var i = 0; i < colCount; i++)
             {
                 var text = i < row.Count ? ExtractTableCellText(row[i]) : "";
-                var cellDisplayWidth = TextWidthHelper.GetDisplayWidth(text);
-                if (cellDisplayWidth > colWidths[i])
-                    text = TextWidthHelper.TruncateByWidth(text, colWidths[i] - 1) + TuiGlyphs.Ellipsis;
-                // Pad using display-width-aware helper so CJK cells stay aligned.
-                var padCount = Math.Max(0, colWidths[i] - TextWidthHelper.GetDisplayWidth(text));
-                cells[i] = text + new string(' ', padCount);
+                var wrapped = WordWrap(text, maxWidth: colWidths[i]);
+                cellLines[i] = wrapped.Count > 0 ? [.. wrapped] : [""];
+                if (cellLines[i].Length > maxLineCount)
+                    maxLineCount = cellLines[i].Length;
             }
 
-            lines.Add(new ConvLine(LineRole.System,
-                $"  │ {string.Join(" │ ", cells)} │"));
-
-            if (isFirst)
+            for (var r = 0; r < maxLineCount; r++)
             {
+                var cells = new string[colCount];
+                for (var i = 0; i < colCount; i++)
+                {
+                    var seg = r < cellLines[i].Length ? cellLines[i][r] : "";
+                    var padCount = Math.Max(0, colWidths[i] - TextWidthHelper.GetDisplayWidth(seg));
+                    cells[i] = seg + new string(' ', padCount);
+                }
+
+                lines.Add(new ConvLine(LineRole.System,
+                    $"  │ {string.Join(" │ ", cells)} │"));
+            }
+
+            if (isFirstRow)
+            {
+                isFirstRow = false;
                 var sep = new string[colCount];
                 for (var i = 0; i < colCount; i++)
                     sep[i] = new string('─', colWidths[i]);
                 lines.Add(new ConvLine(LineRole.System,
                     $"  ├─{string.Join("─┼─", sep)}─┤"));
-                isFirst = false;
             }
         }
     }

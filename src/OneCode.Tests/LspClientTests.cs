@@ -15,7 +15,7 @@ public sealed class LspClientTests
     public void ToPendingRequestKey_StringId_StripsJsonQuotes()
     {
         using var doc = JsonDocument.Parse("""{"id":"deadbeefcafebabe"}""");
-        var key = LspClient.ToPendingRequestKey(doc.RootElement.GetProperty("id"));
+        var key = LspProtocol.ToPendingRequestKey(doc.RootElement.GetProperty("id"));
 
         // Must match the unquoted Guid string stored when sending the request.
         key.Should().Be("deadbeefcafebabe");
@@ -26,7 +26,7 @@ public sealed class LspClientTests
     public void ToPendingRequestKey_NumericId_UsesRawDigits()
     {
         using var doc = JsonDocument.Parse("""{"id":42}""");
-        var key = LspClient.ToPendingRequestKey(doc.RootElement.GetProperty("id"));
+        var key = LspProtocol.ToPendingRequestKey(doc.RootElement.GetProperty("id"));
 
         key.Should().Be("42");
     }
@@ -41,7 +41,7 @@ public sealed class LspClientTests
         var id = doc.RootElement.GetProperty("id");
 
         id.GetRawText().Should().Be($"\"{storedKey}\"");
-        LspClient.ToPendingRequestKey(id).Should().Be(storedKey);
+        LspProtocol.ToPendingRequestKey(id).Should().Be(storedKey);
     }
 }
 

@@ -1,5 +1,5 @@
 using Microsoft.Agents.AI;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware.Contracts;
 
@@ -16,7 +16,7 @@ public sealed class AgentPipelineAssembly(
     Core.Tools.IVerificationProvider verificationProvider,
     IPermissionModeProvider modeProvider,
     IPermissionChecker permissionChecker,
-    ICostTracker costTracker)
+    ITokenLedger tokenLedger)
 {
     /// <summary>
     /// Builds <see cref="AgentPipelineOptions"/> for the Main agent (<see cref="PipelineProfile.Full"/>).
@@ -48,7 +48,7 @@ public sealed class AgentPipelineAssembly(
             permissionMode: modeProvider.CurrentMode,
             hook: hookExecutionService,
             permissionChecker: permissionChecker,
-            costTracker: costTracker,
+            tokenLedger: tokenLedger,
             rulesBySource: options.PermissionRules,
             additionalWorkingDirectories: BuildAdditionalWorkingDirectories(),
             sessionAllowlist: options.SessionAllowlist,
@@ -61,7 +61,7 @@ public sealed class AgentPipelineAssembly(
             behaviorContracts: CreateDefaultBehaviorContracts(cwd),
             editTransaction: transaction,
             conversationId: options.ConversationId,
-            maxBudgetUsd: options.MaxBudgetUsd);
+            maxBudgetTokens: options.MaxBudgetTokens);
     }
 
     /// <summary>

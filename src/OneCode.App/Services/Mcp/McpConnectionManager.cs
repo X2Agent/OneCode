@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Mcp;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using OneCode.Core.Mcp;
 using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App.Services.Mcp;
@@ -10,7 +11,7 @@ namespace OneCode.App.Services.Mcp;
 /// Config is loaded from multi-scope .mcp.json files (user, project, local) via
 /// <see cref="McpMultiScopeConfigLoader"/>.
 /// </summary>
-public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposable
+public sealed class McpConnectionManager : IMcpConnectionManager
 {
     private readonly ILogger<McpConnectionManager> _logger;
     private readonly McpMultiScopeConfigLoader _multiScopeLoader;
@@ -259,14 +260,14 @@ public sealed class McpConnectionManager : IMcpConnectionManager, IAsyncDisposab
         => _connections.Keys.ToList();
 
     /// <summary>已连接且可用的 MCP 客户端（供技能/工具 MAF 集成使用）。</summary>
-    public IReadOnlyList<(string Name, McpClient Client)> GetConnectedClients()
+    public IReadOnlyList<(string Name, IMcpClient Client)> GetConnectedClients()
         => _connections.Values
             .Where(c => c.IsConnected)
-            .Select(c => (c.Name, c.Client))
+            .Select(c => (c.Name, (IMcpClient)c.Client))
             .ToList();
 
     /// <summary>Lookup a connected client by server name (null if not connected).</summary>
-    public McpClient? GetClient(string name)
+    public IMcpClient? GetClient(string name)
         => _connections.TryGetValue(name, out var c) && c.IsConnected ? c.Client : null;
 
     // Tools

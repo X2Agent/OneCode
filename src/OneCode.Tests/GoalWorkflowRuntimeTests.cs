@@ -1,11 +1,9 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
-using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Tui;
 using OneCode.Core.Build;
-using OneCode.Core.Cost;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
@@ -235,7 +233,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         var run = await CreateClaimedRunWithBudgetAsync(
             store,
             [step],
-            new GoalBudgetSnapshot(3, 30, 15, 0m, DateTimeOffset.UtcNow));
+            new GoalBudgetSnapshot(3, 30, 15, DateTimeOffset.UtcNow));
         var runtime = CreateRuntime(
             store,
             new FakePlanningService(),
@@ -268,7 +266,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         var run = await CreateClaimedRunWithBudgetAsync(
             store,
             plan,
-            new GoalBudgetSnapshot(14, 0, 0, 0m, DateTimeOffset.UtcNow));
+            new GoalBudgetSnapshot(14, 0, 0, DateTimeOffset.UtcNow));
         var (runtime, events) = CreateRuntimeWithEvents(
             store,
             new FakePlanningService(),
@@ -346,15 +344,12 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         IGoalStepExecutionService steps,
         IGoalWorkspaceService workspace)
     {
-        var cost = Substitute.For<ICostTracker>();
-        cost.GetTotalCost().Returns(0m);
         return new GoalWorkflowRuntime(
             planning,
             steps,
             store,
             workspace,
             new FakeCompletionService(store),
-            cost,
             new GoalWorkflowRuntimeContext(
                 new GoalRunOptions
                 {
@@ -374,8 +369,6 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         IGoalWorkspaceService workspace,
         GoalBudget? budget = null)
     {
-        var cost = Substitute.For<ICostTracker>();
-        cost.GetTotalCost().Returns(0m);
         var events = Channel.CreateUnbounded<TuiEvent>();
         var options = new GoalRunOptions
         {
@@ -391,7 +384,6 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             store,
             workspace,
             new FakeCompletionService(store),
-            cost,
             new GoalWorkflowRuntimeContext(
                 options,
                 events.Writer,

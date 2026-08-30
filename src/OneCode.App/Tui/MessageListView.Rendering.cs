@@ -73,11 +73,11 @@ public sealed partial class MessageListView
                 void RenderHighlight(string text, Color fg, bool isMatch)
                 {
                     if (remaining <= 0 || string.IsNullOrEmpty(text)) return;
-                    if (text.Length > remaining)
-                        text = text[..remaining];
+                    // 按显示宽度裁剪：字符数裁剪遇 CJK 会溢出 remaining 列。
+                    text = TextWidthHelper.ClipByWidth(text, remaining);
                     SetAttribute(new Attribute(fg, isMatch ? highlightBg : segBg));
                     AddStr(text);
-                    remaining -= text.Length;
+                    remaining -= TextWidthHelper.GetDisplayWidth(text);
                 }
 
                 void RenderText(string text, Color fg)
@@ -108,23 +108,19 @@ public sealed partial class MessageListView
                     if (remaining <= 0) break;
                     var segBg = seg.Bg ?? lineBg;
                     SetAttribute(new Attribute(seg.Color, segBg));
-                    if (seg.Text.Length <= remaining)
-                    {
-                        AddStr(seg.Text);
-                        remaining -= seg.Text.Length;
-                    }
-                    else
-                    {
-                        AddStr(seg.Text[..remaining]);
-                        remaining = 0;
-                    }
+                    var clipped = TextWidthHelper.ClipByWidth(seg.Text, remaining);
+                    AddStr(clipped);
+                    remaining -= TextWidthHelper.GetDisplayWidth(clipped);
                 }
                 // remaining chars already cleared by the initial fill above.
             }
             else
             {
                 SetAttribute(new Attribute(entry.Color, lineBg));
-                AddStr(MessageRenderer.TruncateVisual(entry.Text, contentWidth));
+                // 绘制期硬裁剪不能用 TruncateByWidth：它为省略号预留 1 列，会把
+                // 恰好满宽的行尾字符替换成 "…"（换行后的工具 JSON 行每行必然
+                // 触顶，看起来像右侧显示不全）。此处裁剪是视口硬边界，无隐藏内容。
+                AddStr(TextWidthHelper.ClipByWidth(entry.Text, contentWidth));
                 // remaining chars already cleared by the initial fill above.
             }
         }

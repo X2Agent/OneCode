@@ -151,7 +151,7 @@ public sealed class TokenBreakdownEstimatorTests
     [Fact]
     public void Estimate_WithCalibratedTracker_AppliesCalibrationFactor()
     {
-        var tracker = new TokenUsageTracker(new CostTracker(), TestSupport.NullSessionIdProvider.Instance);
+        var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
         var breakdown1 = new TokenBreakdown(50, 30, 20, 0, 100);
         var breakdown2 = new TokenBreakdown(50, 30, 20, 0, 100);
         tracker.Record(new TokenUsage(200, 50), breakdown1);
@@ -173,7 +173,7 @@ public sealed class TokenBreakdownEstimatorTests
     [Fact]
     public void Estimate_WithActualInputTokens_CalculatesOtherWithCalibration()
     {
-        var tracker = new TokenUsageTracker(new CostTracker(), TestSupport.NullSessionIdProvider.Instance);
+        var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
         var sut = new TokenBreakdownEstimator(TestTokenEstimators.Default, tracker: tracker);
 
         var result = sut.Estimate("prompt", null, null, actualInputTokens: 1000);
@@ -186,7 +186,7 @@ public sealed class TokenBreakdownEstimatorTests
     [Fact]
     public void Estimate_CalibrationFactorPropagatesToAllScenarios()
     {
-        var tracker = new TokenUsageTracker(new CostTracker(), TestSupport.NullSessionIdProvider.Instance);
+        var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
         var b1 = new TokenBreakdown(100, 60, 40, 0, 200);
         var b2 = new TokenBreakdown(100, 60, 40, 0, 200);
         tracker.Record(new TokenUsage(400, 50), b1);

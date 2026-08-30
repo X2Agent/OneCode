@@ -1,4 +1,4 @@
-using OneCode.Infrastructure.Config;
+using OneCode.Core.Config;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Commands;

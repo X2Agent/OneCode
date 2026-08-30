@@ -1,6 +1,5 @@
 using OneCode.App.Services.Hooks;
 using OneCode.Core.Hooks;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests;
 

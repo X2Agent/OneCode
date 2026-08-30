@@ -1,6 +1,7 @@
-using OneCode.Core.IO;
+
 using OneCode.Core.Tools;
 
+using OneCode.Core.IO;
 namespace OneCode.Core.Permissions;
 
 public static class PermissionCheckHelpers
@@ -10,7 +11,17 @@ public static class PermissionCheckHelpers
     // - 文件写入：ToolNames.FileWriteTools（Write/Edit/ApplyWorkspaceEdit）
 
     public const string BashTool = "Bash";
-    public const string PowerShellTool = "PowerShell";
+
+    /// <summary>
+    /// Bash 工具调用的 shell 方言是否为 powershell（toolInput.shell 字段）。
+    /// 合并后的单 Shell 工具通过该字段分派 Bash/PowerShell 两套分类器。
+    /// </summary>
+    private static bool IsPowerShellDialect(string toolName, JsonElement toolInput) =>
+        string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(ExtractField(toolInput, "shell"), "powershell", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsShellTool(string toolName, JsonElement toolInput) =>
+        string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase) || IsPowerShellDialect(toolName, toolInput);
 
     public static bool IsReadOnlyTool(string toolName, JsonElement toolInput)
     {
@@ -30,14 +41,13 @@ public static class PermissionCheckHelpers
 
     public static bool IsReadOnlyShell(string toolName, JsonElement toolInput)
     {
+        if (!IsShellTool(toolName, toolInput))
+            return false;
+
         var command = ExtractInputString(toolName, toolInput);
-        if (string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase))
-            return BashCommandClassifier.IsReadOnly(command);
-
-        if (string.Equals(toolName, PowerShellTool, StringComparison.OrdinalIgnoreCase))
-            return PowerShellCommandClassifier.IsReadOnly(command);
-
-        return false;
+        return IsPowerShellDialect(toolName, toolInput)
+            ? PowerShellCommandClassifier.IsReadOnly(command)
+            : BashCommandClassifier.IsReadOnly(command);
     }
 
     /// <summary>
@@ -46,14 +56,13 @@ public static class PermissionCheckHelpers
     /// </summary>
     public static bool IsDestructiveShell(string toolName, JsonElement toolInput)
     {
+        if (!IsShellTool(toolName, toolInput))
+            return false;
+
         var command = ExtractInputString(toolName, toolInput);
-        if (string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase))
-            return BashCommandClassifier.IsDestructive(command);
-
-        if (string.Equals(toolName, PowerShellTool, StringComparison.OrdinalIgnoreCase))
-            return PowerShellCommandClassifier.IsDestructive(command);
-
-        return false;
+        return IsPowerShellDialect(toolName, toolInput)
+            ? PowerShellCommandClassifier.IsDestructive(command)
+            : BashCommandClassifier.IsDestructive(command);
     }
 
     /// <summary>
@@ -123,9 +132,7 @@ public static class PermissionCheckHelpers
             return shortcut;
 
         // 3. Shell 工具：区分危险 vs 常规
-        var isShell = string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(toolName, PowerShellTool, StringComparison.OrdinalIgnoreCase);
-        if (isShell)
+        if (IsShellTool(toolName, toolInput))
         {
             if (IsDestructiveShell(toolName, toolInput))
             {
@@ -266,18 +273,16 @@ public static class PermissionCheckHelpers
         string toolName, JsonElement toolInput, ToolPermissionContext context)
     {
         if (!ToolNames.FileWriteTools.Contains(toolName) && !ToolNames.ReadOnlyTools.Contains(toolName)
-            && !string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(toolName, PowerShellTool, StringComparison.OrdinalIgnoreCase))
+            && !IsShellTool(toolName, toolInput))
             return PermissionCheckResult.Allow;
 
         string[] pathValues;
-        if (string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase))
+        if (IsShellTool(toolName, toolInput))
         {
-            pathValues = BashCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput)).ToArray();
-        }
-        else if (string.Equals(toolName, PowerShellTool, StringComparison.OrdinalIgnoreCase))
-        {
-            pathValues = PowerShellCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput)).ToArray();
+            pathValues = (IsPowerShellDialect(toolName, toolInput)
+                    ? PowerShellCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput))
+                    : BashCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput)))
+                .ToArray();
         }
         else
         {

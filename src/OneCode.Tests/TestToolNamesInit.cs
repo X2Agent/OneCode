@@ -65,7 +65,6 @@ internal static class TestToolNamesInit
 
         // Shell tools
         registry.Register(new ToolMetadata { Name = "Bash", Risk = ToolRisk.Dynamic });
-        registry.Register(new ToolMetadata { Name = "PowerShell", Risk = ToolRisk.Dynamic });
 
         ToolNames.Initialize(registry);
     }

@@ -211,8 +211,8 @@ public void IsReadOnly_CorrectlyClassifies(string command, bool expectedReadOnly
 
 | 约定 | 格式 | 示例 |
 |------|------|------|
-| 测试类名 | `{被测类}Tests` | `CostTrackerTests` |
-| 测试方法名 | `{方法名}_{场景}_{预期结果}` | `RecordUsage_CalculatesCostCorrectly` |
+| 测试类名 | `{被测类}Tests` | `BudgetGuardRunMiddlewareTests` |
+| 测试方法名 | `{方法名}_{场景}_{预期结果}` | `RunAsync_BudgetExceeded_ShortCircuitsWithoutCallingAgent` |
 | 参数化测试 | `{方法名}_{场景描述}` | `ParseEffort_ReturnsCorrectLevel` |
 
 ---

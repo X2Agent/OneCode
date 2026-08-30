@@ -1,7 +1,9 @@
 using OneCode.App.Tools;
-using OneCode.Core.Lsp;
+
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Text;
+
+using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Lsp;
 

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Microsoft.Extensions.AI;
+using OneCode.Core.Ai;
 
 namespace OneCode.Infrastructure.Ai;
 

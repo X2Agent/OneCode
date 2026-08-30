@@ -1071,7 +1071,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
         planned.State.Should().Be(BuildRunState.Planned);
         return await sut.ApprovePlanAsync(
             planned.Id,
-            new ApprovedToolPolicy(["ReadFile", "Write", "Edit", "Bash", "PowerShell"]),
+            new ApprovedToolPolicy(["ReadFile", "Write", "Edit", "Bash"]),
             "test",
             ct);
     }

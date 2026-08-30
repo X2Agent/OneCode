@@ -1,8 +1,11 @@
 using NSubstitute;
+using OneCode.App.Services.Search;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Abstractions;
+using OneCode.Core.IO;
+
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OneCode.Tests;
 
@@ -55,7 +58,9 @@ public sealed class GrepToolTests : IDisposable
     {
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(false);
-        return new GrepTool(processRunner, new LocalAgentFileStore(CreateWd()), CreateWd());
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()),
+            NullLogger<TextSearchService>.Instance);
+        return new GrepTool(textSearch, CreateWd());
     }
 
     private static void AssertRejected(ToolResult result)
@@ -296,7 +301,8 @@ public sealed class GrepToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:found", "", false));
 
-        var tool = new GrepTool(processRunner, Substitute.For<IFileSystem>(), CreateWd());
+        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var tool = new GrepTool(textSearch, CreateWd());
 
         var result = await tool.SearchAsync("found", path: "src", output_mode: "content", ct: ct);
 
@@ -316,7 +322,8 @@ public sealed class GrepToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(2, "", "ripgrep error: invalid regex", false));
 
-        var tool = new GrepTool(processRunner, Substitute.For<IFileSystem>(), CreateWd());
+        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var tool = new GrepTool(textSearch, CreateWd());
 
         var result = await tool.SearchAsync("pattern", path: "src", output_mode: "content", ct: ct);
 

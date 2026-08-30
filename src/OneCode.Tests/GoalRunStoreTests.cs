@@ -150,7 +150,7 @@ public sealed class GoalRunStoreTests : IDisposable
                     true,
                     false),
             ],
-            Budget = new GoalBudgetSnapshot(0, 0, 0, 0m, now),
+            Budget = new GoalBudgetSnapshot(0, 0, 0, now),
             CreatedAt = now,
             UpdatedAt = now,
         };

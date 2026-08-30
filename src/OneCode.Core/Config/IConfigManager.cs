@@ -1,4 +1,4 @@
-namespace OneCode.Infrastructure.Config;
+namespace OneCode.Core.Config;
 
 /// <summary>
 /// OneCode 配置服务。统一解析内置默认值、用户配置、项目配置、环境变量和会话覆盖，

@@ -82,7 +82,6 @@ public sealed record TuiBuildRunState(
     OneCode.Core.Build.BuildValidationStatus? ValidationStatus = null,
     int ChangedFiles = 0,
     int TurnsCompleted = 0,
-    decimal? EstimatedCost = null,
     int ActiveTasks = 0,
     int BlockedTasks = 0) : TuiEvent;
 
@@ -235,8 +234,7 @@ public sealed record TuiGoalBudgetWarning(
     OneCode.Core.Goals.GoalBudgetWarningLevel Level,
     int TotalAttempts,
     long TotalTokens,
-    TimeSpan? Elapsed,
-    decimal EstimatedCostUsd) : TuiEvent;
+    TimeSpan? Elapsed) : TuiEvent;
 
 /// <summary>
 /// 用户提问请求事件 — AskUserQuestionTool 需要与用户交互时触发。

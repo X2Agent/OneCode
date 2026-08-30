@@ -1,17 +1,14 @@
 using System.Text;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace OneCode.App.Commands;
 
 /// <summary>
-/// Injects <see cref="IServiceProvider"/> instead of <see cref="ICommandRegistry"/>
+/// Injects <see cref="Func{ICommandRegistry}"/> instead of <see cref="ICommandRegistry"/>
 /// to break the circular dependency: CommandRegistry → IEnumerable&lt;ICommand&gt; → HelpCommand → ICommandRegistry.
 /// Resolution is deferred to <see cref="ExecuteAsync"/> when the registry is already constructed.
 /// </summary>
-public sealed class HelpCommand(IServiceProvider services) : Command
+public sealed class HelpCommand(Func<ICommandRegistry> registryFactory) : Command
 {
-    private ICommandRegistry? _registry;
-    private ICommandRegistry Registry => _registry ??= services.GetRequiredService<ICommandRegistry>();
     public override string Name => "help";
     public override string Description => "Show available commands and keyboard shortcuts";
     public override CommandCategory Category => CommandCategory.Builtin;
@@ -25,7 +22,7 @@ public sealed class HelpCommand(IServiceProvider services) : Command
         sb.AppendLine("Available Commands:");
         sb.AppendLine();
 
-        var grouped = Registry.GetGrouped();
+        var grouped = registryFactory().GetGrouped();
         var categoryOrder = new (CommandCategory Cat, string Label)[]
         {
             (CommandCategory.Builtin, "Built-in"),

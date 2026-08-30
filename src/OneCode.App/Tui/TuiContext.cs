@@ -1,10 +1,13 @@
 using OneCode.App.Services;
 using OneCode.App.Services.Lsp;
-using OneCode.Core.IO;
+
 using OneCode.Core.Keybindings;
-using OneCode.Core.Lsp;
+
 using OneCode.Core.Models;
 using OneCode.Infrastructure.Media;
+
+using OneCode.Core.IO;
+using OneCode.Core.Lsp;
 
 namespace OneCode.App.Tui;
 
@@ -49,7 +52,6 @@ public sealed record TuiRuntimeServices(
     Func<IReadOnlyList<KeybindingWarning>>? GetKeybindingWarnings = null,
     TrustService? TrustService = null,
     ImagePipeline? ImagePipeline = null,
-    Func<string>? RecordCost = null,
     OneCode.Core.IO.IClipboardService? Clipboard = null,
     Func<IReadOnlyCollection<string>>? GetToolNames = null,
     Func<bool>? GetShowThinking = null,
@@ -111,7 +113,6 @@ public sealed record TuiContext(
     public Func<IReadOnlyList<KeybindingWarning>>? GetKeybindingWarnings => Runtime.GetKeybindingWarnings;
     public TrustService? TrustService => Runtime.TrustService;
     public ImagePipeline? ImagePipeline => Runtime.ImagePipeline;
-    public Func<string>? RecordCost => Runtime.RecordCost;
     public IClipboardService? Clipboard => Runtime.Clipboard;
     public Func<IReadOnlyCollection<string>>? GetToolNames => Runtime.GetToolNames;
     public Func<bool>? GetShowThinking => Runtime.GetShowThinking;

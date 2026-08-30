@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Coordinator;
@@ -11,7 +12,6 @@ using OneCode.Core.Goals;
 using OneCode.Core.Tools;
 using OneCode.Core.Workflows;
 using OneCode.Infrastructure.Build;
-using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Teams;
 
 namespace OneCode.Tests;

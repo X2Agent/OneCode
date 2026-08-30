@@ -168,7 +168,8 @@ public sealed class AgentTaskWorkflowCompiler(IAgentRunner runner, ILogger<Agent
     {
         Validate(tasks);
 
-        var orderedTasks = TopologicalOrder(tasks);
+        var orderedTasks = WorkflowTopology.KahnOrder(
+            tasks, task => task.Id, task => task.Dependencies, "Task graph contains a cycle.");
         var effectiveDependencies = BuildEffectiveDependencies(orderedTasks);
         var outcomeRegistry = new AgentTaskOutcomeRegistry();
         var dispatcher = new AgentTaskDispatcherExecutor(DispatcherId);
@@ -218,45 +219,6 @@ public sealed class AgentTaskWorkflowCompiler(IAgentRunner runner, ILogger<Agent
             effectiveDependencies,
             terminalTasks.Select(task => task.Id).ToArray(),
             ComputeDefinitionHash(orderedTasks, effectiveDependencies, terminalTasks, cacheSafeParams, parentCapabilities));
-    }
-
-    private static IReadOnlyList<AgentWorkflowTask> TopologicalOrder(IReadOnlyList<AgentWorkflowTask> tasks)
-    {
-        var taskById = tasks.ToDictionary(task => task.Id, StringComparer.OrdinalIgnoreCase);
-        var remainingDependencies = tasks.ToDictionary(
-            task => task.Id,
-            task => task.Dependencies.Count,
-            StringComparer.OrdinalIgnoreCase);
-        var dependents = tasks.ToDictionary(
-            task => task.Id,
-            _ => new List<string>(),
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var task in tasks)
-        {
-            foreach (var dependency in task.Dependencies)
-                dependents[dependency].Add(task.Id);
-        }
-
-        var ready = new SortedSet<string>(
-            remainingDependencies.Where(pair => pair.Value == 0).Select(pair => pair.Key),
-            StringComparer.OrdinalIgnoreCase);
-        var ordered = new List<AgentWorkflowTask>(tasks.Count);
-        while (ready.Count > 0)
-        {
-            var taskId = ready.Min!;
-            ready.Remove(taskId);
-            ordered.Add(taskById[taskId]);
-            foreach (var dependent in dependents[taskId].Order(StringComparer.OrdinalIgnoreCase))
-            {
-                remainingDependencies[dependent]--;
-                if (remainingDependencies[dependent] == 0)
-                    ready.Add(dependent);
-            }
-        }
-
-        if (ordered.Count != tasks.Count)
-            throw new InvalidOperationException("Task graph contains a cycle.");
-        return ordered;
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildEffectiveDependencies(

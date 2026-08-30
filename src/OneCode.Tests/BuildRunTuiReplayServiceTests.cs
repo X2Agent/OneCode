@@ -40,7 +40,6 @@ public sealed class BuildRunTuiReplayServiceTests
             Metrics = BuildRunMetrics.Empty with
             {
                 TurnsCompleted = 7,
-                EstimatedCost = 0.25m,
             },
         };
         var store = Substitute.For<IBuildRunStore>();
@@ -64,7 +63,6 @@ public sealed class BuildRunTuiReplayServiceTests
         result.ValidationStatus.Should().Be(BuildValidationStatus.Pending);
         result.ChangedFiles.Should().Be(1);
         result.TurnsCompleted.Should().Be(7);
-        result.EstimatedCost.Should().Be(0.25m);
         await eventStore.Received(1).ReplayAsync(runId, Arg.Any<CancellationToken>());
     }
 

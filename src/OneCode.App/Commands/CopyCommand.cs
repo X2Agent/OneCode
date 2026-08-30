@@ -1,6 +1,7 @@
 using OneCode.App.Session;
-using OneCode.Core.IO;
 
+
+using OneCode.Core.IO;
 namespace OneCode.App.Commands;
 
 public sealed class CopyCommand(ISessionManager sessionManager, IClipboardService clipboard) : Command

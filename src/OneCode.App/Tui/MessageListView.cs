@@ -1,3 +1,4 @@
+
 namespace OneCode.App.Tui;
 
 /// <summary>
@@ -23,13 +24,17 @@ public sealed partial class MessageListView : View
     /// 交互卡片（QuestionWizard / InlineSelector）等外部渲染方据此按同一宽度预换行，
     /// 避免 Render 阶段按 contentWidth 截断丢字。
     /// </summary>
+    /// <remarks>
+    /// 滚动条列常驻预留 1 列：折行发生在 <see cref="TuiSpacing.GetContentColumnWidth"/>（展开
+    /// 思考/错误详情时），而滚动条是否出现随内容增长随时变化。按当时状态条件预留会导致
+    /// 先折行、后出滚动条的行尾被绘制层截断。常驻预留保证折行宽度 ≤ 任何绘制状态。
+    /// </remarks>
     public int ContentWidth
     {
         get
         {
             var viewport = Viewport;
-            var showScrollbar = _lines.Count > viewport.Height;
-            var availableWidth = showScrollbar ? Math.Max(0, viewport.Width - 1) : viewport.Width;
+            var availableWidth = Math.Max(0, viewport.Width - 1);
             return TuiSpacing.GetContentColumnWidth(availableWidth);
         }
     }

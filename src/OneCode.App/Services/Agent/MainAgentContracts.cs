@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using OneCode.App.Tui;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -37,8 +36,8 @@ public sealed record MainAgentRunOptions
     /// <summary>Immutable upper bound for tool visibility and child-agent inheritance.</summary>
     public ToolCapabilitySet? ToolCapabilities { get; init; }
 
-    /// <summary>Maximum cost budget in USD (null = unlimited).</summary>
-    public decimal? MaxBudgetUsd { get; init; }
+    /// <summary>Maximum token budget (input + output; null = unlimited).</summary>
+    public long? MaxBudgetTokens { get; init; }
 
     /// <summary>
     /// 当前 UI 工作模式（Build/Plan/Team/Goal）。

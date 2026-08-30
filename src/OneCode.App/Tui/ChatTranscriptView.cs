@@ -1,3 +1,4 @@
+
 namespace OneCode.App.Tui;
 
 public sealed partial class ChatTranscriptView : View
@@ -34,7 +35,13 @@ public sealed partial class ChatTranscriptView : View
     /// Content column width for wrapping — tracks the live viewport so chat
     /// fills available horizontal space.
     /// </summary>
-    private int ContentWidth => TuiSpacing.GetContentColumnWidth(Viewport.Width);
+    /// <remarks>
+    /// 预留 1 列滚动条：MessageListView 绘制期在行数超出视口时保留最右列画滚动条，
+    /// 绘制层 contentWidth 因此比视口窄 1。此处若按全宽折行，滚动条出现时每行
+    /// 尾部 1-2 列被绘制层截断为省略号——长回复（必然出滚动条）每行都缺字。
+    /// 常驻预留 1 列保证渲染宽度 ≤ 任何绘制状态下的可用宽度。
+    /// </remarks>
+    private int ContentWidth => TuiSpacing.GetContentColumnWidth(Math.Max(0, Viewport.Width - 1));
 
     public WorkingMode CurrentMode
     {
@@ -172,13 +179,15 @@ public sealed partial class ChatTranscriptView : View
     /// 构建错误块（首行摘要 + 展开的详情行）。按 <paramref name="contentWidth"/>
     /// 换行/截断，供追加与宽度变化后的整体重渲共用。
     /// </summary>
-    private static IReadOnlyList<FormattedLine> RenderErrorBlock(string text, int contentWidth)
+    internal static IReadOnlyList<FormattedLine> RenderErrorBlock(string text, int contentWidth)
     {
         var maxWidth = Math.Max(20, contentWidth - 6);
         var errorLines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
         var firstLine = errorLines[0];
-        var summary = firstLine.Length > maxWidth - 6
-            ? firstLine[..(maxWidth - 6)] + TuiGlyphs.Ellipsis
+        // 摘要预算按显示宽度判定——旧实现按字符数截断，CJK 摘要会成倍超宽。
+        var summaryBudget = Math.Max(1, maxWidth - 6);
+        var summary = TextWidthHelper.GetDisplayWidth(firstLine) > summaryBudget
+            ? TextWidthHelper.TruncateByWidth(firstLine, summaryBudget)
             : firstLine;
         var tag = new ErrorLineTag(text, IsExpanded: true);
         var lines = new List<FormattedLine>
@@ -193,7 +202,7 @@ public sealed partial class ChatTranscriptView : View
         if (errorLines.Length > 1)
         {
             var maxContentWidth = Math.Max(20, contentWidth - ConversationRenderer.ContentIndent - 2);
-            var startIdx = firstLine.Length <= maxWidth - 6 ? 1 : 0;
+            var startIdx = TextWidthHelper.GetDisplayWidth(firstLine) <= summaryBudget ? 1 : 0;
             for (var li = startIdx; li < errorLines.Length; li++)
             {
                 var line = errorLines[li];
@@ -437,8 +446,14 @@ public sealed partial class ChatTranscriptView : View
         _lastViewportWidth = newWidth;
         _lastViewportHeight = newHeight;
 
-        _renderer.CurrentWidth = TuiSpacing.GetContentColumnWidth(newWidth);
-        _messageView.ReflowExpandedToolDetails(newWidth);
+        _renderer.CurrentWidth = ContentWidth;
+        // 预留 1 列滚动条，与 MessageListView 绘制期 contentWidth 对齐。
+        _messageView.ReflowExpandedToolDetails(Math.Max(0, newWidth - 1));
+
+        // 终端 resize 后已提交内容按新宽度整体重排。不重排时，旧宽度下折行的
+        // 消息/工具结果在更窄的视口中行尾被直接裁切（展开的工具 JSON 最明显）。
+        // 侧边栏开合路径已单独调用 RequestContentRerender；终端 resize 此前遗漏。
+        RequestContentRerender();
 
         // Re-render welcome screen so logo / text re-center in the new width
         if (_isWelcomeShowing)
@@ -474,7 +489,7 @@ public sealed partial class ChatTranscriptView : View
         }
 
         // Keep the renderer's width in sync without touching child layout.
-        _renderer.CurrentWidth = TuiSpacing.GetContentColumnWidth(vp.Width);
+        _renderer.CurrentWidth = ContentWidth;
         return base.OnDrawingContent(context);
     }
 

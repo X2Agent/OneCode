@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using OneCode.Core.Ai;
 
 namespace OneCode.Infrastructure;
 

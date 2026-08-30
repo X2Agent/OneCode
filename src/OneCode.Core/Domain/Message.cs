@@ -148,8 +148,7 @@ public sealed record TokenUsage(
     int InputTokens,
     int OutputTokens,
     int CacheReadTokens = 0,
-    int CacheWriteTokens = 0,
-    decimal? TotalCostUsd = null)
+    int CacheWriteTokens = 0)
 {
     public int TotalTokens => InputTokens + OutputTokens;
 }

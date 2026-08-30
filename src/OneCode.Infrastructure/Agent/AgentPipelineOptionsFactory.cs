@@ -3,7 +3,7 @@ using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Permissions;
 using OneCode.Core.Tools;
-using OneCode.Core.Cost;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Contracts;
 using Microsoft.Agents.AI;
@@ -32,8 +32,8 @@ public sealed record PipelineSecurityContext(
     IReadOnlyList<FileEditContract>? BehaviorContracts = null,
     EditTransaction? EditTransaction = null,
     IPermissionChecker? PermissionChecker = null,
-    ICostTracker? CostTracker = null,
-    decimal? MaxBudgetUsd = null,
+    ITokenLedger? TokenLedger = null,
+    long? MaxBudgetTokens = null,
     SessionId? ConversationId = null);
 
 /// <summary>
@@ -126,9 +126,9 @@ public static class AgentPipelineOptionsFactory
             OrchestrationEventSink = ctx.OrchestrationEventSink,
             ModelId = ctx.ModelId,
             ProviderId = ctx.ProviderId,
-            CostTracker = ctx.CostTracker,
+            TokenLedger = ctx.TokenLedger,
             ConversationId = ctx.ConversationId,
-            MaxBudgetUsd = ctx.MaxBudgetUsd,
+            MaxBudgetTokens = ctx.MaxBudgetTokens,
         };
     }
 

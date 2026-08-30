@@ -1,9 +1,9 @@
+using OneCode.Core.Config;
 using Microsoft.Agents.AI;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Skills;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
-using OneCode.Infrastructure.Config;
 using System.Text;
 
 namespace OneCode.App.Services;

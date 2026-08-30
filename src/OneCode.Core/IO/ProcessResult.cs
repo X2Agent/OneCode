@@ -1,4 +1,4 @@
-namespace OneCode.Infrastructure;
+namespace OneCode.Core.IO;
 
 public sealed record ProcessResult(
     int ExitCode,

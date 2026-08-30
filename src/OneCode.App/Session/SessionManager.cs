@@ -239,8 +239,7 @@ public sealed class SessionManager : ISessionManager
                 conversation.TotalUsage.InputTokens + usage.InputTokens,
                 conversation.TotalUsage.OutputTokens + usage.OutputTokens,
                 conversation.TotalUsage.CacheReadTokens + usage.CacheReadTokens,
-                conversation.TotalUsage.CacheWriteTokens + usage.CacheWriteTokens,
-                conversation.TotalUsage.TotalCostUsd);
+                conversation.TotalUsage.CacheWriteTokens + usage.CacheWriteTokens);
         }
 
         conversation.LastActivityAt = DateTimeOffset.UtcNow;

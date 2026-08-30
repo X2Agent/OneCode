@@ -1,3 +1,4 @@
+using OneCode.Core.Config;
 namespace OneCode.App.Services;
 
 using OneCode.Core.Permissions;

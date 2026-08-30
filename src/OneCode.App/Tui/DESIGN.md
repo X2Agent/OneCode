@@ -275,7 +275,7 @@ ReplShell
 │       CHAT TRANSCRIPT — sole permanent surface        │
 │                                                       │
 ├─ AgentStatusBar ─────────────────────────────────────┤
-│ ⠋ 思考中 · Opus · 💰 $0.04 · 🔒 Sandbox · LSP: 2s  BUILD │
+│ ⠋ 思考中 · Opus · 🔒 Sandbox · LSP: 2s              BUILD │
 ├─ ChatInputView ──────────────────────────────────────┤
 │ _                                                     │
 │                                                       │
@@ -418,7 +418,7 @@ orchestrator → researcher    Investigate Terminal.Gui constraints
 A single-line bar showing **agent runtime state and orientation**:
 
 ```
-⠋ 思考中 · Opus · 💰 $0.04 · 🔒 Sandbox · LSP: 2s       BUILD
+⠋ 思考中 · Opus · 🔒 Sandbox · LSP: 2s                   BUILD
 ```
 
 - Left group: animated activity indicator while busy, activity phase, model,

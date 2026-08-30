@@ -1,4 +1,4 @@
-namespace OneCode.Infrastructure.Config;
+namespace OneCode.Core.Config;
 
 public enum ConfigScope
 {
@@ -129,7 +129,7 @@ public static class SettingDescriptors
             ["allowedDirectories"] = new("allowedDirectories", ActivationMode.Immediate, ConfigValueKind.StringList, BuiltInDefault: Array.Empty<string>()),
             ["hasTrustAccepted"] = new("hasTrustAccepted", ActivationMode.Immediate, ConfigValueKind.Boolean, AllowProjectScope: false, BuiltInDefault: false),
             ["maxTurns"] = new("maxTurns", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 100),
-            ["maxBudgetUsd"] = new("maxBudgetUsd", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: 10.0),
+            ["maxBudgetTokens"] = new("maxBudgetTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: 5_000_000L),
             ["webSearchProvider"] = new("webSearchProvider", ActivationMode.NextOperation, EnvironmentVariable: "ONECODE_WEB_SEARCH_PROVIDER", BuiltInDefault: "duckduckgo"),
             ["webSearchApiKey"] = new("webSearchApiKey", ActivationMode.NextOperation, IsSecret: true, EnvironmentVariable: "ONECODE_WEB_SEARCH_API_KEY"),
             ["thinkingEnabled"] = new("thinkingEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: false),
@@ -145,7 +145,6 @@ public static class SettingDescriptors
             ["goal.maxTurnsPerSubGoal"] = new("goal.maxTurnsPerSubGoal", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 50),
             ["goal.maxTotalTokens"] = new("goal.maxTotalTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: 200_000L),
             ["goal.maxWallClockHours"] = new("goal.maxWallClockHours", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: 2.0),
-            ["goal.maxCostUsd"] = new("goal.maxCostUsd", ActivationMode.NextOperation, ConfigValueKind.Decimal, BuiltInDefault: 5.0m),
         };
 
     public static IEnumerable<SettingDescriptor> All => Items.Values;

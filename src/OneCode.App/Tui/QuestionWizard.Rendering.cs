@@ -26,16 +26,16 @@ public sealed partial class QuestionWizard
         {
             case QuestionType.SingleChoice:
             case QuestionType.Confirm:
-                RenderSingleChoice(lines, question);
+                RenderSingleChoice(lines, question, viewWidth);
                 break;
             case QuestionType.MultipleChoice:
-                RenderMultipleChoice(lines, question);
+                RenderMultipleChoice(lines, question, viewWidth);
                 break;
             case QuestionType.ShortText:
-                RenderShortText(lines, question);
+                RenderShortText(lines, question, viewWidth);
                 break;
             case QuestionType.LongText:
-                RenderLongText(lines, question);
+                RenderLongText(lines, question, viewWidth);
                 break;
         }
 
@@ -58,9 +58,16 @@ public sealed partial class QuestionWizard
         _ => "问答"
     };
 
-    private void RenderSingleChoice(List<FormattedLine> lines, WizardQuestion question)
+    /// <summary>选项/答案预览是单行内容：超宽时按显示宽度截断（隐藏内容存在，省略号成立）。</summary>
+    private static string FitOptionText(string text, int viewWidth, int prefixDisplayWidth)
+        => TextWidthHelper.GetDisplayWidth(text) > viewWidth - prefixDisplayWidth
+            ? TextWidthHelper.TruncateByWidth(text, Math.Max(1, viewWidth - prefixDisplayWidth))
+            : text;
+
+    private void RenderSingleChoice(List<FormattedLine> lines, WizardQuestion question, int viewWidth)
     {
         var options = GetEffectiveOptions();
+        const int prefixWidth = 4; // "  " + "● "
         for (var i = 0; i < options.Count; i++)
         {
             var isSelected = i == _selectedOptionIndex;
@@ -72,15 +79,17 @@ public sealed partial class QuestionWizard
             {
                 new LineSegment("  ", TuiPalette.BgPrimary),
                 new LineSegment($"{bullet} ", isSelected ? TuiPalette.Accent : TuiPalette.FgMuted),
-                new LineSegment(options[i], labelColor),
+                new LineSegment(FitOptionText(options[i], viewWidth, prefixWidth), labelColor),
             }));
         }
     }
 
-    private void RenderMultipleChoice(List<FormattedLine> lines, WizardQuestion question)
+    private void RenderMultipleChoice(List<FormattedLine> lines, WizardQuestion question, int viewWidth)
     {
         if (question.Options == null) return;
 
+        // "  " + bullet(1) + "[✓](✓ 为 U+2713，占 2 列)" + 空格 = 8 列。
+        const int prefixWidth = 8;
         for (var i = 0; i < question.Options.Count; i++)
         {
             var isSelected = i == _selectedOptionIndex;
@@ -95,7 +104,7 @@ public sealed partial class QuestionWizard
             {
                 new LineSegment("  ", TuiPalette.BgPrimary),
                 new LineSegment($"{bullet}{checkbox} ", isSelected ? TuiPalette.Accent : TuiPalette.FgMuted),
-                new LineSegment(question.Options[i], labelColor),
+                new LineSegment(FitOptionText(question.Options[i], viewWidth, prefixWidth), labelColor),
             }));
         }
 
@@ -110,12 +119,14 @@ public sealed partial class QuestionWizard
         }
     }
 
-    private static void RenderShortText(List<FormattedLine> lines, WizardQuestion question)
+    private static void RenderShortText(List<FormattedLine> lines, WizardQuestion question, int viewWidth)
     {
         var currentAnswer = question.Answer ?? string.Empty;
+        // "  " + "> " 前缀；已输入答案超宽时截断预览。
+        const int prefixWidth = 4;
         var displayText = string.IsNullOrEmpty(currentAnswer)
             ? "[请输入简短回答，按 Enter 继续]"
-            : $"> {currentAnswer}";
+            : $"> {FitOptionText(currentAnswer, viewWidth, prefixWidth)}";
         var color = string.IsNullOrEmpty(currentAnswer) ? TuiPalette.FgMuted : TuiPalette.Accent;
 
         lines.Add(FormattedLine.FromSegments(new[]
@@ -125,9 +136,10 @@ public sealed partial class QuestionWizard
         }));
     }
 
-    private static void RenderLongText(List<FormattedLine> lines, WizardQuestion question)
+    private static void RenderLongText(List<FormattedLine> lines, WizardQuestion question, int viewWidth)
     {
         var currentAnswer = question.Answer ?? string.Empty;
+        const int prefixWidth = 4; // "  " + "> "
 
         if (string.IsNullOrEmpty(currentAnswer))
         {
@@ -146,7 +158,7 @@ public sealed partial class QuestionWizard
                 lines.Add(FormattedLine.FromSegments(new[]
                 {
                     new LineSegment("  ", TuiPalette.BgPrimary),
-                    new LineSegment("> " + previewLine, TuiPalette.Accent),
+                    new LineSegment("> " + FitOptionText(previewLine, viewWidth, prefixWidth), TuiPalette.Accent),
                 }));
             }
 

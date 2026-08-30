@@ -5,6 +5,7 @@ using OllamaSharp;
 using OneCode.Infrastructure.Config;
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using OneCode.Core.Ai;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Infrastructure.Ai;
@@ -52,8 +53,13 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
     {
         var baseClient = CreateBaseClient(providerId, apiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
 
+        // DeepSeek thinking 模式：历史 assistant 消息必须回传 reasoning_content（HTTP 层补写）。
+        var passbackClient = ReasoningPassbackPolicy.ShouldEnable(providerId, baseUrl, model)
+            ? new ReasoningPassbackChatClient(baseClient)
+            : baseClient;
+
         var retryLogger = loggerFactory?.CreateLogger<RetryOnOverloadChatClient>();
-        var retryClient = new RetryOnOverloadChatClient(baseClient, retryLogger);
+        var retryClient = new RetryOnOverloadChatClient(passbackClient, retryLogger);
         var providerAware = new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
 
         return vcrMode is { } m && m.IsActive()
