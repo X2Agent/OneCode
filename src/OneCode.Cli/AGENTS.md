@@ -57,6 +57,6 @@ public static int Main(string[] args)
 # 开发构建
 dotnet build src/OneCode.Cli/OneCode.Cli.csproj
 
-# 运行 CLI
-dotnet run --project src/OneCode.Cli/OneCode.Cli.csproj -- --help
+# 运行 CLI（--version 是唯一快路径参数，其余参数进入交互式 TUI）
+dotnet run --project src/OneCode.Cli/OneCode.Cli.csproj -- --version
 ```

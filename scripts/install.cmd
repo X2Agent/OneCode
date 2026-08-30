@@ -133,7 +133,7 @@ echo ╔════════════════════════
 echo ║  安装完成!                                        ║
 echo ╚══════════════════════════════════════════════════╝
 echo.
-echo   运行 onecode --help 开始使用
+echo   运行 onecode 进入交互界面（onecode --version 查看版本）
 echo   请重新打开终端使 PATH 生效
 echo.
 

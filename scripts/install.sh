@@ -204,7 +204,7 @@ main() {
     echo -e "${GREEN}║  ✅ 安装完成!                                     ║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  运行 ${CYAN}onecode --help${NC} 开始使用"
+    echo -e "  运行 ${CYAN}onecode${NC} 进入交互界面（onecode --version 查看版本）"
     echo -e "  或重新打开终端使 PATH 生效"
     echo ""
 }

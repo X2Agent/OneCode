@@ -133,8 +133,8 @@ function Show-PostInstallInfo {
     Write-Host "╚══════════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
     Write-Host "  运行 " -NoNewline
-    Write-Host "onecode --help" -ForegroundColor Cyan -NoNewline
-    Write-Host " 开始使用"
+    Write-Host "onecode" -ForegroundColor Cyan -NoNewline
+    Write-Host " 进入交互界面（onecode --version 查看版本）"
     Write-Host ""
     Write-Host "  提示: 你可以设置别名让输入更短:" -ForegroundColor Yellow
     Write-Host '    function cc { onecode @args }' -ForegroundColor White

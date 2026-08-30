@@ -113,17 +113,6 @@ foreach ($rel in $requiredResources) {
     Write-Pass "存在"
 }
 
-# ── 4. --help 冒烟(可选,验证 DI 容器能初始化) ───────────────────
-# --help 走 FullCli 路径,会触发最小 DI 组装;失败说明入口程序集加载有问题
-Write-Step "执行 --help(验证入口完整性)"
-& $exePath --help 2>&1 | Out-Null
-$helpExit = $LASTEXITCODE
-if ($helpExit -ne 0) {
-    Write-Fail "--help 退出码非零: $helpExit"
-    exit 1
-}
-Write-Pass "入口完整"
-
 # ── 摘要 ──────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Green

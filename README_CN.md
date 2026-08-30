@@ -159,7 +159,7 @@ irm https://raw.githubusercontent.com/X2Agent/OneCode/main/scripts/install.ps1 |
 curl -fsSL https://raw.githubusercontent.com/X2Agent/OneCode/main/scripts/install.sh | bash
 ```
 
-安装脚本从 `X2Agent/OneCode` 的 latest GitHub Release 下载与当前系统匹配的资产，并在无法获取 Release 时直接失败，不会回退到虚构版本。安装后运行 `onecode --help` 开始使用。
+安装脚本从 `X2Agent/OneCode` 的 latest GitHub Release 下载与当前系统匹配的资产，并在无法获取 Release 时直接失败，不会回退到虚构版本。安装后直接运行 `onecode` 进入交互界面（`onecode --version` 查看版本）。
 
 ### 手动构建
 
@@ -183,9 +183,8 @@ onecode "修复登录页的 CSS 问题"
 # 指定工作目录启动
 onecode --cwd /path/to/project "分析项目结构"
 
-# 查看版本 / 帮助
+# 查看版本
 onecode --version
-onecode --help
 ```
 
 > **Headless / CI 模式**：非交互式终端（无 TTY）下自动进入无交互路径（`AskUserQuestion` 等交互工具返回错误而不是阻塞）。权限模式通过 `settings.json` 的 `permissionMode` 键配置（可选值见 [权限模式](#权限与安全系统)）。
