@@ -134,7 +134,8 @@ jobs:
         shell: pwsh
         run: |
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts/release"
-          $archive = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notlike '*.sha256' } | Select-Object -Single
+          $archive = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notlike '*.sha256' } | Select-Object -First 1
+          if (-not $archive) { throw "No packaged archive found in $releaseDir" }
           $hash = (Get-FileHash -Path $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($archive.Name)" | Set-Content -Path "$($archive.FullName).sha256" -Encoding ascii -NoNewline
 
