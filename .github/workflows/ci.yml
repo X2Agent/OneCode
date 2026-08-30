@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CONFIGURATION: Release
+  SOLUTION: src/OneCode.slnx
+  TEST_PROJECT: src/OneCode.Tests/OneCode.Tests.csproj
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check command docs sync
+        shell: pwsh
+        run: ./scripts/check-docs.ps1 -RepoRoot "$env:GITHUB_WORKSPACE"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        run: dotnet build "$SOLUTION" -c "$CONFIGURATION" --no-restore
+
+      - name: Test
+        run: dotnet test "$TEST_PROJECT" -c "$CONFIGURATION" --no-build --no-restore
