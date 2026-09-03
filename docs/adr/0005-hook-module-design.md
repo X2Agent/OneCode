@@ -1,8 +1,8 @@
-# ADR 0005: Hook 模块架构设计
+# Hook 模块架构设计
 
 **状态**: Accepted
 **日期**: 2026-07-18
-**关联**: [hooks.md](../hooks.md)、[settings.md §Hooks 配置](../settings.md#hooks-配置)、[ADR 0001](./0001-permission-vs-toolapproval-vs-filter.md)
+**关联**: [hooks.md](../hooks.md)、[settings.md §Hooks 配置](../settings.md#hooks-配置)、[Permission vs ToolApproval vs Filter](./0001-permission-vs-toolapproval-vs-filter.md)
 
 ## 语境
 
@@ -45,7 +45,7 @@ public enum HookEvent
 **理由**：
 - 移除 `PreAgentRun` / `PostAgentRun`：与 `SessionStart` / `Stop` 语义重叠，外部脚本无法区分
 - 移除 `SubagentStop`：子 Agent 停止事件无外部消费价值，内部通过 `OrchestrationEventSink` 流式处理
-- 移除 `PreToolApproval`：审批逻辑由 `PermissionMiddleware` 统一处理（见 [ADR 0001](./0001-permission-vs-toolapproval-vs-filter.md)）
+- 移除 `PreToolApproval`：审批逻辑由 `PermissionMiddleware` 统一处理（见 [Permission vs ToolApproval vs Filter](./0001-permission-vs-toolapproval-vs-filter.md)）
 - 保留 `StopFailure`：API 错误（rate_limit / auth_failed / billing 等）需要外部告警
 
 **事件元数据**：`HookEventMetadataRegistry` 为每种事件声明 matcher 字段名与可选值，用于 UI 展示和文档生成：

@@ -4,7 +4,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Tui;
 using OneCode.Infrastructure.Agent;
-using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
 using System.Runtime.CompilerServices;
@@ -52,8 +51,7 @@ public sealed class OrchestrationStreamService(
     {
         var conversationId = session.SessionManager.ForegroundConversation?.Id
             ?? throw new InvalidOperationException("Goal mode requires an active conversation.");
-        var maxSubGoalAttempts = configManager.Current.Effective.Get("goal.maxSubGoalAttempts", 20);
-        var maxTurnsPerSubGoal = configManager.Current.Effective.Get("goal.maxTurnsPerSubGoal", 50);
+        var budget = ModeBudgetSettings.FromSettings(configManager.Current.Effective);
         var tools = toolCatalog.Tools.ToList<AITool>();
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(session.SystemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
@@ -75,8 +73,8 @@ public sealed class OrchestrationStreamService(
             WorkingDirectory = goalRun.Workspace?.IsolatedPath ?? goalRun.WorkingDirectory,
             ModelId = currentModelId,
             Tools = tools,
-            MaxTurnsPerSubGoal = maxTurnsPerSubGoal,
-            Budget = BuildGoalBudgetFromSettings(configManager, maxSubGoalAttempts),
+            MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
+            Budget = budget.ToGoalBudget(),
             OrchestrationEventSink = orchEvt =>
             {
                 if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
@@ -109,7 +107,7 @@ public sealed class OrchestrationStreamService(
                 mergedChannel.Writer.TryWrite(new TuiDone(
                     InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
                     OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                    TerminalReason: final.TerminalReason ?? ResolveTerminalReason(final.State),
+                    TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
                     TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
                     SessionId: final.SessionId,
                     TransactionRolledBack: false,
@@ -202,16 +200,12 @@ public sealed class OrchestrationStreamService(
                 progressState);
         }
 
-        var terminalReason = teamResult switch
-        {
-            { MaxTurnsReached: true } => OneCode.Core.Build.BuildTerminalReason.TurnLimitReached,
-            { Status: TeamRunStatus.Succeeded } => OneCode.Core.Build.BuildTerminalReason.Completed,
-            { Status: TeamRunStatus.Cancelled } => OneCode.Core.Build.BuildTerminalReason.Cancelled,
-            { Status: TeamRunStatus.Blocked } => OneCode.Core.Build.BuildTerminalReason.Blocked,
-            { Status: TeamRunStatus.RolledBack or TeamRunStatus.Failed } => OneCode.Core.Build.BuildTerminalReason.ValidationFailed,
-            { Error: not null } => OneCode.Core.Build.BuildTerminalReason.AgentException,
-            _ => OneCode.Core.Build.BuildTerminalReason.Completed,
-        };
+        // 终结原因共享词汇（RunTerminalReasonMap）：MaxTurnsReached 优先级保留在调用侧。
+        var terminalReason = teamResult is { MaxTurnsReached: true }
+            ? OneCode.Core.Workflows.RunTerminalReason.TurnLimitReached
+            : RunTerminalReasonMap.FromTeamStatus(
+                teamResult?.Status ?? TeamRunStatus.Created,
+                hasError: teamResult?.Error is not null);
         var rolledBack = teamResult?.Status is TeamRunStatus.RolledBack or TeamRunStatus.Failed;
         yield return new TuiDone(
             InputTokens: (int)(teamResult?.InputTokens ?? 0),
@@ -266,8 +260,7 @@ public sealed class OrchestrationStreamService(
             ?? throw new InvalidOperationException($"No GoalRun exists for session '{sessionId}'.");
         if (goalRun.IsTerminal)
             throw new InvalidOperationException($"GoalRun '{goalRun.Id}' is already terminal.");
-        var maxSubGoalAttempts = configManager.Current.Effective.Get("goal.maxSubGoalAttempts", 20);
-        var maxTurnsPerSubGoal = configManager.Current.Effective.Get("goal.maxTurnsPerSubGoal", 50);
+        var budget = ModeBudgetSettings.FromSettings(configManager.Current.Effective);
         var tools = toolCatalog.Tools.ToList<AITool>();
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(systemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
@@ -286,8 +279,8 @@ public sealed class OrchestrationStreamService(
                 WorkingDirectory = goalRun.Workspace?.IsolatedPath ?? goalRun.WorkingDirectory,
                 ModelId = currentModelId,
                 Tools = tools,
-                MaxTurnsPerSubGoal = maxTurnsPerSubGoal,
-                Budget = BuildGoalBudgetFromSettings(configManager, maxSubGoalAttempts),
+                MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
+                Budget = budget.ToGoalBudget(),
             },
             mergedChannel.Writer,
             static () => new EditTransaction()));
@@ -309,7 +302,7 @@ public sealed class OrchestrationStreamService(
                 mergedChannel.Writer.TryWrite(new TuiDone(
                     checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
                     checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                    final.TerminalReason ?? ResolveTerminalReason(final.State),
+                    final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
                     final.Executions.Sum(execution => execution.Attempts),
                     SessionId: final.SessionId,
                     ValidationFailureSummary: final.FailureSummary));
@@ -369,7 +362,7 @@ public sealed class OrchestrationStreamService(
         yield return new TuiDone(
             InputTokens: (int)(teamResult?.InputTokens ?? 0),
             OutputTokens: (int)(teamResult?.OutputTokens ?? 0),
-            TerminalReason: (teamResult?.MaxTurnsReached ?? false) ? OneCode.Core.Build.BuildTerminalReason.TurnLimitReached : OneCode.Core.Build.BuildTerminalReason.Completed,
+            TerminalReason: (teamResult?.MaxTurnsReached ?? false) ? OneCode.Core.Workflows.RunTerminalReason.TurnLimitReached : OneCode.Core.Workflows.RunTerminalReason.Completed,
             TurnsCompleted: teamResult?.TurnsCompleted ?? 0,
             SessionId: teamResult?.SessionId ?? sessionId);
     }
@@ -444,13 +437,7 @@ public sealed class OrchestrationStreamService(
         await runTask.ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 从 settings.json 加载 GOAL 模式三级预算配置。
-    /// 配置项（用户可在 settings.json 中覆盖）：
-    ///   - goal.maxSubGoalAttempts (int, default 20)
-    ///   - goal.maxTotalTokens (long?, default 200000; null = 不限制)
-    ///   - goal.maxWallClockHours (double?, default 2.0; null = 不限制)
-    /// </summary>
+    /// <summary>构建 GOAL 结果投影（完成/失败/跳过计数与验证门摘要）。</summary>
     private static TuiGoalResult ToGoalResult(GoalRun run)
         => new(
             run.Plan.Count(step => step.State == GoalStepState.Completed),
@@ -465,28 +452,4 @@ public sealed class OrchestrationStreamService(
                 ? run.FailureSummary ?? "Goal execution did not produce final validation evidence."
                 : string.Join("\n", run.FinalValidation.Select(gate =>
                     $"[{(gate.Skipped ? "SKIP" : gate.Passed ? "PASS" : "FAIL")}] {gate.Gate}: {gate.Summary}")));
-
-    private static BuildTerminalReason ResolveTerminalReason(GoalRunState state)
-        => state switch
-        {
-            GoalRunState.Completed => BuildTerminalReason.Completed,
-            GoalRunState.Paused => BuildTerminalReason.BudgetExceeded,
-            GoalRunState.Cancelled => BuildTerminalReason.Cancelled,
-            GoalRunState.Blocked => BuildTerminalReason.Blocked,
-            GoalRunState.Failed => BuildTerminalReason.ValidationFailed,
-            _ => BuildTerminalReason.AgentException,
-        };
-
-    private static GoalBudget BuildGoalBudgetFromSettings(IConfigManager configManager, int maxSubGoalAttempts)
-    {
-        var maxTotalTokens = configManager.Current.Effective.Get<long?>("goal.maxTotalTokens", 200_000);
-        var maxWallClockHours = configManager.Current.Effective.Get<double?>("goal.maxWallClockHours", 2.0);
-
-        return new GoalBudget
-        {
-            MaxSubGoalAttempts = maxSubGoalAttempts,
-            MaxTotalTokens = maxTotalTokens,
-            MaxWallClock = maxWallClockHours.HasValue ? TimeSpan.FromHours(maxWallClockHours.Value) : null,
-        };
-    }
 }

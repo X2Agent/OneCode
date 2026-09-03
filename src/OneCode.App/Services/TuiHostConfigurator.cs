@@ -3,6 +3,7 @@ using OneCode.Core.Config;
 using System.Text;
 using OneCode.App.Commands;
 using OneCode.App.Tui;
+using OneCode.Core.Coordinator;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services;
@@ -155,17 +156,19 @@ public sealed class TuiHostConfigurator(
     }
 
     /// <summary>
-    /// Projects persisted workflow state to the plan card. The TUI only emits
-    /// typed approval commands; it never mutates workflow state or starts an agent run itself.
+    /// Subscribes the unified OrchestrationEvent bus: the plan
+    /// projection event is asynchronously resolved (revision store lookup) and rendered;
+    /// the event is captured on the emitting thread, and the UI thread is marshaled
+    /// by <see cref="ProjectAndShowPlanAsync"/> via <c>app.Invoke</c>.
     /// </summary>
     private void WirePlanCard(OneCodeToplevel toplevel, InteractiveSession session, IApplication app)
     {
-        overlay.PlanCardPublisher.PlanCreated += (title, steps, phase) =>
-            toplevel.ShowPlanFromBackend(title, steps, phase);
-
-        overlay.PlanCardPublisher.WorkflowChanged += workflow =>
+        overlay.OrchestrationEvents.Subscribe(evt =>
+        {
+            if (evt is not OrchestrationEvent.PlanProjectionChanged { Workflow: var workflow })
+                return;
             _ = ProjectAndShowPlanAsync(workflow, toplevel, app);
-
+        });
 
         toplevel.PlanDecisionReceived += decision =>
             _ = HandlePlanDecisionAsync(decision, session, toplevel, app);
@@ -234,57 +237,9 @@ public sealed class TuiHostConfigurator(
 
         try
         {
-            var workflow = await overlay.PlanWorkflow.GetAsync(conversation.Id).ConfigureAwait(false)
-                ?? throw new InvalidOperationException("No active plan workflow exists for this session.");
-            if (workflow.State != PlanWorkflowState.AwaitingApproval
-                || workflow.SubmittedRevision is not { } revision)
-            {
-                throw new InvalidOperationException(
-                    $"Plan approval is not available in state '{workflow.State}'.");
-            }
-
-            var commandId = Guid.NewGuid().ToString("N");
-            switch (decision)
-            {
-                case PlanCardDecision.Approve:
-                    {
-                        var result = await overlay.PlanWorkflow.ApproveAsync(new ApprovePlanCommand(
-                            commandId,
-                            conversation.Id,
-                            workflow.Id,
-                            revision,
-                            workflow.Version,
-                            "interactive-user")).ConfigureAwait(false);
-                        overlay.PlanCardPublisher.Publish(result.Workflow);
-                        await overlay.PlanRunDispatcher.StartBuildAsync(session, result.Workflow).ConfigureAwait(false);
-                        break;
-                    }
-                case PlanCardDecision.Reject:
-                    {
-                        var result = await overlay.PlanWorkflow.RejectAsync(new RejectPlanCommand(
-                            commandId,
-                            conversation.Id,
-                            workflow.Id,
-                            revision,
-                            workflow.Version,
-                            "Rejected by interactive user.")).ConfigureAwait(false);
-                        overlay.PlanCardPublisher.Publish(result.Workflow);
-                        break;
-                    }
-                case PlanCardDecision.Edit:
-                    {
-                        var result = await overlay.PlanWorkflow.RequestEditAsync(new RequestPlanEditCommand(
-                            commandId,
-                            conversation.Id,
-                            workflow.Id,
-                            revision,
-                            workflow.Version,
-                            "请根据用户反馈修订计划。",
-                            [])).ConfigureAwait(false);
-                        overlay.PlanCardPublisher.Publish(result.Workflow);
-                        break;
-                    }
-            }
+            // 决策编排（状态校验/命令构造/投影发布/批准后 Build 派发）已收敛至
+            // AggregateApprovalGate（控制面并入）；此处仅保留 TUI 错误呈现。
+            await overlay.PlanApprovalGate.DecideAsync(session, decision).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -364,6 +319,7 @@ public sealed class TuiHostConfigurator(
                 await toplevel.ReplayCurrentBuildRunAsync(token).ConfigureAwait(false);
                 if (workflow is not null)
                 {
+                    // Stage 4c：PlanCardPublisher 已是统一总线发射器，重放订阅链路与实时同构。
                     overlay.PlanCardPublisher.Publish(workflow);
                     if (workflow.State == PlanWorkflowState.StartingExecution
                         && (workflow.NextRetryAt is null || workflow.NextRetryAt <= DateTimeOffset.UtcNow))

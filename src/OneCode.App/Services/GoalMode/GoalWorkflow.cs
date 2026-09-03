@@ -116,7 +116,6 @@ public sealed class GoalWorkflowCompiler
         var canonical = JsonSerializer.Serialize(new
         {
             contract = "goal-workflow-v1",
-            maf = "1.15.0",
             executors = new[] { PlanExecutorId, StepExecutorId, RouterExecutorId, CompletionExecutorId },
             edges = new[]
             {

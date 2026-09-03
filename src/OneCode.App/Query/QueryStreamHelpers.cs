@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
-using OneCode.Core.Build;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.App.Query;
@@ -27,20 +26,20 @@ internal static class QueryStreamHelpers
         // Compute real terminal reason: combine runner result with turn-limit detection.
         var outcome = new TerminalOutcomeState
         {
-            Reason = runResult?.TerminalReason ?? BuildTerminalReason.Completed,
+            Reason = runResult?.TerminalReason ?? RunTerminalReason.Completed,
             TransactionRolledBack = runResult?.TransactionRolledBack ?? false,
             ValidationFailureSummary = runResult?.ValidationFailureSummary,
         };
 
         // If the agent didn't explicitly signal a terminal reason, check turn limit.
-        if (outcome.Reason == BuildTerminalReason.Completed && session.TurnCount >= options.MaxTurns)
-            outcome.Reason = BuildTerminalReason.TurnLimitReached;
+        if (outcome.Reason == RunTerminalReason.Completed && session.TurnCount >= options.MaxTurns)
+            outcome.Reason = RunTerminalReason.TurnLimitReached;
 
         // Detect budget exceeded from final text (BudgetGuard middleware short-circuits with a text marker).
-        if (outcome.Reason == BuildTerminalReason.Completed
+        if (outcome.Reason == RunTerminalReason.Completed
             && finalText.Contains("[Budget Exceeded]", StringComparison.OrdinalIgnoreCase))
         {
-            outcome.Reason = BuildTerminalReason.BudgetExceeded;
+            outcome.Reason = RunTerminalReason.BudgetExceeded;
         }
 
         return outcome;

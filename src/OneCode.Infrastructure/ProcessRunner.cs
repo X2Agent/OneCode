@@ -126,7 +126,11 @@ public sealed class ProcessRunner : IProcessRunner
         {
             throw;
         }
-        catch (Exception ex) when (ex is FileNotFoundException or Win32Exception { NativeErrorCode: 2 })
+        // CliWrap 将 Win32「文件不存在」包装为外层 Win32Exception（NativeErrorCode=0x80004005），
+        // 真实错误码 2 在 InnerException 上——必须同时匹配，否则命令探测会误入通用 catch 打 ERROR。
+        catch (Exception ex) when (ex is FileNotFoundException
+            or Win32Exception { NativeErrorCode: 2 }
+            or Win32Exception { InnerException: Win32Exception { NativeErrorCode: 2 } })
         {
             return null;
         }

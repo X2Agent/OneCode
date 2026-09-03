@@ -128,7 +128,7 @@ public sealed partial class BuildRunCoordinator
     {
         var blocked = transitions.Transition(run, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
         {
-            TerminalReason = BuildTerminalReason.Blocked,
+            TerminalReason = RunTerminalReason.Blocked,
             FailureSummary = $"澄清问题生成失败：{error.Message}",
         };
         return await SaveAndReloadAsync(blocked, run.Version, ct, durableStateObserver).ConfigureAwait(false);

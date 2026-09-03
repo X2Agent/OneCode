@@ -67,7 +67,7 @@ internal static class TeamConfigLoader
     /// <summary>
     /// GroupChat 成员协作协议：Round-Robin 轮询下最容易退化的问题是成员礼貌性附和、空转烧轮次。
     /// 在加载期把协议注入每个成员 instructions，要求发言必须推进讨论，无可贡献时显式 PASS，
-    /// 配合 GroupChatActivityTracker 的活动计数收敛判定降低无效轮次。
+    /// 配合 GroupChat 的提前收敛判定（预算过半后无实质发言即终止）降低无效轮次。
     /// </summary>
     internal const string CollaborationProtocol =
         """

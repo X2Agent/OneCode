@@ -5,6 +5,7 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.AutoDream;
 using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.Runtime;
 using OneCode.App.Services.Notifier;
 using OneCode.Infrastructure;
 
@@ -35,21 +36,21 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<TeamRunStateMachine>();
         services.AddSingleton<IClarificationQuestionGenerator, ClarificationQuestionGenerator>();
         services.AddSingleton<TeamRequirementService>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamChangeScopeQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamWorkspaceCleanlinessQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamSecurityQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamBuildQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamUnitTestQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamIntegrationTestQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamLspDiagnosticsQualityGateValidator>();
-        services.AddSingleton<ITeamQualityGateValidator, TeamAcceptanceCriteriaQualityGateValidator>();
-        services.AddSingleton<TeamQualityGateRunner>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowChangeScopeQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowWorkspaceCleanlinessQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowSecurityQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowBuildQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowUnitTestQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowIntegrationTestQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowLspDiagnosticsQualityGateValidator>();
+        services.AddSingleton<IWorkflowQualityGateValidator, WorkflowAcceptanceCriteriaQualityGateValidator>();
+        services.AddSingleton<WorkflowQualityGateRunner>();
         services.AddSingleton<DeliveryReportBuilder>();
         // C2: 注入工作区指纹 provider（可选），供 Succeeded 任务落库记录指纹与恢复世代对账。
         services.AddSingleton(sp => new TeamRunApplicationService(
             sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
             sp.GetRequiredService<TeamRunStateMachine>(),
-            sp.GetRequiredService<TeamQualityGateRunner>(),
+            sp.GetRequiredService<WorkflowQualityGateRunner>(),
             sp.GetRequiredService<DeliveryReportBuilder>(),
             sp.GetService<OneCode.Core.Build.IWorkspaceFingerprintProvider>()));
         // Team M5：将批准 TaskGraph 通过共享 MAF Durable Workflow Host 编排（Fan-out/Fan-in Barrier）。
@@ -59,6 +60,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<TeamTaskWorkflowHost>();
         services.AddSingleton<TeamApprovalWorkflowHost>();
         services.AddSingleton<TeamClarificationWorkflowHost>();
+        services.AddSingleton<RequestPortGate>();
         // Factory: ctor is internal (takes internal TeamWorkflowRunner); DI cannot auto-bind it.
         services.AddSingleton(sp => new TeamOrchestrationService(
             sp.GetRequiredService<TeamWorkflowRunner>(),
@@ -69,8 +71,8 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<IClarificationInteractionService>(),
             sp.GetRequiredService<Core.Tools.IWorkingDirectoryAccessor>(),
             sp.GetRequiredService<TeamTaskWorkflowHost>(),
-            sp.GetRequiredService<TeamApprovalWorkflowHost>(),
             sp.GetRequiredService<TeamClarificationWorkflowHost>(),
+            sp.GetRequiredService<RequestPortGate>(),
             sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
             sp.GetService<Core.Workflows.IOperationLedger>()));
         services.AddSingleton<Core.Coordinator.ITeamOrchestrationService>(sp =>

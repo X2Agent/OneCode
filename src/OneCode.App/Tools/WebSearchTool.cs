@@ -19,15 +19,17 @@ public sealed partial class WebSearchTool
     private const int MaxResults = 8;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfigManager _config;
+    private readonly ILogger<WebSearchTool> _logger;
 
     // 单例复用 HtmlParser——DuckDuckGo HTML 解析专用。
     // AngleSharp 的 HtmlParser 是线程安全的（每次 ParseDocument 返回独立 IDocument），可安全共享。
     private static readonly HtmlParser _htmlParser = new();
 
-    public WebSearchTool(IConfigManager config, IHttpClientFactory httpClientFactory)
+    public WebSearchTool(IConfigManager config, IHttpClientFactory httpClientFactory, ILogger<WebSearchTool> logger)
     {
         _config = config;
         _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
     private HttpClient CreateSearchHttpClient()
@@ -45,7 +47,8 @@ public sealed partial class WebSearchTool
                  "Domain filtering: allowed_domains restricts results to the listed domains (whitelist); blocked_domains excludes them (blacklist). Both accept bare hostnames (www. prefix is stripped automatically). " +
                  "Result limit: maximum 8 results per call. " +
                  "Query length: must be at least 2 characters. " +
-                 "Tip: for reading a specific known URL, use WebFetch instead; for general research, use WebSearch first then WebFetch on the most relevant results.")]
+                 "Tip: for reading a specific known URL, use WebFetch instead; for general research, use WebSearch first then WebFetch on the most relevant results. " +
+                 "On provider failure the error includes a hint — fall back to WebFetch, Playwright MCP browser tools, or the user instead of retrying the same query.")]
     public async Task<ToolResult> SearchAsync(
         [Description("The search query. Must be at least 2 characters. Use specific terms for better results; avoid overly broad queries like 'javascript'.")] string query,
         [Description("Whitelist: only include results from these domains. Example: ['docs.microsoft.com', 'github.com']. www. is stripped automatically. Omit for no whitelist.")] string[]? allowed_domains = null,
@@ -76,9 +79,19 @@ public sealed partial class WebSearchTool
                 durationSeconds,
             });
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("WebSearch '{Query}' cancelled (provider {Provider})", query, provider);
+            return ToolResult.Error("Request was cancelled");
+        }
         catch (Exception ex)
         {
-            return ToolResult.Error($"WebSearch error: {ex.Message}");
+            // 降级引导（决策权归模型）：只提供替代路径文本，不代为调用其他工具。
+            _logger.LogWarning(ex, "WebSearch '{Query}' failed via {Provider}", query, provider);
+            return ToolResult.Error($"WebSearch error: {ex.Message}\n\n" +
+                "Hint: do not retry the same query repeatedly; rephrase once, use WebFetch on a known URL, " +
+                "render via the Playwright MCP browser tools (browser_navigate + browser_snapshot) if connected, " +
+                "or ask the user to switch webSearchProvider.");
         }
     }
 
@@ -146,6 +159,16 @@ public sealed partial class WebSearchTool
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         using var httpClient = CreateSearchHttpClient();
         using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+
+        // DuckDuckGo 反爬挑战：html.duckduckgo.com 的异常检测返回 202 + 无结果锚点的页面。
+        // EnsureSuccessStatusCode 对 2xx 放行，若不显式报错会得到"成功但空结果"，
+        // 导致模型误以为搜索正常而反复换词重试。
+        if (response.StatusCode == HttpStatusCode.Accepted)
+            throw new InvalidOperationException(
+                "DuckDuckGo returned an anti-bot challenge (HTTP 202, no results). " +
+                "Do not retry the same query repeatedly; rephrase once, use WebFetch on a known URL, " +
+                "or ask the user to switch webSearchProvider to 'brave' (requires API key).");
+
         response.EnsureSuccessStatusCode();
 
         var html = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -286,7 +309,7 @@ public sealed partial class WebSearchTool
     /// <para>处理步骤：</para>
     /// <list type="number">
     ///   <item>遍历字符，将 <c>&lt;...&gt;</c> 标签替换为单个空格</item>
-    ///   <item>用 <see cref="WebUtility.HtmlDecode"/> 解码 HTML 实体（&amp;amp; → &amp; 等）</item>
+    ///   <item>用 <c>WebUtility.HtmlDecode</c> 解码 HTML 实体（&amp;amp; → &amp; 等）</item>
     ///   <item>用 <see cref="NormalizeWhitespace"/> 压缩连续空白为单个空格</item>
     /// </list>
     /// </summary>

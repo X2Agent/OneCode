@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.Runtime;
 using OneCode.App.Tools;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
@@ -52,7 +53,7 @@ public sealed class MafTeamOrchestrationTests
                 Arg.Any<CancellationToken>())
             .Returns(_ => savedTeamRun);
         var stateMachine = new TeamRunStateMachine();
-        var qualityGateRunner = new TeamQualityGateRunner([]);
+        var qualityGateRunner = new WorkflowQualityGateRunner([]);
         var deliveryReportBuilder = new DeliveryReportBuilder();
         var teamRunService = new TeamRunApplicationService(
             teamRunStore, stateMachine, qualityGateRunner, deliveryReportBuilder);
@@ -95,8 +96,8 @@ public sealed class MafTeamOrchestrationTests
             clarification,
             workingDir,
             taskWorkflowHost,
-            approvalHost,
             clarificationHost,
+            new OneCode.App.Services.Runtime.RequestPortGate(approvalHost, clarification),
             teamRunStore);
     }
 

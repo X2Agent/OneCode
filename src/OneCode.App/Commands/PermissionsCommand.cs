@@ -11,7 +11,7 @@ namespace OneCode.App.Commands;
 ///
 /// 工作模式（PLAN/TEAM/GOAL）与权限的联动由 <see cref="Services.WorkingModeBridge"/>
 /// 统一桥接——本命令不再操作 WorkingModeController / IPlanModeService。
-/// 此处设置的 Auto/DontAsk/Bubble/BypassPermissions 属于 CLI 高级档位，
+/// 此处设置的 Auto/DontAsk/BypassPermissions 属于 CLI 高级档位，
 /// WorkingModeBridge 会保护它们不被后续模式切换静默覆盖。
 /// </summary>
 public sealed class PermissionsCommand(
@@ -37,11 +37,10 @@ public sealed class PermissionsCommand(
         ["dontask"] = PermissionMode.DontAsk,
         ["dont-ask"] = PermissionMode.DontAsk,
         ["dont_ask"] = PermissionMode.DontAsk,
-        ["bubble"] = PermissionMode.Bubble,
     };
 
     private const string ValidModesHelp =
-        "default, auto, acceptEdits, bypassPermissions, dontAsk, bubble";
+        "default, auto, acceptEdits, bypassPermissions, dontAsk";
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {

@@ -22,10 +22,6 @@ public static partial class Osc52Detector
     /// Check if the input contains an OSC 52 escape sequence and extract it.
     /// Returns null if no OSC 52 sequence is found.
     /// </summary>
-    /// <param name="logger">
-    /// Optional logger — when supplied, base64 decode failures are logged at Debug level
-    /// so callers can distinguish "no sequence" from "malformed sequence".
-    /// </param>
     public static Osc52Data? Detect(string input, ILogger? logger = null)
     {
         if (string.IsNullOrEmpty(input))

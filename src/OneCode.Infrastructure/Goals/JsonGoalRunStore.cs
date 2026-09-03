@@ -1,4 +1,5 @@
 using OneCode.Core.Goals;
+using OneCode.Core.Workflows;
 
 namespace OneCode.Infrastructure.Goals;
 
@@ -109,7 +110,12 @@ public sealed class JsonGoalRunStore : IGoalRunStore
                 throw new InvalidDataException($"Goal session '{run.SessionId}' already belongs to run '{current.Id}'.");
 
             ValidateTransition(current, run);
-            ValidateFencing(current, run, requiredFencingToken, isClaim);
+            WorkflowFencing.Validate(
+                current?.WorkflowFencingToken,
+                run.WorkflowFencingToken,
+                requiredFencingToken,
+                isClaim,
+                "GoalRun");
             var now = DateTimeOffset.UtcNow;
             var updated = run with
             {
@@ -137,30 +143,6 @@ public sealed class JsonGoalRunStore : IGoalRunStore
             throw new InvalidOperationException($"Terminal GoalRun '{current.Id}' is immutable.");
         if (candidate.SequenceNumber < current.SequenceNumber)
             throw new InvalidOperationException("GoalRun sequence number cannot move backwards.");
-    }
-
-    private static void ValidateFencing(
-        GoalRun? current,
-        GoalRun candidate,
-        long? requiredFencingToken,
-        bool isClaim)
-    {
-        if (isClaim)
-        {
-            if (requiredFencingToken is not { } claimToken || candidate.WorkflowFencingToken != claimToken)
-                throw new InvalidOperationException("GoalRun workflow claim has an invalid fencing token.");
-            if (current?.WorkflowFencingToken is { } existing && claimToken <= existing)
-                throw new InvalidOperationException("Stale GoalRun workflow fencing token.");
-            return;
-        }
-        if (current?.WorkflowFencingToken is { } token)
-        {
-            if (requiredFencingToken != token || candidate.WorkflowFencingToken != token)
-                throw new InvalidOperationException("Stale GoalRun workflow fencing token.");
-            return;
-        }
-        if (requiredFencingToken is not null || candidate.WorkflowFencingToken is not null)
-            throw new InvalidOperationException("GoalRun must be claimed before fenced writes.");
     }
 
     private static void ValidateAggregate(GoalRun run)

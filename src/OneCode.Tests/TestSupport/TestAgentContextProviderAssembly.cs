@@ -5,10 +5,11 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Context;
+using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Memory;
-using OneCode.App.Services.PlanMode;
+
 using OneCode.App.Services.Skills;
 using OneCode.App.Session;
 using OneCode.App.Tools;
@@ -47,7 +48,9 @@ public static class TestAgentContextProviderAssembly
             sessionManager);
         var runtime = new AgentRuntimeContextDependencies(
             new ConversationShellExecutorManager(NullLogger<ConversationShellExecutorManager>.Instance),
-            new HyperlightCodeActService(NullLogger<HyperlightCodeActService>.Instance),
+            new HyperlightCodeActService(
+                NullLogger<HyperlightCodeActService>.Instance,
+                Substitute.For<IHyperlightRuntimeProbe>()),
             new LspDiagnosticRegistry(),
             new TaskContextProvider(Substitute.For<ITaskService>()));
 

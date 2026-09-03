@@ -1,4 +1,5 @@
 using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Coordinator;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Teams;
@@ -116,7 +117,7 @@ public sealed class TeamTaskWorkflowRuntimeTests : IAsyncLifetime
         => new(
             store,
             new TeamRunStateMachine(),
-            new TeamQualityGateRunner([]),
+            new WorkflowQualityGateRunner([]),
             new DeliveryReportBuilder(),
             fingerprintProvider);
 

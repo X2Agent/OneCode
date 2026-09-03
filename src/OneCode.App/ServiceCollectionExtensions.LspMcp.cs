@@ -24,8 +24,8 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<McpElicitationHandler>(sp =>
             Services.Mcp.ConsoleMcpElicitationHandler.Create(
                 sp.GetRequiredService<ILogger<McpElicitationHandler>>()));
-        // Smithery MCP registry client (used by /mcp search and /mcp install).
-        services.AddSingleton<McpRegistryClient>();
+        // Official MCP registry client (used by /mcp search and /mcp install).
+        services.AddSingleton<OfficialMcpRegistryClient>();
         services.AddSingleton<McpMultiScopeConfigLoader>();
         services.AddSingleton<LspServerManager>();
         services.AddSingleton<ILspServerManager>(sp => sp.GetRequiredService<LspServerManager>());

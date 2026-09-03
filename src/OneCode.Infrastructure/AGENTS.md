@@ -11,7 +11,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 
 | 子目录 | 职责 |
 |--------|------|
-| `Mcp/` | MCP 客户端管理（连接池、OAuth、多传输协议）：接口 `IMcpConnectionManager` 在本层，实现在 App 层 |
+| `Mcp/` | MCP 客户端管理（连接池、多传输协议）：接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`），实现在 App 层 |
 | `Git/` | Git 操作（blame 解析 + GitHub 托管提供者） |
 | `Config/` | 配置解析与持久化 |
 | `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
@@ -92,16 +92,16 @@ var result = await _processRunner.ExecuteWithArgumentListAsync("git", ["commit",
 
 ### 连接失败容忍
 
-MCP 连接在启动时软失败（超时 1 秒），不阻塞主流程。连接失败需记录警告日志但不中断程序启动：
+MCP 连接在启动时软失败（默认超时 30 秒，见 `McpConnectionManager.ConnectionTimeout`），不阻塞主流程。连接失败需记录警告日志但不中断程序启动：
 
 ```csharp
 try
 {
-    await _mcpClientManager.ConnectAsync(serverConfig, ct).ConfigureAwait(false);
+    await mcpConnectionManager.ConnectOneAsync(name, ct).ConfigureAwait(false);
 }
 catch (Exception ex)
 {
-    _logger.LogWarning(ex, "MCP server {Name} failed to connect, skipping", serverConfig.Name);
+    _logger.LogWarning(ex, "MCP server {Name} failed to connect, skipping", name);
 }
 ```
 

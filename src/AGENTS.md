@@ -180,6 +180,7 @@ public class ConversationOptions {
 | 过期注释 | 注释与代码逻辑不一致 | 代码变更时同步更新注释，否则删除 |
 | 被注释掉的代码 | `// var oldCode = DoSomething();` | 彻底删除，依赖 Git history |
 | 长篇设计文档 | `// 🚀 ARCHITECTURE: This uses a hexagonal... (50行)` | 放入设计文档而非代码中 |
+| **引用易变的文档编号** | `// ADR <编号> Stage <阶段>: …`、`/// （ADR <编号> §<小节> …）` | 指向可被**重排/删除**的 ADR 决策记录，编号一旦失效即成为**悬空引用**（此前曾因删除某条 ADR，一次暴露 66 处此类注释）。改用**纯语义描述**说明设计缘由，不使用 ADR 编号 / Stage 代号 / §小节号（**注释与文档均适用**：.md 标题、`**关联**`字段、交叉链接、各类注释一律禁用 `ADR <编号>` 字样；ADR 文件名中的编号前缀仅作稳定标识保留，不视为文本引用） |
 
 #### 2.3 方法级注释（XML doc）
 
@@ -242,7 +243,8 @@ if (!string.IsNullOrEmpty(assistantText))
 2. 是否有公开 API 缺少 `<summary>`？→ 补文档注释
 3. 是否有「回文注释」（复述代码）？→ 删除
 4. 是否有注释掉的代码块？→ 删除
-5. 注释是否在代码变更后依然准确？→ 验证或更新
+5. 是否在任何**注释或文档**（代码注释、.md 标题、`**关联**`字段、交叉链接、README/overview 引用）里使用了具体 **ADR 编号 / Stage 代号 / §小节号**？→ **禁用**，改用纯语义描述（ADR 文档会被重排/删除，编号易失效；ADR 文件名编号前缀仅作稳定标识保留）
+6. 注释是否在代码变更后依然准确？→ 验证或更新
 
 ### 3. 异步编程
 
@@ -450,7 +452,7 @@ services.AddHttpClient("anthropic")
 | 弹性/重试 | `Microsoft.Extensions.Http.Resilience` (Polly) | 官方 Polly 集成，零额外依赖 | 自己写重试循环 |
 | JSON 序列化 | `System.Text.Json` | BCL 内置，高性能 | Newtonsoft.Json（除非有特殊需要） |
 | YAML 解析 | `YamlDotNet` | 最成熟的 .NET YAML 库 | 自定义 YAML 解析器 |
-| MCP 协议 | `ModelContextProtocol` v1.4.0（官方 SDK） | 官方支持，活跃维护 | 自实现 MCP 协议 |
+| MCP 协议 | `ModelContextProtocol` v2.1.0（官方 SDK） | 官方支持，活跃维护 | 自实现 MCP 协议 |
 | 全屏 TUI | `Terminal.Gui` v2.4+ | 实例化 IApplication 模型 + Scheme 主题 + Command/KeyBindings 输入架构；唯一的交互式 UI 框架 | `Spectre.Console`（命令式 `LiveDisplay` 无法模拟组件树，已下线）、手动 ANSI 转义码 |
 | Glob 匹配 | `Microsoft.Extensions.FileSystemGlobbing` | 官方内置，零依赖 | 自写 glob |
 | Markdown 渲染 | `Markdig` | 最完整的 .NET Markdown 实现 | 手写 MD 解析 |
@@ -761,7 +763,7 @@ var maxTurns = options.MaxTurns ?? 100;  // ← 为什么默认 100？
 | HttpClient 注册名 | [Infrastructure.Constants.HttpClientNames](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
 | 子目录名 | [Infrastructure.Constants.Subdirs](OneCode.Infrastructure/Config/Constants.cs) | `Skills`, `Prompts`, `MemoryStore` |
 | 超时/阈值 | [Infrastructure.Constants.Timeouts](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
-| 应用文件信息 | [Infrastructure.Constants.App](OneCode.Infrastructure/Config/Constants.cs) | `SettingsFileName`, `McpFileName` |
+| 应用文件信息 | [Infrastructure.Constants.App](OneCode.Infrastructure/Config/Constants.cs) | `SettingsFileName` |
 
 > **注：** 工具执行限制（如 `MaxResultSizeChars`、`MaxOutputChars`）当前散落在 App 层工具类内部私有常量中，尚未集中到 Infrastructure 层。新增此类常量时，建议集中到 `Infrastructure.Constants.Tools` 子类。
 

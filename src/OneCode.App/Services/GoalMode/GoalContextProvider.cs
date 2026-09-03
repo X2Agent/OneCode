@@ -134,10 +134,6 @@ public sealed class GoalContextState
 /// <summary>
 /// 不可变快照，记录 Goal 模式当前进度。
 /// </summary>
-/// <param name="CurrentGoalDepth">
-/// 当前子目标的递归分解深度（0 = 根子目标，1+ = 按需分解的子目标）。
-/// 让 LLM 知道当前是哪一层，对理解父子关系和已分解上下文有帮助。
-/// </param>
 public sealed record GoalContextSnapshot(
     int CurrentGoalId,
     int TotalGoals,

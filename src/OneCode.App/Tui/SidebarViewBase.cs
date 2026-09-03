@@ -189,7 +189,7 @@ internal abstract class SidebarViewBase : View
     internal static int ComputeMaxWidth(int screenWidth) =>
         Math.Min(screenWidth, Math.Max(MinWidth, Math.Min(screenWidth * 3 / 5, screenWidth - ChatColumnMinWidth)));
 
-    /// <summary>宽度下限：极窄终端（< MinWidth）退化为屏幕宽。</summary>
+    /// <summary>宽度下限：极窄终端（&lt; MinWidth）退化为屏幕宽。</summary>
     internal static int ComputeMinWidth(int screenWidth) => Math.Min(MinWidth, screenWidth);
 
     protected override bool OnDrawingContent(DrawContext? context)

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+
 using OneCode.Core.Config;
 using System.Reflection;
 using NSubstitute;
@@ -124,7 +126,7 @@ public sealed class WebSearchToolTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var config = new ConfigManager(_tempDir);
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var sut = new WebSearchTool(config, httpClientFactory);
+        var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance);
 
         var result = await sut.SearchAsync(query, ct: ct);
 
@@ -152,7 +154,7 @@ public sealed class WebSearchToolTests : IDisposable
 
             var config = new ConfigManager(_tempDir);
             var httpClientFactory = Substitute.For<IHttpClientFactory>();
-            var sut = new WebSearchTool(config, httpClientFactory);
+            var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance);
 
             var result = await sut.SearchAsync("test query", ct: ct);
 

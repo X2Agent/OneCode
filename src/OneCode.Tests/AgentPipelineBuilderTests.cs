@@ -19,7 +19,7 @@ namespace OneCode.Tests;
 /// (the private <c>CheckPermissionAndExecuteAsync</c> method).
 ///
 /// The method is accessed via reflection because it is the single source of
-/// truth for Allow/Deny/Ask/Passthrough/Bubble branching and is otherwise
+/// truth for Allow/Deny/Ask branching and is otherwise
 /// only reachable through the full MAF pipeline (which requires a real
 /// <see cref="AIAgent"/> instance).
 /// </summary>
@@ -67,15 +67,15 @@ public sealed class AgentPipelineBuilderTests
         IPermissionChecker? checker = null,
         PermissionMode mode = PermissionMode.Default,
         string workingDirectory = "/test",
-        Func<string, JsonElement, CancellationToken, Task<bool>>? approvalHandler = null,
+        IApprovalBroker? broker = null,
         bool? enableToolApproval = null)
         => new()
         {
             WorkingDirectory = workingDirectory,
             PermissionChecker = checker,
             PermissionMode = mode,
-            ApprovalHandler = approvalHandler,
-            // PERM-1.5: 默认 true（与生产配置一致）；测试可显式覆盖以验证 Team inline 审批路径
+            ApprovalBroker = broker,
+            // 默认 true（与生产配置一致）；测试可显式覆盖以验证 Team inline 审批路径
             EnableToolApproval = enableToolApproval ?? true,
         };
 
@@ -156,80 +156,9 @@ public sealed class AgentPipelineBuilderTests
             .Which.Content.Should().Be("Tool 'Write' denied: not allowed");
     }
 
-    // Test 4: PERM-1.5 — Ask + ApprovalHandler exists
-    //         新行为：Ask → 放行到 next（ToolApprovalAgent 接管），ApprovalHandler 不被调用
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task CheckPermission_AskDecision_PassesThroughToToolApprovalAgent(bool handlerApproved)
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var checker = Substitute.For<IPermissionChecker>();
-        checker.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<JsonElement>(),
-                Arg.Any<ToolPermissionContext>(),
-                Arg.Any<CancellationToken>())
-            .Returns(PermissionCheckResult.Ask("confirm?"));
-
-        var approvalHandler = Substitute.For<Func<string, JsonElement, CancellationToken, Task<bool>>>();
-        approvalHandler
-            .Invoke(Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(handlerApproved));
-
-        var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, approvalHandler: approvalHandler);
-        var holder = new FlagHolder();
-
-        var result = await InvokeCheckPermissionAsync(
-            options, ctx,
-            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
-            ct);
-
-        // PERM-1.5: ApprovalHandler 不再被 PermissionAndLimitMiddleware 调用
-        await approvalHandler.DidNotReceive().Invoke(
-            Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeTrue("Ask → 放行到 next（ToolApprovalAgent 接管）");
-        result.Should().Be("tool-result");
-    }
-
-    // Test 5: PERM-1.5 — Passthrough → 放行到 next（与 Ask 行为一致）
+    // Test 4: Ask + EnableToolApproval:true → 放行到 next（MAF ToolApprovalAgent 接管）
     [Fact]
-    public async Task CheckPermission_PassthroughDecision_PassesThroughToToolApprovalAgent()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var checker = Substitute.For<IPermissionChecker>();
-        checker.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<JsonElement>(),
-                Arg.Any<ToolPermissionContext>(),
-                Arg.Any<CancellationToken>())
-            .Returns(PermissionCheckResult.Passthrough("defer"));
-
-        var approvalHandler = Substitute.For<Func<string, JsonElement, CancellationToken, Task<bool>>>();
-        approvalHandler
-            .Invoke(Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(true));
-
-        var ctx = CreateContext("Edit");
-        var options = BuildOptions(checker: checker, approvalHandler: approvalHandler);
-        var holder = new FlagHolder();
-
-        var result = await InvokeCheckPermissionAsync(
-            options, ctx,
-            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
-            ct);
-
-        await approvalHandler.DidNotReceive().Invoke(
-            Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeTrue("Passthrough → 放行到 next（ToolApprovalAgent 接管）");
-        result.Should().Be("tool-result");
-    }
-
-    // Test 6: PERM-1.5 — Ask + 无 ApprovalHandler → 放行到 next（不再 fail-safe Deny）
-    // 新行为：Ask 路径由 MAF ToolApprovalAgent + AutoApprovalRules 接管
-    [Fact]
-    public async Task CheckPermission_AskDecision_WithoutApprovalHandler_PassesThrough()
+    public async Task CheckPermission_AskDecision_PassesThroughToToolApprovalAgent()
     {
         var ct = TestContext.Current.CancellationToken;
         var checker = Substitute.For<IPermissionChecker>();
@@ -241,7 +170,33 @@ public sealed class AgentPipelineBuilderTests
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, approvalHandler: null);
+        var options = BuildOptions(checker: checker);
+        var holder = new FlagHolder();
+
+        var result = await InvokeCheckPermissionAsync(
+            options, ctx,
+            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
+            ct);
+
+        holder.Value.Should().BeTrue("Ask + EnableToolApproval → 放行到 next（ToolApprovalAgent 接管）");
+        result.Should().Be("tool-result");
+    }
+
+    // Test 5: Ask + 无 broker → 放行到 next（由 MAF ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）
+    [Fact]
+    public async Task CheckPermission_AskDecision_WithoutBroker_PassesThrough()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var checker = Substitute.For<IPermissionChecker>();
+        checker.CheckAsync(
+                Arg.Any<string>(),
+                Arg.Any<JsonElement>(),
+                Arg.Any<ToolPermissionContext>(),
+                Arg.Any<CancellationToken>())
+            .Returns(PermissionCheckResult.Ask("confirm?"));
+
+        var ctx = CreateContext("Write");
+        var options = BuildOptions(checker: checker, broker: null);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(
@@ -254,10 +209,9 @@ public sealed class AgentPipelineBuilderTests
         result.Should().Be("tool-result");
     }
 
-    // Test 7: EnableToolApproval:false + Ask + ApprovalHandler 批准
-    //         Team 路径：ApprovalHandler inline 处理，批准则放行
+    // Test 6: EnableToolApproval:false + Ask + ApprovalBroker 批准 → inline 放行到 next（Team 路径）
     [Fact]
-    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndHandlerApproves_InvokesHandlerInline()
+    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndBrokerApproves_InvokesNext()
     {
         var ct = TestContext.Current.CancellationToken;
         var checker = Substitute.For<IPermissionChecker>();
@@ -268,16 +222,12 @@ public sealed class AgentPipelineBuilderTests
                 Arg.Any<CancellationToken>())
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
-        var approvalHandler = Substitute.For<Func<string, JsonElement, CancellationToken, Task<bool>>>();
-        approvalHandler
-            .Invoke(Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(true));
+        var broker = Substitute.For<IApprovalBroker>();
+        broker.RequestAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(ApprovalDecision.AllowOnce));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(
-            checker: checker,
-            approvalHandler: approvalHandler,
-            enableToolApproval: false);
+        var options = BuildOptions(checker: checker, broker: broker, enableToolApproval: false);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(
@@ -285,16 +235,15 @@ public sealed class AgentPipelineBuilderTests
             (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
             ct);
 
-        await approvalHandler.Received(1).Invoke(
-            Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeTrue("ApprovalHandler inline 批准后应放行到 next");
+        await broker.Received(1).RequestAsync(
+            Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
+        holder.Value.Should().BeTrue("ApprovalBroker inline 批准后应放行到 next");
         result.Should().Be("tool-result");
     }
 
-    // Test 8: EnableToolApproval:false + Ask + ApprovalHandler 拒绝
-    //         返回 ToolResult.Error，next 不被调用
+    // Test 7: EnableToolApproval:false + Ask + ApprovalBroker 拒绝 → 返回 ToolResult.Error
     [Fact]
-    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndHandlerDenies_ReturnsDeny()
+    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndBrokerDenies_ReturnsDeny()
     {
         var ct = TestContext.Current.CancellationToken;
         var checker = Substitute.For<IPermissionChecker>();
@@ -305,16 +254,12 @@ public sealed class AgentPipelineBuilderTests
                 Arg.Any<CancellationToken>())
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
-        var approvalHandler = Substitute.For<Func<string, JsonElement, CancellationToken, Task<bool>>>();
-        approvalHandler
-            .Invoke(Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
+        var broker = Substitute.For<IApprovalBroker>();
+        broker.RequestAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(ApprovalDecision.Deny));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(
-            checker: checker,
-            approvalHandler: approvalHandler,
-            enableToolApproval: false);
+        var options = BuildOptions(checker: checker, broker: broker, enableToolApproval: false);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(
@@ -322,41 +267,28 @@ public sealed class AgentPipelineBuilderTests
             (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
             ct);
 
-        await approvalHandler.Received(1).Invoke(
-            Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeFalse("ApprovalHandler 拒绝后不应调用 next");
+        await broker.Received(1).RequestAsync(
+            Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
+        holder.Value.Should().BeFalse("ApprovalBroker 拒绝后不应调用 next");
         result.Should().BeOfType<ToolResult>()
-            .Which.Content.Should().Contain("denied by user");
+            .Which.Content.Should().Contain("denied by approval broker");
     }
 
-    // Test 9: PERM-1.5 fail-safe — EnableToolApproval:false + Ask + 无 ApprovalHandler
-    //         无任何审批通道时 fail-safe Deny（防止 fail-open）
-    [Theory]
-    [InlineData(PermissionDecision.Ask)]
-    [InlineData(PermissionDecision.Passthrough)]
-    public async Task CheckPermission_WithApprovalDisabled_AndNoHandler_FailSafeDeny(
-        PermissionDecision decision)
+    // Test 8: fail-safe — EnableToolApproval:false + Ask + 无 ApprovalBroker → fail-safe Deny（防止 fail-open）
+    [Fact]
+    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndNoBroker_FailSafeDeny()
     {
         var ct = TestContext.Current.CancellationToken;
         var checker = Substitute.For<IPermissionChecker>();
-        var checkResult = decision switch
-        {
-            PermissionDecision.Ask => PermissionCheckResult.Ask("confirm?"),
-            PermissionDecision.Passthrough => PermissionCheckResult.Passthrough("defer"),
-            _ => throw new ArgumentOutOfRangeException(nameof(decision)),
-        };
         checker.CheckAsync(
                 Arg.Any<string>(),
                 Arg.Any<JsonElement>(),
                 Arg.Any<ToolPermissionContext>(),
                 Arg.Any<CancellationToken>())
-            .Returns(checkResult);
+            .Returns(PermissionCheckResult.Ask("confirm?"));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(
-            checker: checker,
-            approvalHandler: null,
-            enableToolApproval: false);
+        var options = BuildOptions(checker: checker, broker: null, enableToolApproval: false);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(

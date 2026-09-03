@@ -13,8 +13,8 @@ namespace OneCode.Infrastructure.Middleware;
 /// <list type="bullet">
 ///   <item>工具调用计数 + MaxToolCalls 上限（超限时返回当前调用错误结果）</item>
 ///   <item>IsToolAllowed 白名单过滤</item>
-///   <item>权限检查（Allow/Deny/Ask/Passthrough 路由）</item>
-///   <item>审批路由：Ask/Passthrough → MAF ToolApprovalAgent 或 inline ApprovalHandler</item>
+///   <item>权限检查（Allow/Deny/Ask 路由）</item>
+///   <item>审批路由：Ask → MAF ToolApprovalAgent 或 inline ApprovalBroker（Team）</item>
 /// </list>
 /// </summary>
 public static class PermissionAndLimitMiddleware
@@ -65,7 +65,7 @@ public static class PermissionAndLimitMiddleware
 
     /// <summary>
     /// 权限检查 + 执行。
-    /// 路由 Allow/Deny/Ask/Passthrough 决策到对应处理路径。
+    /// 路由 Allow/Deny/Ask 决策到对应处理路径。
     /// </summary>
     private static async ValueTask<object> CheckPermissionAndExecuteAsync(
         AgentPipelineOptions options,
@@ -105,15 +105,19 @@ public static class PermissionAndLimitMiddleware
                 "Request user permission or modify the tool call.");
         }
 
-        // Ask/Passthrough 处理：
-        // - EnableToolApproval: true → 放行到 MAF ToolApprovalAgent（Main 路径事件驱动审批）
-        // - EnableToolApproval: false → 使用 ApprovalHandler inline 处理（Team 路径）
-        //   无 ApprovalHandler 时 fail-safe Deny
-        if (perm.Decision is PermissionDecision.Ask or PermissionDecision.Passthrough)
+        // Ask 处理（单通道）：
+        // - EnableToolApproval: true → 放行到 MAF ToolApprovalAgent（Main/Worker/Explore/Plan）。
+        //   工具经 WrapApprovalRequiredTools 包装为 ApprovalRequiredAIFunction，
+        //   由 ToolApprovalAgent 依据 AutoApprovalRules 决定自动放行或产出 ToolApprovalRequestContent。
+        // - EnableToolApproval: false → inline ApprovalBroker（Team 路径，因 MAF workflow
+        //   manager 无法处理 ToolApprovalRequestContent）。
+        //   两者皆无 → fail-safe Deny。
+        if (perm.Decision == PermissionDecision.Ask)
         {
-            var isMafApprovalFunction = ctx.Function is ApprovalRequiredAIFunction;
-            if (options.ApprovalBroker is not null
-                && (!options.EnableToolApproval || !isMafApprovalFunction))
+            if (options.EnableToolApproval)
+                return await next(ctx, ct).ConfigureAwait(false);
+
+            if (options.ApprovalBroker is not null)
             {
                 var approval = await options.ApprovalBroker.RequestAsync(
                     new ApprovalRequest(
@@ -130,24 +134,7 @@ public static class PermissionAndLimitMiddleware
                     "Request user permission or modify the tool call.");
             }
 
-            if (options.EnableToolApproval)
-            {
-                // 放行到 ToolApprovalAgent
-                return await next(ctx, ct).ConfigureAwait(false);
-            }
-
-            if (options.ApprovalHandler is not null)
-            {
-                var approved = await options.ApprovalHandler(
-                    ctx.Function.Name, toolInput, ct).ConfigureAwait(false);
-                if (approved)
-                    return await next(ctx, ct).ConfigureAwait(false);
-                return ToolResult.Error(
-                    $"Tool '{ctx.Function.Name}' denied by user.",
-                    "Request user permission or modify the tool call.");
-            }
-
-            // fail-safe Deny：无审批通道时仅返回当前调用的拒绝结果。
+            // fail-safe Deny：无任何审批通道时仅返回当前调用的拒绝结果。
             return ToolResult.Error(
                 $"Tool '{ctx.Function.Name}' requires approval but no approval channel is available (decision={perm.Decision}).",
                 "Adjust permission rules to auto-allow this tool.");

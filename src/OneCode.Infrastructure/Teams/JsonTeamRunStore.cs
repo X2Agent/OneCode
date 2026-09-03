@@ -140,6 +140,19 @@ public sealed class JsonTeamRunStore : ITeamRunStore
         return true;
     }
 
+    /// <summary>
+    /// 内核统一签名：<see cref="TrySaveAsync"/> 的抛异常变体——
+    /// CAS 失败即抛 <see cref="InvalidOperationException"/>，供统一运行时骨架（Stage 3）调用。
+    /// </summary>
+    public async Task SaveAsync(TeamRun run, long expectedVersion, CancellationToken ct = default)
+    {
+        if (!await TrySaveAsync(run, expectedVersion, ct).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                $"TeamRun '{run.Id}' concurrency conflict: expected version {expectedVersion}.");
+        }
+    }
+
     public async Task<TeamRun> ClaimWorkflowAsync(
         TeamRunId runId,
         long fencingToken,

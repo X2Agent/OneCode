@@ -471,8 +471,6 @@ public sealed class DesignInitCommand(
     /// Website clone 模式需要 playwright 作为 LLM 工具服务器（browser_navigate /
     /// browser_take_screenshot / browser_evaluate 注入工具目录）。检查名为
     /// "playwright" 的 MCP server 是否已连接（名称匹配，忽略大小写）。
-    /// WebFetch SPA fallback 走独立的 McpBrowserGateway 按需连接，
-    /// 与这里把 MCP 工具注入 LLM 目录是两条路径。
     /// </summary>
     private static bool IsPlaywrightMcpConnected(IMcpConnectionManager? mcp)
     {

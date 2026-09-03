@@ -169,6 +169,16 @@ public sealed class McpConnectionManager : IMcpConnectionManager
         if (_connections.ContainsKey(name))
             return;
 
+        // 连接前校验配置有效性，避免无效定义（如 http/sse/ws 缺 Url、stdio 缺 Command）
+        // 在 def.Url! / def.Command ?? "" 处触发 NRE 或静默失败。
+        if (!def.IsValid)
+        {
+            _logger.LogWarning(
+                "MCP server '{Name}' has invalid configuration (transport '{Type}' requires Command for stdio / Url for http/sse/ws) -- skipping",
+                name, def.TransportType);
+            return;
+        }
+
         var clientLogger = NullLogger<McpClient>.Instance;
         var client = new McpClient(clientLogger, _elicitationHandler);
         var conn = new McpServerConnection(name, def, client);

@@ -145,8 +145,10 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 |---|---|---|---|
 | `goal.maxSubGoalAttempts` | `int` | `20` | 单次 Goal 运行允许的子目标尝试总数 |
 | `goal.maxTurnsPerSubGoal` | `int` | `50` | 每个子目标允许的最大轮数 |
-| `goal.maxTotalTokens` | `long` | `200000` | Goal 运行的总 Token 预算 |
-| `goal.maxWallClockHours` | `double` | `2.0` | Goal 运行的最长墙钟时间（小时） |
+| `goal.maxTotalTokens` | `long` | `200000` | Goal 运行的总 Token 预算；**≤0 表示不限制** |
+| `goal.maxWallClockHours` | `double` | `2.0` | Goal 运行的最长墙钟时间（小时）；**≤0 表示不限制** |
+
+> **≤0 语义**：`goal.maxTotalTokens` / `goal.maxWallClockHours` 配 0 或负值时归一为“不限制”（`ModeBudgetSettings.TotalTokenLimit` / `MaxWallClock`）；Stage 4b 引入统一预算配置之前该配置会因除零被立即判定为预算耗尽。
 
 磁盘格式使用嵌套对象，例如：
 
@@ -255,7 +257,7 @@ Hook **定义**存放在独立文件中，不在 `settings.json` 内：
 
 Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置。通过 `/hooks` 命令可查看已注册 Hook 和当前工作区信任状态。
 
-> **更多详情**：Hook 子系统的完整设计、事件清单、执行器类型、扩展指南参见 [Hook 模块文档](./hooks.md)，架构决策与实现细节参见 [ADR 0005](./adr/0005-hook-module-design.md)。
+> **更多详情**：Hook 子系统的完整设计、事件清单、执行器类型、扩展指南参见 [Hook 模块文档](./hooks.md)，架构决策与实现细节参见 [Hook 模块架构设计](./adr/0005-hook-module-design.md)。
 
 ---
 
@@ -319,6 +321,6 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `showThinking` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
 | `nextPromptSuggesterEnabled` | `ConfigKeys.NextPromptSuggesterEnabled` | `AppSettings.NextPromptSuggesterEnabled` |
 | `autodream.*` | —（点路径） | `AutoDreamService` |
-| `goal.*` | —（点路径） | `OrchestrationStreamService` |
+| `goal.*` | —（点路径） | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService` 调用） |
 
 > **配置元数据真相源**：`src/OneCode.Infrastructure/Config/ConfigModels.cs` 中的 `SettingDescriptors`。新增配置项时必须同时声明生效模式、密钥属性和项目作用域权限，并更新本文档。

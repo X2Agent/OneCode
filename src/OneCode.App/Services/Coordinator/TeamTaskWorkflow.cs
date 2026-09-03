@@ -368,7 +368,6 @@ internal sealed class TeamTaskWorkflowCompiler
                 writer.WriteStringValue(ExecutorIdPrefix + NormalizeId(terminal.Id));
             writer.WriteEndArray();
             writer.WriteString("contract", "TeamTaskOutcome:v1");
-            writer.WriteString("maf", "1.15.0");
             writer.WriteString(
                 "serializerOptions",
                 serializerOptions is null
@@ -541,7 +540,7 @@ internal sealed class TeamTaskExecutor(
                 {
                     var delay = ComputeBackoffDelay(task.RetryPolicy, attempt);
                     if (delay > TimeSpan.Zero)
-                        // Known limitation: this Task.Delay blocks the current MAF Superstep. MAF 1.15.0
+                        // Known limitation: this Task.Delay blocks the current MAF Superstep. MAF 1.19.0
                         // provides no non-blocking Delay/Timer Activity, and the only non-blocking
                         // alternative would require extending TeamTaskOutcomeStatus (RetryableBlocked)
                         // and re-dispatching from TeamTaskDispatcherExecutor in a new Superstep.

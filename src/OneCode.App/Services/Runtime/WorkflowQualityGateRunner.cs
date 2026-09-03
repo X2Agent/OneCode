@@ -7,24 +7,24 @@ using OneCode.Infrastructure.Agent;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 
-namespace OneCode.App.Services.Coordinator;
+namespace OneCode.App.Services.Runtime;
 
-public sealed record TeamQualityGateContext(
+public sealed record WorkflowQualityGateContext(
     string WorkingDirectory,
     IReadOnlyList<string> ModifiedFiles,
     TeamRun Run);
 
-public interface ITeamQualityGateValidator
+public interface IWorkflowQualityGateValidator
 {
     QualityGateKind Kind { get; }
 
     Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct);
 }
 
-public sealed class TeamQualityGateRunner(IEnumerable<ITeamQualityGateValidator> validators)
+public sealed class WorkflowQualityGateRunner(IEnumerable<IWorkflowQualityGateValidator> validators)
 {
     private static readonly IReadOnlyDictionary<QualityGateKind, int> s_executionOrder =
         new Dictionary<QualityGateKind, int>
@@ -39,7 +39,7 @@ public sealed class TeamQualityGateRunner(IEnumerable<ITeamQualityGateValidator>
             [QualityGateKind.Security] = 7,
         };
 
-    private readonly IReadOnlyDictionary<QualityGateKind, ITeamQualityGateValidator> _validators =
+    private readonly IReadOnlyDictionary<QualityGateKind, IWorkflowQualityGateValidator> _validators =
         validators.ToDictionary(validator => validator.Kind);
 
     public async Task<IReadOnlyList<QualityGateResult>> RunAsync(
@@ -49,7 +49,7 @@ public sealed class TeamQualityGateRunner(IEnumerable<ITeamQualityGateValidator>
         TeamRun run,
         CancellationToken ct)
     {
-        var context = new TeamQualityGateContext(
+        var context = new WorkflowQualityGateContext(
             workingDirectory,
             transaction.GetModifiedFiles(),
             run);
@@ -102,13 +102,13 @@ public sealed class TeamQualityGateRunner(IEnumerable<ITeamQualityGateValidator>
     }
 }
 
-public sealed class TeamChangeScopeQualityGateValidator : ITeamQualityGateValidator
+public sealed class WorkflowChangeScopeQualityGateValidator : IWorkflowQualityGateValidator
 {
     public QualityGateKind Kind => QualityGateKind.ChangeScope;
 
     public Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -138,13 +138,13 @@ public sealed class TeamChangeScopeQualityGateValidator : ITeamQualityGateValida
         => Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
 }
 
-public sealed class TeamWorkspaceCleanlinessQualityGateValidator : ITeamQualityGateValidator
+public sealed class WorkflowWorkspaceCleanlinessQualityGateValidator : IWorkflowQualityGateValidator
 {
     public QualityGateKind Kind => QualityGateKind.WorkspaceCleanliness;
 
     public Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -167,13 +167,13 @@ public sealed class TeamWorkspaceCleanlinessQualityGateValidator : ITeamQualityG
     }
 }
 
-public sealed class TeamSecurityQualityGateValidator : ITeamQualityGateValidator
+public sealed class WorkflowSecurityQualityGateValidator : IWorkflowQualityGateValidator
 {
     public QualityGateKind Kind => QualityGateKind.Security;
 
     public Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -195,13 +195,13 @@ public sealed class TeamSecurityQualityGateValidator : ITeamQualityGateValidator
     }
 }
 
-public sealed class TeamBuildQualityGateValidator(IVerificationProvider verificationProvider)
+public sealed class WorkflowBuildQualityGateValidator(IVerificationProvider verificationProvider)
     : VerificationQualityGateValidator(verificationProvider)
 {
     public override QualityGateKind Kind => QualityGateKind.Build;
 
     protected override Task<VerificationResult> VerifyAsync(
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
         => VerificationProvider.VerifyAsync(
             context.WorkingDirectory,
@@ -209,13 +209,13 @@ public sealed class TeamBuildQualityGateValidator(IVerificationProvider verifica
             ct);
 }
 
-public sealed class TeamUnitTestQualityGateValidator(IVerificationProvider verificationProvider)
+public sealed class WorkflowUnitTestQualityGateValidator(IVerificationProvider verificationProvider)
     : VerificationQualityGateValidator(verificationProvider)
 {
     public override QualityGateKind Kind => QualityGateKind.UnitTest;
 
     protected override Task<VerificationResult> VerifyAsync(
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
         => VerificationProvider.VerifyTestsAsync(
             context.WorkingDirectory,
@@ -223,13 +223,13 @@ public sealed class TeamUnitTestQualityGateValidator(IVerificationProvider verif
             ct);
 }
 
-public sealed class TeamIntegrationTestQualityGateValidator(IVerificationProvider verificationProvider)
+public sealed class WorkflowIntegrationTestQualityGateValidator(IVerificationProvider verificationProvider)
     : VerificationQualityGateValidator(verificationProvider)
 {
     public override QualityGateKind Kind => QualityGateKind.IntegrationTest;
 
     protected override Task<VerificationResult> VerifyAsync(
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
         => VerificationProvider.VerifyIntegrationTestsAsync(
             context.WorkingDirectory,
@@ -238,7 +238,7 @@ public sealed class TeamIntegrationTestQualityGateValidator(IVerificationProvide
 }
 
 public abstract class VerificationQualityGateValidator(IVerificationProvider verificationProvider)
-    : ITeamQualityGateValidator
+    : IWorkflowQualityGateValidator
 {
     protected IVerificationProvider VerificationProvider { get; } = verificationProvider;
 
@@ -246,7 +246,7 @@ public abstract class VerificationQualityGateValidator(IVerificationProvider ver
 
     public async Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         var verification = await VerifyAsync(context, ct).ConfigureAwait(false);
@@ -269,18 +269,18 @@ public abstract class VerificationQualityGateValidator(IVerificationProvider ver
     }
 
     protected abstract Task<VerificationResult> VerifyAsync(
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct);
 }
 
-public sealed class TeamLspDiagnosticsQualityGateValidator(LspDiagnosticRegistry diagnostics)
-    : ITeamQualityGateValidator
+public sealed class WorkflowLspDiagnosticsQualityGateValidator(LspDiagnosticRegistry diagnostics)
+    : IWorkflowQualityGateValidator
 {
     public QualityGateKind Kind => QualityGateKind.LspDiagnostics;
 
     public Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -319,13 +319,13 @@ public sealed class TeamLspDiagnosticsQualityGateValidator(LspDiagnosticRegistry
     }
 }
 
-public sealed class TeamAcceptanceCriteriaQualityGateValidator : ITeamQualityGateValidator
+public sealed class WorkflowAcceptanceCriteriaQualityGateValidator : IWorkflowQualityGateValidator
 {
     public QualityGateKind Kind => QualityGateKind.AcceptanceCriteria;
 
     public Task<QualityGateResult> ValidateAsync(
         QualityGateDefinition definition,
-        TeamQualityGateContext context,
+        WorkflowQualityGateContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

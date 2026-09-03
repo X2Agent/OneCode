@@ -1,7 +1,9 @@
 using NSubstitute;
 using OneCode.App.Query;
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Streaming;
 using OneCode.App.Tools;
 using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
@@ -51,14 +53,14 @@ public sealed class PlanExecutionToolTests
             metadata: new TaskMetadata(
                 ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["BuildPlanTaskId"] = stepId,
+                    [BuildTaskLinker.PlanTaskIdKey] = stepId,
                 }),
             conversationId: sessionId.ToString(),
             buildRunId: buildRunId);
         var sut = new PlanExecutionTool(
             workflowService,
-            new PlanCardPublisher(),
-            tasks);
+            new PlanCardPublisher(new OrchestrationEventBus()),
+            new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -106,14 +108,14 @@ public sealed class PlanExecutionToolTests
             metadata: new TaskMetadata(
                 ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["BuildPlanTaskId"] = "verification",
+                    [BuildTaskLinker.PlanTaskIdKey] = "verification",
                 }),
             conversationId: sessionId.ToString(),
             buildRunId: buildRunId);
         var sut = new PlanExecutionTool(
             workflowService,
-            new PlanCardPublisher(),
-            tasks);
+            new PlanCardPublisher(new OrchestrationEventBus()),
+            new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -177,11 +179,11 @@ public sealed class PlanExecutionToolTests
             metadata: new TaskMetadata(
                 ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["BuildPlanTaskId"] = stepId,
+                    [BuildTaskLinker.PlanTaskIdKey] = stepId,
                 }),
             conversationId: sessionId.ToString(),
             buildRunId: buildRunId);
-        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(new OrchestrationEventBus()), new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -244,11 +246,11 @@ public sealed class PlanExecutionToolTests
             metadata: new TaskMetadata(
                 ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["BuildPlanTaskId"] = stepId,
+                    [BuildTaskLinker.PlanTaskIdKey] = stepId,
                 }),
             conversationId: sessionId.ToString(),
             buildRunId: buildRunId);
-        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(new OrchestrationEventBus()), new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -279,7 +281,7 @@ public sealed class PlanExecutionToolTests
             metadata: new TaskMetadata(
                 ExtraProperties: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["BuildPlanTaskId"] = stepId,
+                    [BuildTaskLinker.PlanTaskIdKey] = stepId,
                 }),
             conversationId: sessionId.ToString(),
             buildRunId: buildRunId);
@@ -326,7 +328,7 @@ public sealed class PlanExecutionToolTests
         var tasks = new TaskService();
         CreateMappedTask(tasks, sessionId, buildRunId, "implementation");
         var verificationTask = CreateMappedTask(tasks, sessionId, buildRunId, "verification");
-        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(new OrchestrationEventBus()), new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -381,7 +383,7 @@ public sealed class PlanExecutionToolTests
         var tasks = new TaskService();
         CreateMappedTask(tasks, sessionId, buildRunId, "implementation");
         CreateMappedTask(tasks, sessionId, buildRunId, "verification");
-        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(), tasks);
+        var sut = new PlanExecutionTool(workflowService, new PlanCardPublisher(new OrchestrationEventBus()), new BuildTaskLinker(tasks));
         ToolActivationContext.CurrentConversationId = sessionId.ToString();
         OneCodeAgentRunContext.CurrentRunId = runId;
         OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
@@ -425,6 +427,7 @@ public sealed class PlanExecutionToolTests
                 PlanId = created.Id,
                 SessionId = sessionId,
                 Revision = 1,
+                Title = "Approved plan",
                 Markdown = "# Approved plan",
                 Steps = stepIds.Select(stepId => new PlanStepDefinition
                 {

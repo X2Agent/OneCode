@@ -1,6 +1,6 @@
 # Hook 模块（Hook Module）
 
-> 本文档介绍 OneCode Hook 子系统的设计思路、模块总览与使用方式。架构决策与实现细节参见 [ADR 0005: Hook 模块架构设计](./adr/0005-hook-module-design.md)。
+> 本文档介绍 OneCode Hook 子系统的设计思路、模块总览与使用方式。架构决策与实现细节参见 [Hook 模块架构设计](./adr/0005-hook-module-design.md)。
 
 ---
 
@@ -207,7 +207,7 @@ OneCode 运行时
 | `Notification` | 权限审批挂起时（TUI 审批请求下发前） | `notification_type` | permission_prompt（idle_prompt / auth_success 未落地） | ❌ |
 | `UserPromptSubmit` | 用户提交 prompt 后、进入运行循环前（纠偏续跑不触发） | 无 matcher | — | ✅ exit code 2（阻断本轮 prompt，不落历史） |
 | `SessionStart` | 会话启动（清空上下文后同样触发） | `source` | startup / resume / switch | ❌ |
-| `Stop` | 主循环终结前（成功或异常收场） | `terminal_reason`（glob） | BuildTerminalReason 枚举名（Completed / TurnLimitReached / BudgetExceeded / Cancelled / ValidationFailed / AgentException / PermissionRefused / ClarificationRequired / Blocked） | ✅ exit code 2（纠偏续跑） |
+| `Stop` | 主循环终结前（成功或异常收场） | `terminal_reason`（glob） | RunTerminalReason 枚举名（Completed / TurnLimitReached / BudgetExceeded / Cancelled / ValidationFailed / AgentException / PermissionRefused / ClarificationRequired / Blocked） | ✅ exit code 2（纠偏续跑） |
 | `StopFailure` | 运行因未处理异常中断时 | `ErrorCategory`（glob） | rate_limit / auth_failed / billing / invalid_request / server_error / max_output_tokens / unknown | ❌ |
 | `PreCompact` | 对话压缩前 | `trigger` | manual / auto | ❌ |
 | `PostCompact` | 对话压缩后（ToolResponse 携带摘要） | `trigger` | manual / auto | ❌ |
@@ -860,7 +860,7 @@ Hook 仅在**受信任工作区**中触发。`HookPolicyService.IsCurrentWorkspa
 
 ### 10.2 策略开关
 
-当前没有 `disableAll` / `allowManagedOnly` / `strictPluginOnly` 等策略开关（设计曾规划于 ADR 0005，未实现）。工作区信任（§10.1）是唯一的策略门控。
+当前没有 `disableAll` / `allowManagedOnly` / `strictPluginOnly` 等策略开关（设计曾规划于 Hook 模块架构设计，未实现）。工作区信任（§10.1）是唯一的策略门控。
 
 ### 10.3 异常处理策略
 
@@ -1025,7 +1025,7 @@ Hook 执行相关日志通过 `ILogger` 输出，关键日志类别：
 
 ## 13. 相关文档
 
-- [ADR 0005: Hook 模块架构设计](./adr/0005-hook-module-design.md) — 架构决策、数据模型、实现细节
+- [Hook 模块架构设计](./adr/0005-hook-module-design.md) — 架构决策、数据模型、实现细节
 - [设置文档 - Hooks 配置](./settings.md#hooks-配置) — `hooks.json` 与策略开关
 - [命令文档 - /hooks](./commands.md#hooks) — `/hooks` 命令完整说明
-- [ADR 0001: Permission vs ToolApproval vs Filter](./adr/0001-permission-vs-toolapproval-vs-filter.md) — HookMiddleware 在 MAF 管道中的位置
+- [Permission vs ToolApproval vs Filter](./adr/0001-permission-vs-toolapproval-vs-filter.md) — HookMiddleware 在 MAF 管道中的位置

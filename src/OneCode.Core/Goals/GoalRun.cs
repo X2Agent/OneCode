@@ -1,5 +1,5 @@
-using OneCode.Core.Build;
 using OneCode.Core.Domain;
+using OneCode.Core.Workflows;
 
 namespace OneCode.Core.Goals;
 
@@ -99,7 +99,7 @@ public sealed record GoalWorkspaceSnapshot(
     string TargetWorkspaceFingerprint,
     DateTimeOffset CreatedAt);
 
-public sealed record GoalRun
+public sealed record GoalRun : IWorkflowRun
 {
     public required GoalRunId Id { get; init; }
     public required SessionId SessionId { get; init; }
@@ -115,7 +115,7 @@ public sealed record GoalRun
     public IReadOnlyList<GoalGateEvidence> FinalValidation { get; init; } = [];
     public GoalWorkspaceSnapshot? Workspace { get; init; }
     public GoalPublishReceipt? PublishReceipt { get; init; }
-    public BuildTerminalReason? TerminalReason { get; init; }
+    public RunTerminalReason? TerminalReason { get; init; }
     public string? FailureSummary { get; init; }
     public long? WorkflowFencingToken { get; init; }
     public long Version { get; init; }

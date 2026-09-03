@@ -144,10 +144,6 @@ public enum GoalStatus
 /// <summary>
 /// GOAL 模式执行结果。
 /// </summary>
-/// <param name="SessionId">
-/// 会话 ID。可通过 <c>/resume</c> 经 Durable Goal 工作流从 Checkpoint 恢复。
-/// 为 null 时表示分解失败，未产生会话。
-/// </param>
 public sealed record GoalRunResult(
     IReadOnlyList<GoalItem> Goals,
     int CompletedCount,

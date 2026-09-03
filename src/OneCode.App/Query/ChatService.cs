@@ -8,7 +8,7 @@ namespace OneCode.App.Query;
 /// Chat service — thin facade preserving the public query contract
 /// (<see cref="IConversationRunner"/> + <see cref="ICacheSafeParamsProvider"/>) for TUI and
 /// BackgroundService (Cron/AutoDream) consumers. All streaming orchestration — Build 门禁、事件消化、
-/// 终结记账 — is delegated to <see cref="QueryStreamEngine"/> (ADR 0006).
+/// 终结记账 — is delegated to <see cref="QueryStreamEngine"/>.
 /// </summary>
 /// <remarks>
 /// 实现 <see cref="IConversationRunner"/> 的原因：headless 触发器（CronJobExecutor 等）依赖接口而非

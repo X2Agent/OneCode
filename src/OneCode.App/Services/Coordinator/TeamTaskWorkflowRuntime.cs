@@ -1,6 +1,7 @@
 using OneCode.Core.Coordinator;
 using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.Coordinator;
 
@@ -59,14 +60,14 @@ internal sealed class TeamTaskWorkflowRuntime(
         // 然后开启 run 级持久化事务；task 内每次文件编辑的 intent 由 EditTransactionMiddleware 落盘。
         if (ledger is not null)
         {
-            await ledger.ReconcileRunAsync($"team/{run.Id}", ct).ConfigureAwait(false);
             _runOperationId = $"team/{run.Id}/fence/{fencingToken}";
-            await ledger.BeginTransactionAsync(
+            await FencedLedgerTransaction.BeginAsync(
+                ledger,
+                $"team/{run.Id}",
                 _runOperationId,
-                "file-transaction",
                 fencingToken,
+                _transaction,
                 ct).ConfigureAwait(false);
-            _transaction.PersistTo(ledger, _runOperationId, fencingToken);
         }
     }
 

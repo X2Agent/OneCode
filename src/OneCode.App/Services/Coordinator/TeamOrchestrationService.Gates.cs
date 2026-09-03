@@ -49,11 +49,12 @@ public sealed partial class TeamOrchestrationService
     }
 
     /// <summary>
-    /// 运行 Team 计划审批门禁：构造 approvalInput，首次调用挂起于 MAF RequestPort，
-    /// 通过 AskAsync 获取用户审批决策后投递 ExternalResponse 恢复。
-    /// 返回包含 ApprovalGranted 的最终结果；调用方负责判断是否批准。
+    /// 运行 Team 计划审批门禁（RequestPortGate 委托）：
+    /// RequestPort 挂起、决策收集与 ExternalResponse 恢复收敛于
+    /// <c>RequestPortGate</c>。返回包含 ApprovalGranted 的最终结果；
+    /// 调用方负责判断是否批准。
     /// </summary>
-    private async Task<TeamApprovalWorkflowResult> RunApprovalGateAsync(
+    private Task<TeamApprovalWorkflowResult> RunApprovalGateAsync(
         string teamName,
         TeamRunId runId,
         TeamConfig config,
@@ -61,44 +62,5 @@ public sealed partial class TeamOrchestrationService
         ImplementationPlan plan,
         Action<OrchestrationEvent>? eventSink,
         CancellationToken ct)
-    {
-        var approvalInput = new TeamPlanApprovalInput(
-            runId.Value,
-            teamName,
-            plan.Summary,
-            plan.Tasks.Select(t => t.Title).ToList(),
-            plan.RequiredGates.Where(g => g.Required).Select(g => g.Description).ToList());
-
-        var approval = await _approvalWorkflowHost.RunApprovalAsync(
-            teamName, runId, config, modelId, approvalInput,
-            new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
-
-        if (approval.PendingRequest is { } pending)
-        {
-            // Notify TUI of plan approval card (display-only, no TaskCompletionSource).
-            eventSink?.Invoke(new OrchestrationEvent.TeamPlanApprovalRequest(
-                runId, teamName, plan.Summary,
-                plan.Tasks.Select(t => t.Title).ToList(),
-                plan.RequiredGates.Where(g => g.Required).Select(g => g.Description).ToList()));
-
-            var decision = await _clarificationInteraction.AskAsync(
-                $"团队 {teamName} 计划审批",
-                [$"执行方案：{plan.Summary}\n任务数：{plan.Tasks.Count}\n批准执行？"],
-                confirmationOnly: true,
-                ct: ct).ConfigureAwait(false);
-            var approved = !decision.IsCancelled;
-            // 决策回显：让用户在会话记录中看到自己批准/取消了计划。
-            eventSink?.Invoke(new OrchestrationEvent.TeamUserResponse(
-                teamName, approved ? "已批准执行计划" : "已取消，不执行"));
-
-            var response = BuildApprovalResponse(pending.PortId, pending.RequestId, approved);
-            approval = await _approvalWorkflowHost.RunApprovalAsync(
-                teamName, runId, config, modelId, approvalInput,
-                new JsonSerializerOptions(),
-                externalResponse: response,
-                ct: ct).ConfigureAwait(false);
-        }
-
-        return approval;
-    }
+        => _approvalGate.DecideAsync(teamName, runId, config, modelId, plan, eventSink, ct);
 }

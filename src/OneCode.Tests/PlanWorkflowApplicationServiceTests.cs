@@ -3,6 +3,7 @@ using NSubstitute;
 using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
@@ -416,6 +417,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var store = Substitute.For<IPlanAggregateStore>();
         store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         var buildRunStore = Substitute.For<IBuildRunStore>();
         buildRunStore.LoadAsync(sessionId, Arg.Any<CancellationToken>()).Returns(buildRun);
         var bound = workflow with { BuildRunId = buildRun.Id.ToString(), Version = workflow.Version + 1 };
@@ -459,6 +466,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var store = Substitute.For<IPlanAggregateStore>();
         store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         var buildRunStore = Substitute.For<IBuildRunStore>();
         buildRunStore.LoadByIdAsync(buildRun.Id, Arg.Any<CancellationToken>()).Returns(buildRun);
         var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
@@ -555,6 +568,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var store = Substitute.For<IPlanAggregateStore>();
         store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         var buildRunStore = Substitute.For<IBuildRunStore>();
         buildRunStore.LoadByIdAsync(buildRun.Id, Arg.Any<CancellationToken>()).Returns(buildRun);
         var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
@@ -591,6 +610,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>())
             .Returns([mismatched, recoverable]);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(callInfo => callInfo.ArgAt<SessionId>(0) == firstSession ? mismatched : recoverable);
         var buildRunStore = Substitute.For<IBuildRunStore>();
         buildRunStore.LoadAsync(firstSession, Arg.Any<CancellationToken>())
             .Returns(CreateMatchingBuildRun(mismatched, BuildRunState.Implementing) with
@@ -717,6 +742,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         };
         var bound = executing with { BuildRunId = "br-observed", Version = executing.Version + 1 };
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
             .Returns(workflow, executing, bound, bound);
         workflowService.RegisterStartAttemptAsync(
@@ -758,6 +789,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var sessionId = SessionId.NewId();
         var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Executing);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow, workflow);
         var runner = Substitute.For<IConversationRunner>();
         runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
@@ -789,6 +826,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var attemptRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
         workflowService.RegisterStartAttemptAsync(
                 Arg.Any<RegisterPlanStartAttemptCommand>(),
@@ -829,6 +872,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var releaseRun = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
             .Returns(workflow, workflow, workflow);
         var runner = Substitute.For<IConversationRunner>();
@@ -864,6 +913,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         };
         var executing = attempted with { State = PlanWorkflowState.Executing };
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
             .Returns(workflow, executing, executing);
         workflowService.RegisterStartAttemptAsync(
@@ -909,6 +964,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(1),
         };
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
             .Returns(workflow, attempted);
         workflowService.RegisterStartAttemptAsync(
@@ -937,6 +998,12 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         var sessionId = SessionId.NewId();
         var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null) with { StartAttempt = 5 };
         var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
         workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
         var session = CreateInteractiveSession(Substitute.For<ISessionManager>());
         var sut = CreateDispatcher(workflowService);
@@ -972,6 +1039,7 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
                 PlanId = created.Id,
                 SessionId = sessionId,
                 Revision = 1,
+                Title = "DAG",
                 Markdown = "# DAG",
                 Steps = [
                     CreateStep("implementation", []),
@@ -1093,6 +1161,7 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
                 PlanId = created.Id,
                 SessionId = sessionId,
                 Revision = 1,
+                Title = "Approved plan",
                 Markdown = "# Approved plan",
                 Steps = [CreateStep("persist-workflow", [])],
                 ContentHash = "sha256-test",
@@ -1165,7 +1234,7 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             State = state,
             IntakePrompt = "Execute approved plan.",
             Plan = new BuildPlan(
-                $"Execute approved plan {workflow.Id} revision {snapshot.Revision}.",
+                snapshot.Title,
                 snapshot.Steps.Select(step => new BuildPlanTask(
                     step.Id,
                     step.Title,
@@ -1194,7 +1263,7 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         IPlanWorkflowApplicationService workflowService)
         => new(
             workflowService,
-            new PlanCardPublisher(),
+            new PlanCardPublisher(new OrchestrationEventBus()),
             new TuiInteractionBridge(),
             NullLogger<PlanAgentRunDispatcher>.Instance);
 

@@ -124,9 +124,10 @@ public sealed class ReasoningPassbackTests
     }
 
     [Fact]
-    public void RewriteRequestBody_EmptySlot_PreservedAndAligned()
+    public void RewriteRequestBody_EmptySlot_StubbedWithEmptyReasoning()
     {
-        // 两条 assistant：第一条无推理（空串占位），第二条有推理——按顺序对齐。
+        // 两条 assistant：第一条无推理（空串占位），第二条有推理——空槽补空字符串 stub，
+        // 确保 thinking 网关对每条 assistant 消息都能看到 reasoning_content 字段。
         const string body = """
             {"model":"m","messages":[
                 {"role":"assistant","content":"a"},
@@ -140,12 +141,12 @@ public sealed class ReasoningPassbackTests
         patched.Should().NotBeNull();
         using var doc = JsonDocument.Parse(patched!);
         var messages = doc.RootElement.GetProperty("messages");
-        messages[0].TryGetProperty("reasoning_content", out _).Should().BeFalse();
+        messages[0].GetProperty("reasoning_content").GetString().Should().Be("");
         messages[2].GetProperty("reasoning_content").GetString().Should().Be("第二条推理");
     }
 
     [Fact]
-    public void RewriteRequestBody_FewerSlotsThanAssistants_ExtraLeftUntouched()
+    public void RewriteRequestBody_FewerSlotsThanAssistants_ExtraStubbedWithEmptyReasoning()
     {
         const string body = """
             {"model":"m","messages":[
@@ -160,16 +161,43 @@ public sealed class ReasoningPassbackTests
         using var doc = JsonDocument.Parse(patched!);
         var messages = doc.RootElement.GetProperty("messages");
         messages[0].GetProperty("reasoning_content").GetString().Should().Be("只有一条");
-        messages[1].TryGetProperty("reasoning_content", out _).Should().BeFalse();
+        messages[1].GetProperty("reasoning_content").GetString().Should().Be("");
     }
 
     [Fact]
-    public void RewriteRequestBody_NoReasoningSlots_ReturnsNull()
+    public void RewriteRequestBody_AllEmptySlots_StubbedEmptyNotNull()
     {
+        // 全空槽位：不再返回 null，而是为每条缺失 reasoning_content 的 assistant 补空 stub。
         const string body = """{"model":"m","messages":[{"role":"assistant","content":"a"}]}""";
 
-        OpenAiReasoningPassbackHandler.RewriteRequestBody(body, [""])
-            .Should().BeNull();
+        var patched = OpenAiReasoningPassbackHandler.RewriteRequestBody(body, [""]);
+
+        patched.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(patched!);
+        doc.RootElement.GetProperty("messages")[0]
+            .GetProperty("reasoning_content").GetString().Should().Be("");
+    }
+
+    [Fact]
+    public void RewriteRequestBody_AssistantToolCallWithEmptyReasoning_GetsEmptyStub()
+    {
+        // 回归：SubmitPlan 缺 content 导致参数绑定失败、StateMachine 注入重试反馈后，
+        // 回传请求中的 assistant 工具调用消息必须携带 reasoning_content 字段（非缺失），
+        // 否则 DeepSeek thinking 网关返回 400 'NoneType' object has no attribute 'items'。
+        const string body = """
+            {"model":"deepseek-v4-flash","messages":[
+                {"role":"assistant","content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"SubmitPlan","arguments":"{}"}}]},
+                {"role":"tool","tool_call_id":"call-1","content":"[STATE MACHINE] retry feedback"}
+            ]}
+            """;
+
+        var patched = OpenAiReasoningPassbackHandler.RewriteRequestBody(body, [""]);
+
+        patched.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(patched!);
+        var messages = doc.RootElement.GetProperty("messages");
+        messages[0].GetProperty("reasoning_content").GetString().Should().Be("");
+        messages[1].TryGetProperty("reasoning_content", out _).Should().BeFalse();
     }
 
     [Theory]

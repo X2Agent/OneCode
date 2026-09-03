@@ -1,4 +1,4 @@
-using OneCode.Core.Build;
+using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Goals;
@@ -68,7 +68,7 @@ public sealed class GoalRunStoreTests : IDisposable
             Plan = [run.Plan[0] with { State = GoalStepState.Completed }],
             FinalValidation = [new GoalGateEvidence("final", true, false, "passed")],
             PublishReceipt = new GoalPublishReceipt("op-1", "hash-1", [], DateTimeOffset.UtcNow),
-            TerminalReason = BuildTerminalReason.Completed,
+            TerminalReason = RunTerminalReason.Completed,
         };
         await store.SaveAsync(completed, 0, TestContext.Current.CancellationToken);
         var saved = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
@@ -83,7 +83,7 @@ public sealed class GoalRunStoreTests : IDisposable
         var run = CreateRun() with
         {
             State = GoalRunState.Failed,
-            TerminalReason = BuildTerminalReason.ValidationFailed,
+            TerminalReason = RunTerminalReason.ValidationFailed,
             FailureSummary = "failed",
         };
         await store.SaveAsync(run, 0, TestContext.Current.CancellationToken);
@@ -105,7 +105,7 @@ public sealed class GoalRunStoreTests : IDisposable
         {
             SessionId = SessionId.NewId(),
             State = GoalRunState.Cancelled,
-            TerminalReason = BuildTerminalReason.Cancelled,
+            TerminalReason = RunTerminalReason.Cancelled,
         };
         await store.SaveAsync(active, 0, TestContext.Current.CancellationToken);
         await store.SaveAsync(terminal, 0, TestContext.Current.CancellationToken);

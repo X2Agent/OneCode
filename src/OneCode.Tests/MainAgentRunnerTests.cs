@@ -13,6 +13,7 @@ using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
+using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Api;
 using OneCode.Infrastructure.Config;
 
@@ -23,7 +24,7 @@ namespace OneCode.Tests;
 /// <list type="bullet">
 /// <item><see cref="ToolNames.ReadOnlyTools"/> (public static, 统一来源)</item>
 /// <item><see cref="MainModeContextProviderBuilder.ResolveAgentMode"/> (internal static)</item>
-/// <item><see cref="AgentPipelineAssembly.CreateAutoApprovalRules"/> (internal instance)</item>
+/// <item><see cref="AutoApprovalRulesFactory"/> (internal static)</item>
 /// </list>
 /// The full <c>RunAsync</c> / <c>RunStreamingAsync</c> pipeline is exercised
 /// by integration tests; here we focus on the mode-aware auto-approval rule
@@ -81,10 +82,10 @@ public sealed class MainAgentRunnerTests : IDisposable
             Directory.Delete(_configDir, recursive: true);
     }
 
-    // Helper: invoke CreateAutoApprovalRules via AgentPipelineAssembly.
-    private List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> InvokeCreateAutoApprovalRules()
+    // Helper: invoke the single auto-approval rule source AutoApprovalRulesFactory.
+    private List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> InvokeAutoApprovalRules()
     {
-        return _pipelineAssembly.CreateAutoApprovalRules();
+        return AutoApprovalRulesFactory.Create(_modeProvider.CurrentMode);
     }
 
     [Theory]
@@ -152,7 +153,6 @@ public sealed class MainAgentRunnerTests : IDisposable
     [InlineData(PermissionMode.AcceptEdits, "build")]
     [InlineData(PermissionMode.BypassPermissions, "build")]
     [InlineData(PermissionMode.DontAsk, "build")]
-    [InlineData(PermissionMode.Bubble, "build")]
     [InlineData(PermissionMode.Auto, "build")]
     [InlineData(null, "build")]
     public void ResolveAgentMode_WhenWorkingModeIsBuild_FallsBackToPermissionMode(
@@ -165,13 +165,13 @@ public sealed class MainAgentRunnerTests : IDisposable
         actual.Should().Be(expected);
     }
 
-    // CreateAutoApprovalRules (private instance) — uses _modeProvider.CurrentMode
+    // AutoApprovalRulesFactory.Create — uses _modeProvider.CurrentMode
 
     [Fact]
-    public async Task CreateAutoApprovalRules_BypassPermissionsMode_ApprovesAllTools()
+    public async Task AutoApprovalRulesFactory_BypassPermissionsMode_ApprovesAllTools()
     {
         _modeProvider.SetCurrentMode(PermissionMode.BypassPermissions);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
         // Read-only tools approved (always)
         (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
@@ -189,20 +189,20 @@ public sealed class MainAgentRunnerTests : IDisposable
     [InlineData("Write")]
     [InlineData("Edit")]
     [InlineData("ApplyWorkspaceEdit")]
-    public async Task CreateAutoApprovalRules_AcceptEditsMode_ApprovesFileWriteTools(string tool)
+    public async Task AutoApprovalRulesFactory_AcceptEditsMode_ApprovesFileWriteTools(string tool)
     {
         _modeProvider.SetCurrentMode(PermissionMode.AcceptEdits);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
         (await EvaluateAsync(rules, MakeCall(tool))).Should().BeTrue(
             $"{tool} should be auto-approved in AcceptEdits mode");
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_AcceptEditsMode_ApprovesReadOnlyShellCommands()
+    public async Task AutoApprovalRulesFactory_AcceptEditsMode_ApprovesReadOnlyShellCommands()
     {
         _modeProvider.SetCurrentMode(PermissionMode.AcceptEdits);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
         // Read-only shell commands approved (git status is in the read-only whitelist)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
@@ -210,10 +210,10 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_AcceptEditsMode_DeniesNonReadOnlyShellCommands()
+    public async Task AutoApprovalRulesFactory_AcceptEditsMode_DeniesNonReadOnlyShellCommands()
     {
         _modeProvider.SetCurrentMode(PermissionMode.AcceptEdits);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
         // Destructive shell commands NOT auto-approved
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf /tmp/x"))).Should().BeFalse();
@@ -221,10 +221,10 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_AcceptEditsMode_DeniesUnknownDangerousTools()
+    public async Task AutoApprovalRulesFactory_AcceptEditsMode_DeniesUnknownDangerousTools()
     {
         _modeProvider.SetCurrentMode(PermissionMode.AcceptEdits);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
         // Unknown / non-shell / non-file-write tools are NOT auto-approved
         (await EvaluateAsync(rules, MakeCall("SomeUnknownTool"))).Should().BeFalse();
@@ -232,14 +232,14 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_PlanMode_ApprovesReadOnlyToolsAndReadOnlyShell()
+    public async Task AutoApprovalRulesFactory_PlanMode_ApprovesReadOnlyShellOnly()
     {
         _modeProvider.SetCurrentMode(PermissionMode.Plan);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
-        // Read-only tools approved (always)
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
-        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeTrue();
+        // 只读工具（Read/Grep）在 Layer 1 PermissionChecker 已 Allow，不进入 MAF 规则层。
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
+        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeFalse();
 
         // Read-only shell approved (aligns with PlanModePermissionStrategy)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
@@ -254,15 +254,15 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_DefaultMode_OnlyApprovesReadOnlyAndReadOnlyShell()
+    public async Task AutoApprovalRulesFactory_DefaultMode_ApprovesReadOnlyShellOnly()
     {
         _modeProvider.SetCurrentMode(PermissionMode.Default);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
-        // Read-only tools approved
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
-        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeTrue();
-        (await EvaluateAsync(rules, MakeCall("WebFetch"))).Should().BeTrue();
+        // 只读工具（Read/Grep/WebFetch）在 Layer 1 PermissionChecker 已 Allow，不进入 MAF 规则层。
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
+        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeFalse();
+        (await EvaluateAsync(rules, MakeCall("WebFetch"))).Should().BeFalse();
 
         // Read-only shell approved (auto-approved via IsReadOnlyShell)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
@@ -279,13 +279,13 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_DontAskMode_DeniesAllNonReadOnlyTools()
+    public async Task AutoApprovalRulesFactory_DontAskMode_DeniesAllToolsExceptLayer1ReadOnly()
     {
         _modeProvider.SetCurrentMode(PermissionMode.DontAsk);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
-        // Read-only approved
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
+        // 只读工具在 Layer 1 已 Allow；MAF 规则层不单独放行。
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
         // Non-readonly denied (no prompts in DontAsk mode)
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeFalse();
@@ -293,32 +293,19 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAutoApprovalRules_AutoMode_DeniesAllNonReadOnlyTools()
+    public async Task AutoApprovalRulesFactory_AutoMode_ApprovesReadOnlyShellOnly()
     {
         // PermissionMode.Auto behaves like Default in this rule table
         // (the YOLO classifier lives in PermissionChecker, not here).
         _modeProvider.SetCurrentMode(PermissionMode.Auto);
-        var rules = InvokeCreateAutoApprovalRules();
+        var rules = InvokeAutoApprovalRules();
 
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
+        // 只读工具在 Layer 1 已 Allow；MAF 规则层不单独放行。
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
         // Auto mode falls through to the Default branch — read-only shell approved
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf x"))).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task CreateAutoApprovalRules_BubbleMode_DeniesAllNonReadOnlyTools()
-    {
-        _modeProvider.SetCurrentMode(PermissionMode.Bubble);
-        var rules = InvokeCreateAutoApprovalRules();
-
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
-        // In Bubble mode (default branch), non-readonly tools denied —
-        // bubbling happens via PermissionChecker + BubbleHandler, not auto-approval.
-        (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
-        // Read-only shell still approved (default-branch behavior)
-        (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
     }
 
     // WrapApprovalRequiredTools — verify ToolMetadataRegistry-driven wrapping

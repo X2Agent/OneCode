@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Build;
 
 namespace OneCode.App.Services.BuildMode;
@@ -208,6 +209,13 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
     }
 }
 
+/// <summary>
+/// Build 模式受控 attempt Workflow Host。执行骨架（generation/attempt 递增、durable 执行、
+/// typed 输出抽取）由 <see cref="ModeWorkflowHost"/> 统一承担；本类保留 Build 语义：
+/// attempt 依赖世代的编译、checkpoint 命令取编译产物 OperationId、
+/// lease 回调（状态前置校验 → claim → PrepareAttemptAsync → Implementing 校验），
+/// 显式 attempt 路径不要求 typed 输出。
+/// </summary>
 public sealed class ControlledBuildAttemptHost(
     IDurableWorkflowHost durableHost,
     ControlledBuildAttemptWorkflowCompiler compiler,
@@ -215,6 +223,8 @@ public sealed class ControlledBuildAttemptHost(
     IWorkflowRunRegistry workflowRunRegistry,
     IBuildRunCoordinator buildRunCoordinator)
 {
+    private readonly ModeWorkflowHost _modeHost = new(durableHost, workflowRunRegistry);
+
     public async Task<ControlledBuildAttemptRunResult> RunNextAsync(
         BuildRun buildRun,
         string modelId,
@@ -225,27 +235,10 @@ public sealed class ControlledBuildAttemptHost(
         Func<WorkflowRuntimeEvent, CancellationToken, ValueTask>? eventSink = null,
         CancellationToken ct = default)
     {
-        var stableRunId = $"build/{buildRun.Id}";
-        var current = await workflowRunRegistry.LoadAsync(stableRunId, ct).ConfigureAwait(false);
-        var attempt = Math.Max(1, (current?.ExecutionGeneration ?? 0) + 1);
-        var durable = await RunAsync(
-            buildRun,
-            attempt,
-            modelId,
-            systemPrompt,
-            toolCapabilityHash,
-            runtime,
-            serializerOptions,
-            eventSink,
+        var result = await _modeHost.RunNextAsync<ControlledBuildAttemptInput, ControlledBuildAttemptOutput>(
+            CreatePolicy(buildRun, modelId, systemPrompt, toolCapabilityHash, runtime, serializerOptions, eventSink),
             ct).ConfigureAwait(false);
-        var output = durable.Events
-            .OfType<WorkflowRuntimeEvent.Output>()
-            .Select(item => item.Value)
-            .OfType<ControlledBuildAttemptOutput>()
-            .SingleOrDefault()
-            ?? throw new InvalidOperationException(
-                $"Controlled Build attempt '{stableRunId}' did not produce its typed output.");
-        return new ControlledBuildAttemptRunResult(durable, output);
+        return new ControlledBuildAttemptRunResult(result.Durable, result.Output);
     }
 
     public Task<DurableWorkflowRunResult> RunAsync(
@@ -258,24 +251,40 @@ public sealed class ControlledBuildAttemptHost(
         JsonSerializerOptions serializerOptions,
         Func<WorkflowRuntimeEvent, CancellationToken, ValueTask>? eventSink = null,
         CancellationToken ct = default)
-    {
-        var definition = compiler.Compile(
-            buildRun,
+        => _modeHost.RunAsync<ControlledBuildAttemptInput>(
+            CreatePolicy(buildRun, modelId, systemPrompt, toolCapabilityHash, runtime, serializerOptions, eventSink),
             attempt,
-            modelId,
-            systemPrompt,
-            toolCapabilityHash,
-            runtime,
-            serializerOptions);
-        return durableHost.RunAsync(
-            definition.Registration,
-            definition.Workflow,
-            definition.Input,
-            definition.Input.OperationId,
+            ct);
+
+    private ModeWorkflowPolicy<ControlledBuildAttemptInput> CreatePolicy(
+        BuildRun buildRun,
+        string modelId,
+        string systemPrompt,
+        string toolCapabilityHash,
+        IControlledBuildAttemptRuntime runtime,
+        JsonSerializerOptions serializerOptions,
+        Func<WorkflowRuntimeEvent, CancellationToken, ValueTask>? eventSink)
+        => new(
+            $"build/{buildRun.Id}",
+            attempt =>
+            {
+                var definition = compiler.Compile(
+                    buildRun,
+                    attempt,
+                    modelId,
+                    systemPrompt,
+                    toolCapabilityHash,
+                    runtime,
+                    serializerOptions);
+                return new ModeWorkflowCompiled<ControlledBuildAttemptInput>(
+                    definition.Registration,
+                    definition.Workflow,
+                    definition.Input,
+                    definition.Input.OperationId);
+            },
             serializerOptions,
-            eventSink,
-            executionGeneration: attempt,
-            leaseAcquired: async (workflowRun, callbackCt) =>
+            EventSink: eventSink,
+            LeaseAcquired: async (workflowRun, callbackCt) =>
             {
                 var current = await buildRunStore.LoadByIdAsync(buildRun.Id, callbackCt).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"BuildRun '{buildRun.Id}' was not found.");
@@ -299,6 +308,5 @@ public sealed class ControlledBuildAttemptHost(
                         $"BuildRun '{buildRun.Id}' did not enter Implementing after attempt preparation.");
                 }
             },
-            ct: ct);
-    }
+            DisplayName: "Controlled Build attempt");
 }

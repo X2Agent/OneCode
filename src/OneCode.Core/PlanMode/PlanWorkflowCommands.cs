@@ -50,14 +50,16 @@ public sealed record RegisterPlanStartAttemptCommand(
     SessionId SessionId,
     PlanWorkflowId PlanId,
     long ExpectedWorkflowVersion,
-    DateTimeOffset AttemptedAt);
+    DateTimeOffset AttemptedAt,
+    long FencingToken = 0);
 
 public sealed record BindPlanBuildRunCommand(
     string CommandId,
     SessionId SessionId,
     PlanWorkflowId PlanId,
     string RunId,
-    string BuildRunId);
+    string BuildRunId,
+    long FencingToken = 0);
 
 public sealed record FailPlanExecutionRecoveryCommand(
     string CommandId,
@@ -68,19 +70,26 @@ public sealed record FailPlanExecutionRecoveryCommand(
     string ErrorMessage,
     DateTimeOffset FailedAt);
 
+/// <summary>
+/// Plan 代理运行事件基类。<see cref="FencingToken"/> 携带执行世代的 fencing 令牌：
+/// 执行期事件（BuildRun*）由 dispatcher 在 claim 后发放并穿透到持久化；
+/// 规划期事件（PlanRun*）为 0，写入走未 claim 的普通保存。
+/// </summary>
 public abstract record PlanAgentRunEvent(
     SessionId SessionId,
     PlanWorkflowId PlanId,
     string RunId,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0);
 
 public sealed record PlanRunCompletedEvent(
     SessionId SessionId,
     PlanWorkflowId PlanId,
     string RunId,
     bool ProtocolValid,
-    DateTimeOffset OccurredAt)
-    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt);
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0)
+    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
 public sealed record PlanRunFailedEvent(
     SessionId SessionId,
@@ -88,15 +97,17 @@ public sealed record PlanRunFailedEvent(
     string RunId,
     string ErrorCode,
     string ErrorMessage,
-    DateTimeOffset OccurredAt)
-    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt);
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0)
+    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
 public sealed record BuildRunStartedEvent(
     SessionId SessionId,
     PlanWorkflowId PlanId,
     string RunId,
-    DateTimeOffset OccurredAt)
-    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt);
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0)
+    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
 public sealed record BuildRunFailedEvent(
     SessionId SessionId,
@@ -104,8 +115,9 @@ public sealed record BuildRunFailedEvent(
     string RunId,
     string ErrorCode,
     string ErrorMessage,
-    DateTimeOffset OccurredAt)
-    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt);
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0)
+    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
 public sealed record UpdatePlanStepCommand(
     string CommandId,
@@ -115,14 +127,16 @@ public sealed record UpdatePlanStepCommand(
     string StepId,
     PlanStepExecutionStatus Status,
     string? Evidence,
-    string? Error);
+    string? Error,
+    long FencingToken = 0);
 
 public sealed record CompletePlanExecutionCommand(
     string CommandId,
     SessionId SessionId,
     PlanWorkflowId PlanId,
     string RunId,
-    string Summary);
+    string Summary,
+    long FencingToken = 0);
 
 public sealed record CompletePlanVerificationCommand(
     string CommandId,
@@ -131,7 +145,8 @@ public sealed record CompletePlanVerificationCommand(
     string RunId,
     bool Passed,
     IReadOnlyList<string> Evidence,
-    string Summary);
+    string Summary,
+    long FencingToken = 0);
 
 public sealed record PlanRevisionResult(PlanWorkflow Workflow, PlanRevision Revision);
 public sealed record PlanSubmissionResult(PlanWorkflow Workflow, PlanRevision Revision);

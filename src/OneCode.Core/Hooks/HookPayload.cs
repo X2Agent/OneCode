@@ -60,7 +60,7 @@ public sealed record HookPayload
     public string? Trigger { get; init; }
 
     /// <summary>
-    /// 终结原因（Stop 事件，BuildTerminalReason 枚举名），同时作为 Stop hook 的 matcher 值——
+    /// 终结原因（Stop 事件，RunTerminalReason 枚举名），同时作为 Stop hook 的 matcher 值——
     /// 可按 "成功完成" / "各种异常收场" 分别配置 hook。
     /// </summary>
     public string? TerminalReason { get; set; }

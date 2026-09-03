@@ -1,7 +1,9 @@
 using Microsoft.Agents.AI;
 using OneCode.App.Services.BuildMode;
+using OneCode.App.Services.Context;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.PlanMode;
+
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
 

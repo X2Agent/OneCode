@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
+using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Query;
 
@@ -9,7 +10,7 @@ namespace OneCode.App.Query;
 /// Mutable per-run streaming state: text/turn/token accumulators, CallId dedup sets,
 /// the tool batch collector and the next-prompt tag parser for one agent run.
 ///
-/// Existence rationale (ADR 0006): an async iterator cannot share its locals with
+/// Existence rationale: an async iterator cannot share its locals with
 /// helper methods, so the digest loop's ten interdependent accumulators previously
 /// pinned the whole loop inside one ~460-line method. Hoisting them into this state
 /// object lets <see cref="Digest"/> stay a pure (unit-testable) mapping over
@@ -81,9 +82,12 @@ internal sealed class StreamingSession
             yield break;
         }
 
-        if (evt is BuildRunStateEvent buildStateEvent)
+        // 受控 Build attempt 以 OrchestrationEvent 信封发射持久化状态
+        // 投影；流内契约仍为 BuildRunStateEvent（QueryEvent），此处为运行时事件 → 流内事件
+        // 的唯一投影点（原 durableStateObserver → BuildRunStateEvent 直产通道退役）。
+        if (evt is OrchestrationEvent.BuildStateProjectionChanged buildProjection)
         {
-            yield return buildStateEvent;
+            yield return BuildRunStateEvent.From(buildProjection.Run);
             yield break;
         }
 

@@ -56,7 +56,6 @@
     <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.19.0-alpha.260822.1" />
     <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.19.0-preview.260822.1" />
     <PackageVersion Include="Hyperlight.HyperlightSandbox.Api" Version="0.5.0" />
-    <PackageVersion Include="Hyperlight.HyperlightSandbox.Guest.Python" Version="0.5.0" />
   </ItemGroup>
   <ItemGroup Label="Tooling">
     <PackageVersion Include="Cronos" Version="0.13.0" />

@@ -1,84 +1,86 @@
 using OneCode.App.Services.PlanMode;
-using OneCode.App.Tui;
+using OneCode.App.Services.Streaming;
+using OneCode.Core.Coordinator;
+using OneCode.Core.Domain;
+using OneCode.Core.PlanMode;
 
 namespace OneCode.Tests;
 
+/// <summary>
+/// 事件通道统一：<see cref="PlanCardPublisher"/> 已收敛为统一领域
+/// 事件总线（<see cref="OrchestrationEventBus"/>）的 Plan 侧发射器——验证其发布的
+/// <see cref="OrchestrationEvent.PlanProjectionChanged"/> 载荷与多路订阅广播语义。
+/// </summary>
 public sealed class PlanCardPublisherTests
 {
     [Fact]
-    public void Publish_WithSubscriber_ForwardsExactTitleStepsAndPhase()
+    public void Publish_WithSubscriber_EmitsPlanProjectionChangedWithExactWorkflow()
     {
-        var sut = new PlanCardPublisher();
-        var steps = new List<PlanStep>
-        {
-            new("Step 1"),
-            new("Step 2", Assignee: "agent", Status: PlanStepStatus.Done),
-        };
-        string? receivedTitle = null;
-        IReadOnlyList<PlanStep>? receivedSteps = null;
-        PlanCardPhase? receivedPhase = null;
-        sut.PlanCreated += (title, s, phase) =>
-        {
-            receivedTitle = title;
-            receivedSteps = s;
-            receivedPhase = phase;
-        };
+        var bus = new OrchestrationEventBus();
+        var sut = new PlanCardPublisher(bus);
+        var workflow = PlanWorkflow.Create(SessionId.NewId());
+        OrchestrationEvent.PlanProjectionChanged? received = null;
+        bus.Subscribe(evt => received = evt as OrchestrationEvent.PlanProjectionChanged);
 
-        sut.Publish("Build feature X", steps, PlanCardPhase.PendingApproval);
+        sut.Publish(workflow);
 
-        receivedTitle.Should().Be("Build feature X");
-        receivedSteps.Should().NotBeNull();
-        receivedSteps!.Should().HaveCount(2);
-        receivedSteps[0].Label.Should().Be("Step 1");
-        receivedSteps[1].Label.Should().Be("Step 2");
-        receivedSteps[1].Assignee.Should().Be("agent");
-        receivedSteps[1].Status.Should().Be(PlanStepStatus.Done);
-        receivedPhase.Should().Be(PlanCardPhase.PendingApproval);
+        received.Should().NotBeNull();
+        received!.Workflow.Should().BeSameAs(workflow);
     }
 
     [Fact]
     public void Publish_WithoutSubscribers_DoesNotThrow()
     {
-        // The TUI subscription is optional — CreatePlanTool calls Publish
-        // unconditionally when steps are present. A NullReferenceException here
-        // would crash the tool in headless/CI runs where no TUI is attached.
-        var sut = new PlanCardPublisher();
+        // Headless/Cron 场景无 TUI 订阅者——总线 Publish 必须为 no-op，
+        // CreatePlanTool 在无 TUI 的运行中调用 Publish 不能崩溃。
+        var sut = new PlanCardPublisher(new OrchestrationEventBus());
 
-        var act = () => sut.Publish("title", [], PlanCardPhase.Finalizing);
+        var act = () => sut.Publish(PlanWorkflow.Create(SessionId.NewId()));
 
         act.Should().NotThrow();
     }
 
     [Fact]
-    public void Publish_WithMultipleSubscribers_NotifiesAllWithSameTitleAndPhase()
+    public void Publish_WithMultipleSubscribers_NotifiesAllWithSameWorkflow()
     {
-        var sut = new PlanCardPublisher();
-        var steps = new List<PlanStep> { new("Only step") };
-        var titles = new List<string?>();
-        var phases = new List<PlanCardPhase>();
-        sut.PlanCreated += (t, _, p) => { titles.Add(t); phases.Add(p); };
-        sut.PlanCreated += (t, _, p) => { titles.Add(t); phases.Add(p); };
+        var bus = new OrchestrationEventBus();
+        var sut = new PlanCardPublisher(bus);
+        var workflow = PlanWorkflow.Create(SessionId.NewId());
+        var received = new List<PlanWorkflow>();
+        bus.Subscribe(evt => received.Add(((OrchestrationEvent.PlanProjectionChanged)evt).Workflow));
+        bus.Subscribe(evt => received.Add(((OrchestrationEvent.PlanProjectionChanged)evt).Workflow));
 
-        sut.Publish("Shared plan", steps, PlanCardPhase.Finalizing);
+        sut.Publish(workflow);
 
-        titles.Should().HaveCount(2);
-        titles[0].Should().Be("Shared plan");
-        titles[1].Should().Be("Shared plan");
-        phases.Should().AllBeEquivalentTo(PlanCardPhase.Finalizing);
+        received.Should().HaveCount(2);
+        received[0].Should().BeSameAs(workflow);
+        received[1].Should().BeSameAs(workflow);
     }
 
-    [Theory]
-    [InlineData(PlanCardPhase.Finalizing)]
-    [InlineData(PlanCardPhase.PendingApproval)]
-    public void Publish_ForwardsPhaseToSubscriber(PlanCardPhase phase)
+    [Fact]
+    public void Subscribe_Unsubscribe_StopsReceivingEvents()
     {
-        // 非审批阶段仅展示卡片；PendingApproval 弹出 InlineSelector 决策面板
-        var sut = new PlanCardPublisher();
-        PlanCardPhase? receivedPhase = null;
-        sut.PlanCreated += (_, _, p) => receivedPhase = p;
+        var bus = new OrchestrationEventBus();
+        var sut = new PlanCardPublisher(bus);
+        var received = new List<PlanWorkflow>();
+        using var subscription = bus.Subscribe(
+            evt => received.Add(((OrchestrationEvent.PlanProjectionChanged)evt).Workflow));
 
-        sut.Publish("A plan", [new PlanStep("Step")], phase);
+        subscription.Dispose();
+        sut.Publish(PlanWorkflow.Create(SessionId.NewId()));
 
-        receivedPhase.Should().Be(phase);
+        received.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bus_HasSubscribers_ReflectsActiveSubscriptions()
+    {
+        // headless 判据随事件通道统一迁移到总线：无订阅者时调用方不应阻塞等待用户决策。
+        var bus = new OrchestrationEventBus();
+        bus.HasSubscribers.Should().BeFalse();
+        using var subscription = bus.Subscribe(_ => { });
+        bus.HasSubscribers.Should().BeTrue();
+        subscription.Dispose();
+        bus.HasSubscribers.Should().BeFalse();
     }
 }

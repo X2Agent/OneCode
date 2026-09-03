@@ -1,4 +1,4 @@
-# ADR 0002: MAF Workflows.Declarative 评估结论
+# MAF Workflows.Declarative 评估结论
 
 **状态**: Rejected (议题关闭)
 **日期**: 2026-07-09

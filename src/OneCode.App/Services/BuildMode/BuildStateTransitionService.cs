@@ -90,7 +90,7 @@ public sealed class BuildStateTransitionService
             throw new InvalidOperationException("A rolled-back BuildRun cannot complete successfully.");
         if (run.DeliveryManifest is null)
             throw new InvalidOperationException("A completed BuildRun requires a delivery manifest.");
-        if (run.TerminalReason != BuildTerminalReason.Completed)
+        if (run.TerminalReason != RunTerminalReason.Completed)
             throw new InvalidOperationException("A completed BuildRun requires the Completed terminal reason.");
     }
 

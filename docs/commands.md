@@ -375,7 +375,6 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `acceptedits` | `accept-edits` / `accept_edits` | 文件写入自动放行 |
 | `bypasspermissions` | `bypass-permissions` / `bypass_permissions` / `bypass` | 跳过所有权限检查 |
 | `dontask` | `dont-ask` / `dont_ask` | 直接拒绝危险操作 |
-| `bubble` | — | 气泡式权限提示 |
 
 无参数时显示当前模式和可用模式。
 
@@ -866,8 +865,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 |---|---|
 | 无参数 / `list` / `ls` | 列出已配置和已连接的 MCP 服务器 |
 | `get <name>` | 查看服务器详情（已连接时列出 tools） |
-| `search <query>` | 从 Smithery 注册表搜索 MCP 服务器 |
-| `install <qualifiedName>` | 从 Smithery 注册表安装 MCP 服务器（支持 `--name`、`--scope`、`--connect`） |
+| `search <query>` | 从官方 MCP 注册表搜索 MCP 服务器（本地关键词过滤，免认证） |
+| `install <name>` | 从官方 MCP 注册表安装 MCP 服务器为本地 stdio（支持 `--name`、`--scope`、`--connect`） |
 | `add <name> [options]` | 手动添加本地服务器 |
 | `remove` / `rm <name>` | 移除服务器 |
 | `connect <name>` | 连接服务器 |

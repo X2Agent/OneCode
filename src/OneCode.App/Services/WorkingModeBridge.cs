@@ -130,8 +130,7 @@ public sealed class WorkingModeBridge : IDisposable
     internal static bool IsCliAdvancedPermissionMode(PermissionMode? mode) =>
         mode is PermissionMode.BypassPermissions
             or PermissionMode.Auto
-            or PermissionMode.DontAsk
-            or PermissionMode.Bubble;
+            or PermissionMode.DontAsk;
 
     public void Dispose()
     {

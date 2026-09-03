@@ -34,7 +34,7 @@ public sealed class MafM4ApprovalEventTests
         tuiEvt.ResponseSource.TrySetResult(ApprovalDecision.AllowAlways);
 
         // 原始事件应收到决策
-        var decision = await evt.ResponseSource.Task.ConfigureAwait(false);
+        var decision = await evt.ResponseSource.Task;
         decision.Should().Be(ApprovalDecision.AllowAlways);
     }
 

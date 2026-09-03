@@ -3,6 +3,7 @@ using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
+using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Infrastructure.Agent;
 
@@ -57,7 +58,7 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
             await File.WriteAllTextAsync(file, "after", TestContext.Current.CancellationToken);
             return PassingResult([file]) with
             {
-                TerminalReason = BuildTerminalReason.ValidationFailed,
+                TerminalReason = RunTerminalReason.ValidationFailed,
                 FinalValidationStatus = BuildValidationStatus.Failed,
             };
         });
@@ -102,7 +103,7 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
         await coordinator.Received(1).CompleteAsync(
             run.Id,
             Arg.Is<MainAgentRunResult>(result =>
-                result.TerminalReason == BuildTerminalReason.AgentException
+                result.TerminalReason == RunTerminalReason.AgentException
                 && result.TransactionRolledBack),
             Arg.Any<CancellationToken>(),
             7);
@@ -255,7 +256,7 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
             TotalInputTokens: 10,
             TotalOutputTokens: 5,
             TurnCount: 1,
-            TerminalReason: BuildTerminalReason.Completed,
+            TerminalReason: RunTerminalReason.Completed,
             FinalValidationStatus: BuildValidationStatus.Passed,
             ModifiedFiles: files);
 

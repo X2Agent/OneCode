@@ -2,7 +2,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
-using OneCode.Core.Build;
+using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
@@ -43,7 +43,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
 
         completed.State.Should().Be(GoalRunState.Completed);
         completed.PublishReceipt.Should().NotBeNull();
-        completed.TerminalReason.Should().Be(BuildTerminalReason.Completed);
+        completed.TerminalReason.Should().Be(RunTerminalReason.Completed);
         completed.FinalValidation.Should().Contain(gate => gate.Gate == "final-semantic-review" && gate.Passed);
         workspace.PublishCalls.Should().Be(1);
     }
@@ -65,7 +65,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var failed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
         failed.State.Should().Be(GoalRunState.Failed);
-        failed.TerminalReason.Should().Be(BuildTerminalReason.ValidationFailed);
+        failed.TerminalReason.Should().Be(RunTerminalReason.ValidationFailed);
         failed.FinalValidation.Should().Contain(gate =>
             gate.Gate == "requirement-and-integration-coverage" && !gate.Passed);
         workspace.PublishCalls.Should().Be(0);
@@ -121,7 +121,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var paused = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
         paused.State.Should().Be(GoalRunState.Paused);
-        paused.TerminalReason.Should().Be(BuildTerminalReason.BudgetExceeded);
+        paused.TerminalReason.Should().Be(RunTerminalReason.BudgetExceeded);
         paused.FinalValidation.Should().Contain(gate =>
             gate.Gate == "state-integrity" && !gate.Passed && gate.Skipped);
     }

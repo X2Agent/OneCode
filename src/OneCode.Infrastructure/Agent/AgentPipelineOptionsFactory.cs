@@ -38,7 +38,7 @@ public sealed record PipelineSecurityContext(
 
 /// <summary>
 /// 角色级覆盖 — 仅裁剪工具集与配额，不裁剪安全层。
-/// ApprovalHandler 用于 Team 路径的 inline 审批（MAF workflow manager 无法处理 ToolApprovalRequestContent）。
+/// ApprovalBroker 用于 Team 路径的 inline 审批（MAF workflow manager 无法处理 ToolApprovalRequestContent）。
 /// </summary>
 public sealed record PipelineRoleOverrides(
     int MaxToolCalls,
@@ -47,7 +47,6 @@ public sealed record PipelineRoleOverrides(
     bool EnableToolApproval = true,
     IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules = null,
     VerificationOptions? VerificationOptions = null,
-    Func<string, JsonElement, CancellationToken, Task<bool>>? ApprovalHandler = null,
     IApprovalBroker? ApprovalBroker = null);
 
 /// <summary>
@@ -117,7 +116,6 @@ public static class AgentPipelineOptionsFactory
 
             AutoApprovalRules = autoApprovalRules,
             ApprovalBroker = overrides.ApprovalBroker,
-            ApprovalHandler = overrides.ApprovalHandler,
 
             MaxToolCalls = overrides.MaxToolCalls,
             ToolLimitMessage = overrides.ToolLimitMessage,

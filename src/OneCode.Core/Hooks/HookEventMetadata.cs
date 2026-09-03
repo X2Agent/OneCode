@@ -87,7 +87,7 @@ public static class HookEventMetadataRegistry
             "agent 主循环终结时触发（无论成功完成还是异常收场），终结收尾前触发。exit code 2 可阻断终结并触发纠偏续跑（连续阻断有上限，超限降级为警告；durable Build 尝试不支持重入，直接降级为警告）。",
             new HookMatcherMetadata(
                 nameof(HookPayload.TerminalReason),
-                "按终结原因（BuildTerminalReason 枚举名）匹配，大小写不敏感，支持 glob；缺省/空值匹配全部终结原因。",
+                "按终结原因（RunTerminalReason 枚举名）匹配，大小写不敏感，支持 glob；缺省/空值匹配全部终结原因。",
                 ["Completed", "TurnLimitReached", "BudgetExceeded", "Cancelled", "ValidationFailed", "AgentException", "PermissionRefused", "ClarificationRequired", "Blocked"])),
 
         HookEventMetadata.WithMatcher(

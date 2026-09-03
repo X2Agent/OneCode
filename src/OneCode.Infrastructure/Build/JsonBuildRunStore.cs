@@ -1,5 +1,6 @@
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
+using OneCode.Core.Workflows;
 
 namespace OneCode.Infrastructure.Build;
 
@@ -103,7 +104,12 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
                     $"BuildRun checkpoint for conversation '{conversationId}' belongs to run '{existing.Id}', not '{run.Id}'.");
             }
 
-            ValidateFencing(existing, run, requiredFencingToken, isClaim);
+            WorkflowFencing.Validate(
+                existing?.WorkflowFencingToken,
+                run.WorkflowFencingToken,
+                requiredFencingToken,
+                isClaim,
+                "BuildRun");
 
             var updated = run with
             {
@@ -174,38 +180,6 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         var conversationId = events[0].ConversationId;
         ValidateEventSequence(events, runId, conversationId);
         return events[^1].Snapshot;
-    }
-
-    private static void ValidateFencing(
-        BuildRun? existing,
-        BuildRun candidate,
-        long? requiredFencingToken,
-        bool isClaim)
-    {
-        if (isClaim)
-        {
-            if (requiredFencingToken is not { } claimToken
-                || candidate.WorkflowFencingToken != claimToken)
-            {
-                throw new InvalidOperationException("BuildRun workflow claim has an invalid fencing token.");
-            }
-            if (existing?.WorkflowFencingToken is { } currentToken && claimToken <= currentToken)
-                throw new InvalidOperationException("Stale BuildRun workflow fencing token.");
-            return;
-        }
-
-        if (existing?.WorkflowFencingToken is { } fencedToken)
-        {
-            if (requiredFencingToken != fencedToken
-                || candidate.WorkflowFencingToken != fencedToken)
-            {
-                throw new InvalidOperationException("Stale BuildRun workflow fencing token.");
-            }
-            return;
-        }
-
-        if (requiredFencingToken is not null || candidate.WorkflowFencingToken is not null)
-            throw new InvalidOperationException("BuildRun must be claimed before fenced writes.");
     }
 
     private string GetRunFilePath(SessionId conversationId)

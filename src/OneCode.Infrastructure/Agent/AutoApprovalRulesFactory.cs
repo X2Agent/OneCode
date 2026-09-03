@@ -5,24 +5,19 @@ using OneCode.Core.Tools;
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
-/// 基于 <see cref="PermissionProfile"/> 生成 MAF ToolApprovalAgent 的 AutoApprovalRules。
-/// 逻辑搬自 MainAgentRunner.Approval.cs 的 CreateAutoApprovalRules，
-/// 使 Worker/Team 路径也能获得 Profile 驱动的自动审批。
+/// 基于 <see cref="PermissionProfile"/> 生成 MAF ToolApprovalAgent 的 AutoApprovalRules（单一来源）。
 /// </summary>
 public static class AutoApprovalRulesFactory
 {
-    /// <summary>
-    /// 创建基于 Profile 的自动审批规则列表。
-    /// 不含 AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule（App 层规则，由调用方合并）。
-    /// </summary>
+    /// <summary>创建基于 Profile 的自动审批规则列表。</summary>
     public static List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> Create(
         PermissionProfile profile)
     {
         return
         [
-            // 只读工具始终自动放行
-            (ToolAutoApprovalRuleContext ctx) => new ValueTask<bool>(
-                ToolNames.ReadOnlyTools.Contains(ctx.FunctionCallContent.Name)),
+            // MAF skills 只读工具（load_skill / read_skill_resource）自动放行；
+            // 走 AIContextProvider，不经过 OneCode PermissionChecker。
+            AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule,
 
             // Profile 驱动的自动审批
             (ToolAutoApprovalRuleContext ctx) =>

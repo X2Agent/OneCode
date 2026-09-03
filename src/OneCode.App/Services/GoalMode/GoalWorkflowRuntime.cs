@@ -4,6 +4,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.GoalMode;
 
@@ -128,7 +129,7 @@ internal sealed class GoalWorkflowRuntime(
             {
                 Budget = budget,
                 State = GoalRunState.Paused,
-                TerminalReason = OneCode.Core.Build.BuildTerminalReason.BudgetExceeded,
+                TerminalReason = OneCode.Core.Workflows.RunTerminalReason.BudgetExceeded,
                 FailureSummary = "Goal execution budget was exhausted.",
             };
             await SaveAsync(paused, ct).ConfigureAwait(false);
@@ -228,13 +229,13 @@ internal sealed class GoalWorkflowRuntime(
         var stepOperationId = $"goal/{run.Id}/step/{step.Id}/fence/{_fencingToken}";
         if (ledger is not null)
         {
-            await ledger.ReconcileRunAsync($"goal/{run.Id}", ct).ConfigureAwait(false);
-            await ledger.BeginTransactionAsync(
+            await FencedLedgerTransaction.BeginAsync(
+                ledger,
+                $"goal/{run.Id}",
                 stepOperationId,
-                "file-transaction",
                 _fencingToken,
+                transaction,
                 ct).ConfigureAwait(false);
-            transaction.PersistTo(ledger, stepOperationId, _fencingToken);
         }
 
         SubGoalExecution execution;
@@ -351,7 +352,7 @@ internal sealed class GoalWorkflowRuntime(
             SafeRollback(transaction);
             await SaveTerminalAsync(
                 GoalRunState.Failed,
-                OneCode.Core.Build.BuildTerminalReason.AgentException,
+                OneCode.Core.Workflows.RunTerminalReason.AgentException,
                 ex.Message).ConfigureAwait(false);
             throw;
         }
@@ -431,7 +432,7 @@ internal sealed class GoalWorkflowRuntime(
 
     private async Task SaveTerminalAsync(
         GoalRunState state,
-        OneCode.Core.Build.BuildTerminalReason terminalReason,
+        OneCode.Core.Workflows.RunTerminalReason terminalReason,
         string failureSummary)
     {
         var current = _run ?? throw new InvalidOperationException("Goal runtime was not bound.");

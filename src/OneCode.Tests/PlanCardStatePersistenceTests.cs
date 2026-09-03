@@ -1,6 +1,7 @@
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Domain;
@@ -46,7 +47,7 @@ public sealed class PlanCardStatePersistenceTests : IDisposable
         mode.IsInPlanMode.Returns(true);
         var store = new PlanAggregateStore(_root);
         var workflow = new PlanWorkflowApplicationService(store);
-        return (new CreatePlanTool(mode, new PlanCardPublisher(), sessions, workflow, store), conversation, workflow);
+        return (new CreatePlanTool(mode, new PlanCardPublisher(new OrchestrationEventBus()), sessions, workflow, store), conversation, workflow);
     }
 
     private static string CreatePlanMarkdown() =>

@@ -76,7 +76,7 @@ public sealed record TuiBuildRunState(
     IReadOnlyList<string> ClarificationQuestions,
     int CompletedTasks = 0,
     int TotalTasks = 0,
-    OneCode.Core.Build.BuildTerminalReason? TerminalReason = null,
+    OneCode.Core.Workflows.RunTerminalReason? TerminalReason = null,
     string? FailureSummary = null,
     OneCode.Core.Build.BuildScopeSnapshot? Scope = null,
     OneCode.Core.Build.BuildValidationStatus? ValidationStatus = null,
@@ -90,7 +90,7 @@ public sealed record TuiBuildDelivery(OneCode.Core.Build.BuildRunResult Result) 
 public sealed record TuiDone(
     int InputTokens,
     int OutputTokens,
-    OneCode.Core.Build.BuildTerminalReason TerminalReason = OneCode.Core.Build.BuildTerminalReason.Completed,
+    OneCode.Core.Workflows.RunTerminalReason TerminalReason = OneCode.Core.Workflows.RunTerminalReason.Completed,
     int TurnsCompleted = 0,
     int CacheReadTokens = 0,
     int CacheWriteTokens = 0,

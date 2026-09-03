@@ -1,7 +1,6 @@
 using OneCode.App.Query;
 using OneCode.App.Services.Compact;
 using OneCode.App.Tui;
-using OneCode.Core.Build;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
@@ -112,6 +111,12 @@ public sealed class PlanAgentRunDispatcher(
             if (current.State is not (PlanWorkflowState.Executing or PlanWorkflowState.Verifying))
                 return;
             ValidateRecoveryIdentity(current);
+            // 执行世代入口 claim（幂等）：恢复路径的所有后续持久化都携带世代令牌。
+            current = await workflowService.ClaimExecutionAsync(
+                current.SessionId,
+                current.Id,
+                current.Version,
+                ct).ConfigureAwait(false);
             await RunConversationAsync(session, current, ct).ConfigureAwait(false);
             return;
         }
@@ -128,6 +133,14 @@ public sealed class PlanAgentRunDispatcher(
                 retryAt);
             return;
         }
+        // 执行世代入口 claim（幂等）：启动路径在重试簿记之前发放令牌，
+        // 其后所有执行期写（重试簿记、事件、绑定）都携带世代令牌。
+        current = await workflowService.ClaimExecutionAsync(
+            current.SessionId,
+            current.Id,
+            current.Version,
+            ct).ConfigureAwait(false);
+        var fencingToken = current.WorkflowFencingToken ?? 0;
         if (current.StartAttempt >= 5)
         {
             await workflowService.HandleRunEventAsync(new BuildRunFailedEvent(
@@ -136,7 +149,8 @@ public sealed class PlanAgentRunDispatcher(
                 $"build-{current.ExecutionRequestId}",
                 "StartRetryExhausted",
                 "Approved plan execution could not be started after five attempts.",
-                DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                DateTimeOffset.UtcNow,
+                fencingToken), ct).ConfigureAwait(false);
             return;
         }
 
@@ -146,7 +160,8 @@ public sealed class PlanAgentRunDispatcher(
                 current.SessionId,
                 current.Id,
                 current.Version,
-                DateTimeOffset.UtcNow),
+                DateTimeOffset.UtcNow,
+                fencingToken),
             ct).ConfigureAwait(false);
         current = attempt.Workflow;
         await RunConversationAsync(session, current, ct).ConfigureAwait(false);
@@ -161,6 +176,7 @@ public sealed class PlanAgentRunDispatcher(
             ?? throw new PlanTransitionException(
                 $"Plan '{current.Id}' lost its approved snapshot while starting or recovering execution.");
         var runId = $"build-{current.ExecutionRequestId}";
+        var fencingToken = current.WorkflowFencingToken ?? 0;
         var starting = current.State == PlanWorkflowState.StartingExecution;
         try
         {
@@ -179,7 +195,8 @@ public sealed class PlanAgentRunDispatcher(
                     current.SessionId,
                     current.Id,
                     runId,
-                    DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                    DateTimeOffset.UtcNow,
+                    fencingToken), ct).ConfigureAwait(false);
                 current = await workflowService.GetAsync(current.SessionId, ct).ConfigureAwait(false)
                     ?? throw new PlanTransitionException($"Plan '{current.Id}' disappeared after BuildRunStarted.");
             }
@@ -198,7 +215,7 @@ public sealed class PlanAgentRunDispatcher(
                 session.Model,
                 WorkingMode.Build,
                 session.SessionManager.WorkingDirectory,
-                ToBuildPlan(approvedSnapshot));
+                approvedSnapshot.Project());
 
             await foreach (var queryEvent in session.ConversationRunner
                 .StreamWorkflowRunAsync(request, ct).ConfigureAwait(false))
@@ -210,7 +227,8 @@ public sealed class PlanAgentRunDispatcher(
                         current.SessionId,
                         current.Id,
                         runId,
-                        buildState.RunId.ToString()), ct).ConfigureAwait(false);
+                        buildState.RunId.ToString(),
+                        fencingToken), ct).ConfigureAwait(false);
                     current = binding.Workflow;
                 }
                 if (TuiEventMapper.MapQueryEventToTuiEvent(queryEvent) is { } tuiEvent)
@@ -226,7 +244,8 @@ public sealed class PlanAgentRunDispatcher(
                     runId,
                     "ExecutionClosureMissing",
                     "Build run ended without completing plan steps and verification.",
-                    DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+                    DateTimeOffset.UtcNow,
+                    fencingToken), ct).ConfigureAwait(false);
                 terminal = await workflowService.GetAsync(current.SessionId, ct).ConfigureAwait(false);
             }
 
@@ -250,7 +269,8 @@ public sealed class PlanAgentRunDispatcher(
                     runId,
                     ex.GetType().Name,
                     ex.Message,
-                    DateTimeOffset.UtcNow), CancellationToken.None).ConfigureAwait(false);
+                    DateTimeOffset.UtcNow,
+                    fencingToken), CancellationToken.None).ConfigureAwait(false);
                 latest = await workflowService.GetAsync(current.SessionId, CancellationToken.None).ConfigureAwait(false);
             }
             else if (latest?.State == PlanWorkflowState.StartingExecution)
@@ -280,21 +300,6 @@ public sealed class PlanAgentRunDispatcher(
         }
     }
 
-    private static BuildPlan ToBuildPlan(ApprovedPlanSnapshot snapshot)
-        => new(
-            $"Execute approved plan {snapshot.PlanId} revision {snapshot.Revision}.",
-            snapshot.Steps.Select(step => new BuildPlanTask(
-                step.Id,
-                step.Title,
-                step.Description,
-                step.DependsOn,
-                step.Files,
-                step.AcceptanceCriteria)).ToArray(),
-            [],
-            [],
-            [],
-            RequireExplicitTaskCompletion: true);
-
     private static string BuildInstruction(
         ApprovedPlanSnapshot snapshot,
         string runId,
@@ -303,8 +308,8 @@ public sealed class PlanAgentRunDispatcher(
         var steps = string.Join("\n", snapshot.Steps.Select(step =>
             $"- {step.Id}: {step.Title}\n  {step.Description}\n  Acceptance: {string.Join("; ", step.AcceptanceCriteria)}"));
         var recoveryDirective = state == PlanWorkflowState.Verifying
-            ? "The persisted workflow is already in Verifying. Do not modify implementation steps. Run only the required build/tests/checks and call CompletePlanVerification with concrete evidence."
-            : "Execute steps in dependency order. Resume from the persisted step states; do not repeat completed steps.";
+            ? PlanExecutionProtocol.VerifyingRecoveryDirective
+            : PlanExecutionProtocol.ExecutionDirective;
         return $"""
             Execute approved plan {snapshot.PlanId} revision {snapshot.Revision}.
             The approved snapshot is immutable; do not reinterpret or replace it.
@@ -316,12 +321,7 @@ public sealed class PlanAgentRunDispatcher(
             ## Structured steps
             {steps}
 
-            ## Required workflow protocol
-            Active run id: {runId}
-            1. Call UpdatePlanStep for every state change. Completed steps require concrete evidence.
-            2. When all steps are completed or explicitly skipped, the workflow automatically enters Verifying.
-            3. Run the required build/tests/checks, then call CompletePlanVerification with command output as evidence.
-            4. Do not claim completion unless CompletePlanVerification returns a completed workflow.
+            {PlanExecutionProtocol.BuildProtocolBlock(runId)}
             """;
     }
 }

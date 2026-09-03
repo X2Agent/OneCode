@@ -1,5 +1,6 @@
 using OneCode.Core.Domain;
 using OneCode.Core.Errors;
+using OneCode.Core.Workflows;
 
 namespace OneCode.Core.Coordinator;
 
@@ -106,7 +107,7 @@ public sealed record TeamTaskDefinition(
     TaskRetryPolicy? RetryPolicy = null);
 
 /// <summary>
-/// 瞬时异常重试策略。MAF 1.15.0 未提供通用业务 RetryPolicy，
+/// 瞬时异常重试策略。MAF 1.19.0 未提供通用业务 RetryPolicy，
 /// OneCode 使用标准 Resilience/Polly Pipeline 包装 Executor 调用。
 /// Retry 只包围无副作用调用；文件/发布操作依赖 OperationId 幂等 Ledger，不能自动盲重试。
 /// </summary>
@@ -175,7 +176,7 @@ public sealed record DeliveryReport(
     IReadOnlyList<string> Risks,
     DateTimeOffset GeneratedAt);
 
-public sealed record TeamRun
+public sealed record TeamRun : IWorkflowRun
 {
     public required TeamRunId Id { get; init; }
     public required string TeamName { get; init; }
@@ -220,30 +221,15 @@ public sealed record TeamRun
     public DateTimeOffset UpdatedAt { get; init; }
 }
 
-public interface ITeamRunStore
+/// <summary>
+/// CAS / fencing / ListActive 方法签名由
+/// <see cref="IWorkflowRunStore{TRun,TId}"/> 与 <see cref="IActiveWorkflowRunStore{TRun}"/> 内核收编；
+/// Team 保留 TrySaveAsync 的 bool 语义与双键 Load（RunId / WorkingDirectory）。
+/// </summary>
+public interface ITeamRunStore : IWorkflowRunStore<TeamRun, TeamRunId>, IActiveWorkflowRunStore<TeamRun>
 {
     Task<TeamRun?> LoadAsync(TeamRunId runId, CancellationToken ct = default);
     Task<TeamRun?> LoadActiveAsync(string workingDirectory, CancellationToken ct = default);
 
-    /// <summary>列出所有非终态 TeamRun（按更新时间倒序），供恢复扫描使用。</summary>
-    Task<IReadOnlyList<TeamRun>> ListActiveAsync(CancellationToken ct = default);
-
     Task<bool> TrySaveAsync(TeamRun run, long expectedVersion, CancellationToken ct = default);
-
-    /// <summary>
-    /// 原子声明 Workflow 持有权：新令牌必须严格大于磁盘当前令牌。
-    /// Claim 成功后，不带令牌的 <see cref="TrySaveAsync"/> 一律拒绝。
-    /// </summary>
-    Task<TeamRun> ClaimWorkflowAsync(
-        TeamRunId runId,
-        long fencingToken,
-        long expectedVersion,
-        CancellationToken ct = default);
-
-    /// <summary>携带当前 FencingToken 的保存；令牌与磁盘不一致时 fail-closed。</summary>
-    Task SaveFencedAsync(
-        TeamRun run,
-        long expectedVersion,
-        long expectedFencingToken,
-        CancellationToken ct = default);
 }

@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
+using OneCode.App.Tui;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
@@ -7,6 +6,18 @@ namespace OneCode.App.Services.PlanMode;
 public interface IPlanWorkflowApplicationService
 {
     Task<PlanWorkflow?> GetAsync(SessionId sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 声明执行世代持有权：为聚合发放 fencing 令牌并返回刷新后的 Workflow。
+    /// 幂等——令牌一经发放不再变更，同一执行世代（启动重试/恢复扫描）共享同一令牌；
+    /// 新的执行请求以严格递增的新令牌重新 claim，旧世代的带令牌写被内核 fail-closed。
+    /// </summary>
+    Task<PlanWorkflow> ClaimExecutionAsync(
+        SessionId sessionId,
+        PlanWorkflowId planId,
+        long expectedVersion,
+        CancellationToken ct = default);
+
     Task<PlanSubmissionResult> SubmitAsync(SubmitPlanCommand command, CancellationToken ct = default);
     Task<PlanTransitionResult> ApproveAsync(ApprovePlanCommand command, CancellationToken ct = default);
     Task<PlanTransitionResult> RejectAsync(RejectPlanCommand command, CancellationToken ct = default);
@@ -19,13 +30,48 @@ public interface IPlanWorkflowApplicationService
     Task<PlanTransitionResult> CompleteExecutionAsync(CompletePlanExecutionCommand command, CancellationToken ct = default);
     Task<PlanTransitionResult> CompleteVerificationAsync(CompletePlanVerificationCommand command, CancellationToken ct = default);
     Task HandleRunEventAsync(PlanAgentRunEvent @event, CancellationToken ct = default);
+
+    /// <summary>
+    /// 断言当前会话存在可决策（<c>AwaitingApproval</c>）的 Plan 工作流并返回其投影；
+    /// 工作流缺失或不可决策时抛出 <see cref="InvalidOperationException"/>。
+    /// </summary>
+    Task<PlanWorkflow> RequireDecidableAsync(SessionId sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 执行用户决策（批准/拒绝/请求修订）：构造并提交对应工作流命令，返回决策后的
+    /// 工作流投影。幂等（重复 CommandId 返回既有状态），版本冲突/非法状态抛出（fail-closed）。
+    /// </summary>
+    Task<DecisionOutcome> DecideAsync(
+        InteractiveSession session,
+        PlanCardDecision decision,
+        CancellationToken ct = default);
 }
 
-public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregateStore)
+public sealed partial class PlanWorkflowApplicationService(IPlanAggregateStore aggregateStore)
     : IPlanWorkflowApplicationService
 {
     public async Task<PlanWorkflow?> GetAsync(SessionId sessionId, CancellationToken ct = default)
         => (await aggregateStore.LoadAsync(sessionId, ct).ConfigureAwait(false))?.Workflow;
+
+    public async Task<PlanWorkflow> ClaimExecutionAsync(
+        SessionId sessionId,
+        PlanWorkflowId planId,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        var aggregate = await RequireAggregateAsync(sessionId, planId, ct).ConfigureAwait(false);
+        // 幂等：同一执行世代的重试与恢复扫描共享已发放的令牌，不再递增。
+        if (aggregate.Workflow.WorkflowFencingToken is { } claimed)
+            return aggregate.Workflow;
+
+        var claimedAggregate = await aggregateStore.ClaimWorkflowAsync(
+            sessionId,
+            planId,
+            DateTimeOffset.UtcNow.UtcTicks,
+            expectedVersion,
+            ct).ConfigureAwait(false);
+        return claimedAggregate.Workflow;
+    }
 
     public async Task<PlanSubmissionResult> SubmitAsync(
         SubmitPlanCommand command,
@@ -33,7 +79,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
     {
         PlanStepValidator.Validate(command.Steps);
         var existing = await aggregateStore.LoadAsync(command.SessionId, ct).ConfigureAwait(false);
-        if (existing?.Workflow.LastProcessedCommandId == command.CommandId)
+        if (CommandIdempotency.IsReplay(existing?.Workflow, command.CommandId))
         {
             var duplicate = DuplicateRevisionResult(existing);
             return new PlanSubmissionResult(duplicate.Workflow, duplicate.Revision);
@@ -79,7 +125,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         {
             var aggregate = await RequireAggregateAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
             var current = aggregate.Workflow;
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             PlanWorkflowValidator.ValidateCommandIdentity(current, command.PlanId, command.Revision, command.ExpectedWorkflowVersion);
             if (current.State != PlanWorkflowState.AwaitingApproval)
@@ -163,7 +209,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.Version != command.ExpectedWorkflowVersion)
                 throw new PlanConcurrencyException(
@@ -192,7 +238,8 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            // 终态取消沿用当前世代令牌：claim 期间取消仍可落盘，而 claim 前的过期取消会被版本 CAS 拒绝。
+            await SaveWorkflowAsync(updated, current.Version, current.WorkflowFencingToken ?? 0, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -202,7 +249,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.State != PlanWorkflowState.StartingExecution)
                 throw PlanWorkflowValidator.InvalidState(current, PlanWorkflowState.StartingExecution);
@@ -220,7 +267,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = command.AttemptedAt,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, command.FencingToken, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -230,7 +277,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.State is not (PlanWorkflowState.Executing or PlanWorkflowState.Verifying))
                 throw new PlanTransitionException(
@@ -254,7 +301,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, command.FencingToken, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -264,7 +311,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.Version != command.ExpectedWorkflowVersion)
                 throw new PlanConcurrencyException(
@@ -277,7 +324,8 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
             {
                 LastProcessedCommandId = command.CommandId,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            // 终态恢复失败沿用当前世代令牌（与取消同规则：claim 期间仍可落盘终态）。
+            await SaveWorkflowAsync(updated, current.Version, current.WorkflowFencingToken ?? 0, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -287,7 +335,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
 
@@ -313,7 +361,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, command.FencingToken, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -323,7 +371,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Executing);
             var incomplete = current.StepExecutions
@@ -344,7 +392,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, command.FencingToken, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -354,7 +402,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == command.CommandId)
+            if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             PlanWorkflowValidator.ValidateActiveBuildRun(current, command.RunId, PlanWorkflowState.Verifying);
             if (command.Passed && command.Evidence.Count == 0)
@@ -376,7 +424,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                     VerificationEvidence = command.Evidence,
                     LastProcessedCommandId = command.CommandId,
                 };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, command.FencingToken, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
@@ -431,7 +479,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                     $"Event '{@event.GetType().Name}' is invalid in state '{current.State}'."),
             };
 
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            await SaveWorkflowAsync(updated, current.Version, @event.FencingToken, ct).ConfigureAwait(false);
             return true;
         }).ConfigureAwait(false);
     }
@@ -447,7 +495,7 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
         => ExecuteAsync(async () =>
         {
             var current = await RequireWorkflowAsync(sessionId, planId, ct).ConfigureAwait(false);
-            if (current.LastProcessedCommandId == commandId)
+            if (CommandIdempotency.IsReplay(current, commandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
             PlanWorkflowValidator.ValidateCommandIdentity(current, planId, revision, expectedVersion);
             if (current.State != PlanWorkflowState.AwaitingApproval)
@@ -463,99 +511,10 @@ public sealed class PlanWorkflowApplicationService(IPlanAggregateStore aggregate
                 Version = current.Version + 1,
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            await SaveWorkflowAsync(updated, current.Version, ct).ConfigureAwait(false);
+            // 规划期反馈写恒未 claim，令牌为 0。
+            await SaveWorkflowAsync(updated, current.Version, 0, ct).ConfigureAwait(false);
             return new PlanTransitionResult(updated);
         });
 
-    private async Task<PlanWorkflow> RequireWorkflowAsync(
-        SessionId sessionId,
-        PlanWorkflowId planId,
-        CancellationToken ct)
-        => (await RequireAggregateAsync(sessionId, planId, ct).ConfigureAwait(false)).Workflow;
 
-    private async Task<PlanAggregate> RequireAggregateAsync(
-        SessionId sessionId,
-        PlanWorkflowId planId,
-        CancellationToken ct)
-    {
-        var aggregate = await aggregateStore.LoadAsync(sessionId, ct).ConfigureAwait(false)
-            ?? throw new PlanTransitionException($"No active plan workflow exists for session '{sessionId}'.");
-        if (aggregate.Workflow.Id != planId)
-            throw new PlanTransitionException($"Plan '{planId}' does not belong to session '{sessionId}'.");
-        return aggregate;
-    }
-
-    private async Task SaveWorkflowAsync(PlanWorkflow workflow, long expectedVersion, CancellationToken ct)
-    {
-        var aggregate = await RequireAggregateAsync(workflow.SessionId, workflow.Id, ct).ConfigureAwait(false);
-        await aggregateStore.SaveAsync(
-            aggregate with { Workflow = workflow },
-            expectedVersion,
-            ct).ConfigureAwait(false);
-    }
-
-    private static PlanRevision CreateRevision(
-        PlanWorkflow workflow,
-        string title,
-        string markdown,
-        IReadOnlyList<PlanStepDefinition> steps,
-        IReadOnlyList<string> risks,
-        IReadOnlyList<string> assumptions,
-        PlanRevisionStatus status)
-        => new()
-        {
-            PlanId = workflow.Id,
-            SessionId = workflow.SessionId,
-            Revision = workflow.LatestRevision + 1,
-            Title = title,
-            Markdown = markdown,
-            Steps = steps,
-            Risks = risks,
-            Assumptions = assumptions,
-            ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(markdown))).ToLowerInvariant(),
-            Status = status,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-
-
-
-    private static PlanWorkflow Failure(
-        PlanWorkflow current,
-        string code,
-        string message,
-        DateTimeOffset occurredAt)
-        => current with
-        {
-            State = PlanWorkflowState.Failed,
-            LastErrorCode = code,
-            LastErrorMessage = message,
-            Version = current.Version + 1,
-            UpdatedAt = occurredAt,
-        };
-
-
-
-    private static PlanRevisionResult DuplicateRevisionResult(PlanAggregate aggregate)
-    {
-        var revisionNumber = aggregate.Workflow.LastProcessedRevision
-            ?? throw new PlanTransitionException("Duplicate revision command is missing its persisted revision reference.");
-        var revision = aggregate.FindRevision(revisionNumber)
-            ?? throw new PlanTransitionException($"Duplicate revision {revisionNumber} is missing from the Plan aggregate.");
-        return new PlanRevisionResult(aggregate.Workflow, revision);
-    }
-
-    private static ApprovedPlanSnapshot FreezeApprovedSnapshot(PlanRevision revision, string approvedBy)
-        => new()
-        {
-            PlanId = revision.PlanId,
-            SessionId = revision.SessionId,
-            Revision = revision.Revision,
-            Markdown = revision.Markdown,
-            Steps = revision.Steps,
-            ContentHash = revision.ContentHash,
-            ApprovedBy = approvedBy,
-            ApprovedAt = DateTimeOffset.UtcNow,
-        };
-
-    private static Task<T> ExecuteAsync<T>(Func<Task<T>> action) => action();
 }

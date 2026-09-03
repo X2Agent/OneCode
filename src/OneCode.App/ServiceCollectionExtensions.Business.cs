@@ -14,6 +14,7 @@ using OneCode.App.Services.Hooks;
 using OneCode.App.Services.Hooks.Notifications;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
+
 using OneCode.App.Services.Setup;
 using OneCode.App.Tui;
 using OneCode.Automation;
@@ -94,6 +95,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<IPlanAggregateStore, PlanAggregateStore>();
         services.AddSingleton<IPlanWorkflowApplicationService, PlanWorkflowApplicationService>();
         services.AddSingleton<IPlanAgentRunDispatcher, PlanAgentRunDispatcher>();
+        services.AddSingleton<AggregateApprovalGate>();
         services.AddSingleton<PlanExecutionRecoveryService>();
         services.AddHostedService(sp => sp.GetRequiredService<PlanExecutionRecoveryService>());
 

@@ -2,6 +2,7 @@ using Microsoft.Agents.AI.Workflows;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
+using OneCode.App.Services.Runtime;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Services.Coordinator;
@@ -32,8 +33,9 @@ public sealed partial class TeamOrchestrationService
     private readonly IClarificationInteractionService _clarificationInteraction;
     private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor;
     private readonly TeamTaskWorkflowHost _taskWorkflowHost;
-    private readonly TeamApprovalWorkflowHost _approvalWorkflowHost;
+
     private readonly TeamClarificationWorkflowHost _clarificationWorkflowHost;
+    private readonly RequestPortGate _approvalGate;
     private readonly ITeamRunStore _teamRunStore;
     private readonly OneCode.Core.Workflows.IOperationLedger? _operationLedger;
     private readonly TeamRegistry _registry;
@@ -47,8 +49,9 @@ public sealed partial class TeamOrchestrationService
         IClarificationInteractionService clarificationInteraction,
         IWorkingDirectoryAccessor workingDirectoryAccessor,
         TeamTaskWorkflowHost taskWorkflowHost,
-        TeamApprovalWorkflowHost approvalWorkflowHost,
+
         TeamClarificationWorkflowHost clarificationWorkflowHost,
+        RequestPortGate approvalGate,
         ITeamRunStore teamRunStore,
         OneCode.Core.Workflows.IOperationLedger? operationLedger = null)
     {
@@ -60,8 +63,9 @@ public sealed partial class TeamOrchestrationService
         _clarificationInteraction = clarificationInteraction;
         _workingDirectoryAccessor = workingDirectoryAccessor;
         _taskWorkflowHost = taskWorkflowHost;
-        _approvalWorkflowHost = approvalWorkflowHost;
+
         _clarificationWorkflowHost = clarificationWorkflowHost;
+        _approvalGate = approvalGate;
         _teamRunStore = teamRunStore;
         _operationLedger = operationLedger;
         // 职责收敛：注册表（注册/发现/活跃团队）与结果聚合分别由 TeamRegistry / TeamResultAggregator 承担，
@@ -429,20 +433,6 @@ public sealed partial class TeamOrchestrationService
             requestId,
             new Microsoft.Agents.AI.Workflows.PortableValue(
                 new TeamClarificationResponse(answerText)));
-
-    /// <summary>
-    /// 构造 MAF ExternalResponse 以恢复 Team 计划审批工作流（RequestPort 决策投递）。
-    /// </summary>
-    private static ExternalResponse BuildApprovalResponse(
-        string portId, string requestId, bool approved) =>
-        new(
-            new Microsoft.Agents.AI.Workflows.Checkpointing.RequestPortInfo(
-                new Microsoft.Agents.AI.Workflows.Checkpointing.TypeId(typeof(TeamPlanApprovalInput)),
-                new Microsoft.Agents.AI.Workflows.Checkpointing.TypeId(typeof(TeamPlanApprovalDecision)),
-                portId),
-            requestId,
-            new Microsoft.Agents.AI.Workflows.PortableValue(
-                new TeamPlanApprovalDecision(approved)));
 
     /// <summary>
     /// 执行 Team 任务工作流的核心逻辑：构造 runtime、运行任务 DAG、聚合结果、完成业务事务。

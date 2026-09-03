@@ -244,7 +244,7 @@ public static class ToolResultSummarizer
         => ExtractFieldFromJson(input, "url");
 
     /// <summary>
-    /// Extracts a string field from a JSON object using <see cref="JsonDocument.Parse"/>.
+    /// Extracts a string field from a JSON object using <c>JsonDocument.Parse</c>.
     /// Handles escaped characters, nested objects, and Unicode correctly — unlike
     /// manual string IndexOf-based parsing which breaks on escaped quotes or
     /// values containing the field name as a substring.

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Tools;
@@ -321,7 +322,7 @@ public sealed class TeamRequirementServiceTests
     }
 }
 
-public sealed class TeamQualityGateRunnerTests
+public sealed class WorkflowQualityGateRunnerTests
 {
     [Fact]
     public async Task RunAsync_OrdersAndExecutesIndependentGateValidators()
@@ -330,7 +331,7 @@ public sealed class TeamQualityGateRunnerTests
         var build = CreateValidator(QualityGateKind.Build, calls);
         var tests = CreateValidator(QualityGateKind.UnitTest, calls);
         var lsp = CreateValidator(QualityGateKind.LspDiagnostics, calls);
-        var sut = new TeamQualityGateRunner([build, tests, lsp]);
+        var sut = new WorkflowQualityGateRunner([build, tests, lsp]);
         var run = TeamRunStateMachineTests.CreateRun(
             TeamRunPhase.Verification,
             TeamRunStatus.Running,
@@ -358,15 +359,15 @@ public sealed class TeamQualityGateRunnerTests
     [Fact]
     public async Task RunAsync_RequiredFailure_SkipsOnlyDownstreamGates()
     {
-        var build = Substitute.For<ITeamQualityGateValidator>();
+        var build = Substitute.For<IWorkflowQualityGateValidator>();
         build.Kind.Returns(QualityGateKind.Build);
         build.ValidateAsync(
                 Arg.Any<QualityGateDefinition>(),
-                Arg.Any<TeamQualityGateContext>(),
+                Arg.Any<WorkflowQualityGateContext>(),
                 Arg.Any<CancellationToken>())
             .Returns(call => Result((QualityGateDefinition)call[0], QualityGateStatus.Failed));
         var tests = CreateValidator(QualityGateKind.UnitTest, []);
-        var sut = new TeamQualityGateRunner([build, tests]);
+        var sut = new WorkflowQualityGateRunner([build, tests]);
         var run = TeamRunStateMachineTests.CreateRun(
             TeamRunPhase.Verification,
             TeamRunStatus.Running,
@@ -388,19 +389,19 @@ public sealed class TeamQualityGateRunnerTests
         results[1].Status.Should().Be(QualityGateStatus.SkippedByDependency);
         await tests.DidNotReceive().ValidateAsync(
             Arg.Any<QualityGateDefinition>(),
-            Arg.Any<TeamQualityGateContext>(),
+            Arg.Any<WorkflowQualityGateContext>(),
             Arg.Any<CancellationToken>());
     }
 
-    private static ITeamQualityGateValidator CreateValidator(
+    private static IWorkflowQualityGateValidator CreateValidator(
         QualityGateKind kind,
         ICollection<QualityGateKind> calls)
     {
-        var validator = Substitute.For<ITeamQualityGateValidator>();
+        var validator = Substitute.For<IWorkflowQualityGateValidator>();
         validator.Kind.Returns(kind);
         validator.ValidateAsync(
                 Arg.Any<QualityGateDefinition>(),
-                Arg.Any<TeamQualityGateContext>(),
+                Arg.Any<WorkflowQualityGateContext>(),
                 Arg.Any<CancellationToken>())
             .Returns(call =>
             {
@@ -705,12 +706,12 @@ public sealed class TeamRunApplicationServiceTests
         => new(
             store,
             new TeamRunStateMachine(),
-            new TeamQualityGateRunner(
+            new WorkflowQualityGateRunner(
             [
-                new TeamBuildQualityGateValidator(verification),
-                new TeamUnitTestQualityGateValidator(verification),
-                new TeamIntegrationTestQualityGateValidator(verification),
-                new TeamAcceptanceCriteriaQualityGateValidator(),
+                new WorkflowBuildQualityGateValidator(verification),
+                new WorkflowUnitTestQualityGateValidator(verification),
+                new WorkflowIntegrationTestQualityGateValidator(verification),
+                new WorkflowAcceptanceCriteriaQualityGateValidator(),
             ]),
             new DeliveryReportBuilder());
 
@@ -823,6 +824,12 @@ public sealed class TeamRunApplicationServiceTests
                 return Task.FromResult(false);
             _run = run;
             return Task.FromResult(true);
+        }
+
+        public async Task SaveAsync(TeamRun run, long expectedVersion, CancellationToken ct = default)
+        {
+            if (!await TrySaveAsync(run, expectedVersion, ct).ConfigureAwait(false))
+                throw new InvalidOperationException("TeamRun concurrency conflict.");
         }
     }
 }

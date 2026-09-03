@@ -83,7 +83,6 @@ public sealed class ForkedAgentRunner : IAgentRunner
                     {
                         WorkingDirectory = cwd,
                         ChatClient = _chatClient,
-                        CodeActTools = tools,
                         ConversationId = parameters.ConversationId,
                     }));
 
@@ -145,6 +144,30 @@ public sealed class ForkedAgentRunner : IAgentRunner
             var session = await pipeline.Agent.CreateSessionAsync(linkedToken).ConfigureAwait(false);
             var response = await pipeline.Agent.RunAsync(chatMessages, session, new AgentRunOptions(), linkedToken)
                 .ConfigureAwait(false);
+
+            // 非交互 fork 无法答复 MAF ToolApprovalRequestContent：检测到挂起审批时
+            // fail-closed 返回错误，避免静默丢弃工具调用（Worker 继承 Default 等模式会触发 Ask）。
+            var pendingApprovals = response.Messages
+                .SelectMany(message => message.Contents)
+                .OfType<ToolApprovalRequestContent>()
+                .ToList();
+            if (pendingApprovals.Count > 0)
+            {
+                var toolNames = string.Join(", ",
+                    pendingApprovals
+                        .Select(request => (request.ToolCall as FunctionCallContent)?.Name ?? "unknown")
+                        .Distinct(StringComparer.Ordinal));
+                _logger.LogWarning(
+                    "Forked agent '{Label}' requested approval for tool(s) [{Tools}]; non-interactive fork cannot grant approval",
+                    run.Label, toolNames);
+                return new ForkedAgentResult
+                {
+                    Messages = [],
+                    Error = AgentProblemDetails.ToolExecutionFailed(
+                        detail: $"Sub-agent requested approval for tool(s) [{toolNames}], which is not supported in a non-interactive fork.",
+                        toolName: run.Label),
+                };
+            }
 
             var result = new ForkedAgentResult
             {

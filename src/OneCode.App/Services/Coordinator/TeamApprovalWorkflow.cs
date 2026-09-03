@@ -107,7 +107,6 @@ internal sealed class TeamApprovalWorkflowCompiler
             writer.WriteEndArray();
             writer.WriteString("portId", PortId);
             writer.WriteString("contract", "TeamPlanApprovalDecision:v1");
-            writer.WriteString("maf", "1.15.0");
             writer.WriteEndObject();
         }
 

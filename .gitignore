@@ -420,11 +420,9 @@ FodyWeavers.xsd
 # IDE LSP cache files (should never be committed)
 *.csproj.lscache
 
-# VS F5 本地测试沙盒（launchSettings.json --cwd 目标目录），含 OneCode 生成的 .onecode 等运行时产物
-.dev-workspace/*
-!.dev-workspace/.gitkeep
-
-# 本地工具与会话数据（不入库）
-.onecode/
-.workbuddy/
-.zcode/
+# 根目录下所有以 . 开头的文件夹默认不入库。
+# 例外：.github 需要提交（CI workflow）。
+# 注意：目录级排除会使目录内文件的 ! 反排除失效；
+# .dev-workspace/.gitkeep 已被跟踪所以不受影响，但无法再新增需要提交的文件到被排除目录。
+/.*/
+!/.github/

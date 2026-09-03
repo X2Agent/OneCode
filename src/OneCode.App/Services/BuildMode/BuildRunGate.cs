@@ -1,10 +1,10 @@
 using Microsoft.Extensions.AI;
-using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
+using OneCode.Core.Coordinator;
 using OneCode.Core.PlanMode;
 using OneCode.Infrastructure.Agent;
 
@@ -90,7 +90,10 @@ public sealed class BuildRunGate
                 options,
                 eventWriter,
                 static () => new EditTransaction(),
-                static run => BuildRunStateEvent.From(run),
+                // durableStateObserver → BuildRunStateEvent 双通道改造——
+                // attempt 运行时以 OrchestrationEvent.BuildStateProjectionChanged 统一信封发射，
+                // StreamingSession.Digest 为其解信封唯一投影点。
+                static run => new OrchestrationEvent.BuildStateProjectionChanged(run),
                 Ledger: _operationLedger));
         var toolCapabilityHash = ControlledBuildAttemptWorkflowCompiler.ComputeToolCapabilityHash(
             ControlledBuildAttemptWorkflowCompiler.ApprovedPolicyCapabilities(buildRun, options.ToolCapabilities),
@@ -126,24 +129,24 @@ public sealed class BuildRunGate
         }
     }
 
-    public static BuildTerminalReason ResolveTerminalReason(BuildRun run)
+    public static RunTerminalReason ResolveTerminalReason(BuildRun run)
         => run.State == BuildRunState.Clarifying
-            ? BuildTerminalReason.ClarificationRequired
+            ? RunTerminalReason.ClarificationRequired
             : run.TerminalReason ?? run.State switch
             {
-                BuildRunState.Completed => BuildTerminalReason.Completed,
-                BuildRunState.Blocked => BuildTerminalReason.Blocked,
-                BuildRunState.Cancelled => BuildTerminalReason.Cancelled,
-                BuildRunState.LimitReached => BuildTerminalReason.TurnLimitReached,
-                BuildRunState.BudgetExceeded => BuildTerminalReason.BudgetExceeded,
-                _ => BuildTerminalReason.AgentException,
+                BuildRunState.Completed => RunTerminalReason.Completed,
+                BuildRunState.Blocked => RunTerminalReason.Blocked,
+                BuildRunState.Cancelled => RunTerminalReason.Cancelled,
+                BuildRunState.LimitReached => RunTerminalReason.TurnLimitReached,
+                BuildRunState.BudgetExceeded => RunTerminalReason.BudgetExceeded,
+                _ => RunTerminalReason.AgentException,
             };
 
     public static BuildRunResult CreateBuildRunResult(BuildRun run, string? summary) =>
         new(
             run.Id,
             run.State,
-            run.TerminalReason ?? BuildTerminalReason.AgentException,
+            run.TerminalReason ?? RunTerminalReason.AgentException,
             summary,
             run.ChangedFiles,
             run.Plan?.Tasks ?? [],

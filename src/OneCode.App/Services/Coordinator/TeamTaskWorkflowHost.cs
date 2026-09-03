@@ -1,14 +1,17 @@
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
 /// Runs an approved Team task DAG through the shared <see cref="DurableWorkflowHost"/>.
-/// Lease acquisition atomically claims the TeamRun with the same fencing token, binds the
-/// per-run runtime, and only then opens the per-run Checkpoint Store. A new execution
-/// generation clears the previous generation's checkpoint/pending request so a crashed
-/// run restarts from the business aggregate instead of a stale MAF cursor.
+/// 执行骨架（durable 执行 / generation / lease / 终态钩子）由 <see cref="ModeWorkflowHost"/>
+/// 统一承担（三件套收敛收官）；本类保留 Team 语义：业务前置校验、
+/// lease 回调（状态校验 → claim → 令牌对账 → Bind）、per-compile OutcomeRegistry 聚合
+/// 与业务终态延迟关闭（<see cref="CompleteBusinessAsync"/>）。A new execution generation
+/// clears the previous generation's checkpoint/pending request so a crashed run restarts
+/// from the business aggregate instead of a stale MAF cursor.
 /// </summary>
 internal sealed class TeamTaskWorkflowHost(
     IDurableWorkflowHost durableHost,
@@ -16,6 +19,8 @@ internal sealed class TeamTaskWorkflowHost(
     ITeamRunStore teamRunStore,
     IWorkflowRunRegistry workflowRunRegistry)
 {
+    private readonly ModeWorkflowHost _modeHost = new(durableHost, workflowRunRegistry);
+
     public async Task<TeamTaskWorkflowResult> RunNextAsync(
         TeamRun teamRun,
         TeamConfig config,
@@ -68,35 +73,39 @@ internal sealed class TeamTaskWorkflowHost(
             modelId,
             runtime,
             serializerOptions);
-        var durable = await durableHost.RunAsync(
-            definition.Registration,
-            definition.Workflow,
-            definition.Input,
-            commandId: definition.Input.RunId.ToString(),
-            serializerOptions,
-            eventSink,
-            executionGeneration: executionGeneration,
-            terminalStateResolver: terminalStateResolver,
-            leaseAcquired: async (workflowRun, callbackCt) =>
-            {
-                var current = await teamRunStore.LoadAsync(teamRun.Id, callbackCt).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException($"TeamRun '{teamRun.Id}' was not found.");
-                if (current.Status != TeamRunStatus.Running)
+        var durable = await _modeHost.RunAsync(
+            new ModeWorkflowPolicy<TeamTaskWorkflowInput>(
+                $"team/{teamRun.Id}",
+                _ => new ModeWorkflowCompiled<TeamTaskWorkflowInput>(
+                    definition.Registration,
+                    definition.Workflow,
+                    definition.Input,
+                    definition.Input.RunId.ToString()),
+                serializerOptions,
+                EventSink: eventSink,
+                LeaseAcquired: async (workflowRun, callbackCt) =>
                 {
-                    throw new InvalidOperationException(
-                        $"TeamRun '{teamRun.Id}' cannot start an attempt from status '{current.Status}'.");
-                }
+                    var current = await teamRunStore.LoadAsync(teamRun.Id, callbackCt).ConfigureAwait(false)
+                        ?? throw new InvalidOperationException($"TeamRun '{teamRun.Id}' was not found.");
+                    if (current.Status != TeamRunStatus.Running)
+                    {
+                        throw new InvalidOperationException(
+                            $"TeamRun '{teamRun.Id}' cannot start an attempt from status '{current.Status}'.");
+                    }
 
-                var claimed = await teamRunStore.ClaimWorkflowAsync(
-                    teamRun.Id,
-                    workflowRun.FencingToken,
-                    current.Version,
-                    callbackCt).ConfigureAwait(false);
-                if (claimed.WorkflowFencingToken != workflowRun.FencingToken)
-                    throw new InvalidOperationException("TeamRun and Workflow Registry fencing tokens diverged.");
-                await runtime.BindAsync(claimed, workflowRun.FencingToken, callbackCt).ConfigureAwait(false);
-            },
-            ct: ct).ConfigureAwait(false);
+                    var claimed = await teamRunStore.ClaimWorkflowAsync(
+                        teamRun.Id,
+                        workflowRun.FencingToken,
+                        current.Version,
+                        callbackCt).ConfigureAwait(false);
+                    if (claimed.WorkflowFencingToken != workflowRun.FencingToken)
+                        throw new InvalidOperationException("TeamRun and Workflow Registry fencing tokens diverged.");
+                    await runtime.BindAsync(claimed, workflowRun.FencingToken, callbackCt).ConfigureAwait(false);
+                },
+                TerminalStateResolver: terminalStateResolver,
+                DisplayName: "Team workflow"),
+            executionGeneration,
+            ct).ConfigureAwait(false);
 
         // 所有任务的结构化结果由共享 outcome registry 记录（包括被上游阻塞的 Blocked 任务）；
         // 终端 Output 事件不足以覆盖中间任务，故从 registry 统一读取。

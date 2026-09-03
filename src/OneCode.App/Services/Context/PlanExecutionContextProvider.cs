@@ -1,10 +1,10 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
-using OneCode.App.Services.Context;
+using OneCode.App.Services.PlanMode;
 using OneCode.Core.PlanMode;
 
-namespace OneCode.App.Services.PlanMode;
+namespace OneCode.App.Services.Context;
 
 /// <summary>
 /// Injects the immutable approved-plan snapshot while its Build run is active.
@@ -67,7 +67,7 @@ public sealed class PlanExecutionContextProvider(
             [
                 new ChatMessage(ChatRole.System,
                     $"[Approved Plan {approved.PlanId} r{approved.Revision} · {approved.ContentHash[..Math.Min(12, approved.ContentHash.Length)]} · Turn {currentTurn}] " +
-                    "Continue executing the immutable approved snapshot. Persist step progress and verification evidence through the plan execution tools."),
+                    PlanExecutionProtocol.ContinueLine),
             ],
         };
     }
@@ -95,7 +95,7 @@ public sealed class PlanExecutionContextProvider(
             ## STRUCTURED STEPS
             {steps}
 
-            Execute exactly this approved snapshot. Use UpdatePlanStep for progress; verification starts automatically once all steps are terminal, then call CompletePlanVerification with concrete evidence.
+            {PlanExecutionProtocol.ContextProtocolLine}
             """;
     }
 }

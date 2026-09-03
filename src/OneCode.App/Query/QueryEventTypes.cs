@@ -32,7 +32,7 @@ public sealed record BuildRunStateEvent(
     IReadOnlyList<string> ClarificationQuestions,
     int CompletedTasks = 0,
     int TotalTasks = 0,
-    OneCode.Core.Build.BuildTerminalReason? TerminalReason = null,
+    OneCode.Core.Workflows.RunTerminalReason? TerminalReason = null,
     string? FailureSummary = null,
     OneCode.Core.Build.BuildScopeSnapshot? Scope = null,
     OneCode.Core.Build.BuildValidationStatus? ValidationStatus = null,
@@ -67,7 +67,7 @@ public sealed record DoneEvent(
     string? FullText,
     TokenUsage? Usage,
     int TurnsCompleted,
-    OneCode.Core.Build.BuildTerminalReason TerminalReason,
+    OneCode.Core.Workflows.RunTerminalReason TerminalReason,
     SessionId? SessionId = null,
     bool TransactionRolledBack = false,
     string? ValidationFailureSummary = null) : QueryEvent;

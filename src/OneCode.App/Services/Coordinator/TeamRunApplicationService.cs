@@ -1,3 +1,4 @@
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Errors;
@@ -8,7 +9,7 @@ namespace OneCode.App.Services.Coordinator;
 public sealed class TeamRunApplicationService(
     ITeamRunStore store,
     TeamRunStateMachine stateMachine,
-    TeamQualityGateRunner qualityGateRunner,
+    WorkflowQualityGateRunner qualityGateRunner,
     DeliveryReportBuilder deliveryReportBuilder,
     IWorkspaceFingerprintProvider? fingerprintProvider = null)
 {

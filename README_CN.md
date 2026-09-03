@@ -43,7 +43,7 @@
 > **已知限制**：
 > - `Microsoft.Agents.AI.Hyperlight` (preview)：沙箱功能受限，默认启用（运行时不可用则静默降级）
 > - GOAL 模式流式输出不支持自动重试（非流式模式支持 PromptTooLong 恢复）
-> - MAF `ToolApprovalAgent` 与 `RunStreamingAsync` 不兼容，权限审批通过自研中间件实现
+> - Team 子 Agent 路径权限审批为 inline 降级（不走 MAF `ToolApprovalAgent`，见 M4 完全事件驱动审批）；Main 路径已接入 MAF 审批
 
 ---
 
@@ -138,7 +138,7 @@ src/
 | 13 | Terminal Execution | 92% | `BashTool`（含 powershell 方言）+ `BackgroundRunTool` |
 | 14 | Headless Mode CI/CD 模式 | 90% | 无 TTY 自动进入无交互路径；权限由 `permissionMode` 配置 |
 | 15 | Code Review 代码审查 | 85% | `/review` 斜杠命令（--staged / LSP / blame / 增量） |
-| 16 | Sandboxed Execution 沙箱 | 85% | `HyperlightCodeActService`（默认启用，自动挂载工作目录） |
+| 16 | Sandboxed Execution 沙箱 | 85% | `HyperlightCodeActService`（默认启用，工作目录只读暴露为 `/input`） |
 | 17 | Background Tasks 后台任务 | 92% | `TaskTool` + `CronCreate/CronList/CronDelete/CronPause/CronResume` |
 
 **综合完成度：17/17 FULL · 平均 91%**
@@ -219,7 +219,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 ## 工具系统
 
-工具通过 `AddTool<T>` 扩展方法在 DI 注册时统一登记（`ServiceCollectionExtensions.Tools.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 在运行时反射解析为 `AIFunction`，共 30 个工具。
+工具通过 `AddTool<T>` 扩展方法在 DI 注册时统一登记（`ServiceCollectionExtensions.Tools.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 在运行时反射解析为 `AIFunction`，共 31 个工具。
 
 ### Shell 与后台执行
 
@@ -253,8 +253,9 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 | 工具 | 功能 |
 |------|------|
-| WebFetch | 抓取网页（HTTP→Markdown；已连接 Playwright MCP 时自动用 navigate/snapshot 兜底 SPA） |
+| WebFetch | 抓取网页（HTTP→Markdown；SPA/JS 页面返回降级提示，由模型决定是否用 BrowserFetch 渲染） |
 | WebSearch | 网络搜索（Brave + DuckDuckGo） |
+| BrowserFetch | 真实无头浏览器抓取（按需连接内置 playwright MCP，一次调用完成渲染，返回 ARIA 快照） |
 
 ### Agent / 子代理
 
@@ -495,7 +496,7 @@ ChatClientAgent
 
 | 功能 | 说明 |
 |------|------|
-| **Hyperlight 沙箱** | 微虚拟机隔离代码执行，支持文件挂载控制和网络域名白名单 |
+| **Hyperlight 沙箱** | 微虚拟机隔离代码执行（CodeAct），工作目录只读暴露为 `/input`；运行时（Windows WHP / Linux KVM）不可用时静默降级 |
 | **LSP 集成** | `EnhancedLspService` + `LspServerManager`，编辑后实时诊断更新 |
 | **代码语义索引** | `CodeIndexService` 语义符号搜索（精确 / 模糊 / 关键字匹配） |
 | **DAG 并行调度** | `ParallelAgentsTool` → MAF 工作流运行时（`AgentTaskWorkflowCompiler` + `AgentTaskWorkflowHost`），依赖驱动的并行 |
@@ -529,8 +530,9 @@ ChatClientAgent
 | 限制项 | 说明 |
 |--------|------|
 | GOAL 模式流式输出 | 不支持自动重试（非流式模式支持 PromptTooLong 恢复） |
-| MAF `ToolApprovalAgent` | 与 `RunStreamingAsync` 不兼容，权限审批通过自研中间件实现 |
+| Team 子 Agent 审批 | inline 审批降级，不走 MAF `ToolApprovalAgent`（Main 路径已接入 MAF 审批，见 M4 完全事件驱动审批） |
 | 鼠标点击模式标签 | Terminal.Gui 中未实现鼠标处理 |
+| Hyperlight 沙箱 | `Microsoft.Agents.AI.Hyperlight` 为 preview 包，沙箱功能受限（运行时不可用时自动降级） |
 
 ---
 

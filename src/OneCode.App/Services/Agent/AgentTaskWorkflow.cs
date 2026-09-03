@@ -312,7 +312,6 @@ public sealed class AgentTaskWorkflowCompiler(IAgentRunner runner, ILogger<Agent
             WriteCapabilities(writer, "parentCapabilities", parentCapabilities);
             writer.WriteString("dispatcherId", DispatcherId);
             writer.WriteString("outcomeContract", "AgentTaskOutcome:v1");
-            writer.WriteString("mafVersion", "1.15.0");
             writer.WriteEndObject();
         }
 

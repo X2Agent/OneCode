@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using OneCode.App.Tools;
 using OneCode.Core.Build;
 using OneCode.Core.PlanMode;
 
@@ -104,6 +105,12 @@ public sealed class PlanExecutionRecoveryService(
         CancellationToken ct)
     {
         ValidateRecoveryIdentity(workflow);
+        // 执行世代入口 claim（幂等）：恢复对账与绑定/终态写携带世代令牌，并刷新版本基线。
+        workflow = await workflowService.ClaimExecutionAsync(
+            workflow.SessionId,
+            workflow.Id,
+            workflow.Version,
+            ct).ConfigureAwait(false);
         var buildRun = string.IsNullOrWhiteSpace(workflow.BuildRunId)
             ? await buildRunStore.LoadAsync(workflow.SessionId, ct).ConfigureAwait(false)
             : await buildRunStore.LoadByIdAsync(
@@ -152,7 +159,8 @@ public sealed class PlanExecutionRecoveryService(
                 workflow.SessionId,
                 workflow.Id,
                 workflow.ActiveRunId!,
-                buildRun.Id.ToString()), ct).ConfigureAwait(false)).Workflow;
+                buildRun.Id.ToString(),
+                workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false)).Workflow;
         }
 
         switch (buildRun.State)
@@ -161,7 +169,8 @@ public sealed class PlanExecutionRecoveryService(
                 await FailWorkflowAsync(
                     workflow,
                     "PlanVerificationProtocolMissing",
-                    "BuildRun completed, but the Plan workflow did not persist CompletePlanVerification evidence.",
+                    "BuildRun completed, but the Plan workflow did not persist " +
+                    $"{PlanToolNames.CompleteVerification} evidence.",
                     ct).ConfigureAwait(false);
                 return;
             case BuildRunState.Cancelled:

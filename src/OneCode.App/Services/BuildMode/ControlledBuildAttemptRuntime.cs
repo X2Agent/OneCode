@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.BuildMode;
 
@@ -53,13 +54,13 @@ public sealed class ControlledBuildAttemptRuntime(
         var ledger = context.Ledger;
         if (ledger is not null)
         {
-            await ledger.ReconcileRunAsync($"build/{input.BuildRunId}", ct).ConfigureAwait(false);
-            await ledger.BeginTransactionAsync(
+            await FencedLedgerTransaction.BeginAsync(
+                ledger,
+                $"build/{input.BuildRunId}",
                 input.OperationId,
-                "file-transaction",
                 fencingToken,
+                transaction,
                 ct).ConfigureAwait(false);
-            transaction.PersistTo(ledger, input.OperationId, fencingToken);
         }
 
         var options = context.Options with
@@ -115,7 +116,7 @@ public sealed class ControlledBuildAttemptRuntime(
                     TotalInputTokens: 0,
                     TotalOutputTokens: 0,
                     TurnCount: 0,
-                    TerminalReason: BuildTerminalReason.Cancelled,
+                    TerminalReason: RunTerminalReason.Cancelled,
                     TransactionRolledBack: true,
                     FinalValidationStatus: BuildValidationStatus.Cancelled),
                 CancellationToken.None,
@@ -135,7 +136,7 @@ public sealed class ControlledBuildAttemptRuntime(
                     TotalInputTokens: 0,
                     TotalOutputTokens: 0,
                     TurnCount: 0,
-                    TerminalReason: BuildTerminalReason.AgentException,
+                    TerminalReason: RunTerminalReason.AgentException,
                     TransactionRolledBack: true,
                     FinalValidationStatus: BuildValidationStatus.Cancelled,
                     ValidationFailureSummary: ex.Message),
@@ -147,18 +148,18 @@ public sealed class ControlledBuildAttemptRuntime(
             throw;
         }
 
-        var terminalReason = result.TerminalReason == BuildTerminalReason.Completed
+        var terminalReason = result.TerminalReason == RunTerminalReason.Completed
             && result.TurnCount >= options.MaxTurns
-                ? BuildTerminalReason.TurnLimitReached
+                ? RunTerminalReason.TurnLimitReached
                 : result.TerminalReason;
-        if (terminalReason != BuildTerminalReason.Completed)
+        if (terminalReason != RunTerminalReason.Completed)
             transaction.Rollback();
 
         var completedResult = result with
         {
             TerminalReason = terminalReason,
             TransactionCommitted = false,
-            TransactionRolledBack = terminalReason != BuildTerminalReason.Completed,
+            TransactionRolledBack = terminalReason != RunTerminalReason.Completed,
             ModifiedFiles = result.ModifiedFiles ?? transaction.GetModifiedFiles(),
         };
         var buildRun = await coordinator.CompleteAsync(

@@ -13,6 +13,5 @@ public sealed record AgentContextProviderOptions
     public bool IncludeLspDiagnostics { get; init; } = true;
     public bool IncludeShellEnvironment { get; init; } = true;
     public bool IncludeCodeAct { get; init; } = true;
-    public IReadOnlyList<AITool>? CodeActTools { get; init; }
     public IChatClient? ChatClient { get; init; }
 }

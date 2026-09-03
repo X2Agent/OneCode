@@ -294,7 +294,7 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
                 TotalInputTokens: 10,
                 TotalOutputTokens: 5,
                 TurnCount: 1,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed));
         }
     }

@@ -20,21 +20,33 @@ public sealed partial class WebFetchTool
     public const int MaxMarkdownLength = 100000;
     private const int CacheTtlMs = 15 * 60 * 1000; // 15 minutes
 
+    // 降级引导（失败路径）：工具不做浏览器渲染等替代路径的硬编码调用，
+    // 决策权归模型——仅在失败结果文本中提供替代路径（BrowserFetch），
+    // 由模型自行决定是否采用。
+    private const string DegradationHint =
+        "\n\nHint: if this failure is caused by a network restriction, anti-bot protection, or a " +
+        "JavaScript-only page, call the BrowserFetch tool to render it in a real headless browser, " +
+        "or report the limitation to the user.";
+
+    // 降级引导（JS-only 页面）：不自动渲染，仅回传事实与替代路径。
+    private const string JsRenderingHint =
+        "\n\n[Hint: this page appears to require JavaScript rendering and was not executed. " +
+        "Call the BrowserFetch tool to render it in a real headless browser, " +
+        "or report the limitation to the user.]";
+
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly WebFetchCache _cache;
     private readonly ILogger<WebFetchTool> _logger;
-    private readonly IBrowserPageRenderer? _browserRenderer;
 
     public WebFetchTool(
         IHttpClientFactory httpClientFactory,
         WebFetchCache cache,
-        ILogger<WebFetchTool> logger,
-        IBrowserPageRenderer? browserRenderer = null)
+        ILogger<WebFetchTool> logger)
     {
         _httpClientFactory = httpClientFactory;
         _cache = cache;
         _logger = logger;
-        _browserRenderer = browserRenderer;
     }
 
     private HttpClient CreateFetchHttpClient()
@@ -50,7 +62,7 @@ public sealed partial class WebFetchTool
                  "SSRF protection: localhost, private IPs (10.x, 172.16-31.x, 192.168.x, 169.254.x), .internal/.local/.localhost hostnames, and IPv6 loopback/link-local are hard-blocked. " +
                  "Hostnames are resolved before the request; any private/loopback DNS record is rejected (DNS rebinding). The HTTP client still uses the system/env proxy, so local proxies are not treated as the fetch target. " +
                  "Cross-host redirects return a redirect notice instead of following automatically — call WebFetch again with the redirected URL. " +
-                 "JavaScript-rendered pages: when Playwright MCP is connected, WebFetch falls back to browser_navigate + browser_snapshot; otherwise the HTTP HTML→Markdown result is returned. " +
+                 "JavaScript-only SPA shells are NOT auto-rendered: WebFetch returns a hint instead; decide yourself whether to render via the BrowserFetch tool (real headless browser). " +
                  "Caching: successful fetches are cached for 15 minutes (max 50MB total); identical URLs return cached content within TTL. " +
                  "Size limits: max URL length 2000 chars, max response 10MB, max markdown output 100,000 chars (truncated with notice). " +
                  "HTTP is automatically upgraded to HTTPS.")]
@@ -72,7 +84,7 @@ public sealed partial class WebFetchTool
             return ApplyPromptAndReturn(cachedContent, prompt, start);
         }
 
-        var dnsBlock = await GetDnsRebindingBlockReasonAsync(url, ct).ConfigureAwait(false);
+        var dnsBlock = await CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
         if (dnsBlock is not null)
         {
             return ToolResult.Error(dnsBlock);
@@ -123,24 +135,33 @@ public sealed partial class WebFetchTool
                 markdownContent = content;
             }
 
-            if (string.IsNullOrWhiteSpace(markdownContent) || NeedsJsRendering(markdownContent))
+            if (string.IsNullOrWhiteSpace(markdownContent))
             {
-                var rendered = await TryBrowserRenderAsync(upgradedUrl, ct).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(rendered))
-                    markdownContent = rendered;
+                _logger.LogWarning(
+                    "WebFetch {Url} returned an empty body (HTTP {StatusCode}, content-type {ContentType})",
+                    upgradedUrl, fetchResult.StatusCode, fetchResult.ContentType);
             }
 
             _cache.Set(url, markdownContent, TimeSpan.FromMilliseconds(CacheTtlMs));
+
+            // 降级决策权归模型：JS-only 页面不在工具内部代为调用浏览器渲染，
+            // 仅回传事实与替代路径提示（见 Description 与 JsRenderingHint）。
+            if (NeedsJsRendering(markdownContent))
+            {
+                markdownContent += JsRenderingHint;
+            }
 
             return ApplyPromptAndReturn(markdownContent, prompt, start);
         }
         catch (OperationCanceledException)
         {
+            _logger.LogDebug("WebFetch {Url} was cancelled", url);
             return ToolResult.Error("Request was cancelled");
         }
         catch (Exception ex)
         {
-            return ToolResult.Error(ex.Message);
+            _logger.LogWarning(ex, "WebFetch failed for {Url}", url);
+            return ToolResult.Error($"{ex.Message}{DegradationHint}");
         }
     }
 
@@ -253,26 +274,6 @@ public sealed partial class WebFetchTool
         }
 
         return false;
-    }
-
-    private async Task<string?> TryBrowserRenderAsync(string url, CancellationToken ct)
-    {
-        if (_browserRenderer is null)
-            return null;
-
-        try
-        {
-            return await _browserRenderer.RenderAsync(url, timeoutMs: 30_000, ct: ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Browser render fallback failed for {Url}", url);
-            return null;
-        }
     }
 
     private sealed class FetchResult

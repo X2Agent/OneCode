@@ -1,4 +1,3 @@
-using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
 
 
@@ -72,35 +71,35 @@ public sealed partial class OneCodeToplevel
                 // Render terminal reason distinctly
                 switch (reason)
                 {
-                    case BuildTerminalReason.TurnLimitReached:
+                    case RunTerminalReason.TurnLimitReached:
                         _shell.Transcript.AddSystem($"(reached max turns: {tc})");
                         break;
-                    case BuildTerminalReason.BudgetExceeded:
+                    case RunTerminalReason.BudgetExceeded:
                         _shell.Transcript.AddSystem($"(budget exceeded after {tc} turns)");
                         break;
-                    case BuildTerminalReason.Cancelled:
+                    case RunTerminalReason.Cancelled:
                         _shell.Transcript.AddSystem($"(cancelled after {tc} turns)");
                         break;
-                    case BuildTerminalReason.ValidationFailed:
+                    case RunTerminalReason.ValidationFailed:
                         _shell.Transcript.AddSystem($"(validation failed — file changes rolled back)");
                         if (!string.IsNullOrEmpty(validationSummary))
                             _shell.Transcript.AddSystem(validationSummary!);
                         break;
-                    case BuildTerminalReason.AgentException:
+                    case RunTerminalReason.AgentException:
                         _shell.Transcript.AddSystem($"(agent error after {tc} turns)");
                         break;
-                    case BuildTerminalReason.PermissionRefused:
+                    case RunTerminalReason.PermissionRefused:
                         _shell.Transcript.AddSystem($"(permission refused after {tc} turns)");
                         break;
-                    case BuildTerminalReason.ClarificationRequired:
+                    case RunTerminalReason.ClarificationRequired:
                         _shell.Transcript.AddSystem("(build paused until scope clarification is confirmed)");
                         break;
-                    case BuildTerminalReason.Blocked:
+                    case RunTerminalReason.Blocked:
                         _shell.Transcript.AddSystem("(build blocked by workspace conflict or external dependency)");
                         break;
                 }
 
-                if (rolledBack && reason != BuildTerminalReason.ValidationFailed)
+                if (rolledBack && reason != RunTerminalReason.ValidationFailed)
                     _shell.Transcript.AddSystem($"(file changes rolled back)");
                 break;
 

@@ -30,8 +30,10 @@ public sealed class OpenAiReasoningPassbackHandler : DelegatingHandler
     }
 
     /// <summary>
-    /// 按顺序为 <c>messages</c> 中缺失 <c>reasoning_content</c> 的 assistant 消息注入推理文本。
-    /// 快照条目少于请求中的 assistant 消息时，超出部分不注入（保守对齐，宁可漏不错配）。
+    /// 为 <c>messages</c> 中缺失 <c>reasoning_content</c> 的 assistant 消息补齐该字段：
+    /// 按顺序对齐到非空推理文本时回传原文，否则补空字符串 stub——
+    /// DeepSeek thinking 模式要求每条 assistant 消息都携带该字段回传，空 stub 被所有 provider
+    /// 容忍且规避非空 stub 偶发的 <c>NoneType</c> 错误（见 aios PR #173 实证）。
     /// body 非 JSON 对象或无需改动时返回 null（不重建请求体）。
     /// </summary>
     internal static string? RewriteRequestBody(string body, IReadOnlyList<string> assistantReasonings)
@@ -86,15 +88,21 @@ public sealed class OpenAiReasoningPassbackHandler : DelegatingHandler
                             : null;
                         assistantIndex++;
 
-                        if (string.IsNullOrEmpty(reasoning)
-                            || message.TryGetProperty("reasoning_content", out _))
+                        // 已有 reasoning_content 的消息原样保留（前序 thinking 轮次已回传）。
+                        if (message.TryGetProperty("reasoning_content", out _))
                         {
                             message.WriteTo(writer);
                             continue;
                         }
 
+                        // 缺失字段统一补齐：对齐到非空推理则回传原文，否则补空字符串 stub。
+                        // 关键修复：此前空/越界槽位直接跳过（字段缺失），DeepSeek thinking 网关
+                        // 拒绝了带工具调用的回传请求；改为始终注入字段，空 stub 也可通过校验。
                         patched = true;
-                        WriteMessageWithReasoning(writer, message, reasoning);
+                        WriteMessageWithReasoning(
+                            writer,
+                            message,
+                            string.IsNullOrEmpty(reasoning) ? string.Empty : reasoning);
                     }
 
                     writer.WriteEndArray();

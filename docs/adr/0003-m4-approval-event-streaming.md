@@ -1,4 +1,4 @@
-# ADR 0003: M4 完全事件驱动审批
+# M4 完全事件驱动审批
 
 **状态**: Accepted
 **日期**: 2026-07-10
@@ -123,3 +123,4 @@ R1 原型的"双路径并行"是典型的兼容性陷阱：为了不破坏现有
 2. **Main 路径决策链路经 `IApprovalBroker` 抽象**：`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 通过 `IApprovalBroker.RequestAsync` 获取决策（`OneCode.Core/Permissions/IApprovalBroker.cs`），不再直接 await `ResponseSource.Task`。
 3. **文件改名**：`CodeAssistantToplevel.Events.cs` → `OneCodeToplevel.Events.cs`（TUI 审批事件消费现位于此）。
 4. **Cron 路径工作模式**：`CronJobExecutor` 现使用 `workingMode: WorkingMode.Goal`（非本文所述 `WorkingMode.Plan`）实现无审批 UI 的只读策略。
+5. **Team 路径改用 `ApprovalBroker.ForTeam`**：正文第 22/40 行所述的 inline `ApprovalHandler` 委托已由 `ApprovalBroker.ForTeam(...)`（`OneCode.App/Services/Agent/ApprovalBroker.cs`）取代，Team 成员经 `OrchestrationEvent.ApprovalRequest` 事件驱动审批；且不再设 30 秒固定超时，改为仅依赖 `ct` 取消（fail-closed，与 Main 路径一致）。

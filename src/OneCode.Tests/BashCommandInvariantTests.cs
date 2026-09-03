@@ -34,13 +34,13 @@ public sealed class BashCommandInvariantTests
     [InlineData("npm install evil-package", "PackageInstall")]
     [InlineData("git config --global core.hookspath /tmp/hooks", "GitConfigGlobal")]
     [InlineData("find / -name '*.key'", "FullDiskScan")]
-    public void CheckAsync_DetectsAllLayer0HardDenyPatterns(string command, string expectedPatternName)
+    public async Task CheckAsync_DetectsAllLayer0HardDenyPatterns(string command, string expectedPatternName)
     {
         // 每条 Layer0HardDeny 模式都必须被 BashCommandInvariant 拦截
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = sut.CheckAsync("Bash", parameters, CancellationToken.None).Result;
+        var result = await sut.CheckAsync("Bash", parameters, CancellationToken.None);
 
         result.Allowed.Should().BeFalse(
             $"command '{command}' should be blocked by pattern '{expectedPatternName}'");
@@ -54,12 +54,12 @@ public sealed class BashCommandInvariantTests
     [InlineData("npm run test")]
     [InlineData("git push origin main")]
     [InlineData("git reset --hard origin/main")]  // reset --hard 但非 HEAD~，不在 Layer0
-    public void CheckAsync_AllowsSafeCommands(string command)
+    public async Task CheckAsync_AllowsSafeCommands(string command)
     {
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = sut.CheckAsync("Bash", parameters, CancellationToken.None).Result;
+        var result = await sut.CheckAsync("Bash", parameters, CancellationToken.None);
 
         result.Allowed.Should().BeTrue(
             $"command '{command}' should not match any Layer0HardDeny pattern");

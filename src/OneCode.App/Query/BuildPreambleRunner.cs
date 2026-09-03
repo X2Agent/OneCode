@@ -127,13 +127,20 @@ internal sealed class BuildPreambleRunner
             && buildRun.State == BuildRunState.Planned
             && _buildRunGate.Clarification is { } clarificationInteraction)
         {
+            // 计划审批门（流内门）：决策非持久化——BuildRun 聚合的 Planned 态
+            // 已落盘，崩溃后 resume 重问。审批机制按模式自持、不强行统一（ADR 非目标），
+            // 流内确认语义：取消/空白回复一律视为拒绝。
+            // 提问文本只展示计划摘要；工具策略由 SnapshotApprovedTools 快照直接走
+            // ApprovePlanAsync 持久化，对用户决策无增量信息，不在卡片展示。
             var approvedTools = _toolAssembler.SnapshotApprovedTools();
-            var approval = await clarificationInteraction.AskAsync(
+            var answer = await clarificationInteraction.AskAsync(
                 "计划已生成，请确认后开始执行",
-                [BuildPlanApprovalPrompt(buildRun, approvedTools)],
+                // 不变量：进入 Planned 前已由 BuildPlanValidator 保证 Plan 与 Summary 非空。
+                [buildRun.Plan!.Summary],
                 confirmationOnly: true,
                 ct).ConfigureAwait(false);
-            buildRun = approval.IsCancelled || string.IsNullOrWhiteSpace(approval.Response)
+            var approved = !answer.IsCancelled && !string.IsNullOrWhiteSpace(answer.Response);
+            buildRun = !approved
                 ? await coordinator.RejectPlanAsync(
                     buildRun.Id,
                     "用户取消计划审批",
@@ -177,16 +184,5 @@ internal sealed class BuildPreambleRunner
         if (durableStates.Count == 0 || durableStates[^1].Version != run.Version)
             events.Add(BuildRunStateEvent.From(run));
         return (run, events);
-    }
-
-    private static string BuildPlanApprovalPrompt(
-        BuildRun buildRun,
-        IReadOnlyList<string> approvedTools)
-    {
-        var planSummary = buildRun.Plan?.Summary ?? "（无计划摘要）";
-        var toolSummary = approvedTools.Count == 0
-            ? "（空）"
-            : string.Join(", ", approvedTools);
-        return $"{planSummary}\n\n本次执行允许工具：{toolSummary}";
     }
 }

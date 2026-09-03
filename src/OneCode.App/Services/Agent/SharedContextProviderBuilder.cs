@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Tools.Shell;
-using Microsoft.Extensions.AI;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Memory;
 using OneCode.App.Services.Skills;
@@ -87,8 +86,7 @@ public sealed class SharedContextProviderBuilder(
 
         if (options.IncludeCodeAct)
         {
-            var sandboxFunctions = options.CodeActTools?.OfType<AIFunction>().ToList();
-            var codeActProvider = runtime.CodeActService.TryCreateProvider(cwd, sandboxFunctions);
+            var codeActProvider = runtime.CodeActService.TryCreateProvider(cwd);
             if (codeActProvider is not null)
                 providers.Add(codeActProvider);
         }

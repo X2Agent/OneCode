@@ -1,3 +1,4 @@
+using OneCode.App.Tools;
 using OneCode.Core.Build;
 using OneCode.Core.Tasks;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
@@ -27,7 +28,9 @@ public sealed partial class BuildRunCoordinator
             [],
             scope.OutOfScope);
 
-    // internal：BuildResumePolicy（纯函数裁决器）复用同一计划比对规则
+    // internal：BuildResumePolicy（恢复策略函数，Runtime 层参考实现）
+    // 复用同一计划比对规则；prescribed plan 可能来自 ApprovedPlanSnapshot.Project() 投影
+    // （快照为唯一定义源，BuildRun.Plan 为派生缓存）。
     internal static bool PlansMatch(BuildPlan persisted, BuildPlan prescribed)
         => string.Equals(persisted.Summary, prescribed.Summary, StringComparison.Ordinal)
             && persisted.RequireExplicitTaskCompletion == prescribed.RequireExplicitTaskCompletion
@@ -227,7 +230,7 @@ public sealed partial class BuildRunCoordinator
         OneCode.Core.Tools.CompletedToolCallRecord call,
         BuildPlanTask task)
     {
-        if (string.Equals(call.ToolName, "UpdatePlanStep", StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(call.ToolName, PlanToolNames.UpdateStep, StringComparison.OrdinalIgnoreCase)
             && TryReadStringArgument(call.ArgumentsJson, "stepId", out var stepId))
         {
             return string.Equals(stepId, task.Id, StringComparison.Ordinal);

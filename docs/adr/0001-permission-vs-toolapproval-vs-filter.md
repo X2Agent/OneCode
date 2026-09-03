@@ -1,4 +1,4 @@
-# ADR 0001: Permission Middleware vs ToolApproval vs FunctionInvocationFilter 职责边界
+# Permission Middleware vs ToolApproval vs FunctionInvocationFilter 职责边界
 
 **状态**: Accepted
 **日期**: 2026-07-09
@@ -68,7 +68,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 
 1. `IsToolAllowed` 白名单过滤（超限只失败当前调用，保留批次完整性）
 2. 工具调用计数 + `MaxToolCalls` 上限（被拒绝的调用不计入）
-3. 权限检查（`PermissionChecker.CheckAsync`，Allow/Deny/Ask/Passthrough 四路决策）
-4. 审批路由：Ask/Passthrough → MAF `ToolApprovalAgent` 或 inline `ApprovalHandler`（`IApprovalBroker` 抽象，见 ADR 0003 现状注记）
+3. 权限检查（`PermissionChecker.CheckAsync`，Allow/Deny/Ask 三路决策）
+4. 审批路由：Ask → MAF `ToolApprovalAgent` 或 inline `ApprovalBroker`（`IApprovalBroker` 抽象，见「M4 完全事件驱动审批」现状注记）
 
 观测性中间件（`RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking）仍为无决策权的 `.Use()` 拦截器，与本 ADR 约束一致。

@@ -2,6 +2,7 @@ using OneCode.Core.Config;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.Runtime;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Tui;
@@ -201,7 +202,7 @@ public sealed class TeamRunRecoveryTests : IAsyncLifetime
         => new(
             store,
             new TeamRunStateMachine(),
-            new TeamQualityGateRunner([]),
+            new WorkflowQualityGateRunner([]),
             new DeliveryReportBuilder(),
             fingerprintProvider);
 

@@ -37,7 +37,8 @@ public static partial class Constants
 
     public static class Urls
     {
-        public const string McpRegistry = "https://registry.smithery.ai";
+        /// <summary>Official MCP Registry (Anthropic/GitHub/PulseMCP/Microsoft), unauthenticated read-only API.</summary>
+        public const string McpRegistry = "https://registry.modelcontextprotocol.io";
     }
 
     public static class Subdirs

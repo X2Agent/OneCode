@@ -1,10 +1,9 @@
 using System.ComponentModel;
 using OneCode.App.Query;
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.PlanMode;
 using OneCode.Core.PlanMode;
-using OneCode.Core.Tasks;
-using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 
 namespace OneCode.App.Tools;
 
@@ -12,7 +11,7 @@ namespace OneCode.App.Tools;
 public sealed class PlanExecutionTool(
     IPlanWorkflowApplicationService workflowService,
     PlanCardPublisher publisher,
-    ITaskService taskService)
+    BuildTaskLinker taskLinker)
 {
     [Description("Persist an approved-plan step status. Completed steps require concrete evidence; failed steps require an error.")]
     public async Task<ToolResult> UpdatePlanStepAsync(
@@ -36,9 +35,10 @@ public sealed class PlanExecutionTool(
 
         try
         {
-            ReconcileLinkedBuildTasks(context.SessionId, context.Workflow);
-            var linkedTask = GetLinkedBuildTask(context.SessionId, stepId);
-            ValidateLinkedTaskDependencies(linkedTask, parsed.Value);
+            var buildRunScope = ResolveBuildRunScope();
+            taskLinker.ReconcilePlanStepProjections(context.SessionId.ToString(), buildRunScope, context.Workflow);
+            var linkedTask = taskLinker.GetLinkedPlanTask(context.SessionId.ToString(), buildRunScope, stepId);
+            taskLinker.ValidatePlanStepDependencies(linkedTask, parsed.Value);
             var commandId = Guid.NewGuid().ToString("N");
             var result = await workflowService.UpdateStepAsync(new UpdatePlanStepCommand(
                 commandId,
@@ -48,11 +48,12 @@ public sealed class PlanExecutionTool(
                 stepId,
                 parsed.Value,
                 evidence,
-                error), ct).ConfigureAwait(false);
+                error,
+                context.Workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false);
             var execution = result.Workflow.StepExecutions.Single(item =>
                 string.Equals(item.StepId, stepId, StringComparison.Ordinal));
-            var projectedTask = GetLinkedBuildTask(context.SessionId, stepId);
-            ProjectLinkedBuildTask(
+            var projectedTask = taskLinker.GetLinkedPlanTask(context.SessionId.ToString(), buildRunScope, stepId);
+            taskLinker.ProjectPlanStep(
                 projectedTask,
                 execution,
                 $"{result.Workflow.Id}:{result.Workflow.Version}:{stepId}");
@@ -66,7 +67,8 @@ public sealed class PlanExecutionTool(
                     context.SessionId,
                     result.Workflow.Id,
                     context.RunId,
-                    BuildExecutionSummary(result.Workflow)), ct).ConfigureAwait(false);
+                    BuildExecutionSummary(result.Workflow),
+                    context.Workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false);
                 publisher.Publish(completion.Workflow);
                 return ToolResult.JsonSuccess(new
                 {
@@ -127,7 +129,8 @@ public sealed class PlanExecutionTool(
                 context.RunId,
                 passed,
                 evidence,
-                summary), ct).ConfigureAwait(false);
+                summary,
+                context.Workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false);
             publisher.Publish(result.Workflow);
             return ToolResult.JsonSuccess(new
             {
@@ -142,113 +145,10 @@ public sealed class PlanExecutionTool(
         }
     }
 
-    private void ReconcileLinkedBuildTasks(SessionId sessionId, PlanWorkflow workflow)
-    {
-        var byId = workflow.StepExecutions.ToDictionary(
-            execution => execution.StepId,
-            StringComparer.Ordinal);
-        var orderedIds = TopologicalStepIds(workflow);
-        foreach (var stepId in orderedIds)
-        {
-            var execution = byId[stepId];
-            var task = GetLinkedBuildTask(sessionId, execution.StepId);
-            var projectionKey = $"{workflow.Id}:{workflow.Version}:{execution.StepId}";
-            ProjectLinkedBuildTask(task, execution, projectionKey);
-        }
-    }
-
-    private static IReadOnlyList<string> TopologicalStepIds(PlanWorkflow workflow)
-    {
-        var definitions = workflow.ApprovedSnapshot?.Steps.ToDictionary(
-            step => step.Id,
-            StringComparer.Ordinal)
-            ?? throw new PlanTransitionException(
-                $"Plan '{workflow.Id}' has no approved step definitions for Build task reconciliation.");
-
-        // 执行引用的 step 必须已定义（与原 Visit 抛错语义一致）
-        foreach (var execution in workflow.StepExecutions)
-        {
-            if (!definitions.ContainsKey(execution.StepId))
-                throw new PlanTransitionException(
-                    $"Approved plan step '{execution.StepId}' was not found during reconciliation.");
-        }
-
-        var result = WorkflowTopology.DepthFirstOrder(
-            workflow.StepExecutions,
-            execution => execution.StepId,
-            execution => definitions.TryGetValue(execution.StepId, out var definition)
-                ? definition.DependsOn
-                : []);
-        if (result.MissingDependencies is { Count: > 0 })
-            throw new PlanTransitionException(
-                $"Approved plan step '{result.MissingDependencies[0]}' was not found during reconciliation.");
-        return result.Ordered.Select(execution => execution.StepId).ToArray();
-    }
-
-    private TaskItem GetLinkedBuildTask(SessionId sessionId, string stepId)
-    {
-        var buildRunId = OneCodeAgentRunContext.CurrentBuildRunId
-            ?? throw new PlanTransitionException("Plan execution has no active BuildRun scope.");
-        return taskService.ListTasks(
-                conversationId: sessionId.ToString(),
-                buildRunId: buildRunId,
-                exactScope: true)
-            .SingleOrDefault(item =>
-                item.Metadata?.ExtraProperties?.TryGetValue("BuildPlanTaskId", out var mappedId) == true
-                && string.Equals(mappedId, stepId, StringComparison.Ordinal))
-            ?? throw new PlanTransitionException(
-                $"Approved plan step '{stepId}' has no persistent Build task mapping.");
-    }
-
-    private void ValidateLinkedTaskDependencies(
-        TaskItem task,
-        PlanStepExecutionStatus status)
-    {
-        if (status is not (PlanStepExecutionStatus.InProgress or PlanStepExecutionStatus.Completed))
-            return;
-
-        var unresolved = task.BlockedBy
-            .Where(dependencyId => taskService.GetTask(dependencyId)?.Status != TaskStatus.Completed)
-            .ToArray();
-        if (unresolved.Length > 0)
-        {
-            throw new PlanTransitionException(
-                $"Approved plan step cannot advance because persistent Build task '{task.Id}' is blocked by: {string.Join(", ", unresolved)}.");
-        }
-    }
-
-    private void ProjectLinkedBuildTask(
-        TaskItem task,
-        PlanStepExecution execution,
-        string projectionKey)
-    {
-        var taskStatus = execution.Status switch
-        {
-            PlanStepExecutionStatus.Pending => TaskStatus.Pending,
-            PlanStepExecutionStatus.InProgress => TaskStatus.InProgress,
-            PlanStepExecutionStatus.Completed => TaskStatus.Completed,
-            PlanStepExecutionStatus.Failed => TaskStatus.Failed,
-            PlanStepExecutionStatus.Skipped => TaskStatus.Completed,
-            PlanStepExecutionStatus.Cancelled => TaskStatus.Cancelled,
-            _ => throw new PlanTransitionException($"Unsupported plan step status '{execution.Status}'."),
-        };
-        var output = execution.Status == PlanStepExecutionStatus.Failed
-            ? execution.Error
-            : execution.Evidence;
-        var projected = taskService.ProjectTaskStatus(
-            task.Id,
-            taskStatus,
-            output,
-            projectionKey,
-            requireCompletedDependencies: execution.Status is
-                PlanStepExecutionStatus.InProgress or PlanStepExecutionStatus.Completed);
-        if (!projected.Succeeded)
-        {
-            throw new PlanTransitionException(
-                projected.Error
-                ?? $"Persistent Build task '{task.Id}' could not project plan step state '{execution.Status}'.");
-        }
-    }
+    /// <summary>Plan 执行的持久化任务作用域：当前 BuildRun（ambient 上下文，缺失即 fail-closed）。</summary>
+    private static string ResolveBuildRunScope()
+        => OneCodeAgentRunContext.CurrentBuildRunId
+           ?? throw new PlanTransitionException("Plan execution has no active BuildRun scope.");
 
     private async Task<(SessionId SessionId, PlanWorkflow Workflow, string RunId)> ResolveContextAsync(
         CancellationToken ct)

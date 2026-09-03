@@ -39,8 +39,9 @@ public sealed record McpServerDefinition(
         // type inference in the parser (URL prefix detection).
         McpTransportType.WebSocket => !string.IsNullOrWhiteSpace(Url),
         // In-process servers are registered programmatically; a non-empty identifier
-        // (Url or Command slot) is sufficient — runtime factories in McpConnectionManager
-        // provide the actual implementation.
+        // (Url or Command slot) is sufficient. Note: InProcess transport has no runtime
+        // connection branch yet in McpConnectionManager (falls through to the default
+        // warning) — reserved for future same-process embedding.
         McpTransportType.InProcess => !string.IsNullOrWhiteSpace(Url) || !string.IsNullOrWhiteSpace(Command),
         _ => false
     };

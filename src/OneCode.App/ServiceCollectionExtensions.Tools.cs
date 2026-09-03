@@ -8,6 +8,7 @@ using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Mcp;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Search;
+using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Automation;
@@ -25,7 +26,6 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<ILspNotifier, LspNotifier>();
         services.AddSingleton<McpConnectionManager>();
         services.AddSingleton<IMcpConnectionManager>(sp => sp.GetRequiredService<McpConnectionManager>());
-        services.AddSingleton<IBrowserPageRenderer, McpBrowserGateway>();
 
         services.AddSingleton<TaskContextProvider>();
 
@@ -128,6 +128,7 @@ public static partial class ServiceCollectionExtensions
         // approval is a persisted command. PlanExclusive: excluded from Build runs — the
         // approved-plan Build run must not re-plan via SubmitPlan (ToolCapabilityResolver
         // enforces this boundary).
+        services.AddSingleton<OrchestrationEventBus>();
         services.AddSingleton<PlanCardPublisher>();
         services.AddTool<CreatePlanTool>("SubmitPlan", nameof(CreatePlanTool.SubmitPlanAsync), ToolRisk.Safe, searchHint: "write and submit the finalized plan for persisted user approval",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed | ToolCategory.PlanExclusive);
@@ -135,10 +136,10 @@ public static partial class ServiceCollectionExtensions
         // Approved Build runs must persist structured progress and verification evidence.
         // CompletePlanExecution is auto-derived by the orchestration layer (see PlanExecutionTool)
         // when every step reaches a terminal state — no longer exposed to the LLM.
-        services.AddTool<PlanExecutionTool>("UpdatePlanStep", nameof(PlanExecutionTool.UpdatePlanStepAsync), ToolRisk.Safe,
+        services.AddTool<PlanExecutionTool>(PlanToolNames.UpdateStep, nameof(PlanExecutionTool.UpdatePlanStepAsync), ToolRisk.Safe,
             searchHint: "update approved plan step execution status", loadPolicy: ToolLoadPolicy.Always,
             keywords: ["plan", "step", "progress"]);
-        services.AddTool<PlanExecutionTool>("CompletePlanVerification", nameof(PlanExecutionTool.CompletePlanVerificationAsync), ToolRisk.Safe,
+        services.AddTool<PlanExecutionTool>(PlanToolNames.CompleteVerification, nameof(PlanExecutionTool.CompletePlanVerificationAsync), ToolRisk.Safe,
             searchHint: "persist approved plan verification evidence", loadPolicy: ToolLoadPolicy.Always,
             keywords: ["plan", "verification", "evidence"]);
 
@@ -149,6 +150,14 @@ public static partial class ServiceCollectionExtensions
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["mcp", "resource"]);
         services.AddTool<ReadMcpResourceTool>("ReadMcpResource", nameof(ReadMcpResourceTool.ReadResourceAsync), ToolRisk.ReadOnly, searchHint: "read an MCP resource",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["mcp", "resource"]);
+        // BrowserFetch：以能力命名的一等浏览器工具（与 WebFetch 对仗），模型感知不到 MCP。
+        // 一次调用封装 SSRF 校验 → 按需连接内置 playwright → navigate+snapshot；
+        // 连接副作用经 Dynamic 风险 Conditional 审批对用户可见。Always 加载：
+        // WebFetch 的降级 hint 必须在同一轮就能落地，不能依赖下一轮的目录装配。
+        services.AddTool<BrowserFetchTool>("BrowserFetch", nameof(BrowserFetchTool.FetchAsync), ToolRisk.Dynamic,
+            concurrency: false, searchHint: "render a JavaScript-only page in a real headless browser",
+            loadPolicy: ToolLoadPolicy.Always);
+
 
         // ToolSearch (needs runtime metadata access)
         services.AddToolInstance("ToolSearch",

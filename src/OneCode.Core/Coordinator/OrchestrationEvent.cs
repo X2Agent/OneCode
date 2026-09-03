@@ -1,5 +1,7 @@
+using OneCode.Core.Build;
 using OneCode.Core.Errors;
 using OneCode.Core.Permissions;
+using OneCode.Core.PlanMode;
 
 namespace OneCode.Core.Coordinator;
 
@@ -87,4 +89,18 @@ public abstract record OrchestrationEvent
 
     /// <summary>用户在澄清/审批交互中给出的回答回显，供 TUI 写入会话记录。</summary>
     public sealed record TeamUserResponse(string TeamName, string Response) : OrchestrationEvent;
+
+    /// <summary>
+    /// Plan 聚合投影变更（事件通道统一）：计划提交/审批/执行阶段推进时
+    /// 由 <c>PlanCardPublisher</c> 经统一领域事件总线发射。Workflow 为唯一权威载荷，
+    /// 计划卡片投影（标题/步骤/阶段/文档路径）由 TUI 宿主从聚合与 revision store 异步解析。
+    /// </summary>
+    public sealed record PlanProjectionChanged(PlanWorkflow Workflow) : OrchestrationEvent;
+
+    /// <summary>
+    /// Build 聚合状态投影变更（事件通道统一）：受控 Build attempt 的
+    /// durable 状态变化时由 <c>ControlledBuildAttemptContext.BuildStateEventFactory</c> 发射，
+    /// 流式管道（StreamingSession）解信封为流内 BuildRunStateEvent（QueryEvent 契约不变）。
+    /// </summary>
+    public sealed record BuildStateProjectionChanged(BuildRun Run) : OrchestrationEvent;
 }

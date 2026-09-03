@@ -44,6 +44,18 @@ public sealed class ProcessRunnerTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [Fact]
+    public async Task CommandExistsAsync_UnknownCommand_ReturnsFalseWithoutThrowing()
+    {
+        // CliWrap 将进程启动失败包装为外层 Win32Exception(0x80004005) + 内层 Win32Exception(2)，
+        // 过滤器必须能识别该形态：命令探测应静默降级返回 false，而非抛出异常。
+        var sut = new ProcessRunner();
+
+        var exists = await sut.CommandExistsAsync("definitely-not-a-real-command-0e1f2c");
+
+        exists.Should().BeFalse();
+    }
+
     private static string GetSleepCommand()
         => OperatingSystem.IsWindows() ? "ping" : "sleep";
 

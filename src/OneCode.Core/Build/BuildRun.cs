@@ -1,5 +1,6 @@
 using OneCode.Core.Domain;
 using OneCode.Core.Tools;
+using OneCode.Core.Workflows;
 
 namespace OneCode.Core.Build;
 
@@ -7,7 +8,7 @@ namespace OneCode.Core.Build;
 /// BuildRun aggregate root — tracks the lifecycle of a single Build mode execution.
 /// Owned by <c>BuildRunCoordinator</c>, not by ChatService or MainAgentRunner.
 /// </summary>
-public sealed record BuildRun
+public sealed record BuildRun : IWorkflowRun
 {
     public required BuildRunId Id { get; init; }
     public required SessionId? ConversationId { get; init; }
@@ -15,6 +16,12 @@ public sealed record BuildRun
     public string IntakePrompt { get; init; } = string.Empty;
     public BuildScopeSnapshot? ProposedScope { get; init; }
     public BuildScopeSnapshot? Scope { get; init; }
+    /// <summary>
+    /// The persisted BuildPlan derived from the approved plan snapshot
+    /// (<see cref="PlanMode.ApprovedPlanSnapshot.Project"/>). Derived cache, not the
+    /// definition source: resume paths validate it against the prescribed plan
+    /// (PlansMatch via BuildResumePolicy).
+    /// </summary>
     public BuildPlan? Plan { get; init; }
     public RequirementAssessment? Assessment { get; init; }
     public IReadOnlyList<string> ClarificationQuestions { get; init; } = [];
@@ -32,7 +39,7 @@ public sealed record BuildRun
     public string? WorkspaceFingerprint { get; init; }
     public string? CommitWorkspaceFingerprint { get; init; }
     public BuildRunMetrics Metrics { get; init; } = BuildRunMetrics.Empty;
-    public BuildTerminalReason? TerminalReason { get; init; }
+    public RunTerminalReason? TerminalReason { get; init; }
     public string? FailureSummary { get; init; }
     public bool TransactionCommitted { get; init; }
     public bool TransactionRolledBack { get; init; }
@@ -249,7 +256,7 @@ public sealed record BuildRunMetrics(
 public sealed record BuildRunResult(
     BuildRunId RunId,
     BuildRunState State,
-    BuildTerminalReason TerminalReason,
+    RunTerminalReason TerminalReason,
     string? Summary,
     IReadOnlyList<string> ChangedFiles,
     IReadOnlyList<BuildPlanTask> Tasks,

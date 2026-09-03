@@ -38,6 +38,7 @@ public static class InfrastructureServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddHyperlightCodeAct(this IServiceCollection services)
     {
+        services.AddSingleton<IHyperlightRuntimeProbe, HyperlightRuntimeProbe>();
         services.AddSingleton<HyperlightCodeActService>();
         services.AddSingleton<IHyperlightCodeActService>(sp =>
             sp.GetRequiredService<HyperlightCodeActService>());
@@ -61,8 +62,9 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Handler order: last AddHttpMessageHandler is outermost.
         // Desired: Identity → Passback → Sanitizing → Proxy HttpClientHandler
-        // （Passback 在请求侧为 DeepSeek thinking 补写 reasoning_content，
-        // 位于 Sanitizing 外层，不影响响应侧清洗。）
+        // 这两个 handler 必须留在 HTTP 层：Passback 注入的 reasoning_content 不在
+        // OpenAI SDK 请求模型中（MEAI 转换即丢弃）；Sanitizing 必须在 SDK 反序列化之前
+        // 修复退化响应。
         services.AddHttpClient(Constants.HttpClientNames.OpenAI)
             .ConfigurePrimaryHttpMessageHandler(CreateProxyAwareHandler)
             .AddHttpMessageHandler<OpenAiResponseSanitizingHandler>()

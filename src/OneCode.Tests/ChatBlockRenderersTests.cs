@@ -40,7 +40,7 @@ public sealed class ChatBlockRenderersTests
             ["明确目标", "确认验收"],
             0,
             1,
-            OneCode.Core.Build.BuildTerminalReason.ClarificationRequired);
+            OneCode.Core.Workflows.RunTerminalReason.ClarificationRequired);
 
         var lines = ChatBlockRenderers.RenderBuildRunPanel(state);
         var text = string.Join("\n", lines.Select(line => line.FullText));
@@ -70,7 +70,7 @@ public sealed class ChatBlockRenderersTests
             [],
             1,
             1,
-            OneCode.Core.Build.BuildTerminalReason.AgentException,
+            OneCode.Core.Workflows.RunTerminalReason.AgentException,
             "failure"));
 
         lines[0].FullText.Should().Contain(expectedLabel);
@@ -184,7 +184,7 @@ public sealed class ChatBlockRenderersTests
         var result = new OneCode.Core.Build.BuildRunResult(
             new OneCode.Core.Build.BuildRunId("br-delivery"),
             OneCode.Core.Build.BuildRunState.Completed,
-            OneCode.Core.Build.BuildTerminalReason.Completed,
+            OneCode.Core.Workflows.RunTerminalReason.Completed,
             "done",
             ["Foo.cs"],
             [],

@@ -50,16 +50,6 @@ public sealed class WorkingModeTests
         c.Mode.Should().Be(WorkingMode.Build);
     }
 
-    [Theory]
-    [InlineData(WorkingMode.Build, "BUILD")]
-    [InlineData(WorkingMode.Plan, "PLAN")]
-    [InlineData(WorkingMode.Team, "TEAM")]
-    public void ModeTag_ReflectsModeOnly(WorkingMode mode, string expected)
-    {
-        // 编排模式是团队 YAML 的固定属性，控制器不再持有策略状态。
-        new WorkingModeController(mode).ModeTag.Should().Be(expected);
-    }
-
     [Fact]
     public void ModeChanged_FiresOnModeTransition()
     {
@@ -115,12 +105,5 @@ public sealed class WorkingModeTests
 
         statusBar.IsBusy.Should().BeTrue();
         statusBar.CurrentActivity.Should().Be("执行 /review");
-    }
-
-    [Fact]
-    public void ModeTag_TeamMode_IsPlainTeam()
-    {
-        new WorkingModeController(WorkingMode.Team)
-            .ModeTag.Should().Be("TEAM");
     }
 }

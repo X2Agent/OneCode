@@ -160,44 +160,45 @@ internal sealed class TeamWorkflowRunner(
         IReadOnlyList<string>? taskAllowedTools = null)
     {
         var maxTurns = config.MaxTurns;
-        var roundsRun = 0;
-        var activity = new GroupChatActivityTracker();
-        Action<OrchestrationEvent>? trackedSink = eventSink is null
-            ? null
-            : evt =>
-            {
-                // 发言（TextDelta）与工具活动都计入，避免纯工具轮被误判为共识。
-                if (evt is OrchestrationEvent.TextDelta or OrchestrationEvent.ToolStart)
-                    activity.OnActivity();
-                eventSink(evt);
-            };
         var agents = new AIAgent[config.Members.Count];
         for (int i = 0; i < config.Members.Count; i++)
             agents[i] = await agentFactory.BuildAgentAsync(
-                    config.Members[i], transaction, cwd, trackedSink, taskAllowedTools)
+                    config.Members[i], transaction, cwd, eventSink, taskAllowedTools)
                 .ConfigureAwait(false);
 
-        // 共识提前终止：预算过半后，若两次检查间无任何新发言/工具活动，判定讨论已收敛。
-        // 只提前、不延后——maxTurns 仍是硬上限。保守阈值避免对纯工具轮误判。
+        // 共识提前终止：预算过半后，若最后一条实质发言无新文本/工具活动，判定讨论已收敛。
+        // 只提前、不延后——maxTurns 仍是硬上限。工具调用（FunctionCallContent）计入活动，
+        // 避免纯工具轮被误判为共识（对应 MAF shouldTerminateFunc 传入的完整 chat history）。
         var consensusMinRounds = Math.Max(2, maxTurns / 2);
         var workflow = AgentWorkflowBuilder.CreateGroupChatBuilderWith(
                 agentList => new RoundRobinGroupChatManager(
                     agentList,
-                    (_, _, _) =>
+                    (manager, history, _) =>
                     {
-                        if (roundsRun++ >= maxTurns)
+                        // 硬上限：IterationCount 是已完成的迭代数（第 N 次检查时等于 N-1），>= maxTurns 即达轮数上限。
+                        if (manager.IterationCount >= maxTurns)
                             return ValueTask.FromResult(true);
-                        return ValueTask.FromResult(
-                            roundsRun > consensusMinRounds && activity.HasSettled());
-                    }))
+
+                        if (manager.IterationCount < consensusMinRounds)
+                            return ValueTask.FromResult(false);
+
+                        var lastAssistant = history.LastOrDefault(message => message.Role == ChatRole.Assistant);
+                        var settled = lastAssistant is not null
+                            && string.IsNullOrWhiteSpace(lastAssistant.Text)
+                            && !lastAssistant.Contents.OfType<FunctionCallContent>().Any();
+                        return ValueTask.FromResult(settled);
+                    })
+                    {
+                        // MAF 基类默认 MaximumIterationCount = 40；不显式设置时 maxTurns > 40 会被静默截断。
+                        MaximumIterationCount = Math.Max(1, maxTurns),
+                    })
             .AddParticipants(agents)
             .WithName(config.TeamName)
             .Build();
 
         var inputMessage = BuildInputMessage(goal, imagePaths);
         var (result, sessionId) = await ExecuteWorkflowAsync(
-            // R-1：workflow 层事件也走 trackedSink，与 agent pipeline 层共用同一活动统计源。
-            workflow, inputMessage, config.TeamName, "GroupChat", maxTurns, trackedSink, ct)
+            workflow, inputMessage, config.TeamName, "GroupChat", maxTurns, eventSink, ct)
             .ConfigureAwait(false);
 
         logger.LogInformation(
@@ -413,33 +414,5 @@ internal sealed class TeamWorkflowRunner(
         }
 
         return new ChatMessage(ChatRole.User, contents);
-    }
-}
-
-/// <summary>
-/// GroupChat 共识终止的活动计数器：统计成员发言与工具活动总数，
-/// 两次终止检查之间计数无增长即判定讨论已收敛。
-/// </summary>
-internal sealed class GroupChatActivityTracker
-{
-    private readonly object _gate = new();
-    private long _total;
-    private long _seenAtLastCheck;
-
-    public void OnActivity()
-    {
-        lock (_gate) _total++;
-    }
-
-    /// <summary>自上次检查无新活动返回 true；从未有过活动时不允许判收敛。</summary>
-    public bool HasSettled()
-    {
-        lock (_gate)
-        {
-            if (_total == 0) return false;
-            var settled = _total == _seenAtLastCheck;
-            _seenAtLastCheck = _total;
-            return settled;
-        }
     }
 }

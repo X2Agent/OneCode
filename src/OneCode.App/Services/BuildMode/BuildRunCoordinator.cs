@@ -1,4 +1,5 @@
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.Runtime;
 using OneCode.Core.Build;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 
@@ -87,7 +88,7 @@ public sealed partial class BuildRunCoordinator(
                 case BuildResumeAction.FingerprintDrift:
                     var blocked = transitions.Transition(existing, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
                     {
-                        TerminalReason = BuildTerminalReason.Blocked,
+                        TerminalReason = RunTerminalReason.Blocked,
                         FailureSummary = decision.FailureSummary,
                     };
                     return await SaveAndReloadAsync(
@@ -212,7 +213,7 @@ public sealed partial class BuildRunCoordinator(
         {
             var blocked = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
             {
-                TerminalReason = BuildTerminalReason.Blocked,
+                TerminalReason = RunTerminalReason.Blocked,
                 FailureSummary = "A non-terminal BuildRun is already marked committed; manual reconciliation is required.",
             };
             return await SaveAndReloadAsync(blocked, current.Version, ct).ConfigureAwait(false);
@@ -287,7 +288,7 @@ public sealed partial class BuildRunCoordinator(
             {
                 var blocked = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
                 {
-                    TerminalReason = BuildTerminalReason.Blocked,
+                    TerminalReason = RunTerminalReason.Blocked,
                     FailureSummary = "Workspace changed after the plan was generated; re-baselining is required before approval.",
                     PlanRejectionReason = "workspace-drift",
                 };
@@ -325,7 +326,7 @@ public sealed partial class BuildRunCoordinator(
 
         var blocked = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
         {
-            TerminalReason = BuildTerminalReason.Blocked,
+            TerminalReason = RunTerminalReason.Blocked,
             FailureSummary = $"Plan was rejected by the user: {reason}",
             PlanRejectionReason = reason,
         };
@@ -384,7 +385,7 @@ public sealed partial class BuildRunCoordinator(
         {
             var blocked = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
             {
-                TerminalReason = BuildTerminalReason.Blocked,
+                TerminalReason = RunTerminalReason.Blocked,
                 FailureSummary = "Workspace changed after final validation and before commit confirmation.",
             };
             return await SaveAndReloadAsync(blocked, current.Version, ct).ConfigureAwait(false);
@@ -449,14 +450,14 @@ public sealed partial class BuildRunCoordinator(
             },
         };
 
-        if (result.TerminalReason != BuildTerminalReason.Completed)
+        if (result.TerminalReason != RunTerminalReason.Completed)
         {
             var target = result.TerminalReason switch
             {
-                BuildTerminalReason.Cancelled => BuildRunState.Cancelled,
-                BuildTerminalReason.TurnLimitReached => BuildRunState.LimitReached,
-                BuildTerminalReason.BudgetExceeded => BuildRunState.BudgetExceeded,
-                BuildTerminalReason.PermissionRefused => BuildRunState.Blocked,
+                RunTerminalReason.Cancelled => BuildRunState.Cancelled,
+                RunTerminalReason.TurnLimitReached => BuildRunState.LimitReached,
+                RunTerminalReason.BudgetExceeded => BuildRunState.BudgetExceeded,
+                RunTerminalReason.PermissionRefused => BuildRunState.Blocked,
                 _ => BuildRunState.Failed,
             };
             current = transitions.Transition(current, target, DateTimeOffset.UtcNow) with
@@ -474,7 +475,7 @@ public sealed partial class BuildRunCoordinator(
         {
             current = transitions.Transition(current, BuildRunState.Failed, DateTimeOffset.UtcNow) with
             {
-                TerminalReason = BuildTerminalReason.ValidationFailed,
+                TerminalReason = RunTerminalReason.ValidationFailed,
                 FailureSummary = result.ValidationFailureSummary ?? "Final validation did not pass.",
             };
             taskLinker.MarkLinkedTasksTerminal(current, TaskStatus.Failed);
@@ -491,7 +492,7 @@ public sealed partial class BuildRunCoordinator(
         {
             current = transitions.Transition(current, BuildRunState.Failed, DateTimeOffset.UtcNow) with
             {
-                TerminalReason = BuildTerminalReason.ValidationFailed,
+                TerminalReason = RunTerminalReason.ValidationFailed,
                 FailureSummary = ex.Message,
             };
             taskLinker.MarkLinkedTasksTerminal(current, TaskStatus.Failed);
@@ -506,7 +507,7 @@ public sealed partial class BuildRunCoordinator(
             TransactionCommitted = current.ChangedFiles.Count == 0,
             CommitWorkspaceFingerprint = commitFingerprint,
             DeliveryManifest = CreateDeliveryManifest(current),
-            TerminalReason = BuildTerminalReason.Completed,
+            TerminalReason = RunTerminalReason.Completed,
         };
         return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
     }

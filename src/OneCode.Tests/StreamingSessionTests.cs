@@ -1,5 +1,7 @@
 using OneCode.App.Query;
 using OneCode.Core.Build;
+using OneCode.Core.Coordinator;
+using OneCode.Core.Domain;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,7 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="StreamingSession"/> — the ADR 0006 acceptance requires the
+/// Unit tests for <see cref="StreamingSession"/> — the acceptance requires the
 /// event-digestion logic (sequence, CallId dedup, token accumulation, suggestion extraction,
 /// turn boundaries) to be verifiable without the full ChatService pipeline.
 /// </summary>
@@ -172,17 +174,41 @@ public sealed class StreamingSessionTests
     }
 
     [Fact]
-    public void Digest_ApprovalAndBuildRunEvents_PassThroughUnchanged()
+    public void Digest_ApprovalEvent_PassesThroughUnchanged()
     {
+        // Stage 4c：durableStateObserver → BuildRunStateEvent 直通透传退役——受控 attempt
+        // 改发 OrchestrationEvent.BuildStateProjectionChanged，由 Digest 解信封为流内
+        // BuildRunStateEvent（见 Digest_OrchestrationBuildProjection_IsUnwrappedToStreamContract）。
         var sut = CreateSut();
         var approval = new ApprovalRequestEvent("req-1", "Write", "path=src/x.cs");
-        var buildState = new BuildRunStateEvent(new BuildRunId("br-1"), BuildRunState.Implementing, 3, []);
 
-        var events = DigestAll(sut, approval, buildState);
+        var events = DigestAll(sut, approval);
 
-        events.Should().HaveCount(2);
-        events[0].Should().Be(approval, "approval requests pass straight through to the TUI");
-        events[1].Should().Be(buildState, "BuildRun state projections pass through untouched");
+        events.Should().ContainSingle()
+            .Which.Should().Be(approval, "approval requests pass straight through to the TUI");
+    }
+
+    [Fact]
+    public void Digest_OrchestrationBuildProjection_IsUnwrappedToStreamContract()
+    {
+        // 受控 attempt 以 OrchestrationEvent.BuildStateProjectionChanged
+        // 统一信封发射，Digest 为其解信封唯一投影点——流内契约仍是 BuildRunStateEvent。
+        var sut = CreateSut();
+        var run = new BuildRun
+        {
+            Id = new BuildRunId("br-1"),
+            ConversationId = SessionId.NewId(),
+            State = BuildRunState.Verifying,
+            SequenceNumber = 3,
+            Version = 4,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var events = DigestAll(sut, new OrchestrationEvent.BuildStateProjectionChanged(run));
+
+        events.Should().ContainSingle().Which.Should().BeOfType<BuildRunStateEvent>()
+            .Which.State.Should().Be(BuildRunState.Verifying);
     }
 
     [Fact]

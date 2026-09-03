@@ -74,12 +74,6 @@ public sealed record AgentPipelineOptions
 
     public IApprovalBroker? ApprovalBroker { get; init; }
 
-    /// <summary>
-    /// Team 路径 inline 审批委托。当 EnableToolApproval:false 且 PermissionDecision 为 Ask/Passthrough 时，
-    /// 由权限中间件调用此委托进行 inline 审批。Main 路径不使用此字段（走 MAF ToolApprovalAgent 事件流）。
-    /// </summary>
-    public Func<string, System.Text.Json.JsonElement, CancellationToken, Task<bool>>? ApprovalHandler { get; init; }
-
     // Permission context fields
     // These populate ToolPermissionContext so that PermissionChecker strategies
     // can evaluate rules and validate paths against additional directories.
@@ -321,12 +315,11 @@ public static class AgentPipelineBuilder
         //
         // Architecture (single-gate model):
         //   Permission middleware (CheckPermissionAndExecuteAsync) handles Allow/Deny.
-        //   Ask/Passthrough → 放行到此层，由 AutoApprovalRules 决定：
+        //   Ask → 放行到此层，由 AutoApprovalRules 决定：
         //     匹配规则 → 自动放行
         //     不匹配 → 产生 ToolApprovalRequestContent → MainAgentRunner 事件驱动审批 → 续跑
         //
-        // Main 路径通过 options.AutoApprovalRules 传入（含 AgentSkillsProvider 规则）；
-        // Worker/Team 通过 AutoApprovalRulesFactory 从 Profile 兜底生成。
+        // 所有路径统一由 AutoApprovalRulesFactory 生成（含 AgentSkillsProvider 只读技能工具规则 + Profile 驱动规则）。
         if (options.EnableToolApproval)
         {
             var rules = options.AutoApprovalRules

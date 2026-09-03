@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Tui;
-using OneCode.Core.Build;
+using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
@@ -107,7 +107,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("agent failed");
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         persisted!.State.Should().Be(GoalRunState.Failed);
-        persisted.TerminalReason.Should().Be(BuildTerminalReason.AgentException);
+        persisted.TerminalReason.Should().Be(RunTerminalReason.AgentException);
     }
 
     [Fact]

@@ -210,16 +210,14 @@ public static class PermissionCheckHelpers
     }
 
     /// <summary>
-    /// 为 Bubble/DontAsk 变体包装 EvaluateRules 结果。
+    /// 为 DontAsk 变体包装 EvaluateRules 结果。
     /// - DenyAsk：Ask → Deny
-    /// - Bubble：Ask → Ask + BubbleRequest 原因
     /// - Standard：原样返回
     /// </summary>
     internal static PermissionCheckResult ApplyAskPolicy(
         PermissionCheckResult result,
         AskDecisionPolicy askPolicy,
-        string toolName,
-        JsonElement toolInput)
+        string toolName)
     {
         if (result.Decision != PermissionDecision.Ask)
             return result;
@@ -227,15 +225,6 @@ public static class PermissionCheckHelpers
         if (askPolicy == AskDecisionPolicy.DenyAsk)
             return PermissionCheckResult.Deny(
                 $"Tool '{toolName}' is not in the allow list (don't-ask mode).");
-
-        if (askPolicy == AskDecisionPolicy.Bubble)
-            return new PermissionCheckResult
-            {
-                Decision = PermissionDecision.Ask,
-                DecisionReason = new PermissionDecisionReason.BubbleRequest(
-                    toolName,
-                    ExtractInputString(toolName, toolInput)),
-            };
 
         return result;
     }

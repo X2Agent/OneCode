@@ -105,7 +105,7 @@ public sealed class AutoDreamService : BackgroundService
 
     /// <summary>
     /// 主循环：每小时轮询 + 响应外部 Trigger() 信号。
-    /// 两者用 <see cref="Task.WhenAny"/> 同时等待，先到先执行。
+    /// 两者用 <c>Task.WhenAny</c> 同时等待，先到先执行。
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

@@ -34,7 +34,6 @@
     <PackageReference Include="Microsoft.Agents.AI.Workflows" />
     <PackageReference Include="Microsoft.Agents.AI.Hyperlight" />
     <PackageReference Include="Hyperlight.HyperlightSandbox.Api" />
-    <PackageReference Include="Hyperlight.HyperlightSandbox.Guest.Python" />
   </ItemGroup>
 
 </Project>

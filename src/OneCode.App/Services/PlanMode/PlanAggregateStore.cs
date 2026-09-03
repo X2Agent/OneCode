@@ -24,6 +24,25 @@ public interface IPlanAggregateStore
     Task SaveAsync(PlanAggregate aggregate, long expectedVersion, CancellationToken ct = default);
 
     /// <summary>
+    /// 原子声明 Workflow 持有权（与其余三模式内核语义一致）：
+    /// 新令牌必须严格大于磁盘当前令牌；Claim 成功后，不带令牌的
+    /// <see cref="SaveAsync"/> 一律拒绝。
+    /// </summary>
+    Task<PlanAggregate> ClaimWorkflowAsync(
+        SessionId sessionId,
+        PlanWorkflowId planId,
+        long fencingToken,
+        long expectedVersion,
+        CancellationToken ct = default);
+
+    /// <summary>携带当前 FencingToken 的保存；令牌与磁盘不一致时 fail-closed。</summary>
+    Task SaveFencedAsync(
+        PlanAggregate aggregate,
+        long expectedVersion,
+        long fencingToken,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Returns the markdown projection path for a plan revision
     /// (<c>{plansRoot}/{sessionId}/{planId}/revision-{revision:0000}.md</c>), written
     /// by <see cref="SaveAsync"/>. Used to surface the document location to users.
@@ -37,7 +56,8 @@ public interface IPlanAggregateStore
 /// </summary>
 public sealed class PlanAggregateStore : IPlanAggregateStore
 {
-    private const int SchemaVersion = 1;
+    /// <summary>v2 起写 WorkflowFencingToken（Plan fencing 接入）；v1 旧聚合兼容读。</summary>
+    private const int SchemaVersion = 2;
     private const int LockRetryDelayMilliseconds = 25;
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(15);
 
@@ -128,10 +148,70 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
             .ToArray();
     }
 
-    public async Task SaveAsync(
+    public Task SaveAsync(
         PlanAggregate aggregate,
         long expectedVersion,
         CancellationToken ct = default)
+        => SaveCoreAsync(aggregate, expectedVersion, requiredFencingToken: null, isClaim: false, ct);
+
+    public async Task<PlanAggregate> ClaimWorkflowAsync(
+        SessionId sessionId,
+        PlanWorkflowId planId,
+        long fencingToken,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        if (fencingToken <= 0)
+            throw new ArgumentOutOfRangeException(nameof(fencingToken));
+        var current = await LoadAsync(sessionId, ct).ConfigureAwait(false)
+            ?? throw new PlanTransitionException($"Plan aggregate '{planId}' was not found in session '{sessionId}'.");
+        if (current.Workflow.Id != planId)
+        {
+            throw new PlanTransitionException(
+                $"Plan aggregate in session '{sessionId}' belongs to workflow '{current.Workflow.Id}', not '{planId}'.");
+        }
+        if (current.Workflow.Version != expectedVersion)
+        {
+            throw new PlanConcurrencyException(
+                $"Plan aggregate version conflict for '{planId}': expected {expectedVersion}, actual {current.Workflow.Version}.");
+        }
+        if (current.Workflow.WorkflowFencingToken is { } existing && fencingToken <= existing)
+        {
+            throw new PlanConcurrencyException(
+                $"Plan workflow '{planId}' fencing token must increase monotonically (current {existing}, attempted {fencingToken}).");
+        }
+
+        var claimed = current with
+        {
+            Workflow = current.Workflow with
+            {
+                WorkflowFencingToken = fencingToken,
+                Version = current.Workflow.Version + 1,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+        };
+        await SaveCoreAsync(claimed, expectedVersion, fencingToken, isClaim: true, ct).ConfigureAwait(false);
+        return await LoadAsync(sessionId, ct).ConfigureAwait(false)
+            ?? throw new PlanTransitionException($"Plan aggregate '{planId}' disappeared after workflow claim.");
+    }
+
+    public Task SaveFencedAsync(
+        PlanAggregate aggregate,
+        long expectedVersion,
+        long fencingToken,
+        CancellationToken ct = default)
+    {
+        if (fencingToken <= 0)
+            throw new ArgumentOutOfRangeException(nameof(fencingToken));
+        return SaveCoreAsync(aggregate, expectedVersion, fencingToken, isClaim: false, ct);
+    }
+
+    private async Task SaveCoreAsync(
+        PlanAggregate aggregate,
+        long expectedVersion,
+        long? requiredFencingToken,
+        bool isClaim,
+        CancellationToken ct)
     {
         ValidateAggregate(aggregate);
         var path = GetAggregatePath(aggregate.Workflow.SessionId, aggregate.Workflow.Id);
@@ -148,6 +228,15 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
             throw new PlanConcurrencyException(
                 $"Plan aggregate version conflict for '{aggregate.Workflow.Id}': expected {expectedVersion}, actual {actualVersion}.");
         }
+
+        // fencing 内核语义与其余三模式一致：
+        // 已 claim 的聚合拒绝无令牌写入；fenced 写要求磁盘令牌与候选令牌一致。
+        WorkflowFencing.Validate(
+            current?.Workflow.WorkflowFencingToken,
+            aggregate.Workflow.WorkflowFencingToken,
+            requiredFencingToken,
+            isClaim,
+            "PlanWorkflow");
 
         var envelope = CreateEnvelope(aggregate);
         var content = JsonSerializer.Serialize(envelope, _jsonOptions);
@@ -199,8 +288,11 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
         var json = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
         var envelope = JsonSerializer.Deserialize<PlanAggregateEnvelope>(json, _jsonOptions)
             ?? throw new PlanTransitionException($"Plan aggregate '{path}' is empty or malformed.");
-        if (envelope.SchemaVersion != SchemaVersion)
+        if (envelope.SchemaVersion is not (1 or SchemaVersion))
+        {
+            // 不识别的 schema 一律 fail-closed（持久化兼容红线）。
             throw new PlanTransitionException($"Plan aggregate '{path}' uses unsupported schema {envelope.SchemaVersion}.");
+        }
 
         var payloadJson = JsonSerializer.Serialize(envelope.Aggregate, _jsonOptions);
         var checksum = ComputeChecksum(payloadJson);

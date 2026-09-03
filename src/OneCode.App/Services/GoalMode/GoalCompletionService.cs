@@ -1,6 +1,5 @@
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
-using OneCode.Core.Build;
 using OneCode.Core.Goals;
 
 
@@ -59,7 +58,7 @@ internal sealed class GoalCompletionService(
             var paused = current with
             {
                 State = GoalRunState.Paused,
-                TerminalReason = BuildTerminalReason.BudgetExceeded,
+                TerminalReason = RunTerminalReason.BudgetExceeded,
                 FailureSummary = "Goal execution paused: budget exhausted before completing required sub-goal(s).",
                 FinalValidation = report,
             };
@@ -239,7 +238,7 @@ internal sealed class GoalCompletionService(
         {
             State = GoalRunState.Completed,
             PublishReceipt = receipt,
-            TerminalReason = BuildTerminalReason.Completed,
+            TerminalReason = RunTerminalReason.Completed,
             FailureSummary = null,
         };
         await SaveAsync(completed, fencingToken, ct).ConfigureAwait(false);
@@ -258,8 +257,8 @@ internal sealed class GoalCompletionService(
             State = current.State == GoalRunState.Paused ? GoalRunState.Paused : GoalRunState.Failed,
             FinalValidation = report,
             TerminalReason = current.State == GoalRunState.Paused
-                ? BuildTerminalReason.BudgetExceeded
-                : BuildTerminalReason.ValidationFailed,
+                ? RunTerminalReason.BudgetExceeded
+                : RunTerminalReason.ValidationFailed,
             FailureSummary = failureSummary,
         };
         await SaveAsync(failed, fencingToken, ct).ConfigureAwait(false);

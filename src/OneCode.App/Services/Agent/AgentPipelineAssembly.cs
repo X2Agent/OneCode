@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware.Contracts;
@@ -73,7 +72,6 @@ public sealed class AgentPipelineAssembly(
             MaxToolCalls: options.MaxTurns,
             ToolLimitMessage: $"Maximum tool call limit ({options.MaxTurns}) reached.",
             IsToolAllowed: options.IsToolAllowed,
-            AutoApprovalRules: CreateAutoApprovalRules(),
             EnableToolApproval: options.ApprovalBroker is not null,
             ApprovalBroker: options.ApprovalBroker);
     }
@@ -85,17 +83,6 @@ public sealed class AgentPipelineAssembly(
     [
         new FileEditContract(workingDirectory),
     ];
-
-    /// <summary>
-    /// Mode-aware auto-approval rules for MAF ToolApprovalAgent.
-    /// Prepends MAF <see cref="AgentSkillsProvider"/> read-only tool rules.
-    /// </summary>
-    internal List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> CreateAutoApprovalRules()
-    {
-        var rules = AutoApprovalRulesFactory.Create(modeProvider.CurrentMode);
-        rules.Insert(0, AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule);
-        return rules;
-    }
 
     private Dictionary<string, AdditionalWorkingDirectory>? BuildAdditionalWorkingDirectories()
     {

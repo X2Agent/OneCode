@@ -4,6 +4,7 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
+using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Core.Tasks;
 using OneCode.Infrastructure.Build;
@@ -202,7 +203,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
             Path.GetTempPath());
 
         run.State.Should().Be(BuildRunState.Blocked);
-        run.TerminalReason.Should().Be(BuildTerminalReason.Blocked);
+        run.TerminalReason.Should().Be(RunTerminalReason.Blocked);
         run.FailureSummary.Should().Contain("澄清问题生成失败");
         run.FailureSummary.Should().Contain("model down");
     }
@@ -447,7 +448,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 100,
                 50,
                 3,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs"]));
         var completed = await sut.ConfirmCommitAsync(accepting.Id);
@@ -507,7 +508,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 100,
                 50,
                 3,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs"]));
         var completed = await sut.ConfirmCommitAsync(accepting.Id);
@@ -536,7 +537,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 100,
                 50,
                 3,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs"]));
 
@@ -571,7 +572,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 100,
                 50,
                 3,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs"]));
 
@@ -669,12 +670,12 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 0,
                 0,
                 1,
-                TerminalReason: BuildTerminalReason.Cancelled,
+                TerminalReason: RunTerminalReason.Cancelled,
                 TransactionRolledBack: true,
                 FinalValidationStatus: BuildValidationStatus.Cancelled));
 
         cancelled.State.Should().Be(BuildRunState.Cancelled);
-        cancelled.TerminalReason.Should().Be(BuildTerminalReason.Cancelled);
+        cancelled.TerminalReason.Should().Be(RunTerminalReason.Cancelled);
         cancelled.TransactionRolledBack.Should().BeTrue();
     }
 
@@ -696,13 +697,13 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 0,
                 0,
                 1,
-                TerminalReason: BuildTerminalReason.AgentException,
+                TerminalReason: RunTerminalReason.AgentException,
                 TransactionRolledBack: true,
                 FinalValidationStatus: BuildValidationStatus.Cancelled,
                 ValidationFailureSummary: "provider failed"));
 
         failed.State.Should().Be(BuildRunState.Failed);
-        failed.TerminalReason.Should().Be(BuildTerminalReason.AgentException);
+        failed.TerminalReason.Should().Be(RunTerminalReason.AgentException);
         failed.FailureSummary.Should().Be("provider failed");
     }
 
@@ -724,7 +725,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 0,
                 0,
                 1,
-                TerminalReason: BuildTerminalReason.ValidationFailed,
+                TerminalReason: RunTerminalReason.ValidationFailed,
                 TransactionRolledBack: true,
                 FinalValidationStatus: BuildValidationStatus.Skipped,
                 ModifiedFiles: ["Foo.cs"],
@@ -814,13 +815,13 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 10,
                 5,
                 2,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs", "FooTests.cs"]),
             TestContext.Current.CancellationToken);
 
         failed.State.Should().Be(BuildRunState.Failed);
-        failed.TerminalReason.Should().Be(BuildTerminalReason.ValidationFailed);
+        failed.TerminalReason.Should().Be(RunTerminalReason.ValidationFailed);
         failed.FailureSummary.Should().Contain("explicitly completed");
     }
 
@@ -847,7 +848,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 10,
                 5,
                 2,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs", "FooTests.cs"]),
             TestContext.Current.CancellationToken);
@@ -891,7 +892,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 10,
                 5,
                 2,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs", "FooTests.cs", "Unplanned.cs"]),
             TestContext.Current.CancellationToken);
@@ -931,7 +932,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 10,
                 5,
                 2,
-                TerminalReason: BuildTerminalReason.Completed,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Passed,
                 ModifiedFiles: ["Foo.cs", "FooTests.cs"]),
             TestContext.Current.CancellationToken);
@@ -1060,7 +1061,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
         blocked.State.Should().Be(BuildRunState.Blocked);
         blocked.PlanRejectionReason.Should().Be("用户拒绝计划");
         blocked.FailureSummary.Should().Contain("拒绝");
-        blocked.TerminalReason.Should().Be(BuildTerminalReason.Blocked);
+        blocked.TerminalReason.Should().Be(RunTerminalReason.Blocked);
     }
 
     private static async Task<BuildRun> ApprovePlanAsync(
@@ -1184,7 +1185,7 @@ public sealed class BuildRunCoordinatorTests : IDisposable
                 [],
                 now),
             TransactionCommitted = true,
-            TerminalReason = BuildTerminalReason.Completed,
+            TerminalReason = RunTerminalReason.Completed,
             CreatedAt = now,
             UpdatedAt = now,
         };

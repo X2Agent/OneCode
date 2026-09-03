@@ -5,8 +5,9 @@ using OneCode.Infrastructure.Mcp;
 namespace OneCode.App.Commands;
 
 /// <summary>
-/// Manages MCP servers: discover (search) and install from the Smithery registry,
-/// add/remove/enable/disable local config, and connect/disconnect at runtime.
+/// Manages MCP servers: discover (search) and install from the official MCP registry
+/// (registry.modelcontextprotocol.io), add/remove/enable/disable local config, and
+/// connect/disconnect at runtime.
 /// All runtime state flows through <see cref="IMcpConnectionManager"/> — the single
 /// source of truth that also feeds the LLM tool catalog, so connect/disconnect
 /// here immediately affects which tools the model can call.
@@ -14,7 +15,7 @@ namespace OneCode.App.Commands;
 /// </summary>
 public sealed class McpCommand(
     IMcpConnectionManager connectionManager,
-    McpRegistryClient registryClient,
+    OfficialMcpRegistryClient registryClient,
     McpMultiScopeConfigLoader configLoader,
     ILogger<McpCommand> logger) : Command
 {
@@ -136,11 +137,10 @@ public sealed class McpCommand(
         var sb = new StringBuilder($"Registry search: '{query}' ({results.Count} results)\n\n");
         foreach (var s in results)
         {
-            var badge = s.Verified ? " ✓" : "";
-            var host = s.Remote ? "remote" : "local";
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.QualifiedName,-32}{badge} ({host}) ↓{s.UseCount}");
-            if (!string.IsNullOrEmpty(s.DisplayName) && s.DisplayName != s.QualifiedName)
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    {s.DisplayName}");
+            var local = s.Packages is { Count: > 0 } ? "stdio" : "remote";
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Name,-36} ({local})");
+            if (!string.IsNullOrWhiteSpace(s.Title) && s.Title != s.Name)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"    {s.Title}");
             if (!string.IsNullOrWhiteSpace(s.Description))
             {
                 var desc = s.Description.Length > 90 ? s.Description[..90] + "…" : s.Description;
@@ -148,7 +148,7 @@ public sealed class McpCommand(
             }
         }
         sb.AppendLine();
-        sb.AppendLine("Use '/mcp install <qualifiedName>' to install a server.");
+        sb.AppendLine("Use '/mcp install <name>' to install a server.");
         return sb.ToString().TrimEnd();
     }
 
@@ -177,6 +177,26 @@ public sealed class McpCommand(
         }
     }
 
+    /// <summary>
+    /// 解析 --scope 参数为合法的配置文件作用域（project/user）。
+    /// 非法值返回错误而非经 <see cref="McpConfigFileStore.GetPath"/> 静默落到 user 作用域。
+    /// </summary>
+    private static bool TryParseScope(
+        string? scope,
+        out string normalized,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+    {
+        normalized = (scope ?? "project").ToLowerInvariant();
+        if (normalized is "project" or "user")
+        {
+            error = null;
+            return true;
+        }
+
+        error = $"Invalid scope '{scope}'. Use 'project' or 'user'.";
+        return false;
+    }
+
     private async Task<string> InstallAsync(string[] args, CancellationToken ct)
     {
         // /mcp install <qualifiedName> [--name <name>] [--scope project|user] [--connect]
@@ -194,22 +214,25 @@ public sealed class McpCommand(
             }
         }
 
-        var server = await registryClient.GetServerAsync(qualifiedName, ct).ConfigureAwait(false);
+        if (!TryParseScope(scope, out var installScope, out var installScopeError))
+            return installScopeError;
+
+        var server = await registryClient.GetLatestAsync(qualifiedName, ct).ConfigureAwait(false);
         if (server is null)
             return $"MCP server '{qualifiedName}' not found in the registry.";
 
-        var conn = server.Connections?.FirstOrDefault(c => !string.IsNullOrEmpty(c.DeploymentUrl));
-        if (conn is null || string.IsNullOrEmpty(conn.DeploymentUrl))
-            return $"'{qualifiedName}' has no installable connection info (it may be a local-only server). Use '/mcp add' to configure manually.";
+        var entry = TryBuildLocalEntry(server);
+        if (entry is null)
+        {
+            var hint = server.Remotes is { Count: > 0 }
+                ? " (it is a remote-only server). Use '/mcp add' to configure the remote URL manually."
+                : ". Use '/mcp add' to configure manually.";
+            return $"'{qualifiedName}' has no installable local package{hint}";
+        }
 
         var name = customName ?? qualifiedName.Replace('/', '-');
-        var entry = new McpConfigEntry
-        {
-            Type = conn.Type ?? "http",
-            Url = conn.DeploymentUrl,
-        };
 
-        var configPath = McpConfigFileStore.GetPath(scope);
+        var configPath = McpConfigFileStore.GetPath(installScope);
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
         if (!TryLoadConfigForWrite(configPath, out var file, out var installError))
             return $"Cannot install '{name}': {installError}";
@@ -218,15 +241,8 @@ public sealed class McpCommand(
 
         logger.LogInformation("Installed MCP server '{Name}' from registry", name);
 
-        var msg = $"Installed '{name}' ({server.DisplayName}) → {scope} config ({conn.Type}: {conn.DeploymentUrl}).";
-
-        // Warn if the server declares config parameters the user may need to fill in.
-        if (conn.ConfigSchema is { ValueKind: JsonValueKind.Object } schema
-            && schema.TryGetProperty("properties", out var props)
-            && props.EnumerateObject().MoveNext())
-        {
-            msg += " Note: this server declares config parameters — edit the config file if tools require authentication.";
-        }
+        var commandDesc = $"{entry.Command} {string.Join(" ", entry.Args ?? [])}".TrimEnd();
+        var msg = $"Installed '{name}' ({server.Title ?? server.Name}) → {installScope} config (stdio: {commandDesc}).";
 
         if (connect)
         {
@@ -239,6 +255,29 @@ public sealed class McpCommand(
         }
 
         return msg;
+    }
+
+    /// <summary>
+    /// 将官方 registry 的 server 元数据映射为本地 stdio 配置：
+    /// npm → npx -y {identifier}；pypi → uvx {identifier}；oci → docker run -i --rm {identifier}。
+    /// nuget/mcpb 暂不支持（返回 null，由调用方提示手动配置）。
+    /// </summary>
+    private static McpConfigEntry? TryBuildLocalEntry(OfficialRegistryServer server)
+    {
+        foreach (var pkg in server.Packages ?? [])
+        {
+            switch (pkg.RegistryType.ToLowerInvariant())
+            {
+                case "npm":
+                    return new McpConfigEntry { Type = "stdio", Command = "npx", Args = ["-y", pkg.Identifier] };
+                case "pypi":
+                    return new McpConfigEntry { Type = "stdio", Command = "uvx", Args = [pkg.Identifier] };
+                case "oci":
+                    return new McpConfigEntry { Type = "stdio", Command = "docker", Args = ["run", "-i", "--rm", pkg.Identifier] };
+            }
+        }
+
+        return null;
     }
 
     private async Task<string> AddServerAsync(string[] args, CancellationToken ct)
@@ -273,6 +312,20 @@ public sealed class McpCommand(
             _ => type.ToLowerInvariant()
         };
 
+        if (!TryParseScope(scope, out var addScope, out var addScopeError))
+            return addScopeError;
+
+        // 校验传输必需参数，避免写入连接时必然失败的无效配置（connect 阶段 def.Url! 会 NRE）。
+        if (normalized is "http" or "sse" or "ws")
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return $"Transport '{normalized}' requires --url.";
+        }
+        else if (normalized == "stdio" && string.IsNullOrWhiteSpace(command))
+        {
+            return "Transport 'stdio' requires --command.";
+        }
+
         var entry = new McpConfigEntry
         {
             Type = normalized,
@@ -281,7 +334,7 @@ public sealed class McpCommand(
             Url = url,
         };
 
-        var configPath = McpConfigFileStore.GetPath(scope);
+        var configPath = McpConfigFileStore.GetPath(addScope);
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
         if (!TryLoadConfigForWrite(configPath, out var addFile, out var addError))
             return $"Cannot add '{name}': {addError}";

@@ -43,6 +43,14 @@ public static class Constants
         public const string PermissionMode = "permissionMode";
         public const string MaxTurns = "maxTurns";
         public const string MaxBudgetTokens = "maxBudgetTokens";
+        /// <summary>Goal 模式：跨子目标总 attempt 上限。</summary>
+        public const string GoalMaxSubGoalAttempts = "goal.maxSubGoalAttempts";
+        /// <summary>Goal 模式：单子目标轮数上限。</summary>
+        public const string GoalMaxTurnsPerSubGoal = "goal.maxTurnsPerSubGoal";
+        /// <summary>Goal 模式：累计 token 上限（≤0 表示不限制）。</summary>
+        public const string GoalMaxTotalTokens = "goal.maxTotalTokens";
+        /// <summary>Goal 模式：墙钟上限小时数（≤0 表示不限制）。</summary>
+        public const string GoalMaxWallClockHours = "goal.maxWallClockHours";
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";

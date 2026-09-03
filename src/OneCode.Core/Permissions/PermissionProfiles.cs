@@ -58,11 +58,10 @@ public enum UnknownToolPolicy
     AllowWithPathValidation,
 }
 
-/// <summary>How Ask decisions from EvaluateRules are post-processed (Default/Bubble/DontAsk variants).</summary>
+/// <summary>How Ask decisions from EvaluateRules are post-processed (Default/DontAsk variants).</summary>
 public enum AskDecisionPolicy
 {
     Standard,
-    Bubble,
     DenyAsk,
 }
 
@@ -141,7 +140,7 @@ public static class PermissionProfiles
             ? PermissionCheckHelpers.CheckReadOnlyAndEvaluate(toolName, toolInput, context)
             : PermissionCheckHelpers.EvaluateRules(toolName, toolInput, context);
 
-        return PermissionCheckHelpers.ApplyAskPolicy(result, config.AskPolicy, toolName, toolInput);
+        return PermissionCheckHelpers.ApplyAskPolicy(result, config.AskPolicy, toolName);
     }
 
     private static PermissionCheckResult CheckAutoAllowFlow(
@@ -219,12 +218,6 @@ public static class PermissionProfiles
                 Profile = readOnlyEvaluateProfile,
                 Flow = PermissionCheckFlow.ReadOnlyAndEvaluate,
                 AskPolicy = AskDecisionPolicy.Standard,
-            },
-            [PermissionMode.Bubble] = new()
-            {
-                Profile = readOnlyEvaluateProfile,
-                Flow = PermissionCheckFlow.ReadOnlyAndEvaluate,
-                AskPolicy = AskDecisionPolicy.Bubble,
             },
             [PermissionMode.DontAsk] = new()
             {

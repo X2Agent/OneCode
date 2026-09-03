@@ -177,7 +177,10 @@ public sealed class SessionMemoryContextProvider : AIContextProvider
             .GetResponseAsync(messages, new ChatOptions
             {
                 ModelId = _modelManager.GetFastModel().Id,
-                MaxOutputTokens = 384,
+                // fastModel 未配置时回退主模型，可能是推理模型（如 deepseek-v4-flash）：
+                // 推理 token 计入 max_tokens，预算太小会让 reasoning 吃光预算、content 恒为空。
+                // 6 条 ×140 字符记忆约 400 token，加上推理余量取 1536。
+                MaxOutputTokens = 1536,
             }, ct)
             .ConfigureAwait(false);
 

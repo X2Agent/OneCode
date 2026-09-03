@@ -1,8 +1,8 @@
-# ADR 0006: Query 流式编排组合契约与状态对象原则
+# Query 流式编排组合契约与状态对象原则
 
 **状态**: Accepted（追认——代码与注释先行，本文档补写）
 **日期**: 2026-08-30
-**关联**: [ADR 0003](./0003-m4-approval-event-streaming.md)、[ADR 0007](./0007-unified-mode-runtime.md)
+**关联**: [M4 完全事件驱动审批](./0003-m4-approval-event-streaming.md)
 
 ## 语境
 
@@ -18,10 +18,10 @@
 ## 后果
 
 - 消化语义可单测：`StreamingSessionTests` 直接对 `Digest` 做表驱动验证，无需网络或 TUI。
-- 门面稳定：`ChatService` 的公共面不随编排内部重构（如 0007 及后续 partial 拆分、`BuildPreambleRunner`/`ToolAssembler`/`HookDispatcher`/`TranscriptPersistence` 等辅助类的引入）而变化。
+- 门面稳定：`ChatService` 的公共面不随编排内部重构（如后续 partial 拆分、`BuildPreambleRunner`/`ToolAssembler`/`HookDispatcher`/`TranscriptPersistence` 等辅助类的引入）而变化。
 - 组合面收敛：引擎不注册 DI，避免了 8+ 参数服务注册面扩大；新增协作组件均遵循同一组合根模式在引擎内组装。
 
 ## 引用
 
-- 代码注释锚点：`ChatService.cs`、`QueryStreamEngine.cs`、`StreamingSession.cs`（搜索 "ADR 0006"）
+- 代码注释锚点：`ChatService.cs`、`QueryStreamEngine.cs`、`StreamingSession.cs`（这些文件的类级注释阐述了本 ADR 的编排契约与状态对象原则）
 - 测试：`src/OneCode.Tests/StreamingSessionTests.cs`

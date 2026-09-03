@@ -9,9 +9,12 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Build;
+using OneCode.Core.Workflows;
+using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;
@@ -396,7 +399,7 @@ public sealed class ChatServiceTests
                         TotalInputTokens: 11,
                         TotalOutputTokens: 7,
                         TurnCount: 1,
-                        TerminalReason: BuildTerminalReason.Completed,
+                        TerminalReason: RunTerminalReason.Completed,
                         FinalValidationStatus: BuildValidationStatus.Passed);
                 });
             var clarifier = Substitute.For<IClarificationInteractionService>();
@@ -457,7 +460,7 @@ public sealed class ChatServiceTests
             events.OfType<TextDeltaEvent>().Should().ContainSingle().Which.Text.Should().Be("durable complete");
             events.OfType<BuildRunCompletedEvent>().Should().ContainSingle();
             events.OfType<DoneEvent>().Should().ContainSingle().Which.TerminalReason
-                .Should().Be(BuildTerminalReason.Completed);
+                .Should().Be(RunTerminalReason.Completed);
             await runner.Received(1).RunStreamingAsync(
                 Arg.Any<MainAgentRunOptions>(),
                 Arg.Any<ChannelWriter<object>>(),
@@ -488,7 +491,7 @@ public sealed class ChatServiceTests
             Id = BuildRunId.New(),
             ConversationId = conversation.Id,
             State = BuildRunState.Completed,
-            TerminalReason = BuildTerminalReason.Completed,
+            TerminalReason = RunTerminalReason.Completed,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -521,7 +524,7 @@ public sealed class ChatServiceTests
 
         events.OfType<BuildRunCompletedEvent>().Should().ContainSingle();
         events.OfType<DoneEvent>().Should().ContainSingle()
-            .Which.TerminalReason.Should().Be(BuildTerminalReason.Completed);
+            .Which.TerminalReason.Should().Be(RunTerminalReason.Completed);
         await runner.DidNotReceive().RunStreamingAsync(
             Arg.Any<MainAgentRunOptions>(),
             Arg.Any<ChannelWriter<object>>(),
@@ -635,9 +638,14 @@ public sealed class ChatServiceTests
         {
             var store = new PlanAggregateStore(root);
             var workflowService = new PlanWorkflowApplicationService(store);
-            var publisher = new PlanCardPublisher();
+            var bus = new OrchestrationEventBus();
+            var publisher = new PlanCardPublisher(bus);
             var publishedStates = new List<PlanWorkflowState>();
-            publisher.WorkflowChanged += workflow => publishedStates.Add(workflow.State);
+            bus.Subscribe(evt =>
+            {
+                if (evt is OrchestrationEvent.PlanProjectionChanged changed)
+                    publishedStates.Add(changed.Workflow.State);
+            });
 
             var conversation = new Conversation { Id = SessionId.NewId(), WorkingDirectory = root };
             var sessionManager = Substitute.For<ISessionManager>();
@@ -877,4 +885,3 @@ public sealed class ChatServiceTests
                 Substitute.For<INotifierService>()));
     }
 }
-

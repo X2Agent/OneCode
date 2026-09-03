@@ -11,7 +11,6 @@ public enum PermissionMode
     AcceptEdits,
     BypassPermissions,
     DontAsk,
-    Bubble,
     /// <summary>
     /// GOAL 模式专用：自主执行不中断，但有安全边界。
     /// 只读工具 + 文件写入工具（路径校验后）+ 只读 Shell 自动放行；
@@ -35,7 +34,6 @@ public enum PermissionMode
 public abstract record PermissionDecisionReason
 {
     public sealed record Other(string Reason) : PermissionDecisionReason;
-    public sealed record BubbleRequest(string ToolName, string? Input) : PermissionDecisionReason;
 }
 
 /// <summary>
@@ -86,7 +84,7 @@ public enum WorkingDirectorySource
 /// <summary>
 /// 权限检查结果——包含决策原因和消息。
 ///
-/// 支持 4 种行为：Allow、Deny、Ask、Passthrough
+/// 支持 3 种行为：Allow、Deny、Ask
 /// </summary>
 public sealed record PermissionCheckResult
 {
@@ -97,7 +95,6 @@ public sealed record PermissionCheckResult
     public static PermissionCheckResult Allow => new() { Decision = PermissionDecision.Allow };
     public static PermissionCheckResult Deny(string reason) => new() { Decision = PermissionDecision.Deny, Message = reason, DecisionReason = new PermissionDecisionReason.Other(reason) };
     public static PermissionCheckResult Ask(string message) => new() { Decision = PermissionDecision.Ask, Message = message };
-    public static PermissionCheckResult Passthrough(string message) => new() { Decision = PermissionDecision.Passthrough, Message = message };
 }
 
 public enum PermissionDecision
@@ -105,7 +102,6 @@ public enum PermissionDecision
     Allow,
     Deny,
     Ask,
-    Passthrough,
 }
 
 /// <summary>

@@ -18,7 +18,7 @@ namespace OneCode.App.Query;
 /// Streaming orchestration core for interactive chat and workflow runs: Build 门禁前置
 /// (clarification → plan approval → durable attempt)、MAF agent run 驱动、事件消化与终结记账。
 ///
-/// 组合说明（ADR 0006）：<see cref="ChatService"/> 是对外契约门面；本类由其在构造函数内组装
+/// 组合说明：<see cref="ChatService"/> 是对外契约门面；本类由其在构造函数内组装
 /// （与 <see cref="BuildRunGate"/> 相同的组合根模式），不单独注册 DI，也绝不反向引用
 /// <see cref="ChatService"/>。可变流式状态收敛在 <see cref="StreamingSession"/>。
 /// </summary>
@@ -132,7 +132,7 @@ internal sealed class QueryStreamEngine
         {
             _logger.LogInformation("UserPromptSubmit hook blocked prompt: {Error}", promptBlocks[0].Error);
             yield return new ErrorEvent($"Prompt blocked by hook: {promptBlocks[0].Error}");
-            yield return new DoneEvent(null, null, 0, BuildTerminalReason.Completed, conversationId);
+            yield return new DoneEvent(null, null, 0, RunTerminalReason.Completed, conversationId);
             yield break;
         }
 
@@ -250,7 +250,7 @@ internal sealed class QueryStreamEngine
         var currentFeedback = (string?)null;
         var finalize = false;
         StreamingSession session = null!;
-        var outcome = new TerminalOutcomeState { Reason = BuildTerminalReason.Completed };
+        var outcome = new TerminalOutcomeState { Reason = RunTerminalReason.Completed };
 
         try
         {

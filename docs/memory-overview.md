@@ -1,6 +1,6 @@
 # 记忆模块（Memory Module）
 
-> 本文档介绍 OneCode 记忆子系统的设计思路、模块总览与使用方式。架构决策与实现细节参见 [ADR 0004: 记忆模块架构设计](./adr/0004-memory-module-design.md)。
+> 本文档介绍 OneCode 记忆子系统的设计思路、模块总览与使用方式。架构决策与实现细节参见 [记忆模块架构设计](./adr/0004-memory-module-design.md)。
 
 ---
 
@@ -27,7 +27,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 | 结构化条目记忆 | 永久（含 TTL / LRU 淘汰） | 用户级 / 项目级 | `MEMORY.md` 结构化条目 | 用户手动 + AutoDream 自动 |
 | 会话记忆 | 会话内 + 跨会话持久 | 单会话 | JSON Lines + 元数据 | LLM 自动提取 + 用户手动 |
 
-> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [ADR 0004](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemoryFileContextProvider`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [ADR 0004 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
+> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [记忆模块架构设计](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemoryFileContextProvider`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
 
 ---
 
@@ -188,7 +188,7 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 
 ### 4.4 手动维护 MEMORY.md
 
-`MEMORY.md` 是结构化条目文件，用户也可直接编辑。文件格式见 [ADR 0004 §2](./adr/0004-memory-module-design.md#2-memorymd-文件格式与数据模型)。
+`MEMORY.md` 是结构化条目文件，用户也可直接编辑。文件格式见 [记忆模块架构设计 §2](./adr/0004-memory-module-design.md#2-memorymd-文件格式与数据模型)。
 
 **注意事项**：
 - 手动编辑时保持 `## {key}` 作为条目分隔符，`- key: value` 作为元数据行
@@ -212,7 +212,7 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 
 ## 6. 相关文档
 
-- [ADR 0004: 记忆模块架构设计](./adr/0004-memory-module-design.md) — 架构决策、数据模型、实现细节
+- [记忆模块架构设计](./adr/0004-memory-module-design.md) — 架构决策、数据模型、实现细节
 - [后台服务文档 - AutoDream 记忆整合](./background-services.md#5-autodream-记忆整合) — AutoDream 后台服务机制
 - [命令文档](./commands.md) — `/memory` 命令完整说明
 - [内置技能 /remember](./skills.md#remember) — 写入 `AGENTS.md` 项目规范（与 Memory 子系统分离）

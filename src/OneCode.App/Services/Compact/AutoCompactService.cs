@@ -11,7 +11,7 @@ namespace OneCode.App.Services.Compact;
 /// 不会提前提醒用户）。</para>
 ///
 /// <para><b>运行时集成点</b>：<see cref="Streaming.QueryStreamService"/> 在每次 agent turn 结束后
-/// 调用 <see cref="CheckAndWarnAsync"/>，通过 <see cref="ConsumeWarning"/> 发射 <c>TuiCompactSuggested</c> 事件。</para>
+/// 调用 <c>CheckAndWarnAsync</c>，通过 <see cref="ConsumeWarning"/> 发射 <c>TuiCompactSuggested</c> 事件。</para>
 ///
 /// <para><b>阈值即语义</b>：
 ///   0.70 (<see cref="WarningThreshold"/>) — 首次跨越时发射告警，提醒用户执行 /compact（无 LLM，无压缩）

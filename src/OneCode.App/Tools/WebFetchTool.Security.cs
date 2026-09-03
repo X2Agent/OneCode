@@ -4,7 +4,7 @@ using OneCode.Infrastructure;
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// URL validation and SSRF protection helpers for WebFetchTool.
+/// URL validation and SSRF protection helpers for WebFetchTool and BrowserFetchTool.
 /// All methods are private static — no instance state required.
 /// </summary>
 public sealed partial class WebFetchTool
@@ -69,6 +69,13 @@ public sealed partial class WebFetchTool
         return true;
     }
 
+    /// <summary>
+    /// BrowserFetchTool 的 SSRF 校验入口：与 WebFetch 同一套 URL 校验、私网判定
+    /// 与 DNS rebinding 预解析（<see cref="CheckDnsRebindingAsync"/>），
+    /// 保证浏览器渲染不成为绕过 WebFetch 防护的旁路。
+    /// </summary>
+    internal static bool ValidateUrlForBrowser(string url) => ValidateUrl(url);
+
     private static bool IsPermittedRedirect(string originalUrl, string redirectUrl)
     {
         if (!Uri.TryCreate(originalUrl, UriKind.Absolute, out var original) ||
@@ -99,7 +106,7 @@ public sealed partial class WebFetchTool
     /// blocks remain the primary net.
     /// </summary>
     /// <returns>An error message to return to the model, or <c>null</c> when the host is safe.</returns>
-    private async Task<string?> GetDnsRebindingBlockReasonAsync(string url, CancellationToken ct)
+    internal static async Task<string?> CheckDnsRebindingAsync(string url, ILogger logger, CancellationToken ct)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return null;
@@ -121,11 +128,11 @@ public sealed partial class WebFetchTool
         {
             if (!viaProxy)
             {
-                _logger.LogDebug(ex, "DNS lookup failed for WebFetch host {Host}", uri.Host);
+                logger.LogDebug(ex, "DNS lookup failed for WebFetch host {Host}", uri.Host);
                 return $"Could not resolve host '{uri.Host}'";
             }
 
-            _logger.LogDebug(ex, "DNS lookup failed for proxied WebFetch host {Host}; allowing (proxy resolves hostname)", uri.Host);
+            logger.LogDebug(ex, "DNS lookup failed for proxied WebFetch host {Host}; allowing (proxy resolves hostname)", uri.Host);
             return null;
         }
 

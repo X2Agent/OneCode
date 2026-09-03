@@ -126,9 +126,6 @@ public sealed record MainAgentRunOptions
 /// <summary>
 /// Result from MainAgentRunner.
 /// </summary>
-/// <param name="CacheReadTokens">缓存读 token（命中部分）。从 UsageDetails.CachedInputTokenCount 提取。</param>
-/// <param name="CacheWriteTokens">缓存写 token（Anthropic 创生）。从 AdditionalCounts["cache_creation_input_tokens"] 提取。</param>
-/// <param name="ReasoningTokens">推理 token（思考）。从 UsageDetails.ReasoningTokenCount 提取。</param>
 public sealed record MainAgentRunResult(
     string? Text,
     long TotalInputTokens,
@@ -139,7 +136,7 @@ public sealed record MainAgentRunResult(
     long CacheReadTokens = 0,
     long CacheWriteTokens = 0,
     long ReasoningTokens = 0,
-    OneCode.Core.Build.BuildTerminalReason TerminalReason = OneCode.Core.Build.BuildTerminalReason.Completed,
+    OneCode.Core.Workflows.RunTerminalReason TerminalReason = OneCode.Core.Workflows.RunTerminalReason.Completed,
     bool TransactionCommitted = false,
     bool TransactionRolledBack = false,
     OneCode.Core.Build.BuildValidationStatus FinalValidationStatus = OneCode.Core.Build.BuildValidationStatus.Skipped,

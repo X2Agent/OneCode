@@ -116,7 +116,7 @@ public partial class MainAgentRunner : IMainAgentRunner
         var transaction = options.SharedTransaction ?? new EditTransaction(
             _loggerFactory.CreateLogger<EditTransaction>());
 
-        BuildTerminalReason terminalReason = BuildTerminalReason.Completed;
+        RunTerminalReason terminalReason = RunTerminalReason.Completed;
         bool transactionCommitted = false;
         bool transactionRolledBack = false;
         BuildValidationStatus finalValidationStatus = BuildValidationStatus.Passed;
@@ -255,7 +255,7 @@ public partial class MainAgentRunner : IMainAgentRunner
                             finalValidationStatus, finalCheck.Errors.Count, transaction.SnapshotCount);
 
                         validationFailureSummary = finalCheck.FormatForLlm();
-                        terminalReason = BuildTerminalReason.ValidationFailed;
+                        terminalReason = RunTerminalReason.ValidationFailed;
                         transactionRolledBack = true;
                         return BuildResult();
                     }
@@ -275,7 +275,7 @@ public partial class MainAgentRunner : IMainAgentRunner
         catch (OperationCanceledException)
         {
             _logger.LogDebug("MainAgentRunner streaming cancelled");
-            terminalReason = BuildTerminalReason.Cancelled;
+            terminalReason = RunTerminalReason.Cancelled;
             transactionRolledBack = ownsTransaction && !transaction.IsCommitted;
         }
         finally
@@ -295,7 +295,7 @@ public partial class MainAgentRunner : IMainAgentRunner
             TurnCount: evidence.TurnCount,
             BudgetExceeded: evidence.BudgetExceeded,
             BudgetExceededReason: evidence.BudgetExceeded ? "Agent budget was exceeded." : null,
-            TerminalReason: evidence.BudgetExceeded ? BuildTerminalReason.BudgetExceeded : terminalReason,
+            TerminalReason: evidence.BudgetExceeded ? RunTerminalReason.BudgetExceeded : terminalReason,
             TransactionCommitted: transactionCommitted,
             TransactionRolledBack: transactionRolledBack,
             FinalValidationStatus: finalValidationStatus,

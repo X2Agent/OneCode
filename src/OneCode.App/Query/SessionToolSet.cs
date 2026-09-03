@@ -13,7 +13,7 @@ namespace OneCode.App.Query;
 ///   <item><b>三条激活链路</b>：
 ///     <list type="number">
 ///       <item>初始选择：prompt 经索引评分，超阈值的 Contextual 工具自动并入。</item>
-///       <item>ToolSearch 激活：<c>select:X</c> 或搜索结果触发 <see cref="Activate"/>。</item>
+///       <item>ToolSearch 激活：<c>select:X</c> 或搜索结果触发 <c>Activate</c>。</item>
 ///       <item>未知工具兜底：模型 hallucinate 的工具名若在注册表中存在，自动激活。</item>
 ///     </list>
 ///   </item>
