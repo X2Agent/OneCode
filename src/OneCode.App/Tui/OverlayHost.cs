@@ -1,7 +1,7 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Centralised overlay (popup) manager for the TUI — design-spec §3.
+/// Centralised overlay (popup) manager for the TUI.
 ///
 /// Owns the lifecycle of modal panels (/diff Review, Ctrl+Shift+D LSP,
 /// Settings, Resume chooser, Diff detail, etc.).
@@ -139,6 +139,15 @@ public sealed class OverlayHost : View
     public void Position(View overlay)
     {
         var (sw, sh) = ResolveHostSize();
+        Position(overlay, sw, sh);
+    }
+
+    /// <summary>
+    /// 按给定宿主（终端）尺寸定位并钳制 overlay 尺寸。internal 供 headless 测试注入
+    /// 模拟终端尺寸（宿主 Viewport 在测试中恒为 0，公开重载会提前返回）。
+    /// </summary>
+    internal void Position(View overlay, int sw, int sh)
+    {
         if (sw <= 0 || sh <= 0)
             return; // First draw / RepositionAll will retry once Viewport is valid.
 

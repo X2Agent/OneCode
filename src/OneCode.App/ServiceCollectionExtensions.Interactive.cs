@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services;
 using OneCode.App.Services.BuildMode;
+using OneCode.App.Services.Mcp;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Tui;
 using OneCode.Infrastructure.Media;
@@ -13,6 +14,7 @@ public static partial class ServiceCollectionExtensions
     {
         services.AddSingleton<PromptConfigBuilder>();
         services.AddSingleton<PromptRuntimeDependencies>();
+        services.AddSingleton<McpStartupPreconnector>();
         services.AddSingleton<ThinkingParamsResolver>();
         services.AddSingleton<TuiOverlayDependencies>();
         services.AddSingleton<TuiCommandSurfaceDependencies>();

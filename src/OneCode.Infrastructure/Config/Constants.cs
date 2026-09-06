@@ -51,7 +51,9 @@ public static partial class Constants
 
     public static class Timeouts
     {
-        public const int McpRegistry = 15;
+        /// <summary>MCP registry 命名客户端超时：官方 search 端点实测 18~26s 返回，
+        /// 必须大于客户端内置 30s 请求预算，避免 HttpClient 层先掐断慢响应。</summary>
+        public const int McpRegistry = 35;
         public const int WebSearch = 20;
         public const int ModelsDev = 30;
     }

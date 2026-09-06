@@ -210,19 +210,6 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+T — 进入对话区导航模式（焦点切换与 Transcript 上下文 push 在 ReplShell）。
-        // 补全激活时不进入：Enter/数字优先服务补全确认；挂起/提问态不进入，
-        // 键盘归交互会话（挂起分支本已先行吞键，此处守卫作纵深防御）。
-        if (action == KeybindingDefaults.ActionChatEnterTranscript
-            && !_completion.IsCompletionActive
-            && !_interactionSuspended
-            && !_isQuestionMode)
-        {
-            EnterTranscriptRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
         // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板），
         // 与分隔线鼠标拖拽等价的键盘路径。宽度调整与补全/模式切换互不冲突，无额外守卫。
         if (action == KeybindingDefaults.ActionAppSidebarWider)

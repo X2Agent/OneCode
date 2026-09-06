@@ -1,7 +1,7 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Plan sidebar interaction for <see cref="ReplShell"/> (design-spec §4.2)。
+/// Plan sidebar interaction for <see cref="ReplShell"/>。
 /// 计划内容渲染在右侧 <see cref="PlanSidebarView"/>，不再进入对话流；
 /// PendingApproval 阶段弹出 InlineSelector 决策面板（对话流内），自动接管键盘
 /// （SetInteractionSuspended）；其余阶段仅展示侧边栏不弹决策面板。

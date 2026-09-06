@@ -10,7 +10,7 @@ namespace OneCode.Tests;
 ///
 /// <para>验证点：</para>
 /// <list type="number">
-///   <item><c>Search_ReturnsServers</c>：/mcp search 底层的客户端过滤能命中真实 registry。</item>
+///   <item><c>Search_ReturnsServers</c>：/mcp search 底层的服务端搜索（search + version=latest）能命中真实 registry。</item>
 ///   <item><c>GetLatest_ReturnsPackages</c>：/mcp install 底层的 GetLatestAsync 能取到本地 stdio 安装包。</item>
 /// </list>
 /// </summary>
@@ -22,11 +22,12 @@ public sealed class OfficialMcpRegistryIntegrationTests
     /// <summary>为 registry 客户端提供带 BaseAddress 的真实 HttpClient（相对 URL 依赖 BaseAddress）。</summary>
     private sealed class RegistryHttpClientFactory : IHttpClientFactory
     {
-        // 复用单实例：全量分页会发起 50+ 请求，复用连接池避免每页重建 TCP/TLS。
+        // 复用单实例：搜索/详情各一次请求，复用连接池避免重建 TCP/TLS。
+        // 超时 60s > 客户端内置 30s 请求预算（官方 search 端点实测 18~26s）。
         private readonly HttpClient _client = new()
         {
             BaseAddress = new Uri(RegistryBaseUrl),
-            Timeout = TimeSpan.FromSeconds(30),
+            Timeout = TimeSpan.FromSeconds(60),
         };
 
         public HttpClient CreateClient(string name) => _client;
@@ -40,7 +41,7 @@ public sealed class OfficialMcpRegistryIntegrationTests
         var client = new OfficialMcpRegistryClient(new RegistryHttpClientFactory());
         var results = await client.SearchAsync("github", limit: 10, TestContext.Current.CancellationToken);
 
-        results.Should().NotBeEmpty("官方 registry 搜索应返回匹配的 MCP server");
+        results.Should().NotBeEmpty("官方 registry 服务端 search 较慢（实测 18~26s）但应返回匹配结果");
         results.Should().OnlyContain(s => !string.IsNullOrEmpty(s.Name));
     }
 

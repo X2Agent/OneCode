@@ -100,28 +100,6 @@ public sealed class McpClient : IMcpClient
         LogConnectionInfo();
     }
 
-    /// <summary>
-    /// Connect to an MCP server via Streamable HTTP transport (explicit, no auto-detect).
-    /// </summary>
-    public async Task ConnectStreamableHttpAsync(
-        string url,
-        IReadOnlyDictionary<string, string>? headers = null,
-        CancellationToken ct = default)
-    {
-        _logger.LogInformation("Connecting to MCP server (Streamable HTTP): {Url}", url);
-
-        _transport = new HttpClientTransport(new HttpClientTransportOptions
-        {
-            Endpoint = new Uri(url, UriKind.RelativeOrAbsolute),
-            TransportMode = HttpTransportMode.StreamableHttp,
-            AdditionalHeaders = headers?.ToDictionary(kv => kv.Key, kv => kv.Value),
-            Name = $"streamable-http:{url}",
-        });
-
-        _client = await CreateClientAsync(ct).ConfigureAwait(false);
-        LogConnectionInfo();
-    }
-
     // Generic transport-based connection
 
     /// <summary>
@@ -218,42 +196,6 @@ public sealed class McpClient : IMcpClient
             ModelContextProtocol.Protocol.TextResourceContents textContent => textContent.Text ?? "",
             ModelContextProtocol.Protocol.BlobResourceContents blobContent => Convert.ToBase64String(blobContent.Blob.ToArray()),
             _ => c.ToString() ?? ""
-        }));
-    }
-
-    /// <summary>
-    /// List available prompts from the connected server.
-    /// </summary>
-    public async Task<IReadOnlyList<McpPrompt>> ListPromptsAsync(CancellationToken ct = default)
-    {
-        if (_client == null)
-            throw new InvalidOperationException("Not connected to an MCP server");
-
-        var prompts = await _client.ListPromptsAsync(cancellationToken: ct).ConfigureAwait(false);
-        return prompts.Select(p => new McpPrompt(
-            p.Name,
-            p.Description,
-            p.ProtocolPrompt.Arguments?.Select(a => a.Name).ToArray() ?? []
-        )).ToList();
-    }
-
-    /// <summary>
-    /// Get a specific prompt, optionally with arguments, returning the rendered text.
-    /// </summary>
-    public async Task<string> GetPromptAsync(
-        string name,
-        IReadOnlyDictionary<string, string>? arguments = null,
-        CancellationToken ct = default)
-    {
-        if (_client == null)
-            throw new InvalidOperationException("Not connected to an MCP server");
-
-        var args = arguments?.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
-        var result = await _client.GetPromptAsync(name, args, cancellationToken: ct).ConfigureAwait(false);
-        return string.Join("\n", result.Messages.Select(m => m.Content switch
-        {
-            ModelContextProtocol.Protocol.TextContentBlock text => text.Text ?? "",
-            _ => m.Content?.ToString() ?? ""
         }));
     }
 

@@ -13,7 +13,7 @@ namespace OneCode.App.Commands;
 /// here immediately affects which tools the model can call.
 /// Config-file persistence lives in <see cref="McpConfigFileStore"/>.
 /// </summary>
-public sealed class McpCommand(
+public sealed partial class McpCommand(
     IMcpConnectionManager connectionManager,
     OfficialMcpRegistryClient registryClient,
     McpMultiScopeConfigLoader configLoader,
@@ -22,7 +22,27 @@ public sealed class McpCommand(
     public override string Name => "mcp";
     public override string Description => "Manage MCP server connections";
     public override CommandCategory Category => CommandCategory.Skill;
-    public override string? ArgumentHint => "[list|get|search|install|add|remove|connect|disconnect|enable|disable] <args>";
+    public override string? ArgumentHint => "[list|get|tools|search|install|add|remove|connect|disconnect|enable|disable|enable-tool|disable-tool] <args>";
+
+    // 最近一次 /mcp search（或 install 短名歧义提示）展示的编号列表；
+    // /mcp install <n> 据此把编号还原为完整限定名（仅作名字快捷方式，安装时仍拉取最新元数据）。
+    // 命令在 TUI / headless 路径均串行执行（SlashCommandPipeline 单例顺序 await），无并发写风险。
+    private IReadOnlyList<OfficialRegistryServer> _lastSearchResults = [];
+
+    // 官方 registry 的 search 端点较慢（实测 18~26s 返回），执行期间 AgentStatusBar 必须给出
+    // 动态忙碌反馈，否则用户会误以为卡死。install 按目标形态细分：序号/限定名只做一次
+    // GetLatest 元数据解析（秒级），短名可能回退一次慢速 registry search（见 ResolveInstallTargetAsync），
+    // 沿用 search 文案让等待预期一致。其余子命令为本地操作、瞬时完成，沿用默认标签。
+    public override string? GetSubcommandProgressMessage(string[] args) =>
+        args.Length > 0 ? args[0].ToLowerInvariant() switch
+        {
+            "search" => "searching MCP registry",
+            "install" when args.Length > 1 && (args[1].All(char.IsAsciiDigit) || args[1].Contains('/'))
+                => "installing from MCP registry",
+            "install" when args.Length > 1 => "searching MCP registry",
+            _ => null,
+        }
+        : null;
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
@@ -32,6 +52,7 @@ public sealed class McpCommand(
         {
             "list" or "ls" => CommandResult.Text(await ListServersAsync(ct)),
             "get" when args.Length > 1 => CommandResult.Text(await GetServerAsync(args[1], ct)),
+            "tools" when args.Length > 1 => CommandResult.Text(await ListToolsStatusAsync(args[1], ct)),
             "search" when args.Length > 1 => CommandResult.Text(await SearchAsync(args[1..], ct)),
             "install" when args.Length > 1 => CommandResult.Text(await InstallAsync(args[1..], ct)),
             "add" => CommandResult.Text(await AddServerAsync(args[1..], ct)),
@@ -40,6 +61,8 @@ public sealed class McpCommand(
             "disconnect" => CommandResult.Text(await DisconnectAsync(args[1..], ct)),
             "enable" => CommandResult.Text(await ToggleEnabledAsync(args[1..], true, ct)),
             "disable" => CommandResult.Text(await ToggleEnabledAsync(args[1..], false, ct)),
+            "enable-tool" => CommandResult.Text(await ToggleToolAsync(args[1..], true, ct)),
+            "disable-tool" => CommandResult.Text(await ToggleToolAsync(args[1..], false, ct)),
             _ => CommandResult.Error($"Unknown MCP command: {args[0]}"),
         };
     }
@@ -64,6 +87,9 @@ public sealed class McpCommand(
                 var enabledTag = def.Disabled ? "[disabled]   " : "[enabled]    ";
                 var connTag = connected ? "[connected]    " : "[disconnected] ";
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {name,-24} {enabledTag}{connTag}{tools}");
+                // Plan C：断连原因始终可见——坏服务器不再只是一个静默的 [disconnected]。
+                if (!connected && status.TryGetValue(name, out var failed) && failed.LastError is { } reason)
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"    └ 失败原因：{reason}（用 /mcp connect {name} 重试）");
             }
         }
         else
@@ -98,6 +124,16 @@ public sealed class McpCommand(
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {k} = ***");  // don't leak secrets
         }
         sb.AppendLine(CultureInfo.InvariantCulture, $"Enabled:    {(!def.Disabled ? "yes" : "no")}");
+        if (def.EnabledTools is { } whitelist)
+        {
+            sb.AppendLine(whitelist.Count == 0
+                ? "Tool filter: [] (no tools exposed)"
+                : $"Tool filter: {whitelist.Count} pattern(s): {string.Join(", ", whitelist)}");
+        }
+        else
+        {
+            sb.AppendLine("Tool filter: none (all tools exposed)");
+        }
 
         var client = connectionManager.GetClient(name);
         if (client?.IsConnected == true)
@@ -130,15 +166,39 @@ public sealed class McpCommand(
         if (string.IsNullOrWhiteSpace(query))
             return "Usage: /mcp search <query>";
 
-        var results = await registryClient.SearchAsync(query, limit: 20, ct).ConfigureAwait(false);
+        IReadOnlyList<OfficialRegistryServer> results;
+        try
+        {
+            results = await registryClient.SearchAsync(query, limit: 20, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // 官方 registry search 端点可用但响应慢（实测 18~26s）：超时按可重试的网络问题提示
+            return "MCP registry search timed out — the official registry search endpoint is slow at the moment; check network/proxy and retry.";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "MCP registry search failed for '{Query}'", query);
+            return $"MCP registry search failed: {ex.Message}";
+        }
+
         if (results.Count == 0)
+        {
+            // 空结果清空缓存：编号永远对应用户最近看到的列表，避免引用过期展示
+            _lastSearchResults = [];
             return $"No MCP servers found for '{query}'.";
+        }
+
+        // 缓存本列表，供 '/mcp install <序号>' 按编号引用
+        _lastSearchResults = results;
 
         var sb = new StringBuilder($"Registry search: '{query}' ({results.Count} results)\n\n");
-        foreach (var s in results)
+        for (var i = 0; i < results.Count; i++)
         {
+            var s = results[i];
             var local = s.Packages is { Count: > 0 } ? "stdio" : "remote";
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Name,-36} ({local})");
+            var dep = s.IsDeprecated ? ", deprecated" : "";
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  [{i + 1}] {s.Name,-34} ({local}{dep})");
             if (!string.IsNullOrWhiteSpace(s.Title) && s.Title != s.Name)
                 sb.AppendLine(CultureInfo.InvariantCulture, $"    {s.Title}");
             if (!string.IsNullOrWhiteSpace(s.Description))
@@ -148,7 +208,8 @@ public sealed class McpCommand(
             }
         }
         sb.AppendLine();
-        sb.AppendLine("Use '/mcp install <name>' to install a server.");
+        sb.AppendLine("Use '/mcp install <n>' to install a numbered server (e.g. '/mcp install 1'), or '/mcp install <name>'.");
+        sb.AppendLine("Remote servers have no installable package — use '/mcp add <name> --transport http --url <url>' instead.");
         return sb.ToString().TrimEnd();
     }
 
@@ -195,89 +256,6 @@ public sealed class McpCommand(
 
         error = $"Invalid scope '{scope}'. Use 'project' or 'user'.";
         return false;
-    }
-
-    private async Task<string> InstallAsync(string[] args, CancellationToken ct)
-    {
-        // /mcp install <qualifiedName> [--name <name>] [--scope project|user] [--connect]
-        var qualifiedName = args[0];
-        string? customName = null;
-        var scope = "project";
-        var connect = false;
-        for (var i = 1; i < args.Length; i++)
-        {
-            switch (args[i].ToLowerInvariant())
-            {
-                case "--name": if (++i < args.Length) customName = args[i]; break;
-                case "--scope": if (++i < args.Length) scope = args[i]; break;
-                case "--connect": connect = true; break;
-            }
-        }
-
-        if (!TryParseScope(scope, out var installScope, out var installScopeError))
-            return installScopeError;
-
-        var server = await registryClient.GetLatestAsync(qualifiedName, ct).ConfigureAwait(false);
-        if (server is null)
-            return $"MCP server '{qualifiedName}' not found in the registry.";
-
-        var entry = TryBuildLocalEntry(server);
-        if (entry is null)
-        {
-            var hint = server.Remotes is { Count: > 0 }
-                ? " (it is a remote-only server). Use '/mcp add' to configure the remote URL manually."
-                : ". Use '/mcp add' to configure manually.";
-            return $"'{qualifiedName}' has no installable local package{hint}";
-        }
-
-        var name = customName ?? qualifiedName.Replace('/', '-');
-
-        var configPath = McpConfigFileStore.GetPath(installScope);
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        if (!TryLoadConfigForWrite(configPath, out var file, out var installError))
-            return $"Cannot install '{name}': {installError}";
-        file.McpServers[name] = entry;
-        await McpConfigFileStore.SaveAsync(configPath, file, ct).ConfigureAwait(false);
-
-        logger.LogInformation("Installed MCP server '{Name}' from registry", name);
-
-        var commandDesc = $"{entry.Command} {string.Join(" ", entry.Args ?? [])}".TrimEnd();
-        var msg = $"Installed '{name}' ({server.Title ?? server.Name}) → {installScope} config (stdio: {commandDesc}).";
-
-        if (connect)
-        {
-            var ok = await connectionManager.ConnectOneAsync(name, ct).ConfigureAwait(false);
-            msg += ok ? " Connected." : $" Connection failed — use '/mcp connect {name}'.";
-        }
-        else
-        {
-            msg += $" Use '/mcp connect {name}' to connect.";
-        }
-
-        return msg;
-    }
-
-    /// <summary>
-    /// 将官方 registry 的 server 元数据映射为本地 stdio 配置：
-    /// npm → npx -y {identifier}；pypi → uvx {identifier}；oci → docker run -i --rm {identifier}。
-    /// nuget/mcpb 暂不支持（返回 null，由调用方提示手动配置）。
-    /// </summary>
-    private static McpConfigEntry? TryBuildLocalEntry(OfficialRegistryServer server)
-    {
-        foreach (var pkg in server.Packages ?? [])
-        {
-            switch (pkg.RegistryType.ToLowerInvariant())
-            {
-                case "npm":
-                    return new McpConfigEntry { Type = "stdio", Command = "npx", Args = ["-y", pkg.Identifier] };
-                case "pypi":
-                    return new McpConfigEntry { Type = "stdio", Command = "uvx", Args = [pkg.Identifier] };
-                case "oci":
-                    return new McpConfigEntry { Type = "stdio", Command = "docker", Args = ["run", "-i", "--rm", pkg.Identifier] };
-            }
-        }
-
-        return null;
     }
 
     private async Task<string> AddServerAsync(string[] args, CancellationToken ct)
@@ -391,7 +369,18 @@ public sealed class McpCommand(
                 logger.LogInformation("Connected to MCP server: {Name}", name);
                 return $"MCP server '{name}' connected.";
             }
-            return $"MCP server '{name}' not found in configuration or connection failed. Use /mcp list to see configured servers.";
+
+            // Plan C：失败必须给出原因——此前只回 "not found in configuration or
+            // connection failed"，用户分不清"没配置"与"连不上"。
+            var reason = connectionManager.GetStatus()
+                .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.LastError;
+            return reason is null
+                ? $"MCP server '{name}' not found in configuration or connection failed. Use /mcp list to see configured servers."
+                : $"MCP server '{name}' connection failed: {reason} — use /mcp list to see configured servers.";
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return $"MCP server '{name}' connection timed out — check the server command/URL, or raise initTimeoutMs in .mcp.json.";
         }
         catch (Exception ex)
         {

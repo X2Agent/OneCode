@@ -60,7 +60,7 @@ public static class PathsHelper
         }
         catch (Exception ex)
         {
-            // 纯静态方法无法注入 ILogger，按 §5.1 兜底使用 Debug.WriteLine。
+            // 纯静态方法无法注入 ILogger，使用 Debug.WriteLine 兜底。
             // 常见触发场景：路径含非法字符（Path.GetFullPath 抛 ArgumentException）。
             System.Diagnostics.Debug.WriteLine($"PathsHelper.NormalizePath fallback for '{path}': {ex.Message}");
             return trimmed.Replace('\\', '/').TrimEnd('/');
@@ -101,9 +101,9 @@ public static class PathsHelper
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (path.Length == 1)
                 return home;
-            if ((path.Length > 1 && path[1] == '/') || (path.Length > 1 && path[1] == '\\'))
-                return Path.Combine(home, path.Substring(2));
-            return Path.Combine(home, path.Substring(1));
+            if (path.Length > 1 && (path[1] == '/' || path[1] == '\\'))
+                return Path.Combine(home, path[2..]);
+            return Path.Combine(home, path[1..]);
         }
         return path;
     }
@@ -157,8 +157,10 @@ public static class PathsHelper
                     if (PathBoundary.IsWithinDirectory(resolved, dir))
                         return Result<string>.Success(resolved);
                 }
-                catch (ArgumentException) { /* skip invalid dir entries */ }
-                catch (NotSupportedException) { /* skip invalid dir entries */ }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+                {
+                    // skip invalid dir entries
+                }
             }
         }
 

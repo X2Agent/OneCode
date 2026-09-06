@@ -202,7 +202,7 @@ OneCode 运行时
 
 | 事件 | 触发时机 | matcher 字段 | 可选值 | 可阻断 |
 |------|---------|-------------|--------|--------|
-| `PreToolUse` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / TodoWrite / `mcp.*` 等 | ✅ exit code 2 |
+| `PreToolUse` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / TodoWrite / `mcp__*`（MCP 工具名为 `mcp__{server}__{tool}`）等 | ✅ exit code 2 |
 | `PostToolUse` | 工具调用成功执行后 | `tool_name`（glob） | 同上 | ❌ |
 | `Notification` | 权限审批挂起时（TUI 审批请求下发前） | `notification_type` | permission_prompt（idle_prompt / auth_success 未落地） | ❌ |
 | `UserPromptSubmit` | 用户提交 prompt 后、进入运行循环前（纠偏续跑不触发） | 无 matcher | — | ✅ exit code 2（阻断本轮 prompt，不落历史） |

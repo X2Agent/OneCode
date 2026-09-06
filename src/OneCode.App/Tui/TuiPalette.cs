@@ -123,7 +123,7 @@ internal static class TuiPalette
     /// <summary>Goal 模式前景色。#5BB8C8。</summary>
     public static readonly Color ModeGoalFg = new(0x5B, 0xB8, 0xC8);
 
-    // Agent 8-色系统（design-spec §6.2）
+    // Agent 8-色系统
     /// <summary>orchestrator — 紫色 #A386D8。</summary>
     public static readonly Color AgentPurple = new(0xA3, 0x86, 0xD8);
     /// <summary>researcher — 蓝色 #5B8DEE。即设计 token accent 的原色值，终端中仅作角色色使用。</summary>
@@ -165,7 +165,7 @@ internal static class TuiPalette
     };
 
     /// <summary>
-    /// 根据 agent 名称返回对应的前景色（design-spec §6.2 八色系统）。
+    /// 根据 agent 名称返回对应的前景色（八色系统）。
     /// 未知名称返回默认 AgentPurple。
     /// </summary>
     public static Color FromAgentName(string? name)

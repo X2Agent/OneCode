@@ -22,6 +22,9 @@ public abstract class Command : ICommand
     public virtual bool IsEnabled() => true;
     public virtual string? ArgumentHint => null;
     public virtual string? ProgressMessage => null;
+
+    /// <inheritdoc/>
+    public virtual string? GetSubcommandProgressMessage(string[] args) => null;
     public virtual bool Immediate => false;
     public virtual CommandSource Source => CommandSource.Builtin;
 

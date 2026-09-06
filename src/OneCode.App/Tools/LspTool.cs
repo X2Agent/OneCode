@@ -27,15 +27,15 @@ public sealed class LspTool
         _logger = logger;
     }
 
-    [Description("Perform Language Server Protocol operations: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, executeCommand, workspaceSymbol.")]
+    [Description("Perform Language Server Protocol operations: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol.")]
     public async Task<ToolResult> ExecuteLspAsync(
-        [Description("LSP action: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, executeCommand, workspaceSymbol")] string action,
+        [Description("LSP action: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol")] string action,
         [Description("File path (required for all actions except workspaceSymbol, executeCommand, and hierarchy sub-actions)")] string file = "",
         [Description("Line number (1-based, required for position-based actions)")] int line = 1,
         [Description("Column number (1-based, required for position-based actions)")] int column = 1,
         [Description("LSP server name (optional, auto-resolved by file extension if omitted)")] string? server = null,
         [Description("New name for rename action")] string? newName = null,
-        [Description("Query string for workspaceSymbol; JSON CodeAction for codeActionResolve; command name for executeCommand; JSON item for callHierarchy/typeHierarchy sub-actions")] string? query = null,
+        [Description("Query string for workspaceSymbol; JSON CodeAction for codeActionResolve; command name for executeCommand; 'incoming'/'outgoing' for callHierarchy; 'subtypes'/'supertypes' for typeHierarchy")] string? query = null,
         [Description("JSON-serialized arguments array for executeCommand (optional)")] string? arguments = null,
         CancellationToken ct = default)
     {
@@ -121,7 +121,9 @@ public sealed class LspTool
                 "preparerename" => await PrepareRenameAsync(targetServer, uri, line, column, ct).ConfigureAwait(false),
                 "formatting" => await FormatAsync(targetServer, uri, ct).ConfigureAwait(false),
                 "signaturehelp" => await GetSignatureHelpAsync(targetServer, uri, line, column, ct).ConfigureAwait(false),
-                _ => (object)new { error = $"Unknown LSP action: {action}. Supported: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, executeCommand, workspaceSymbol" }
+                "callhierarchy" => await GetCallHierarchyAsync(targetServer, uri, line, column, query, ct).ConfigureAwait(false),
+                "typehierarchy" => await GetTypeHierarchyAsync(targetServer, uri, line, column, query, ct).ConfigureAwait(false),
+                _ => (object)new { error = $"Unknown LSP action: {action}. Supported: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol" }
             };
 
             return ToolResult.JsonSuccess(result);
@@ -227,8 +229,34 @@ public sealed class LspTool
     {
         var @params = new { textDocument = new { uri }, position = new { line = line - 1, character = column - 1 } };
         var result = await _serverManager.SendRequestAsync(server, "textDocument/completion", JsonSerializer.SerializeToElement(@params), ct).ConfigureAwait(false);
-        return (object?)result ?? new { items = Array.Empty<object>() };
+        if (result is null)
+            return new { items = Array.Empty<object>() };
+
+        // 原始 completionItem 对 agent 噪音大（textEdit/sortText/data 等编辑器字段）：
+        // 投影为紧凑条目并截断，原始顺序即服务器相关度排序。
+        var items = result.Value.ValueKind == JsonValueKind.Array
+            ? result.Value
+            : result.Value.TryGetProperty("items", out var inner) ? inner : default;
+
+        if (items.ValueKind != JsonValueKind.Array)
+            return new { items = Array.Empty<object>() };
+
+        var compact = items.EnumerateArray()
+            .Select(i => new
+            {
+                label = i.TryGetProperty("label", out var l) ? l.GetString() : null,
+                kind = i.TryGetProperty("kind", out var k) && k.TryGetInt32(out var ki) ? (int?)ki : null,
+                detail = i.TryGetProperty("detail", out var d) ? d.GetString() : null,
+            })
+            .Take(MaxCompletionItems)
+            .ToList();
+        var total = items.GetArrayLength();
+
+        return new { total, returned = compact.Count, items = compact };
     }
+
+    /// <summary>completion 结果返回给模型的最大条目数（服务器排序即相关度排序，截断尾部）。</summary>
+    private const int MaxCompletionItems = 25;
 
     private async Task<object> GetCodeActionsAsync(string server, string uri, int line, int column, CancellationToken ct)
     {
@@ -241,6 +269,63 @@ public sealed class LspTool
         var result = await _serverManager.SendRequestAsync(server, "textDocument/codeAction", JsonSerializer.SerializeToElement(@params), ct).ConfigureAwait(false);
         return (object?)result ?? new { actions = Array.Empty<object>() };
     }
+
+    /// <summary>
+    /// Call hierarchy: prepare at position, then query incoming or outgoing calls
+    /// (<c>query</c>: "incoming" default / "outgoing"). Valuable for the agent to
+    /// understand who calls a method and what it calls before refactoring.
+    /// </summary>
+    private async Task<object> GetCallHierarchyAsync(
+        string server, string uri, int line, int column, string? query, CancellationToken ct)
+    {
+        var direction = string.Equals(query?.Trim(), "outgoing", StringComparison.OrdinalIgnoreCase)
+            ? "outgoing" : "incoming";
+
+        var prepare = await _serverManager.SendRequestAsync(
+            server, "textDocument/prepareCallHierarchy",
+            JsonSerializer.SerializeToElement(PositionParams(uri, line, column)), ct).ConfigureAwait(false);
+
+        if (prepare is null || prepare.Value.ValueKind != JsonValueKind.Array || prepare.Value.GetArrayLength() == 0)
+            return new { direction, items = Array.Empty<object>() };
+
+        var item = prepare.Value.EnumerateArray().First().Clone();
+        var method = direction == "outgoing" ? "callHierarchy/outgoingCalls" : "callHierarchy/incomingCalls";
+        var result = await _serverManager.SendRequestAsync(
+            server, method, JsonSerializer.SerializeToElement(new { item }), ct).ConfigureAwait(false);
+
+        return new { direction, calls = result ?? (JsonElement)LspProtocol.EmptyNull };
+    }
+
+    /// <summary>
+    /// Type hierarchy: prepare at position, then query subtypes or supertypes
+    /// (<c>query</c>: "subtypes" / "supertypes" default).
+    /// </summary>
+    private async Task<object> GetTypeHierarchyAsync(
+        string server, string uri, int line, int column, string? query, CancellationToken ct)
+    {
+        var direction = string.Equals(query?.Trim(), "subtypes", StringComparison.OrdinalIgnoreCase)
+            ? "subtypes" : "supertypes";
+
+        var prepare = await _serverManager.SendRequestAsync(
+            server, "textDocument/prepareTypeHierarchy",
+            JsonSerializer.SerializeToElement(PositionParams(uri, line, column)), ct).ConfigureAwait(false);
+
+        if (prepare is null || prepare.Value.ValueKind != JsonValueKind.Array || prepare.Value.GetArrayLength() == 0)
+            return new { direction, items = Array.Empty<object>() };
+
+        var item = prepare.Value.EnumerateArray().First().Clone();
+        var method = direction == "subtypes" ? "typeHierarchy/subtypes" : "typeHierarchy/supertypes";
+        var result = await _serverManager.SendRequestAsync(
+            server, method, JsonSerializer.SerializeToElement(new { item }), ct).ConfigureAwait(false);
+
+        return new { direction, items = result ?? (JsonElement)LspProtocol.EmptyNull };
+    }
+
+    private static object PositionParams(string uri, int line, int column) => new
+    {
+        textDocument = new { uri },
+        position = new { line = line - 1, character = column - 1 }
+    };
 
     /// <summary>
     /// Resolve a CodeAction to fill in its `edit` field. The agent passes back the
@@ -372,6 +457,8 @@ public sealed class LspTool
         "signaturehelp" => "textDocument/signatureHelp",
         "declaration" => "textDocument/declaration",
         "documenthighlight" => "textDocument/documentHighlight",
+        "callhierarchy" => "textDocument/prepareCallHierarchy",
+        "typehierarchy" => "textDocument/prepareTypeHierarchy",
         "executecommand" => "workspace/executeCommand",
         _ => null,
     };

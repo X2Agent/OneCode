@@ -24,8 +24,12 @@ public static partial class Constants
         public static readonly TimeSpan DiagnosticsCleanupInterval = TimeSpan.FromMinutes(5);
 
         // LspNotifier
-        public const int DiagnosticsSettleMs = 300;
         public const int MaxDiagnosticsInSummary = 5;
+
+        // LspNotifier — didChange 后诊断发布等待：轮询新诊断而非单次 sleep，
+        // 大项目首次分析远超固定 settle 时间，假阴性会误导模型。
+        public const int DiagnosticsPollIntervalMs = 200;
+        public const int DiagnosticsWaitTotalMs = 2000;
 
         // LanguagePackInstaller
         public static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(5);

@@ -856,23 +856,40 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 **用法**：
 
 ```
-/mcp [list|get|search|install|add|remove|connect|disconnect|enable|disable]
+/mcp [list|get|tools|search|install|add|remove|connect|disconnect|enable|disable|enable-tool|disable-tool]
 ```
 
 **参数**：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` / `ls` | 列出已配置和已连接的 MCP 服务器 |
+| 无参数 / `list` / `ls` | 列出已配置和已连接的 MCP 服务器（TUI 中无参数会打开工具白名单配置页，`list` 仍为文本列表）。启动连接失败的服务器在列表中直接给出失败原因与重试指引 |
 | `get <name>` | 查看服务器详情（已连接时列出 tools） |
-| `search <query>` | 从官方 MCP 注册表搜索 MCP 服务器（本地关键词过滤，免认证） |
-| `install <name>` | 从官方 MCP 注册表安装 MCP 服务器为本地 stdio（支持 `--name`、`--scope`、`--connect`） |
+| `tools <name>` | 列出服务器的全部方法及勾选状态（✓ 会暴露给模型 / ✗ 被白名单过滤），需已连接 |
+| `search <query>` | 从官方 MCP 注册表搜索 MCP 服务器（服务端搜索 `search` + `version=latest`，单次请求，免认证）。结果带 `[1]`…`[n]` 编号，可直接用 `/mcp install <编号>` 安装；remote 条目没有本地包，需改用 `/mcp add`。官方 search 端点较慢（实测 18~26s 返回），执行期间状态栏显示 spinner 与"searching MCP registry"忙碌标签，请耐心等待 |
+| `install <target>` | 从官方 MCP 注册表安装 MCP 服务器为本地 stdio，支持三种目标形式：完整限定名（`io.github.user/server`）、search 结果编号（`/mcp install 2`，引用最近一次 `/mcp search` 的编号列表）、短名模糊匹配（`/mcp install weather`——按 server name 子串匹配，唯一命中自动安装，多命中返回候选列表再按编号选择）。编号安装仍会拉取最新元数据，不存在缓存过期问题。安装后默认立即连接验证并在结果中给出失败原因（`--no-connect` 跳过）；支持 `--name`、`--scope` |
 | `add <name> [options]` | 手动添加本地服务器 |
 | `remove` / `rm <name>` | 移除服务器 |
 | `connect <name>` | 连接服务器 |
 | `disconnect <name>` | 断开服务器 |
 | `enable <name>` | 启用服务器 |
 | `disable <name>` | 禁用服务器 |
+| `enable-tool <name> <pattern>` | 把方法（支持 `*` 通配符）加入该服务器的白名单，写回配置并热生效（不断开连接） |
+| `disable-tool <name> <pattern>` | 从白名单移除方法；白名单未配置时先物化为全部方法再移除目标；目标仅被某个通配符条目覆盖时（如 `browser_*` 盖住 `browser_click`），把该通配符条目物化为具体方法并剔除目标，避免禁用被静默吞掉 |
+
+**工具白名单**：每台服务器在 `.mcp.json` 条目上支持 `tools` 字段——`null`（缺省）暴露全部方法，`[]` 连接但不暴露任何方法，非空数组为白名单（条目支持 `*` 通配符，大小写不敏感；`browser_*`、`*_screenshot`）。过滤发生在连接层（`McpConnectionManager.LoadAgentToolsAsync`），`/mcp:{server}` 动态命令、ToolCatalog、GOAL/TEAM 编排因此天然只暴露选中的方法。注意：白名单为静态配置，服务器端新增的方法不会自动暴露（用 `/mcp tools <name>` 可见全部方法）。内置服务器（如 playwright）不在 `.mcp.json` 中落盘时，方法级配置不持久化——先在配置文件中同名声明该服务器。
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "github-mcp-server",
+      "tools": ["get_*", "list_*", "create_issue"]
+    }
+  }
+}
+```
 
 **`add` 子命令支持的选项**：
 
@@ -885,7 +902,13 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `--args ...` | 透传参数（stdio 命令参数） |
 | `--connect` | 添加后立即连接 |
 
-配置写入 `.mcp.json`（用户级为 `~/.onecode/.mcp.json`，项目级为工作区 `.mcp.json`）。
+配置写入 `.mcp.json`（用户级为 `~/.onecode/.mcp.json`，项目级为从工作目录向上解析的最近 `.mcp.json`——`.git` 边界止步，未找到时回落工作目录新建）。写路径与 `/mcp list` 等读取路径一致，避免"读到上级配置、写到当前目录新文件"的分裂。
+
+配置中的字符串值（`command`、`args` 元素、`env` / `headers` 值、`url`）支持环境变量展开：`${VAR}` / `${env:VAR}`，未定义的变量展开为空串。适合引用不在配置文件中明文落盘的密钥，如 `"Authorization": "Bearer ${GITHUB_TOKEN}"`。
+
+每台服务器支持 `initTimeoutMs` / `startupTimeoutMs` 字段覆盖连接超时窗口（默认 30s，取两者较大值生效；非法值回落默认）。`inprocess` 传输的服务器需在同进程内经 `IInProcessMcpServerProvider` 注册（测试 / 嵌入场景），未注册时连接软失败。
+
+`type` 缺省时按字段推断传输协议：有 `command` → `stdio`；`url` 以 `ws://` / `wss://` 开头 → `websocket`；其余 `url` → `sse`。远端服务器只支持 Streamable HTTP 时须显式写 `"type": "http"`（客户端以 AutoDetect 自动选择 Streamable / SSE）。
 
 **Playwright 浏览器扩展（可选）**：
 

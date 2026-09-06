@@ -65,6 +65,14 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
     private readonly JsonSerializerOptions _jsonOptions = CreateJsonOptions();
     private readonly ILogger<PlanAggregateStore>? _logger;
 
+    /// <summary>
+    /// 已报告过"无法读取"的聚合文件（全路径）。后台扫描每 5 秒遍历一次磁盘，
+    /// 同一损坏文件不去重会以 WARNING 刷屏；首见记录 Debug 详情，重复出现静默跳过。
+    /// 容量上限防御恶意目录场景；进程重启或文件重写（保存会校验）自然清零。
+    /// </summary>
+    private readonly HashSet<string> _reportedUnreadable = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxReportedUnreadableEntries = 64;
+
     public PlanAggregateStore(
         string? basePath = null,
         ILogger<PlanAggregateStore>? logger = null)
@@ -136,7 +144,18 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or PlanTransitionException)
             {
-                _logger?.LogWarning(ex, "Skipping unreadable Plan aggregate {Path}", file);
+                // 后台恢复扫描每 5 秒遍历一次磁盘：同一损坏文件只报告一次，
+                // 否则 WARNING（含完整 JSON 异常堆栈）会以 5 秒周期刷屏。
+                if (_reportedUnreadable.Add(file))
+                {
+                    if (_reportedUnreadable.Count > MaxReportedUnreadableEntries)
+                        _reportedUnreadable.Clear();
+                    _logger?.LogWarning(ex, "Skipping unreadable Plan aggregate {Path}", file);
+                }
+                else
+                {
+                    _logger?.LogDebug(ex, "Skipping unreadable Plan aggregate {Path} (already reported)", file);
+                }
             }
         }
 

@@ -96,6 +96,9 @@ public sealed partial class ChatTranscriptView : View
         RenderWelcome();
     }
 
+    /// <summary>欢迎页是否仍占据会话视图（MCP 连接完成后据此决定是否重渲染诊断行）。</summary>
+    public bool IsWelcomeShowing => _isWelcomeShowing;
+
     /// <summary>
     /// Renders the stored welcome info using the current viewport width.
     /// Called on initial display and on resize.

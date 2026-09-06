@@ -1,6 +1,7 @@
 using OneCode.App.Services.Streaming;
 using OneCode.App.Tui;
 using OneCode.Core.Models;
+using OneCode.Core.Mcp;
 using IAppStateAccessor = OneCode.Core.Domain.IAppStateAccessor;
 
 namespace OneCode.App.Services;
@@ -17,4 +18,6 @@ public sealed record TuiCatalogDependencies(
     IModelCatalog ModelCatalog,
     IAppStateAccessor AppState,
     ICommandRegistry CommandRegistry,
-    IToolCatalog ToolCatalog);
+    IToolCatalog ToolCatalog,
+    IMcpConnectionManager? McpConnectionManager = null,
+    OneCode.App.Services.Mcp.McpStartupPreconnector? Preconnector = null);

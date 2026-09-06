@@ -29,6 +29,14 @@ public interface ICommand
 
     string? ProgressMessage => null;
 
+    /// <summary>
+    /// 按子命令参数解析执行中的忙碌标签（如 <c>/mcp search</c> → "searching MCP registry"）。
+    /// 拥有子命令的命令可覆盖以提供精确反馈；返回 null 时回退到 <see cref="ProgressMessage"/>
+    /// （进而回退到宿主的默认标签，如 TUI 的"执行 /{name}"）。
+    /// </summary>
+    /// <param name="args">命令参数（已剥离命令名，与 <see cref="ExecuteAsync"/> 的 args 一致）</param>
+    string? GetSubcommandProgressMessage(string[] args) => null;
+
     /// <summary>如果为 true，则绕过 query 队列立即执行</summary>
     bool Immediate => false;
 

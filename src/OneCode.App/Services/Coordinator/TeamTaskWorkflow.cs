@@ -557,8 +557,7 @@ internal sealed class TeamTaskExecutor(
         }
 
         stopwatch.Stop();
-        // All attempts exhausted or non-retryable failure → Blocked (per T-03 §5: structured
-        // Blocked result for OneCode domain policy to decide business failure).
+        // All attempts exhausted or non-retryable failure → Blocked.
         return outcomeRegistry.Set(new TeamTaskOutcome(
             task.Id,
             task.Title,

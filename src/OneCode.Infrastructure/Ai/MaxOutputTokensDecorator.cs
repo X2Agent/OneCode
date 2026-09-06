@@ -7,10 +7,6 @@ namespace OneCode.Infrastructure.Ai;
 /// 先一步升级到 EscalatedMaxTokens (65536)，然后通过 multi-turn continuation prompt 恢复，
 /// 最多 RecoveryLimit=3 次。
 ///
-/// 实际恢复策略（对应 ChatService.cs TryHandleNoToolCallsAsync 第 674-706 行）：
-///   Step 1: 默认值 → 65536（一步升级）
-///   Step 2: 注入 continuation prompt + 重试（最多3次）
-///
 /// 注意：此机制依赖 M.E.AI 标准 ChatFinishReason.Length，与具体提供商无关。
 /// 此装饰器在 MainAgentRunner 构建时与 CompactionProvider 一起组装，不在 DI 单例层注册。
 /// </summary>

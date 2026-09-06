@@ -142,7 +142,7 @@ public sealed class JsonTeamRunStore : ITeamRunStore
 
     /// <summary>
     /// 内核统一签名：<see cref="TrySaveAsync"/> 的抛异常变体——
-    /// CAS 失败即抛 <see cref="InvalidOperationException"/>，供统一运行时骨架（Stage 3）调用。
+    /// CAS 失败即抛 <see cref="InvalidOperationException"/>，供统一运行时骨架调用。
     /// </summary>
     public async Task SaveAsync(TeamRun run, long expectedVersion, CancellationToken ct = default)
     {

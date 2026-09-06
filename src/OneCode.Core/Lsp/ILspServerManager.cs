@@ -33,6 +33,8 @@ public sealed record LspServerStatus
     public bool IsRunning { get; init; }
     public bool IsInitialized { get; init; }
     public JsonElement? Capabilities { get; init; }
+    /// <summary>Server is pushing workDoneProgress (e.g. indexing a large solution) — ready-ness signal.</summary>
+    public bool IsIndexing { get; init; }
 }
 
 /// <summary>

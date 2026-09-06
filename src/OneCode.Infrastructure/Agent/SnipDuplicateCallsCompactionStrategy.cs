@@ -109,9 +109,7 @@ public sealed class SnipDuplicateCallsCompactionStrategy : CompactionStrategy
 
             if (dedupKeyToLastIndex.TryGetValue(groupKey, out int prevIndex))
             {
-                // 之前的组是重复的，标记排除
-                // 但先把之前记录的索引加入 duplicateIndices（它更早）
-                // 当前索引成为新的"最后一次"
+                // 保留每个 key 组的最后一次出现，更早的同 key 组标记为重复并排除
                 duplicateIndices.Add(prevIndex);
                 dedupKeyToLastIndex[groupKey] = i;
             }

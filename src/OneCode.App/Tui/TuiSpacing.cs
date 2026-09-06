@@ -78,6 +78,19 @@ internal static class TuiSpacing
 
     public const int FormFieldX = FormLabelWidth + 1;
 
+    // MCP 配置页（McpConfigOverlay）双栏布局
+    /// <summary>MCP 配置页服务器窗格常规宽度（窄对话框下收缩）。</summary>
+    public const int McpServerPaneWidth = 36;
+
+    /// <summary>MCP 配置页服务器窗格收缩下限（为方法窗格让位）。</summary>
+    public const int McpServerPaneMinWidth = 8;
+
+    /// <summary>MCP 配置页方法窗格最小宽度，低于该宽度勾选列表不可用。</summary>
+    public const int McpToolPaneMinWidth = 20;
+
+    /// <summary>MCP 配置页左右窗格间隔。</summary>
+    public const int McpPaneGap = 2;
+
     // 主布局预留
     /// <summary>对话区与 AgentStatusBar 之间的空行间距。</summary>
     public const int StatusBarTopGap = 1;

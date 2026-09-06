@@ -27,6 +27,7 @@ public static partial class ServiceCollectionExtensions
         // Official MCP registry client (used by /mcp search and /mcp install).
         services.AddSingleton<OfficialMcpRegistryClient>();
         services.AddSingleton<McpMultiScopeConfigLoader>();
+        services.AddSingleton<Services.Mcp.McpConfigService>();
         services.AddSingleton<LspServerManager>();
         services.AddSingleton<ILspServerManager>(sp => sp.GetRequiredService<LspServerManager>());
 

@@ -50,8 +50,11 @@ public sealed class PlanExecutionTool(
                 evidence,
                 error,
                 context.Workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false);
-            var execution = result.Workflow.StepExecutions.Single(item =>
+            var execution = result.Workflow.StepExecutions.SingleOrDefault(item =>
                 string.Equals(item.StepId, stepId, StringComparison.Ordinal));
+            if (execution is null)
+                return ToolResult.Error($"Step '{stepId}' not found in workflow {result.Workflow.Id}. " +
+                    $"Known steps: {string.Join(", ", result.Workflow.StepExecutions.Select(s => s.StepId))}");
             var projectedTask = taskLinker.GetLinkedPlanTask(context.SessionId.ToString(), buildRunScope, stepId);
             taskLinker.ProjectPlanStep(
                 projectedTask,

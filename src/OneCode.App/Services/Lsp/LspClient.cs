@@ -44,6 +44,14 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public Exception? StartError => _startError;
 
+    /// <summary>
+    /// Number of in-flight <c>$/progress</c> workDone tokens (begin without end).
+    /// Non-zero means the server is busy (e.g. indexing a large solution) —
+    /// a more accurate ready-ness signal than <see cref="IsInitialized"/>.
+    /// </summary>
+    public int ActiveWorkDoneProgress => _activeProgressTokens;
+    private int _activeProgressTokens;
+
     public LspClient(string serverName, ILogger<LspClient> logger, Action<Exception>? onCrash = null)
     {
         _serverName = serverName;
@@ -409,11 +417,34 @@ public sealed class LspClient : IAsyncDisposable
                 else
                 {
                     // Notification from server (e.g., textDocument/publishDiagnostics)
+                    var @params = root.TryGetProperty("params", out var p) ? p : LspProtocol.EmptyObject;
+
+                    // Built-in $/progress tracking (window/workDoneProgress): count begin/end
+                    // pairs so consumers can tell "server busy indexing" from "ready".
+                    if (method == "$/progress"
+                        && @params.ValueKind == JsonValueKind.Object
+                        && @params.TryGetProperty("value", out var value)
+                        && value.TryGetProperty("kind", out var kindEl))
+                    {
+                        var kind = kindEl.GetString();
+                        if (kind == "begin")
+                        {
+                            Interlocked.Increment(ref _activeProgressTokens);
+                        }
+                        else if (kind == "end")
+                        {
+                            // 孤立 end（如服务器重启重放）不把计数压成负数——负值会让后续
+                            // 正常 end 的配对判断失真（IsIndexing 判 >0，本身不受影响）。
+                            var after = Interlocked.Decrement(ref _activeProgressTokens);
+                            if (after < 0)
+                                Interlocked.CompareExchange(ref _activeProgressTokens, 0, after);
+                        }
+                    }
+
                     lock (_notificationHandlers)
                     {
                         if (_notificationHandlers.TryGetValue(method, out var handler))
                         {
-                            var @params = root.TryGetProperty("params", out var p) ? p : LspProtocol.EmptyObject;
                             handler(@params);
                         }
                     }
@@ -434,7 +465,17 @@ public sealed class LspClient : IAsyncDisposable
                         try
                         {
                             if (root.TryGetProperty("error", out var error))
-                                tcs.SetException(new LspException($"LSP request failed: {error.GetRawText()}"));
+                            {
+                                var code = error.TryGetProperty("code", out var codeEl) && codeEl.TryGetInt32(out var c)
+                                    ? (int?)c
+                                    : null;
+                                var message = error.TryGetProperty("message", out var msgEl)
+                                    ? msgEl.GetString()
+                                    : null;
+                                tcs.SetException(new LspException(
+                                    $"LSP request failed: [{code?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"}] {message ?? error.GetRawText()}",
+                                    code));
+                            }
                             else if (root.TryGetProperty("result", out var result))
                                 tcs.SetResult(result.Clone());
                             else
@@ -553,10 +594,15 @@ public sealed class LspClient : IAsyncDisposable
 }
 
 /// <summary>
-/// Exception thrown when an LSP request fails.
+/// Exception thrown when an LSP request fails. Preserves the JSON-RPC
+/// <c>error.code</c> (e.g. ServerNotInitialized=-32002) so callers can
+/// distinguish "server not ready" from "invalid params" and self-heal.
 /// </summary>
 public sealed class LspException : Exception
 {
-    public LspException(string message) : base(message) { }
+    /// <summary>JSON-RPC error.code from the server response (null for transport-level failures).</summary>
+    public int? Code { get; }
+
+    public LspException(string message, int? code = null) : base(message) => Code = code;
     public LspException(string message, Exception inner) : base(message, inner) { }
 }

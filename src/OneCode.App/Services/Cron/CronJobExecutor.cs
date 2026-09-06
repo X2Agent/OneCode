@@ -2,6 +2,7 @@ using OneCode.Core.Config;
 using OneCode.App.Query;
 using OneCode.App.Session;
 using OneCode.Automation.Cron;
+using OneCode.App.Services.Mcp;
 using OneCode.Core.Models;
 
 namespace OneCode.App.Services.Cron;
@@ -26,6 +27,7 @@ public sealed class CronJobExecutor : ICronJobExecutor
     private readonly IConversationRunner _runner;
     private readonly ISessionManager _sessionManager;
     private readonly PromptConfigBuilder _promptConfigBuilder;
+    private readonly McpStartupPreconnector _preconnector;
     private readonly IConfigManager _configManager;
     private readonly IModelManager _modelManager;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -36,6 +38,7 @@ public sealed class CronJobExecutor : ICronJobExecutor
         IConversationRunner runner,
         ISessionManager sessionManager,
         PromptConfigBuilder promptConfigBuilder,
+        McpStartupPreconnector preconnector,
         IConfigManager configManager,
         IModelManager modelManager)
     {
@@ -43,6 +46,7 @@ public sealed class CronJobExecutor : ICronJobExecutor
         _runner = runner;
         _sessionManager = sessionManager;
         _promptConfigBuilder = promptConfigBuilder;
+        _preconnector = preconnector;
         _configManager = configManager;
         _modelManager = modelManager;
     }
@@ -67,11 +71,13 @@ public sealed class CronJobExecutor : ICronJobExecutor
                 return;
             }
 
-            // Build (and cache) the system prompt once. BuildSystemPromptAsync also
-            // connects MCP servers and rebuilds the skills provider, so we avoid
-            // repeating it on every fire. The first build is uncancellable (prompt
-            // pipeline doesn't honour the token), but subsequent await points
-            // below DO honour `ct` so a host shutdown still surfaces promptly.
+            // Build (and cache) the system prompt once, including the skills provider
+            // rebuild. MCP 预连接已移出 PromptConfigBuilder（Plan B）——cron 是非交互
+            // 路径，这里显式等待预连接完成后再构建，保证工具目录与 skills 覆盖 MCP。
+            // The first build is uncancellable (prompt pipeline doesn't honour the
+            // token), but subsequent await points below DO honour `ct` so a host
+            // shutdown still surfaces promptly.
+            await _preconnector.EnsureConnectedAsync(ct).ConfigureAwait(false);
             _cachedSystemPrompt ??= await _promptConfigBuilder.BuildSystemPromptAsync(
                 memoryQuery: null,
                 ct: ct).ConfigureAwait(false);

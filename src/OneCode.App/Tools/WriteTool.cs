@@ -106,12 +106,17 @@ public sealed class WriteTool
     private async Task<ToolResult> WriteRemoteAsync(SshRemoteService ssh, string filePath, string content, bool dryRun, CancellationToken ct)
     {
         var existing = await ssh.ReadFileAsync(filePath, ct).ConfigureAwait(false) ?? "";
-        if (dryRun)
-            return ToolResult.Success(UnifiedDiff.Compute(existing, content, filePath));
+        // 与本地路径对齐：按目标文件现有行尾风格归一化写入内容，
+        // 避免 SSH 写入将 CRLF 文件改成 LF（或反之）造成整文件 diff。
+        var lineEndingStyle = FileEncodingHelper.DetectLineEndingStyle(existing);
+        var finalContent = FileEncodingHelper.NormalizeLineEndings(content, lineEndingStyle);
 
-        var ok = await ssh.WriteFileAsync(filePath, content, ct).ConfigureAwait(false);
+        if (dryRun)
+            return ToolResult.Success(UnifiedDiff.Compute(existing, finalContent, filePath));
+
+        var ok = await ssh.WriteFileAsync(filePath, finalContent, ct).ConfigureAwait(false);
         return ok
-            ? ToolResult.Success($"Successfully wrote {content.Length} characters to ssh:{filePath}")
+            ? ToolResult.Success($"Successfully wrote {finalContent.Length} characters to ssh:{filePath}")
             : ToolResult.Error($"Error writing ssh:{filePath}");
     }
 }

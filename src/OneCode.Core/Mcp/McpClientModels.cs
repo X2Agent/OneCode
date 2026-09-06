@@ -19,11 +19,3 @@ public sealed record McpTool(
 public sealed record McpToolResult(
     string Content,
     bool IsError = false);
-
-/// <summary>
-/// MCP prompt definition.
-/// </summary>
-public sealed record McpPrompt(
-    string Name,
-    string? Description,
-    string[] ArgumentNames);

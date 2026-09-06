@@ -5,7 +5,7 @@ using OneCode.Core.Tools;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="LSTool"/> — covers path-safety boundary checks, directory listing,
+/// Unit tests for <see cref="LsTool"/> — covers path-safety boundary checks, directory listing,
 /// hidden-file filtering, and generated-directory/extension exclusion.
 /// </summary>
 public sealed class LsToolTests : IDisposable
@@ -65,7 +65,7 @@ public sealed class LsToolTests : IDisposable
     public async Task ListAsync_TraversalPath_ReturnsError(string traversal)
     {
         var ct = TestContext.Current.CancellationToken;
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync(traversal, ct: ct);
 
@@ -77,7 +77,7 @@ public sealed class LsToolTests : IDisposable
     public async Task ListAsync_AbsolutePathOutsideWorkingDir_ReturnsError()
     {
         var ct = TestContext.Current.CancellationToken;
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync(_outsideDir, ct: ct);
 
@@ -89,7 +89,7 @@ public sealed class LsToolTests : IDisposable
     public async Task ListAsync_NonExistentDirectory_ReturnsError()
     {
         var ct = TestContext.Current.CancellationToken;
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("does_not_exist", ct: ct);
 
@@ -107,7 +107,7 @@ public sealed class LsToolTests : IDisposable
         WriteFileInListing("alpha.txt");
         WriteFileInListing("beta.txt");
         CreateDirInListing("gamma");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", ct: ct);
 
@@ -127,7 +127,7 @@ public sealed class LsToolTests : IDisposable
         CreateListingDir();
         WriteFileInListing("visible.txt");
         WriteFileInListing(".hidden");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", all: false, ct: ct);
 
@@ -144,7 +144,7 @@ public sealed class LsToolTests : IDisposable
         CreateListingDir();
         WriteFileInListing("visible.txt");
         WriteFileInListing(".hidden");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", all: true, ct: ct);
 
@@ -166,7 +166,7 @@ public sealed class LsToolTests : IDisposable
         CreateDirInListing("bin");
         CreateDirInListing("obj");
         CreateDirInListing("node_modules");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", all: false, ct: ct);
 
@@ -184,7 +184,7 @@ public sealed class LsToolTests : IDisposable
         CreateListingDir();
         WriteFileInListing("app.cs");
         WriteFileInListing("build.dll");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", all: false, ct: ct);
 
@@ -202,7 +202,7 @@ public sealed class LsToolTests : IDisposable
         WriteFileInListing("app.cs");
         WriteFileInListing("build.dll");
         CreateDirInListing("bin");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync("listing", all: true, ct: ct);
 
@@ -217,7 +217,7 @@ public sealed class LsToolTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         File.WriteAllText(Path.Combine(_projectDir, "root.txt"), "x");
-        var tool = new LSTool(CreateWd());
+        var tool = new LsTool(CreateWd());
 
         var result = await tool.ListAsync(ct: ct);
 

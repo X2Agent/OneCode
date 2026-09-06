@@ -136,8 +136,8 @@ public sealed class CreatePlanTool(
         => new()
         {
             Id = step.Id?.Trim() ?? string.Empty,
-            Title = (step.Title ?? step.Label)?.Trim() ?? string.Empty,
-            Description = (step.Description ?? step.Content)?.Trim() ?? string.Empty,
+            Title = step.Title?.Trim() ?? string.Empty,
+            Description = step.Description?.Trim() ?? string.Empty,
             Files = step.Files ?? [],
             AcceptanceCriteria = step.AcceptanceCriteria ?? [],
             DependsOn = step.DependsOn ?? [],
@@ -395,21 +395,6 @@ internal static class PlanContentQualityGate
         TimeSpan.FromSeconds(1));
 
     /// <summary>
-    /// 架构决策关键词正则——匹配项目组织/结构相关术语。用于 Greenfield 场景
-    /// 作为技术栈引用的补充证据：新项目 plan 应明确代码组织方式。
-    /// </summary>
-    private static readonly Regex ArchitectureDecisionRegex = new(
-        // 英文关键词
-        @"\b(?:project\s+structure|directory\s+(?:structure|layout)|" +
-        @"module\s+(?:structure|breakdown|organization)|architecture|folder\s+structure|" +
-        @"component\s+hierarchy|layer(?:ed)?\s+architecture|monorepo|microservices?|" +
-        @"MVC|MVVM|clean\s+architecture|hexagonal)\b" +
-        // 中文关键词
-        @"|(?:项目结构|目录结构|架构设计|模块划分|分层架构|组件层级|单体仓库|微服务)",
-        RegexOptions.IgnoreCase,
-        TimeSpan.FromSeconds(1));
-
-    /// <summary>
     /// 校验 plan 内容质量。返回失败原因列表；空列表表示通过。
     /// </summary>
     public static IReadOnlyList<string> Validate(string planContent)
@@ -446,7 +431,6 @@ internal static class PlanContentQualityGate
         var hasFilePath = FilePathReferenceRegex.IsMatch(planContent);
         var hasCodeBlock = CodeBlockRegex.IsMatch(planContent);
         var hasTechStack = TechStackReferenceRegex.IsMatch(planContent);
-        var hasArchitectureDecision = ArchitectureDecisionRegex.IsMatch(planContent);
         var existingProjectEvidence = hasFilePath || hasCodeBlock;
         // Greenfield 证据：技术栈引用即可；架构决策关键词作为补充但不强制。
         var greenfieldEvidence = hasTechStack;
@@ -457,8 +441,6 @@ internal static class PlanContentQualityGate
                 "Complete Phase 1 (investigate existing codebase with Read/Grep/Glob, OR for new projects " +
                 "specify the tech stack) and reflect the evidence in the plan.");
         }
-        // 保留 hasArchitectureDecision 的计算用于未来扩展（如更细粒度的质量评分），
-        // 当前不参与 pass/fail 判定。
 
         return failures;
     }
@@ -473,17 +455,11 @@ public sealed class PlanStepDto
     [Description("Stable unique step ID used by dependencies and execution tracking.")]
     public string? Id { get; set; }
 
-    [Description("Step title. Label is accepted as a backwards-compatible alias.")]
+    [Description("Step title shown on the plan card.")]
     public string? Title { get; set; }
 
-    [Description("Backwards-compatible short label shown in the plan card.")]
-    public string? Label { get; set; }
-
-    [Description("Detailed step description. Content is accepted as a backwards-compatible alias.")]
+    [Description("Detailed step description describing what to execute.")]
     public string? Description { get; set; }
-
-    [Description("Backwards-compatible secondary plan-card content.")]
-    public string? Content { get; set; }
 
     [Description("Files expected to be read or changed by this step.")]
     public string[]? Files { get; set; }

@@ -68,7 +68,7 @@ public sealed class PromptConfigBuilderTests
     }
 
     [Fact]
-    public async Task BuildSystemPromptAsync_ComposesAllContextSections_AndConnectsMcp()
+    public async Task BuildSystemPromptAsync_ComposesAllContextSections_AndRebuildsSkillProvider()
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = new PromptManager();
@@ -103,8 +103,9 @@ public sealed class PromptConfigBuilderTests
         var mcpManager = Substitute.For<IMcpConnectionManager>();
         var mcpSkillsIntegrator = new McpSkillsIntegrator(mcpManager, NullLogger<McpSkillsIntegrator>.Instance);
         var skillProviderHolder = new SkillProviderHolder(new AgentSkillsProviderBuilder().Build());
+        var initialProvider = skillProviderHolder.Current;
         var runtimeDeps = new PromptRuntimeDependencies(
-            mcpManager, mcpSkillsIntegrator, skillProviderHolder, new SkillCatalog(Path.GetTempPath()));
+            mcpSkillsIntegrator, skillProviderHolder, new SkillCatalog(Path.GetTempPath()));
 
         var builder = new PromptConfigBuilder(
             NullLogger<PromptConfigBuilder>.Instance,
@@ -124,7 +125,9 @@ public sealed class PromptConfigBuilderTests
         result.Should().Contain("MEMORY_SENTINEL");
         result.Split("MEMORY_SENTINEL", StringSplitOptions.None).Length.Should().Be(2,
             "memory section must appear exactly once (no duplication)");
-        // MCP ConnectAllAsync was called
-        await mcpManager.Received(1).ConnectAllAsync(Arg.Any<CancellationToken>());
+        // Skills provider was rebuilt (MCP preconnect moved out of this path — Plan B);
+        // the holder must have been atomically replaced with a fresh provider.
+        skillProviderHolder.Current.Should().NotBeSameAs(initialProvider,
+            "BuildSystemPromptAsync must rebuild and replace the skills provider");
     }
 }

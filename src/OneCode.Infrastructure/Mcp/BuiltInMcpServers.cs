@@ -25,7 +25,8 @@ public static class BuiltInMcpServers
             ["playwright"] = new(
                 McpTransportType.Stdio,
                 Command: "npx",
-                Args: ["-y", "@playwright/mcp@latest", "--headless"]),
+                Args: ["-y", "@playwright/mcp@latest", "--headless"],
+                InitTimeoutMs: 120_000),
         };
 
     public static IReadOnlyDictionary<string, McpServerDefinition> All => Servers;

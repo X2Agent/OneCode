@@ -3,7 +3,6 @@ namespace OneCode.App.Modes;
 /// <summary>
 /// Four working modes supported by the app.
 ///
-/// Design-spec §1.1:
 /// - <see cref="Build"/>: Agent directly analyzes and executes the request.
 /// - <see cref="Plan"/>:  Agent first produces a plan card; user approves before execution.
 /// - <see cref="Team"/>:  Multi-agent team coordination (Magentic or GroupChat strategy).

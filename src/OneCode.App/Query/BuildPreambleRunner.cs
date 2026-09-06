@@ -128,7 +128,7 @@ internal sealed class BuildPreambleRunner
             && _buildRunGate.Clarification is { } clarificationInteraction)
         {
             // 计划审批门（流内门）：决策非持久化——BuildRun 聚合的 Planned 态
-            // 已落盘，崩溃后 resume 重问。审批机制按模式自持、不强行统一（ADR 非目标），
+            // 已落盘，崩溃后 resume 重问。审批机制按模式自持、不强行统一，
             // 流内确认语义：取消/空白回复一律视为拒绝。
             // 提问文本只展示计划摘要；工具策略由 SnapshotApprovedTools 快照直接走
             // ApprovePlanAsync 持久化，对用户决策无增量信息，不在卡片展示。

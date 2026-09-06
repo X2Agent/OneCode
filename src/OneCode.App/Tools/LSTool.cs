@@ -6,11 +6,11 @@ namespace OneCode.App.Tools;
 /// <summary>
 /// List directory contents.
 /// </summary>
-public sealed class LSTool
+public sealed class LsTool
 {
     private readonly IWorkingDirectoryAccessor _wd;
 
-    public LSTool(IWorkingDirectoryAccessor wd) => _wd = wd;
+    public LsTool(IWorkingDirectoryAccessor wd) => _wd = wd;
 
     [Description("List directory contents, returning entries with size, last-modified time, and a trailing '/' for directories. " +
                  "Use this to explore directory structure when you need a quick overview; use Glob when you need to find files by pattern across many directories. " +
@@ -49,7 +49,7 @@ public sealed class LSTool
                             if ((File.GetAttributes(entry) & FileAttributes.Hidden) != 0)
                                 continue;
                         }
-                        catch (IOException ex) { System.Diagnostics.Debug.WriteLine($"LSTool failed to check Hidden attribute: {ex.Message}"); }
+                        catch (IOException ex) { System.Diagnostics.Debug.WriteLine($"LsTool failed to check Hidden attribute: {ex.Message}"); }
                     }
                     if (Directory.Exists(entry) && GeneratedFilesDetector.IsGeneratedDirectory(name))
                         continue;

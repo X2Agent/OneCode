@@ -73,8 +73,6 @@ public sealed partial class ReplShell : View
         _gitHelper = gitHelper;
 
         _transcript = new ChatTranscriptView(app, clipboard, getShowThinking);
-        _transcriptNav = new OneCode.App.Transcript.TranscriptViewModel(
-            () => _transcript.MessageView.GetInteractiveLineIndices());
         _chatInput = new ChatInputView(
             app,
             _modeController,
@@ -100,9 +98,6 @@ public sealed partial class ReplShell : View
         // ChatInputView 把挂起态/提问态的按键转发给会话（见 IInteractionSession），
         // 替代旧的松散转发事件。
         _chatInput.InteractionSession = this;
-
-        // Ctrl+T — 进入对话区导航模式（焦点切换 + Transcript 上下文 push）。
-        _chatInput.EnterTranscriptRequested += EnterTranscriptMode;
 
         // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
         _chatInput.ScrollUpRequested += () => _transcript.MessageView.ScrollUp();
@@ -215,7 +210,7 @@ public sealed partial class ReplShell : View
         _sessionContextBar.SetWorkingMode(_modeController.Mode);
     }
 
-    // Plan card interaction (design-spec §4.2) lives in ReplShell.PlanCard.cs:
+    // Plan card interaction lives in ReplShell.PlanCard.cs:
     // 计划内容渲染在右侧 PlanSidebarView；PendingApproval 阶段弹出 InlineSelector
     // 决策面板（在对话流内），自动接管键盘（SetInteractionSuspended）。
 
@@ -329,9 +324,6 @@ public sealed partial class ReplShell : View
         if (busy)
             _agentStatusBar.SetActivity(initialActivity);
         _agentStatusBar.SetBusy(busy);
-        // 流式开始时自动退出导航模式：流式插入会让游标行号漂移（流式禁入）。
-        if (busy)
-            ExitTranscriptMode();
     }
 
     public void FocusChatInput()

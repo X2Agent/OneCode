@@ -4,28 +4,14 @@ namespace OneCode.Tests;
 
 public sealed class TuiContentLayoutTests
 {
-    [Theory]
-    [InlineData(80, 80)]
-    [InlineData(100, 100)]
-    [InlineData(160, 160)]
-    [InlineData(200, 200)]
-    [InlineData(0, TuiSpacing.DefaultContentWidth)]
-    public void GetContentColumnWidth_TracksViewport(int viewportWidth, int expected)
-    {
-        TuiSpacing.GetContentColumnWidth(viewportWidth).Should().Be(expected);
-    }
-
+    /// <summary>
+    /// 首次绘制前 viewport 未测量，必须回退到 80 列而不是 0（0 会导致换行宽度归零）。
+    /// 直通分支（80→80 等）是恒等断言，无回归价值，不测。
+    /// </summary>
     [Fact]
-    public void ContentZoneReservedBottom_IncludesFullChatInputHeight()
+    public void GetContentColumnWidth_UnmeasuredViewport_FallsBackToDefaultWidth()
     {
-        ChatInputView.MaxHeight.Should().Be(1 + ChatTextEditor.MaxVisibleLines);
-        TuiSpacing.ContentZoneReservedBottom.Should().Be(
-            TuiSpacing.SessionContextBarHeight
-            + TuiSpacing.StatusBarHeight
-            + TuiSpacing.StatusBarTopGap
-            + TuiSpacing.ChatInputContextGap
-            + ChatInputView.MaxHeight);
-        TuiSpacing.ContentZoneReservedBottom.Should().Be(9);
+        TuiSpacing.GetContentColumnWidth(0).Should().Be(TuiSpacing.DefaultContentWidth);
     }
 
     [Fact]
@@ -42,15 +28,16 @@ public sealed class TuiContentLayoutTests
         (pad + logoWidth).Should().BeLessThanOrEqualTo(width);
     }
 
-    [Fact]
-    public void WelcomeRenderer_WideColumn_StaysCenteredNotLeftGlued()
-    {
-        const int width = 160;
-        var lines = WelcomeRenderer.Render(new WelcomeInfo("1.0.0"), width);
-        var logoLine = lines.Select(l => l.FullText).First(t => t.Contains('█', StringComparison.Ordinal));
-        var pad = logoLine.TakeWhile(c => c == ' ').Count();
+    // 欢迎页 MCP 状态行已去重移除（2026-09）：状态栏是三态唯一实时出口，
+    // 失败明细由一次性 startup hint 给出——欢迎页出现任何 MCP 文案即回归。
 
-        pad.Should().BeGreaterThan(width / 4, "logo should not cling to the left of a wide column");
-        pad.Should().BeLessThan(width / 2);
+    [Fact]
+    public void WelcomeRenderer_NeverRendersMcpStatus_DeduplicatedIntoStatusBar()
+    {
+        const int width = 100;
+        var lines = WelcomeRenderer.Render(new WelcomeInfo("1.0.0"), width);
+
+        lines.Select(l => l.FullText).Should().NotContain(t => t.Contains("MCP", StringComparison.Ordinal),
+            "MCP tri-state must be surfaced only by the status bar; the welcome screen must not duplicate it");
     }
 }

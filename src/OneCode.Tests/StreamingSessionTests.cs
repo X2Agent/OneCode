@@ -176,7 +176,7 @@ public sealed class StreamingSessionTests
     [Fact]
     public void Digest_ApprovalEvent_PassesThroughUnchanged()
     {
-        // Stage 4c：durableStateObserver → BuildRunStateEvent 直通透传退役——受控 attempt
+        // durableStateObserver → BuildRunStateEvent 直通透传退役——受控 attempt
         // 改发 OrchestrationEvent.BuildStateProjectionChanged，由 Digest 解信封为流内
         // BuildRunStateEvent（见 Digest_OrchestrationBuildProjection_IsUnwrappedToStreamContract）。
         var sut = CreateSut();

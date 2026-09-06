@@ -82,9 +82,6 @@ public sealed partial class ChatInputView : View
     /// <summary>Raised when the user presses Tab in a non-completion context to cycle the working mode.</summary>
     public event Action? CycleModeRequested;
 
-    /// <summary>进入对话区导航模式（Ctrl+T）。由 ReplShell 接线：焦点切换 + Transcript 上下文 push。</summary>
-    public event Action? EnterTranscriptRequested;
-
     /// <summary>加宽右侧侧边栏（Ctrl+Shift+→，app:sidebarWider）。由 ReplShell 接线到宽度调整。</summary>
     public event Action? SidebarWiderRequested;
 

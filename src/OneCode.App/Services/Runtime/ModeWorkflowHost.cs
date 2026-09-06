@@ -10,7 +10,7 @@ public sealed record ModeWorkflowRunResult<TOutput>(
 
 /// <summary>
 /// 每模式一份 Workflow Host 策略（ModePolicy 的 host 层）。
-/// Compile / checkpoint 命令 / lease 回调 / 终态解析保留各模式语义；MAF 编译器不合一（ADR §3）。
+/// Compile / checkpoint 命令 / lease 回调 / 终态解析保留各模式语义；MAF 编译器不合一。
 /// 审批门机制按模式自持（Build 流内门 / Plan AggregateApprovalGate / Team RequestPortGate），
 /// 语义保留不强行统一（不合并四模式审批门）。
 /// </summary>
@@ -42,7 +42,7 @@ public sealed record ModeWorkflowCompiled<TInput>(
 /// <summary>
 /// 统一模式 Workflow Host 骨架（以 Goal 已验证形态泛化）：
 /// generation 递增（registry 对账）→ MAF durable 执行（lease/终态钩子）→ typed 输出抽取。
-/// Build/Goal/Team Host 的逐方法同构三件套由本类承担（Team 随 Stage 4d 接入）；
+/// Build/Goal/Team Host 的逐方法同构三件套由本类承担；
 /// 领域执行器与 MAF 编译器不合一。
 /// </summary>
 public sealed class ModeWorkflowHost(

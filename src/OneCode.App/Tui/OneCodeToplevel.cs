@@ -20,6 +20,7 @@ public sealed partial class OneCodeToplevel : Window
     private Func<string, CancellationToken, Task>? _resumeSessionAsync;
     private Func<CancellationToken, Task<bool>>? _showSettingsOverlayAsync;
     private Func<CancellationToken, Task<string>>? _applySettingsAsync;
+    private Func<CancellationToken, Task<string?>>? _showMcpConfigAsync;
 
     private CancellationTokenSource _queryCts = new();
     private bool _isQueryRunning;
@@ -114,6 +115,12 @@ public sealed partial class OneCodeToplevel : Window
         // the LSP notification thread, so we marshal to the UI thread.
         if (_ctx.SubscribeDiagnosticsChanged is { } subscribe)
             subscribe(OnLspDiagnosticsChanged);
+
+        // Subscribe to MCP server set changes so the status bar indicator
+        // refreshes on hot-connect/disconnect. Fires on background threads —
+        // marshal to the UI thread, mirroring the LSP diagnostics path.
+        if (_ctx.SubscribeMcpServersChanged is { } mcpSubscribe)
+            mcpSubscribe(OnMcpServersChanged);
     }
 
     /// <summary>
@@ -125,6 +132,9 @@ public sealed partial class OneCodeToplevel : Window
         {
             if (_ctx.UnsubscribeDiagnosticsChanged is { } unsubscribe)
                 unsubscribe(OnLspDiagnosticsChanged);
+
+            if (_ctx.UnsubscribeMcpServersChanged is { } mcpUnsubscribe)
+                mcpUnsubscribe(OnMcpServersChanged);
         }
         base.Dispose(disposing);
     }
@@ -137,6 +147,16 @@ public sealed partial class OneCodeToplevel : Window
     private void OnLspDiagnosticsChanged()
     {
         _app.Invoke(() => DispatchEvent(new TuiLspDiagnosticsChanged()));
+    }
+
+    /// <summary>
+    /// Handler for IMcpConnectionManager.ServersChanged — fires on background
+    /// connection threads. Marshals to the UI thread and dispatches a
+    /// <see cref="TuiMcpServersChanged"/> event so the status bar refreshes.
+    /// </summary>
+    private void OnMcpServersChanged()
+    {
+        _app.Invoke(() => DispatchEvent(new TuiMcpServersChanged()));
     }
 
     /// <summary>
@@ -216,6 +236,9 @@ public sealed partial class OneCodeToplevel : Window
         _app.AddTimeout(TimeSpan.Zero, () =>
         {
             _shell.Transcript.ShowWelcome(new WelcomeInfo(_ctx.Version));
+            // 启动即拉取一次 MCP 三态进状态栏（唯一实时出口）：后台预连接可能已
+            // 加载配置（连接中 x/y），否则首帧要等第一台服务器结果才可见。
+            UpdateMcpStatusBar();
             _shell.FocusChatInput();
 
             // Refresh the session context bar (git branch/worktree) once on startup.

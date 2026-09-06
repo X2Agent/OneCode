@@ -30,6 +30,8 @@ public sealed class LspServerInstance
     public bool IsHealthy => _isHealthy;
     public JsonElement? Capabilities => _client?.Capabilities;
     public DateTimeOffset? LastActivity => _lastActivity;
+    /// <summary>Server is pushing workDoneProgress (indexing) — see <see cref="LspClient.ActiveWorkDoneProgress"/>.</summary>
+    public bool IsIndexing => (_client?.ActiveWorkDoneProgress ?? 0) > 0;
 
     /// <summary>
     /// Check whether this server has declared support for the given LSP method
@@ -186,16 +188,11 @@ public sealed class LspServerInstance
                     "implementation": { "dynamicRegistration": true },
                     "documentHighlight": { "dynamicRegistration": false },
                     "codeAction": { "dynamicRegistration": true, "resolveSupport": { "properties": ["edit"] } },
-                    "codeLens": { "dynamicRegistration": true },
-                    "documentLink": { "dynamicRegistration": true },
                     "rename": { "dynamicRegistration": true, "prepareSupport": true },
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                     "formatting": { "dynamicRegistration": true },
-                    "rangeFormatting": { "dynamicRegistration": true },
                     "callHierarchy": { "dynamicRegistration": false },
                     "typeHierarchy": { "dynamicRegistration": false },
-                    "semanticTokens": { "dynamicRegistration": false, "requests": { "range": true, "full": { "delta": true } }, "tokenTypes": [], "tokenModifiers": [], "formats": ["relative"] },
-                    "inlayHint": { "dynamicRegistration": false },
                     "publishDiagnostics": { "relatedInformation": true }
                 },
                 "window": { "workDoneProgress": true }

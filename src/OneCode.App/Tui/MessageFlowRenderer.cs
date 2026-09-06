@@ -1,7 +1,7 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Message renderer — design-spec chat content format:
+/// Message renderer — chat content format:
 ///
 ///   [U] 帮我重构 StartupFlowCoordinator                    13:14
 ///

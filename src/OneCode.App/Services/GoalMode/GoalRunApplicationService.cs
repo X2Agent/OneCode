@@ -51,7 +51,7 @@ public sealed class GoalRunApplicationService(
             }
             // Workspace drift check: recompute the fingerprint and reject recovery if the
             // workspace has changed since the run was created. This is a fail-closed safety
-            // invariant per design §6.4: "恢复前和提交前校验工作区漂移".
+            // invariant "恢复前和提交前校验工作区漂移".
             var currentFingerprint = await fingerprintProvider.ComputeAsync(normalizedDirectory, ct).ConfigureAwait(false);
             if (!string.Equals(existing.WorkspaceFingerprint, currentFingerprint, StringComparison.Ordinal))
                 throw new InvalidOperationException(

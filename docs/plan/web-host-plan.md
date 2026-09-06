@@ -103,15 +103,15 @@ REST（控制面，Minimal API）+ Blazor Server 电路（UI 数据面，框架�
 
 ### 3.6 双宿主共享设计（与 keyboard-first 计划协同）
 
-**共享 TranscriptViewModel（App 层新增 `OneCode.App/Transcript/`）**：
-- Web 的 `SessionViewModel` 与 TUI 的可交互行体系（`ToolLineTag`/`ThinkingLineTag`/`ErrorLineTag`/`CodeBlockCopyTag`）本质同构。共享视图模型 `TranscriptViewModel` 已由 keyboard-first Phase 1 在 App 层创建（消息列表、可交互块标记、展开状态、游标位置），TUI 的 `MessageListView` 与 Web 的 Razor 组件均消费它。
+**共享 TranscriptViewModel（App 层 `OneCode.App/Transcript/`）**：
+- Web 的 `SessionViewModel` 与 TUI 的可交互行体系（`ToolLineTag`/`ThinkingLineTag`/`ErrorLineTag`/`CodeBlockCopyTag`）本质同构。共享视图模型由 Web Phase 2 在 App 层创建（消息列表、可交互块标记、展开状态），TUI 的 `MessageListView` 与 Web 的 Razor 组件均消费它。
 - 收益：交互逻辑（展开/折叠/复制/审批状态迁移）单测一次覆盖两端；为第三宿主（移动端/IDE 插件）预留统一状态层。
-- 落点：`TranscriptViewModel` 由 keyboard-first Phase 1 **直接创建**（游标导航、展开状态即落于此），Web Phase 2 仅做消费接入，不做二次抽取迁移。
+- 落点：keyboard-first 计划曾随 TUI 对话区导航模式创建过 `TranscriptViewModel`，该功能已整体移除，视图模型改由 Web Phase 2 创建。
 
 **keybindings.json 双宿主共用**：
-- `KeybindingResolver`/`KeybindingParser`/`KeybindingContextManager` 均在 Core 层、UI 无关。Web 端 Blazor `onkeydown`（JS 互操作转按键字符串）同样经 Resolver 解析，网页拥有与 TUI 一致的 Ctrl+T 导航模式与可配置快捷键。
+- `KeybindingResolver`/`KeybindingParser`/`KeybindingContextManager` 均在 Core 层、UI 无关。Web 端 Blazor `onkeydown`（JS 互操作转按键字符串）同样经 Resolver 解析，网页拥有与 TUI 一致的可配置快捷键。
 - 绑定配置经 `GET /api/keybindings` 下发给页面（Phase 4 接入）；`keybindings.json` 修改热重载后两端同步生效。
-- 约束：浏览器保留键（Ctrl+T 新标签页、Ctrl+W 关标签等）不可用。`KeybindingDefaults` 提供**宿主感知默认集**（TUI：ctrl+t；Web：alt+t），用户 `keybindings.json` 覆盖优先于宿主默认；`KeybindingValidator` 增加「Web 保留键」校验集并结合当前宿主校验。
+- 约束：浏览器保留键（Ctrl+T 新标签页、Ctrl+W 关标签等）不可用。`KeybindingDefaults` 提供**宿主感知默认集**（Web：alt+t 替代浏览器保留的 ctrl+t），用户 `keybindings.json` 覆盖优先于宿主默认；`KeybindingValidator` 增加「Web 保留键」校验集并结合当前宿主校验。
 
 ### 3.7 会话所有权与并发模型（多标签语义）
 
@@ -157,7 +157,7 @@ FastPathDispatcher:      CliMode.WebHost   → WebHostRunner.RunAsync(args)   //
 ### Phase 2：会话与流式对话（数据面打通）
 **改动**：
 - Blazor 组件骨架：`App.razor` / `MainLayout` / `ChatPage.razor`（消息流 + 输入框 + 取消按钮 + 用量条）。
-- 接入 App 层共享 `TranscriptViewModel`（§3.6，已由 keyboard-first Phase 1 创建）：QueryEvent 流 → 共享视图模型；TUI `MessageListView` 已是同一模型的消费方，两端交互逻辑单测一次覆盖。
+- 接入 App 层共享 `TranscriptViewModel`（§3.6，由本 Phase 创建）：QueryEvent 流 → 共享视图模型；TUI `MessageListView` 已是同一模型的消费方，两端交互逻辑单测一次覆盖。
 - `WebSessionService`（singleton + 电路级订阅，§3.7）：会话级唯一 pump 消费 `ChatService.StreamQueryAsync` → 广播至各电路 → `SessionViewModel` → `StateHasChanged`。
 - REST：sessions / models / modes；会话级事件广播（多标签 + 重连补发）。
 **验收**：网页完成一轮完整 BUILD 对话（含工具调用可视化）；刷新页面不丢历史；两个标签页实时同步。
@@ -188,7 +188,7 @@ FastPathDispatcher:      CliMode.WebHost   → WebHostRunner.RunAsync(args)   //
 | App | `Query/ChatService.cs`、`Query/QueryStreamEngine.cs` | 移除 Tui using（O1） |
 | App | `ServiceCollectionExtensions.*.cs` | 拆分交互注册（O5） |
 | App | `Interaction/`（新目录） | IInteractionProtocol + 数据模型 |
-| App | `Transcript/`（keyboard-first Phase 1 已建） | 共享 TranscriptViewModel（双宿主状态层，§3.6）+ TranscriptEventBuffer（环形缓冲/快照，§3.3/§3.7） |
+| App | `Transcript/`（新目录） | 共享 TranscriptViewModel（双宿主状态层，§3.6）+ TranscriptEventBuffer（环形缓冲/快照，§3.3/§3.7） |
 | Web | `OneCode.Web.csproj`、`WebAppHost.cs`、`WebSessionService.cs`、`SessionViewModel.cs`、`Components/*.razor`、`wwwroot/*` | 新增 |
 | Cli | `CliModeDetector.cs`、`FastPathDispatcher.cs`、`WebHostRunner.cs` | 扩展 |
 | Tests | `SessionViewModelTests`、`WebSessionServiceTests`、`WebHostIntegrationTests`（bUnit 组件测试） | 新增 |

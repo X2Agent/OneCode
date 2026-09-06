@@ -1,3 +1,4 @@
+using OneCode.App.Services.Mcp;
 using OneCode.App.Tui;
 
 namespace OneCode.App.Services;
@@ -10,6 +11,7 @@ namespace OneCode.App.Services;
 public sealed class InteractiveBootstrapService(
     StartupFlowCoordinator startupFlowCoordinator,
     PromptConfigBuilder promptConfigBuilder,
+    McpStartupPreconnector mcpPreconnector,
     InteractiveSessionStack session,
     InteractiveDiscoveryDependencies discovery,
     WorkingModeController modeController,
@@ -26,6 +28,12 @@ public sealed class InteractiveBootstrapService(
             await Console.Error.WriteLineAsync("Workspace trust was not granted. Exiting interactive mode.");
             return null;
         }
+
+        // MCP 预连接后台并发执行（Plan B）：不再阻塞系统提示词构建与 TUI 首屏渲染。
+        // 连接完成后重建技能提供者，把预连接期间缺席的 MCP skills 原子补挂。
+        mcpPreconnector.StartBackground(
+            onCompleted: () => promptConfigBuilder.RebuildSkillProviderAsync(ct),
+            ct: ct);
 
         var systemPrompt = await promptConfigBuilder.BuildSystemPromptAsync(
             memoryQuery: null, ct).ConfigureAwait(false);

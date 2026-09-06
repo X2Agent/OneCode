@@ -403,7 +403,9 @@ ChatClientAgent
 
 ### MCP 集成
 
-5 种传输协议（Stdio / SSE / HTTP Streamable / WebSocket / InProcess），多作用域配置加载（user / workspace / project），OAuth 2.0 完整支持。
+5 种传输协议（Stdio / SSE / HTTP Streamable / WebSocket / InProcess），多作用域配置加载（user / project / local 三层同名覆盖，另有内置服务清单兜底）。
+
+启动采用后台预连接：trust 流程通过后连接在后台进行，TUI 首屏立即渲染；首条消息发送前对进行中的连接做 ≤5s 有界收尾（超时放行，工具下一轮附挂）。状态栏以三态显示连接进度（`连接中 x/y` → `已连 n · Nt` → 全部失败时 `MCP: ✗k 失败`），启动失败另有一次性 startup hint 给出逐台明细与 `/mcp connect` 重试指引，失败原因在 `/mcp list` 中始终可见。`/mcp install` 默认安装后立即连接验证（`--no-connect` 跳过），坏包当场暴露。
 
 ### 上下文压缩
 

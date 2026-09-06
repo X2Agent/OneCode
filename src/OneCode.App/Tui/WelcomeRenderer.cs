@@ -4,6 +4,8 @@ namespace OneCode.App.Tui;
 /// Renders a minimal welcome screen on startup / after conversation reset.
 /// Block-char "OneCode" logo with compact layout.
 /// Model / workspace / branch live in status &amp; context bars — not duplicated here.
+/// MCP 三态同理：状态栏是唯一实时出口，失败明细由 startup hint 一次性给出，
+/// 欢迎页不再重复渲染（与状态栏/底部 hint 三重重复，2026-09 去重）。
 /// </summary>
 public static class WelcomeRenderer
 {
@@ -86,7 +88,6 @@ public static class WelcomeRenderer
 
         RenderTipLine(
         [
-            ("Ctrl+T ", "浏览对话"),
             ("Alt+1..4 ", "直达模式"),
             ("/keybindings ", "快捷键面板"),
         ]);
@@ -128,4 +129,5 @@ public static class WelcomeRenderer
 }
 
 /// <summary>Data needed to render the welcome screen.</summary>
+/// <param name="Version">Product version.</param>
 public sealed record WelcomeInfo(string Version);

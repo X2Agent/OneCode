@@ -10,6 +10,9 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class OneCodeToplevel
 {
+    /// <summary>首条消息前的 MCP 预连接有界收尾是否已执行（每会话一次）。</summary>
+    private bool _mcpFirstMessageWaitDone;
+
     private void OnUserSubmitted(string text)
     {
         // Detect OSC 52 image paste from terminal clipboard.
@@ -200,6 +203,17 @@ public sealed partial class OneCodeToplevel
     private async Task HandleSubmitAsync(string text, IReadOnlyList<string>? images, CancellationToken ct)
     {
         _isQueryRunning = true;
+
+        // Plan B：MCP 预连接在 trust 后已后台并发执行。首条消息（每次会话仅一次）
+        // 给仍在握手的连接一个 ≤5s 的有界收尾窗口——超时放行，未就绪的服务器
+        // 其工具在下一轮查询附挂，对话永远不会被 MCP 阻塞。
+        if (!_mcpFirstMessageWaitDone)
+        {
+            _mcpFirstMessageWaitDone = true;
+            if (_ctx.WaitForMcpPreconnect is { } waitForMcp)
+                await waitForMcp(ct).ConfigureAwait(false);
+        }
+
         try
         {
             await HandleSubmitCoreAsync(text, images, ct).ConfigureAwait(false);
@@ -284,44 +298,61 @@ public sealed partial class OneCodeToplevel
                 return;
             }
 
-            // PromptResult / ResumeWorkflowResult commands: resolve, then stream.
-            if (_ctx.TryResolvePromptCommand is not null && _ctx.StreamCommandPrompt is not null)
+            if (name == "mcp" && text.Trim().Equals("/mcp", StringComparison.OrdinalIgnoreCase))
             {
+                await HandleMcpConfigCommandAsync(ct).ConfigureAwait(false);
+                return;
+            }
+
+            // 忙碌 UI 必须在解析之前建立：TryResolvePromptCommandAsync 会真实执行命令并缓存
+            // 结果（供下方 ExecuteCommand 直接取用）——慢命令（/mcp search 实测 18~26s）的
+            // 耗时发生在解析阶段，若执行完成后才建立忙碌状态，用户全程看不到任何反馈。
+            var progressLabel = GetProgressLabel(text);
+            Invoke(() => { _shell.ChatInput.SetBusy(true); _shell.Transcript.BeginStreaming(); _shell.SetAgentBusy(true, progressLabel); });
+            try
+            {
+                // PromptResult / ResumeWorkflowResult commands: resolve, then stream.
+                // RunCommandPromptAsync / RunResumeWorkflowAsync 自行重建忙碌状态并在结束时清理。
                 OneCode.App.Services.CommandDispatchResult? dispatchResult = null;
-                try
+                if (_ctx.TryResolvePromptCommand is not null && _ctx.StreamCommandPrompt is not null)
                 {
                     dispatchResult = await _ctx.TryResolvePromptCommand(text, ct).ConfigureAwait(false);
+
+                    switch (dispatchResult)
+                    {
+                        case OneCode.App.Services.CommandDispatchResult.Prompt pi:
+                            await RunCommandPromptAsync(text, pi.Content, pi.AllowedTools, ct).ConfigureAwait(false);
+                            if (_ctx.IsExitRequested?.Invoke() == true)
+                                OnQuitRequested();
+                            return;
+
+                        case OneCode.App.Services.CommandDispatchResult.ResumeWorkflow rw
+                            when _ctx.StreamResumeWorkflow is not null:
+                            await RunResumeWorkflowAsync(rw.SessionId, rw.Kind, ct).ConfigureAwait(false);
+                            return;
+                    }
                 }
-                catch (OperationCanceledException) { return; }
-                catch (Exception ex)
+
+                // All other commands → local handler.
+                // User message is already shown by OnUserSubmitted (AddUserMessageDirect).
+                var result = await _ctx.ExecuteCommand(text, ct).ConfigureAwait(false);
+
+                if (result is not null)
                 {
-                    Invoke(() => _shell.Transcript.AddError(ex.Message));
+                    Invoke(() =>
+                    {
+                        _shell.Transcript.AddCommandResult(result);
+                        RefreshSessionName();
+                    });
+
+                    if (_ctx.IsExitRequested?.Invoke() == true)
+                    {
+                        OnQuitRequested();
+                    }
                     return;
                 }
 
-                switch (dispatchResult)
-                {
-                    case OneCode.App.Services.CommandDispatchResult.Prompt pi:
-                        await RunCommandPromptAsync(text, pi.Content, pi.AllowedTools, ct).ConfigureAwait(false);
-                        if (_ctx.IsExitRequested?.Invoke() == true)
-                            OnQuitRequested();
-                        return;
-
-                    case OneCode.App.Services.CommandDispatchResult.ResumeWorkflow rw
-                        when _ctx.StreamResumeWorkflow is not null:
-                        await RunResumeWorkflowAsync(rw.SessionId, rw.Kind, ct).ConfigureAwait(false);
-                        return;
-                }
-            }
-
-            // All other commands → local handler.
-            // User message is already shown by OnUserSubmitted (AddUserMessageDirect).
-            var progressLabel = GetProgressLabel(text);
-            Invoke(() => { _shell.ChatInput.SetBusy(true); _shell.Transcript.BeginStreaming(); _shell.SetAgentBusy(true, progressLabel); });
-            string? result;
-            try
-            {
-                result = await _ctx.ExecuteCommand(text, ct).ConfigureAwait(false);
+                // Unknown slash command → fall through to AI (AI can answer meta questions).
             }
             catch (OperationCanceledException) { return; }
             catch (Exception ex)
@@ -333,23 +364,6 @@ public sealed partial class OneCodeToplevel
             {
                 Invoke(() => { _shell.Transcript.EndStreaming(); _shell.ChatInput.SetBusy(false); _shell.SetAgentBusy(false); _shell.FocusChatInput(); });
             }
-
-            if (result is not null)
-            {
-                Invoke(() =>
-                {
-                    _shell.Transcript.AddCommandResult(result);
-                    RefreshSessionName();
-                });
-
-                if (_ctx.IsExitRequested?.Invoke() == true)
-                {
-                    OnQuitRequested();
-                }
-                return;
-            }
-
-            // Unknown slash command → fall through to AI (AI can answer meta questions).
         }
 
         await RunQueryAsync(text, images, ct);

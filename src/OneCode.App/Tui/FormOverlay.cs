@@ -89,6 +89,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
 {
     private int _nextRowY = TuiSpacing.OverlayContentY;
     private readonly Label _errorLabel;
+    private View? _actions;
 
     protected FormOverlay(string title, int preferredWidth, int preferredHeight)
         : base(title, preferredWidth, preferredHeight)
@@ -107,6 +108,9 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
     protected int NextRowY => _nextRowY;
 
     internal string ValidationMessage => _errorLabel.Text;
+
+    /// <summary>底部操作栏容器（internal 供 headless 测试定位保存/取消焦点断言）。</summary>
+    internal View? Actions => _actions;
 
     protected FormRow AddRow(string labelText, View field, int rowSpacing = TuiSpacing.Sm)
     {
@@ -164,6 +168,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             CanFocus = true,
             TabStop = TabBehavior.TabGroup,
         };
+        _actions = actions;
         secondary.X = Pos.Right(primary) + TuiSpacing.Sm;
         primary.Y = 0;
         secondary.Y = 0;

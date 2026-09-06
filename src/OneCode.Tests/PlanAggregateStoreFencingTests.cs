@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using OneCode.App.Services.PlanMode;
 using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
@@ -154,6 +155,26 @@ public sealed class PlanAggregateStoreFencingTests : IDisposable
             .WithMessage("*unsupported schema*");
     }
 
+    [Fact]
+    public async Task LoadRecoverableExecutionAsync_WarnsUnreadableAggregate_OnlyOnce()
+    {
+        // 模拟旧 schema 残留（永远无法反序列化）：后台恢复扫描每 5 秒遍历一次磁盘，
+        // 同一损坏文件只允许记一次 WARNING，后续扫描降级为 Debug，避免日志刷屏。
+        var corruptPath = Path.Combine(
+            _root, Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"), "aggregate.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(corruptPath)!);
+        await File.WriteAllTextAsync(corruptPath, "{\"schemaVersion\":99}");
+
+        var logger = new CapturingLogger();
+        var store = new PlanAggregateStore(_root, logger);
+
+        await store.LoadRecoverableExecutionAsync(TestContext.Current.CancellationToken);
+        await store.LoadRecoverableExecutionAsync(TestContext.Current.CancellationToken);
+
+        logger.Entries.Count(e => e.Level == LogLevel.Warning).Should().Be(1);
+        logger.Entries.Count(e => e.Level == LogLevel.Debug).Should().Be(1);
+    }
+
     private async Task<(PlanWorkflow Workflow, PlanAggregate Aggregate)> CreatePersistedAsync(
         PlanAggregateStore store)
     {
@@ -207,5 +228,22 @@ public sealed class PlanAggregateStoreFencingTests : IDisposable
             $"\"schemaVersion\": {to}",
             StringComparison.Ordinal);
         File.WriteAllText(path, rewritten);
+    }
+
+    private sealed class CapturingLogger : ILogger<PlanAggregateStore>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
     }
 }

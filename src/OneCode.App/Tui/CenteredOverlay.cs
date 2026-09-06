@@ -1,7 +1,7 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Convenience base class for centred overlay panels — design-spec §3.
+/// Convenience base class for centred overlay panels.
 /// Provides automatic sizing, box-drawing border, and a title bar with accent color.
 /// Lifecycle management lives in <see cref="OverlayHost"/>; result-bearing
 /// close semantics in <see cref="ResultOverlay{TResult}"/>.
@@ -24,16 +24,50 @@ public abstract class CenteredOverlay : View
     /// </summary>
     public bool IsTopMost { get; set; } = true;
 
-    /// <summary>Sizing strategy used by <see cref="OverlayHost.Position"/>.</summary>
+    /// <summary>Sizing strategy used by <see cref="OverlayHost.Position(Terminal.Gui.ViewBase.View)"/>.</summary>
     public virtual OverlayLayoutMode LayoutMode => OverlayLayoutMode.Dialog;
 
     /// <summary>The control that receives focus whenever this overlay becomes topmost.</summary>
     protected virtual View? InitialFocusView => null;
 
+    /// <summary>
+    /// 聚焦 <see cref="InitialFocusView"/>；未指定或聚焦被否决时，退化为子树中
+    /// 第一个可交互的叶子控件（列表/按钮/文本框等）。焦点必须落在叶子上，
+    /// 绝不停留在 overlay 根部或 FrameView 等容器：容器 SetFocus 只保证自身
+    /// <c>_hasFocus</c>，RestoreFocus/AdvanceFocus 下沉失败时焦点会滞留在
+    /// 边框/标题上（McpConfigOverlay 的红框缺陷），且容器自身没有按键绑定，
+    /// ←/→ 等按键会失控冒泡到 shell 层走会话记录导航。
+    /// </summary>
     internal void FocusInitialView()
     {
-        if (InitialFocusView?.SetFocus() != true)
-            SetFocus();
+        if (InitialFocusView is { } initial && (initial.SetFocus() || initial.HasFocus))
+        {
+            return;
+        }
+
+        FindFocusableLeaf(this)?.SetFocus();
+    }
+
+    /// <summary>
+    /// 按子视图顺序深度优先查找第一个可聚焦叶子：优先下钻 CanFocus 容器
+    /// （如 FrameView 内的列表），容器仅在其整个子树都不可聚焦时才作为候选。
+    /// </summary>
+    private static View? FindFocusableLeaf(View view)
+    {
+        foreach (View subView in view.SubViews)
+        {
+            if (FindFocusableLeaf(subView) is { } leaf)
+            {
+                return leaf;
+            }
+
+            if (subView.CanFocus)
+            {
+                return subView;
+            }
+        }
+
+        return null;
     }
 
     protected CenteredOverlay(string title, int preferredWidth = TuiSpacing.OverlayDefaultWidth, int preferredHeight = TuiSpacing.OverlayDefaultHeight)
@@ -49,6 +83,10 @@ public abstract class CenteredOverlay : View
         };
         HeaderLabel.SetScheme(TuiTheme.MakeScheme(TuiPalette.Accent, TuiPalette.BgCard));
         Add(HeaderLabel);
+        // 同时声明 Preferred*：Position/GetPreferredSize 以它们为准做钳制
+        //（Width/Height 仅作为首次定位前的占位尺寸）。
+        PreferredWidth = preferredWidth;
+        PreferredHeight = preferredHeight;
         Width = preferredWidth;
         Height = preferredHeight;
         CanFocus = true;

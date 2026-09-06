@@ -1,5 +1,6 @@
 using OneCode.App.Tui;
 using OneCode.Core.Keybindings;
+using OneCode.Core.Mcp;
 using OneCode.Core.Product;
 
 using OneCode.Core.Coordinator;
@@ -52,8 +53,21 @@ public sealed class TuiContextFactory(
             },
             ExecuteCommand: (text, token) => streaming.SlashCommands.ExecuteCommandAsync(session, text, token),
             IsExitRequested: () => streaming.SlashCommands.IsExitRequested,
+            // Plan B：MCP 预连接在 trust 后后台进行，首条消息前做一次有界收尾（≤5s）。
+            WaitForMcpPreconnect: catalog.Preconnector is { } preconnector
+                ? preconnector.WaitForFirstMessageAsync
+                : null,
             IsImmediateCommand: input => catalog.CommandRegistry.Find(input) is { Immediate: true },
-            GetProgressMessage: input => catalog.CommandRegistry.Find(input)?.ProgressMessage,
+            // 子命令级忙碌标签优先（如 /mcp search 需独立的"搜索中"反馈），回退命令级 ProgressMessage
+            GetProgressMessage: input =>
+            {
+                var cmd = catalog.CommandRegistry.Find(input);
+                if (cmd is null) return null;
+                var parts = input.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                return parts.Length > 1
+                    ? cmd.GetSubcommandProgressMessage(parts[1..]) ?? cmd.ProgressMessage
+                    : cmd.ProgressMessage;
+            },
             TryResolvePromptCommand: (text, token) => streaming.SlashCommands.TryResolvePromptCommandAsync(session, text, token),
             StreamCommandPrompt: (prompt, tools, token) => streaming.QueryStream.StreamCommandPromptAsync(session, prompt, tools, token),
             StreamResumeWorkflow: (sessionId, kind, token) => streaming.QueryStream.StreamResumeWorkflowAsync(session, sessionId, kind, token),
@@ -109,7 +123,17 @@ public sealed class TuiContextFactory(
             GetLspServerStatus: () => lspServerManager.GetStatus(),
             GetLspDiagnostics: () => lspDiagnosticRegistry.GetAllDiagnostics(),
             SubscribeDiagnosticsChanged: handler => lspDiagnosticRegistry.DiagnosticsChanged += handler,
-            UnsubscribeDiagnosticsChanged: handler => lspDiagnosticRegistry.DiagnosticsChanged -= handler);
+            UnsubscribeDiagnosticsChanged: handler => lspDiagnosticRegistry.DiagnosticsChanged -= handler,
+            GetMcpConnectionSummary: () => catalog.McpConnectionManager?.GetConnectionSummary()
+                ?? new McpConnectionSummary(Expected: 0, Connected: 0, Connecting: 0, Failed: 0, ToolCount: 0),
+            SubscribeMcpServersChanged: handler =>
+            {
+                if (catalog.McpConnectionManager is { } mcp) mcp.ServersChanged += handler;
+            },
+            UnsubscribeMcpServersChanged: handler =>
+            {
+                if (catalog.McpConnectionManager is { } mcp) mcp.ServersChanged -= handler;
+            });
 
         var runtime = new TuiRuntimeServices(
             Model: session.Model,

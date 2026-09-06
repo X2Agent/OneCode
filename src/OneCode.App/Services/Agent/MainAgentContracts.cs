@@ -4,11 +4,6 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
-/// <see cref="MainAgentRunner"/> 的运行选项与结果契约。
-/// 抽取自 MainAgentRunner.cs 以满足单文件行数规范。
-/// </summary>
-
-/// <summary>
 /// Options for MainAgentRunner.
 /// </summary>
 public sealed record MainAgentRunOptions
@@ -69,12 +64,6 @@ public sealed record MainAgentRunOptions
     /// 供 TUI 层实时渲染 Diff 块。默认 null 时不发射事件（用于测试/非交互场景）。
     /// </summary>
     public Action<FileChange>? FileChangeCallback { get; init; }
-
-    // Permission context
-    // These fields populate ToolPermissionContext so that PermissionChecker
-    // strategies can evaluate rules and validate paths. When null, defaults
-    // (empty collections) are used, preserving existing behavior.
-
     /// <summary>User-configured permission rules keyed by source name.</summary>
     public IReadOnlyDictionary<string, PermissionRuleGroup>? PermissionRules { get; init; }
 
@@ -83,7 +72,6 @@ public sealed record MainAgentRunOptions
 
     /// <summary>Session-level allowlist (e.g., from "Always Allow" user choice).</summary>
     public HashSet<string>? SessionAllowlist { get; init; }
-
 
     /// <summary>
     /// 编排事件回调。当设置时，Pipeline 中间件会发射 OrchestrationEvent.ToolStart/ToolDone

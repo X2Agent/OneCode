@@ -73,7 +73,7 @@ internal static class ConversationMessageMapper
         catch (JsonException ex)
         {
             // 工具参数 JSON 损坏 → FunctionCallContent 将无参数回放，agent 会看到
-            // "工具被调用但不知道传了什么"。必须留日志，不能静默吞掉（AGENTS.md §5.1）。
+            // "工具被调用但不知道传了什么"。必须留日志，不能静默吞掉。
             logger?.LogWarning(ex,
                 "Tool argument deserialization failed for '{ToolName}' — arguments will be empty in replayed history",
                 toolName);

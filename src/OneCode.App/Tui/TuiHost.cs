@@ -107,7 +107,7 @@ public static class TuiHost
         catch (Exception ex)
         {
             // Sending escape sequences may fail in non-terminal environments.
-            // 纯静态方法无法注入 ILogger，按 §5.1 兑底使用 Debug.WriteLine。
+            // 纯静态方法无法注入 ILogger，兜底使用 Debug.WriteLine。
             System.Diagnostics.Debug.WriteLine($"TuiHost.EnableKittyKeyboard failed: {ex.Message}");
         }
     }
@@ -166,7 +166,7 @@ public static class TuiHost
         catch (Exception ex)
         {
             // Safe to ignore during shutdown.
-            // 纯静态方法无法注入 ILogger，按 §5.1 兑底使用 Debug.WriteLine。
+            // 纯静态方法无法注入 ILogger，兜底使用 Debug.WriteLine。
             System.Diagnostics.Debug.WriteLine($"TuiHost.DisableKittyKeyboard failed: {ex.Message}");
         }
     }

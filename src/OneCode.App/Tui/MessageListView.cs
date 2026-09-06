@@ -66,7 +66,6 @@ public sealed partial class MessageListView : View
         _tailRegionStart = -1;
         _streamingPreviewStart = -1;
         _toolDetailLayoutWidth = 0;
-        _navHighlightLine = -1;
         _scroll.Reset();
         SetNeedsDraw();
     }
@@ -342,7 +341,6 @@ public sealed partial class MessageListView : View
 
         // 行索引整体变化，搜索高亮随之失效。
         SetSearchHighlight(null, null);
-        _navHighlightLine = -1;
         SetNeedsDraw();
     }
 

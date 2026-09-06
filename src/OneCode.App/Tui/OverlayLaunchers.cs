@@ -40,4 +40,18 @@ public static class OverlayLaunchers
         var overlay = new SettingsOverlay(snapshot, projectScopeAvailable);
         return await overlay.ShowAsync(pushOverlay, popOverlay, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 打开 MCP 工具白名单配置页。返回 null 表示用户取消；
+    /// 非 null 为保存摘要（已由调用方完成配置写回与热生效）。
+    /// </summary>
+    public static async Task<McpConfigResult?> ShowMcpConfigOverlayAsync(
+        Action<View> pushOverlay,
+        Action popOverlay,
+        IReadOnlyList<McpConfigServerEntry> entries,
+        CancellationToken ct = default)
+    {
+        var overlay = new McpConfigOverlay(entries);
+        return await overlay.ShowAsync(pushOverlay, popOverlay, ct).ConfigureAwait(false);
+    }
 }

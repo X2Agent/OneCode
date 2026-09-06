@@ -10,6 +10,13 @@ public interface ILspNotifier
     Task NotifyFileUpdatedAsync(string fullPath, CancellationToken ct = default);
 
     /// <summary>
+    /// Notify LSP servers that a file was closed (e.g. deleted), sending
+    /// textDocument/didClose so servers stop tracking it. No-op for files
+    /// that were never opened.
+    /// </summary>
+    Task NotifyFileClosedAsync(string fullPath, CancellationToken ct = default);
+
+    /// <summary>
     /// Get a brief diagnostics summary for a file after LSP has processed the change.
     /// Returns null if no LSP server is running or no diagnostics exist for the file.
     /// The implementation may wait briefly for the server to publish fresh diagnostics.
@@ -26,6 +33,9 @@ public sealed class NoOpLspNotifier : ILspNotifier
     }
 
     public Task NotifyFileUpdatedAsync(string fullPath, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task NotifyFileClosedAsync(string fullPath, CancellationToken ct = default)
         => Task.CompletedTask;
 
     public Task<string?> GetDiagnosticsSummaryAsync(string fullPath, CancellationToken ct = default)

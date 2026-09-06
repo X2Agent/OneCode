@@ -55,6 +55,10 @@ public sealed class PromptConfigBuilder(
         var userContext = await contextBuilder.BuildUserContextAsync(
             Environment.CurrentDirectory, additionalDirs, ct).ConfigureAwait(false);
 
+        // MCP 预连接已移出本链路（启动不再被握手阻塞）：由 McpStartupPreconnector 在
+        // trust 通过后后台执行；本方法只负责构建提示词 + 首次技能提供者组装，
+        // 已连接 MCP 服务器的 skill:// 技能源在其完成后由 RebuildSkillProviderAsync 原子补挂。
+
         var provider = configManager.Current.Effective.Provider?.ToLowerInvariant();
         var contextWindow = configManager.Current.Effective.OllamaContextWindow;
         var isFiltered = ModelCapabilities.RequiresToolFiltering(provider, contextWindow);
@@ -63,8 +67,18 @@ public sealed class PromptConfigBuilder(
         var systemPrompt = await BuildDefaultPromptContentAsync(
             systemContext, userContext, memorySection, availableTools, ct).ConfigureAwait(false);
 
-        await runtimeDeps.McpConnectionManager.ConnectAllAsync(ct).ConfigureAwait(false);
+        await RebuildSkillProviderAsync(ct).ConfigureAwait(false);
 
+        return systemPrompt;
+    }
+
+    /// <summary>
+    /// 重建技能提供者（文件/内置技能 + 已连接 MCP 服务器的 skill:// 技能源）并原子替换。
+    /// 系统提示词构建时调用一次；MCP 预连接完成后由 <c>McpStartupPreconnector</c>
+    /// 再次调用，把预连接期间缺席的 MCP skills 补挂进 <see cref="SkillProviderHolder"/>。
+    /// </summary>
+    public async Task RebuildSkillProviderAsync(CancellationToken ct)
+    {
         try
         {
             var builder = new AgentSkillsProviderBuilder();
@@ -77,27 +91,44 @@ public sealed class PromptConfigBuilder(
         {
             logger.LogWarning(ex, "Failed to rebuild AgentSkillsProvider with MCP skills");
         }
-
-        return systemPrompt;
     }
+
+    /// <summary>
+    /// 过滤模式下注入系统提示词的工具清单条目上限（ToolSearch 局部上下文注入）。
+    /// MCP 目录可能携带几十个工具，整表灌入会挤占本地小模型的上下文窗口——
+    /// 超出部分折叠为一行计数提示，模型仍可通过 ToolSearch 按关键词检索全量工具。
+    /// </summary>
+    private const int MaxListedTools = 30;
 
     /// <summary>
     /// 为过滤模式（本地模型）生成紧凑的可用工具列表。
     /// </summary>
     private string BuildAvailableToolsList()
     {
+        // 收集全部未加载工具（Contextual + Deferred），按名称排序，超出上限的折叠为计数行。
+        var available = toolMetadataRegistry.GetVisibleToolNames()
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .Select(toolMetadataRegistry.Get)
+            .Where(static m => m is { LoadPolicy: not ToolLoadPolicy.Always })
+            .ToList();
+
         var sb = new StringBuilder();
         sb.AppendLine("Additional tools are available but not loaded. Call them directly to activate, or use ToolSearch to search by keyword.");
         sb.AppendLine();
 
-        foreach (var name in toolMetadataRegistry.GetVisibleToolNames().Order(StringComparer.OrdinalIgnoreCase))
+        var listed = 0;
+        foreach (var meta in available)
         {
-            var meta = toolMetadataRegistry.Get(name);
-            if (meta is null || meta.LoadPolicy == ToolLoadPolicy.Always)
-                continue;
+            if (listed >= MaxListedTools)
+                break;
 
-            sb.AppendLine(CultureInfo.InvariantCulture, $"- {meta.Name}: {meta.SearchHint ?? meta.Name}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- {meta!.Name}: {meta.SearchHint ?? meta.Name}");
+            listed++;
         }
+
+        var omitted = available.Count - listed;
+        if (omitted > 0)
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- … {omitted} more tools not listed — use ToolSearch to find them.");
 
         return sb.ToString();
     }

@@ -22,11 +22,16 @@ public enum ToolLoadPolicy
 /// 工具风险级别。
 /// 由权限中间件消费，决定 Plan Mode / AcceptEdits Mode 下的行为。
 /// </summary>
+/// <remarks>
+/// Safe 与 ReadOnly 的审批行为一致（均为 ToolApprovalMode.Never），
+/// 区别仅在语义分类：Safe 表示不访问任何数据（交互/编排类，如 Task、AskUserQuestion、Sleep）；
+/// ReadOnly 表示只读数据访问（读文件、搜索、网络读取，如 Read、Grep、LS、WebFetch）。
+/// </remarks>
 public enum ToolRisk
 {
-    /// <summary>无副作用的安全操作（如 Read, Sleep）</summary>
+    /// <summary>无副作用且不访问数据的安全操作（如 Task, AskUserQuestion, Sleep）</summary>
     Safe,
-    /// <summary>只读操作（如 Grep, LS, WebFetch）</summary>
+    /// <summary>只读数据访问（如 Read, Grep, LS, WebFetch）</summary>
     ReadOnly,
     /// <summary>破坏性操作（如 Write, Edit, Bash "rm"）</summary>
     Destructive,

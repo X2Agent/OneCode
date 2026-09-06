@@ -15,6 +15,7 @@ public sealed class ReadTool
     private const int BinaryProbeBytes = 512;
     private const int LargeFileLineThreshold = 400;
     private const int DefaultReadLimit = 400;
+    private const int MaxReadLimit = 2000;
 
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly SshRemoteService _ssh;
@@ -36,7 +37,7 @@ public sealed class ReadTool
         CancellationToken ct = default)
     {
         offset = Math.Max(1, offset);
-        limit = Math.Max(1, limit);
+        limit = Math.Clamp(limit, 1, MaxReadLimit);
 
         try
         {

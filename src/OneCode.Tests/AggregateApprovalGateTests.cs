@@ -194,7 +194,7 @@ public sealed class AggregateApprovalGateTests : IDisposable
 
     private static PlanCardPublisher CreatePublisher(List<PlanWorkflow> published)
     {
-        // Stage 4c：PlanCardPublisher 是统一总线（OrchestrationEventBus）的发射器，
+        // PlanCardPublisher 是统一总线（OrchestrationEventBus）的发射器，
         // 断言面从订阅 publisher 事件改为订阅总线上的 PlanProjectionChanged。
         var bus = new OrchestrationEventBus();
         bus.Subscribe(evt =>

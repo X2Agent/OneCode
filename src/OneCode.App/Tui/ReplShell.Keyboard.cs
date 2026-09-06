@@ -15,7 +15,6 @@ public sealed partial class ReplShell
     /// </summary>
     internal bool DispatchShellKey(Key kb) => OnKeyDown(kb);
 
-    // Keyboard: design-spec §5
     protected override bool OnKeyDown(Key kb)
     {
         // 输入框持有焦点时，交互键已由 ChatInputView.OnInputKeyPress 处理。
@@ -50,10 +49,6 @@ public sealed partial class ReplShell
         // ESC for overlays/completion is handled above (not configurable) because
         // dismissal must always work regardless of keybinding overrides.
         var action = TuiKeyAdapter.ResolveAction(kb, _keyResolver, _keyContextManager.ActiveContexts);
-
-        // transcript:* — 导航模式激活时优先分发（j/k/Enter/C/G/Esc/i）。
-        if (HandleTranscriptAction(action))
-            return true;
 
         // app:sidebar* — 键盘调整侧边栏宽度（焦点不在输入框时的兜底路径；
         // 输入框聚焦时经 ChatInputView 的 SidebarWider/NarrowerRequested 转发到这里）。

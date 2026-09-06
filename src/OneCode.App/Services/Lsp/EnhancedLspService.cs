@@ -142,6 +142,14 @@ public sealed class EnhancedLspService : IAsyncDisposable
         {
             content = await File.ReadAllTextAsync(filePath, ct).ConfigureAwait(false);
         }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // File deleted while open in the server — close it so servers stop
+            // publishing diagnostics for a path that no longer exists.
+            _logger.LogDebug("File {Path} no longer exists — sending didClose", filePath);
+            await NotifyFileClosedAsync(filePath, ct).ConfigureAwait(false);
+            return;
+        }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not read file for LSP notification: {Path}", filePath);
@@ -182,6 +190,30 @@ public sealed class EnhancedLspService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Notify all servers that a file was closed (deleted or no longer tracked):
+    /// sends <c>textDocument/didClose</c> and drops the open-file version state so a
+    /// later recreate starts a fresh didOpen. Without this, servers keep publishing
+    /// diagnostics for deleted files and full-sync state goes stale.
+    /// </summary>
+    public async Task NotifyFileClosedAsync(string filePath, CancellationToken ct = default)
+    {
+        var uri = LspUriHelper.BuildFileUri(filePath);
+        if (!_fileVersions.TryRemove(uri, out _))
+            return; // never opened — nothing to close
+
+        try
+        {
+            var didCloseParams = JsonSerializer.Serialize(new { textDocument = new { uri } });
+            await _serverManager.BroadcastNotificationAsync(
+                "textDocument/didClose", ParseJson(didCloseParams)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to send didClose for {Path}", filePath);
+        }
+    }
+
+    /// <summary>
     /// Map file extension to LSP language identifier.
     /// </summary>
     private static string GetLanguageId(string filePath)
@@ -211,6 +243,9 @@ public sealed class EnhancedLspService : IAsyncDisposable
     }
 
     public IReadOnlyList<LspServerStatus> GetServerStatus() => _serverManager.GetStatus();
+
+    /// <summary>是否有任何 LSP 服务器处于运行中。诊断等待的短路依据：无服务器时永远等不到新诊断。</summary>
+    public bool HasRunningServer => _serverManager.GetStatus().Any(s => s.IsRunning);
 
     public async ValueTask DisposeAsync()
     {

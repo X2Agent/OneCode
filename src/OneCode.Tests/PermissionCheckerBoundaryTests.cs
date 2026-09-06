@@ -34,67 +34,35 @@ public sealed class PermissionCheckerBoundaryTests
 
     // Plan mode — SubmitPlan
 
-    [Fact]
-    public async Task CheckAsync_PlanMode_SubmitPlan_IsAllowed()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson(@"{""plan"":""step 1""}");
-
-        var result = await _sut.CheckAsync("SubmitPlan", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow,
-            "SubmitPlan is one of the file-write tools permitted in plan mode (previous regression)");
-    }
-
     [Theory]
-    [InlineData("Task")]
-    public async Task CheckAsync_PlanMode_TaskManagementTools_AreAllowed(string toolName)
+    [InlineData("SubmitPlan", @"{""plan"":""step 1""}")]
+    [InlineData("Task", @"{}")]
+    public async Task CheckAsync_PlanMode_WhitelistedTools_AreAllowed(string toolName, string inputJson)
     {
         var ct = TestContext.Current.CancellationToken;
         var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson("{}");
+        var input = ParseJson(inputJson);
 
         var result = await _sut.CheckAsync(toolName, input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Allow);
+        result.Decision.Should().Be(PermissionDecision.Allow,
+            $"{toolName} is one of the tools permitted in plan mode (previous regression)");
     }
 
-    [Fact]
-    public async Task CheckAsync_PlanMode_EditTool_IsDenied()
+    [Theory]
+    [InlineData("Edit", @"{""file_path"":""a.txt"",""old"":""x"",""new"":""y""}")]
+    [InlineData("Write", @"{""file_path"":""/tmp/test.txt""}")]
+    [InlineData("Bash", @"{""command"":""rm -rf /""}")]
+    [InlineData("", @"{}")]
+    public async Task CheckAsync_PlanMode_NonWhitelistedTools_AreDenied(string toolName, string inputJson)
     {
         var ct = TestContext.Current.CancellationToken;
         var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson(@"{""file_path"":""a.txt"",""old"":""x"",""new"":""y""}");
-
-        var result = await _sut.CheckAsync("Edit", input, ctx, ct);
+        var result = await _sut.CheckAsync(toolName, ParseJson(inputJson), ctx, ct);
 
         result.Decision.Should().Be(PermissionDecision.Deny);
-        result.Message.Should().Contain("plan mode");
-    }
-
-    [Fact]
-    public async Task CheckAsync_PlanMode_Write_IsDenied()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson(@"{""file_path"":""/tmp/test.txt""}");
-
-        var result = await _sut.CheckAsync("Write", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Deny);
-    }
-
-    [Fact]
-    public async Task CheckAsync_PlanMode_BashNonReadOnly_IsDenied()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson(@"{""command"":""rm -rf /""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Deny);
+        result.Message.Should().Contain("plan mode",
+            "PlanWhitelist denies every non-whitelisted tool with an explanatory message");
     }
 
     [Fact]
@@ -127,38 +95,25 @@ public sealed class PermissionCheckerBoundaryTests
 
     // Nested path permission checks
 
-    [Fact]
-    public async Task CheckAsync_DeeplyNestedPath_InsideWorkingDir_IsAllowedInAcceptEdits()
+    [Theory]
+    [InlineData("a/b/c/d/e/f/file.txt", PermissionDecision.Allow)]
+    [InlineData("a/b/../../../outside.txt", PermissionDecision.Deny)]
+    public async Task CheckAsync_AcceptEdits_WriteNestedPath_RespectsBoundary(
+        string relativePath, PermissionDecision expected)
     {
         var ct = TestContext.Current.CancellationToken;
-        var workDir = Path.Combine(Path.GetTempPath(), "project_root");
+        var workDir = Path.Combine(Path.GetTempPath(), "nested_sandbox");
         var ctx = new ToolPermissionContext
         {
             Mode = PermissionMode.AcceptEdits,
             WorkingDirectory = workDir,
         };
-        var input = ParseJson(@"{""file_path"":""a/b/c/d/e/f/file.txt"",""content"":""x""}");
+        var input = ParseJson($@"{{""file_path"":""{relativePath}"",""content"":""x""}}");
 
         var result = await _sut.CheckAsync("Write", input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    [Fact]
-    public async Task CheckAsync_NestedPathTraversal_OutsideWorkingDir_IsDeniedInAcceptEdits()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var workDir = Path.Combine(Path.GetTempPath(), "deep_sandbox");
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.AcceptEdits,
-            WorkingDirectory = workDir,
-        };
-        var input = ParseJson(@"{""file_path"":""a/b/../../../outside.txt"",""content"":""x""}");
-
-        var result = await _sut.CheckAsync("Write", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Deny);
+        result.Decision.Should().Be(expected,
+            "AcceptEdits auto-approves writes inside the working dir and denies traversal outside it");
     }
 
     [Fact]
@@ -245,48 +200,6 @@ public sealed class PermissionCheckerBoundaryTests
         result.Decision.Should().NotBe(PermissionDecision.Deny);
     }
 
-    [Fact]
-    public async Task CheckAsync_EmptyInput_BypassMode_AlwaysAllow()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.BypassPermissions };
-        var input = ParseJson("{}");
-
-        var result = await _sut.CheckAsync("", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow,
-            "bypass mode should allow everything regardless of input");
-    }
-
-    [Fact]
-    public async Task CheckAsync_EmptyInput_PlanMode_DeniesUnknownTool()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Plan };
-        var input = ParseJson("{}");
-
-        var result = await _sut.CheckAsync("", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Deny);
-    }
-
-    [Fact]
-    public async Task CheckAsync_UnknownTool_DefaultMode_AskDecision()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.Default,
-            WorkingDirectory = Path.GetTempPath(),
-        };
-        var input = ParseJson("{}");
-
-        var result = await _sut.CheckAsync("MysteryTool", input, ctx, ct);
-
-        // Unknown (non-read, non-write) tool falls through to rule evaluation → Ask
-        result.Decision.Should().Be(PermissionDecision.Ask);
-    }
-
     // Behavior differences across PermissionMode
 
     [Fact]
@@ -361,13 +274,29 @@ public sealed class PermissionCheckerBoundaryTests
         }
     }
 
-    [Fact]
-    public async Task CheckAsync_DontAskMode_AlwaysAllowRule_OverridesDenyDefault()
+    [Theory]
+    [InlineData("", @"{}")]
+    [InlineData("Write", @"{}")]
+    [InlineData("Bash", @"{""command"":""rm -rf /""}")]
+    public async Task CheckAsync_BypassMode_AlwaysAllows(string toolName, string inputJson)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = new ToolPermissionContext { Mode = PermissionMode.BypassPermissions };
+        var result = await _sut.CheckAsync(toolName, ParseJson(inputJson), ctx, ct);
+
+        result.Decision.Should().Be(PermissionDecision.Allow,
+            "bypass mode should allow everything regardless of input");
+    }
+
+    [Theory]
+    [InlineData(PermissionMode.Default)]
+    [InlineData(PermissionMode.DontAsk)]
+    public async Task CheckAsync_AlwaysAllowRule_OverridesModeDefault(PermissionMode mode)
     {
         var ct = TestContext.Current.CancellationToken;
         var ctx = new ToolPermissionContext
         {
-            Mode = PermissionMode.DontAsk,
+            Mode = mode,
             WorkingDirectory = Path.GetTempPath(),
             RulesBySource = new Dictionary<string, PermissionRuleGroup>
             {
@@ -379,7 +308,8 @@ public sealed class PermissionCheckerBoundaryTests
 
         var result = await _sut.CheckAsync("Bash", input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Allow);
+        result.Decision.Should().Be(PermissionDecision.Allow,
+            $"an AlwaysAllow rule must override the default decision of {mode} mode");
     }
 
     // AutoMode — YOLO path + profile fallback for unmatched tools
@@ -400,135 +330,51 @@ public sealed class PermissionCheckerBoundaryTests
         result.Decision.Should().Be(PermissionDecision.Allow);
     }
 
-    [Fact]
-    public async Task CheckAsync_AutoMode_BashNonReadOnly_AskDecision()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.Auto,
-            WorkingDirectory = Path.GetTempPath(),
-        };
-        // dotnet build: 非只读命令，不引用路径（不会触发 ValidatePath 越界 Deny），
-        // YOLO None → Auto profile EvaluateRules → 无规则 → Ask
-        var input = ParseJson(@"{""command"":""dotnet build""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Ask);
-    }
-
     // GoalAuto mode — autonomous with safety boundaries
 
-    [Fact]
-    public async Task CheckAsync_GoalAutoMode_DestructiveShell_IsDenied()
+    [Theory]
+    [InlineData(PermissionMode.GoalAuto, PermissionDecision.Deny, "GOAL mode")]
+    [InlineData(PermissionMode.Team, PermissionDecision.Ask, "Team mode")]
+    [InlineData(PermissionMode.AcceptEdits, PermissionDecision.Ask, null)]
+    public async Task CheckAsync_DestructiveShellCommand_PerModePolicy(
+        PermissionMode mode, PermissionDecision expected, string? expectedMessageFragment)
     {
         var ct = TestContext.Current.CancellationToken;
         var ctx = new ToolPermissionContext
         {
-            Mode = PermissionMode.GoalAuto,
+            Mode = mode,
             WorkingDirectory = Path.GetTempPath(),
         };
         var input = ParseJson(@"{""command"":""rm -rf /""}");
 
         var result = await _sut.CheckAsync("Bash", input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Deny);
-        result.Message.Should().Contain("GOAL mode");
+        result.Decision.Should().Be(expected, $"{mode} destructive-shell policy");
+        if (expectedMessageFragment is not null)
+            result.Message.Should().Contain(expectedMessageFragment);
     }
 
-    [Fact]
-    public async Task CheckAsync_GoalAutoMode_WriteInsideWorkDir_IsAllowed()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var workDir = Path.Combine(Path.GetTempPath(), "goal_auto_test");
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.GoalAuto, WorkingDirectory = workDir };
-        var input = ParseJson(@"{""file_path"":""file.txt"",""content"":""x""}");
+    // 未知工具各模式策略（AllowWithPathValidation / EvaluateRules）
 
-        var result = await _sut.CheckAsync("Write", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    [Fact]
-    public async Task CheckAsync_GoalAutoMode_UnknownTool_IsAllowedWithPathValidation()
+    [Theory]
+    [InlineData(PermissionMode.Default, "MysteryTool", PermissionDecision.Ask)]
+    [InlineData(PermissionMode.GoalAuto, "MysteryTool", PermissionDecision.Allow)]
+    [InlineData(PermissionMode.Team, "SomeUnknownTool", PermissionDecision.Ask)]
+    public async Task CheckAsync_UnknownTool_PerModePolicy(
+        PermissionMode mode, string toolName, PermissionDecision expected)
     {
         var ct = TestContext.Current.CancellationToken;
         var ctx = new ToolPermissionContext
         {
-            Mode = PermissionMode.GoalAuto,
+            Mode = mode,
             WorkingDirectory = Path.GetTempPath(),
         };
         var input = ParseJson("{}");
 
-        var result = await _sut.CheckAsync("MysteryTool", input, ctx, ct);
+        var result = await _sut.CheckAsync(toolName, input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Allow,
-            "GoalAuto allows unknown tools after path validation (autonomous execution)");
-    }
-
-    // Team mode — AcceptEdits-like with event-driven approval for dangerous shell
-
-    [Fact]
-    public async Task CheckAsync_TeamMode_DestructiveShell_ReturnsAsk()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.Team,
-            WorkingDirectory = Path.GetTempPath(),
-        };
-        var input = ParseJson(@"{""command"":""rm -rf /""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Ask);
-        result.Message.Should().Contain("Team mode");
-    }
-
-    [Fact]
-    public async Task CheckAsync_TeamMode_UnknownTool_FallsBackToEvaluateRules()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Team };
-        var input = ParseJson("{}");
-
-        var result = await _sut.CheckAsync("SomeUnknownTool", input, ctx, ct);
-
-        // No matching rules → EvaluateRules returns Ask
-        result.Decision.Should().Be(PermissionDecision.Ask);
-    }
-
-    [Fact]
-    public async Task CheckAsync_TeamMode_WriteInsideWorkDir_IsAllowed()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var workDir = Path.Combine(Path.GetTempPath(), "team_mode_test");
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Team, WorkingDirectory = workDir };
-        var input = ParseJson(@"{""file_path"":""file.txt"",""content"":""x""}");
-
-        var result = await _sut.CheckAsync("Write", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    // AcceptEdits — destructive shell falls through to EvaluateRules (Ask when no rule)
-
-    [Fact]
-    public async Task CheckAsync_AcceptEditsMode_DestructiveShell_AskWhenNoRule()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.AcceptEdits,
-            WorkingDirectory = Path.GetTempPath(),
-        };
-        var input = ParseJson(@"{""command"":""rm -rf /""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Ask,
-            "AcceptEdits routes destructive shell through EvaluateRules → Ask when no matching rule");
+        result.Decision.Should().Be(expected,
+            $"{mode} mode should {expected} unknown tool");
     }
 
     // Mode × tool-category decision matrix (behavior lock)
@@ -603,39 +449,6 @@ public sealed class PermissionCheckerBoundaryTests
     // Bypass / rule overrides (migrated from PermissionCheckerTests)
 
     [Fact]
-    public async Task CheckAsync_BypassPermissions_AlwaysAllows()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.BypassPermissions };
-        var input = ParseJson("{}");
-
-        var result = await _sut.CheckAsync("Write", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    [Fact]
-    public async Task CheckAsync_AlwaysAllowRule_OverridesDefault()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.Default,
-            WorkingDirectory = Path.GetTempPath(),
-            RulesBySource = new Dictionary<string, PermissionRuleGroup>
-            {
-                ["test"] = new PermissionRuleGroup(
-                    AlwaysAllow: [new PermissionRule("Bash", "git status")])
-            },
-        };
-        var input = ParseJson(@"{""command"":""git status""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    [Fact]
     public async Task CheckAsync_AlwaysDenyRule_DeniesMatchingCommand()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -706,68 +519,41 @@ public sealed class PermissionCheckerBoundaryTests
         result.Decision.Should().Be(PermissionDecision.Allow);
     }
 
-    [Fact]
-    public async Task CheckAsync_AutoMode_DenyRule_ReturnsDeny()
+    [Theory]
+    [InlineData("deny", @"rm\s+-rf", "never rm -rf", "rm -rf /tmp", PermissionDecision.Deny, "never rm -rf")]
+    [InlineData("soft_deny", @"curl\s+", "no curl", "curl http://example.com", PermissionDecision.Ask, "no curl")]
+    [InlineData("allow", @"^git\s+status$", "safe git status", "git status", PermissionDecision.Allow, null)]
+    public async Task CheckAsync_AutoMode_UserRule_ReturnsExpectedDecision(
+        string ruleType, string pattern, string description, string command,
+        PermissionDecision expected, string? expectedMessage)
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = CreateCheckerWithRules(new UserRule("deny", @"rm\s+-rf", "never rm -rf"));
+        var sut = CreateCheckerWithRules(new UserRule(ruleType, pattern, description));
 
         var ctx = new ToolPermissionContext { Mode = PermissionMode.Auto, WorkingDirectory = Path.GetTempPath() };
-        var input = ParseJson(@"{""command"":""rm -rf /tmp""}");
+        var input = ParseJson($@"{{""command"":""{command}""}}");
 
         var result = await sut.CheckAsync("Bash", input, ctx, ct);
 
-        result.Decision.Should().Be(PermissionDecision.Deny);
-        result.Message.Should().Contain("never rm -rf");
+        result.Decision.Should().Be(expected);
+        if (expectedMessage is not null)
+            result.Message.Should().Contain(expectedMessage);
     }
 
-    [Fact]
-    public async Task CheckAsync_AutoMode_SoftDenyRule_ReturnsAsk()
+    [Theory]
+    [InlineData("dotnet build")]
+    [InlineData("some-unknown-command")]
+    public async Task CheckAsync_AutoMode_NoMatchingRule_FallsBackToAutoStrategy(string command)
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = CreateCheckerWithRules(new UserRule("soft_deny", @"curl\s+", "no curl"));
-
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Auto, WorkingDirectory = Path.GetTempPath() };
-        var input = ParseJson(@"{""command"":""curl http://example.com""}");
-
-        var result = await sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Ask);
-        result.Message.Should().Contain("no curl");
-    }
-
-    [Fact]
-    public async Task CheckAsync_AutoMode_AllowRule_ReturnsAllow()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var sut = CreateCheckerWithRules(new UserRule("allow", @"^git\s+status$", "safe git status"));
-
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Auto, WorkingDirectory = Path.GetTempPath() };
-        var input = ParseJson(@"{""command"":""git status""}");
-
-        var result = await sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
-
-    [Fact]
-    public async Task CheckAsync_AutoMode_NoRuleMatch_FallsBackToAutoStrategy()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Auto, WorkingDirectory = Path.GetTempPath() };
-        var input = ParseJson(@"{""command"":""some-unknown-command""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Ask);
-    }
-
-    [Fact]
-    public async Task CheckAsync_AutoMode_ClearedRules_FallsBackToAutoStrategy()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.Auto, WorkingDirectory = Path.GetTempPath() };
-        var input = ParseJson(@"{""command"":""dotnet build""}");
+        var ctx = new ToolPermissionContext
+        {
+            Mode = PermissionMode.Auto,
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        // 非只读命令也不引用路径（不会触发 ValidatePath 越界 Deny），
+        // YOLO None → Auto profile EvaluateRules → 无规则 → Ask
+        var input = ParseJson($@"{{""command"":""{command}""}}");
 
         var result = await _sut.CheckAsync("Bash", input, ctx, ct);
 
@@ -791,15 +577,5 @@ public sealed class PermissionCheckerBoundaryTests
         result.Decision.Should().Be(PermissionDecision.Deny);
     }
 
-    [Fact]
-    public async Task CheckAsync_NonAutoMode_DoesNotInvokeYoloClassifier()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext { Mode = PermissionMode.BypassPermissions };
-        var input = ParseJson(@"{""command"":""rm -rf /""}");
-
-        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow);
-    }
+    // NonAutoMode（Bypass 模式不下发 YOLO）已并入 CheckAsync_BypassMode_AlwaysAllows
 }

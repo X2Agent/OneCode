@@ -83,7 +83,7 @@
 1. **用户绑定追加在默认绑定之后**，相同按键的用户绑定覆盖默认绑定
 2. **设为 `null` 表示显式解绑**：`"ctrl+s": null` 会禁用该默认快捷键
 3. **和弦序列**用空格分隔：`"ctrl+x ctrl+k": "chat:killAgents"`（用户自定义示例）
-4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+y": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告；注意 ctrl+t 已被默认绑定为 chat:enterTranscript）
+4. **支持 `command:` 前缀**绑定斜杠命令：`"ctrl+y": "command:compact"`（`command:` 绑定必须在 `Chat` 上下文中，否则产生验证警告）
 
 ### 按键语法
 
@@ -118,7 +118,6 @@
 | `Global` | 全局生效，不受焦点影响 |
 | `Chat` | 聊天输入框获得焦点时 |
 | `Autocomplete` | 自动补全菜单可见时（由输入视图 push/pop） |
-| `Transcript` | 对话区导航模式激活时（`Ctrl+T` 进入，`Esc`/`i` 退出） |
 | `Diff` | Diff 审查视图聚焦时（解析时并入活跃集合） |
 | `Selector` | 内联选择器（权限提示 / Plan 审批）接管键盘时 |
 
@@ -156,7 +155,6 @@
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Shift+Tab` | `chat:cycleTeam` | TEAM 模式下循环切换已注册团队（编排模式由团队 team.yaml 固定声明） |
 | `Alt+1` .. `Alt+4` | `app:modeBuild/Plan/Team/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |
-| `Ctrl+T` | `chat:enterTranscript` | 进入对话区导航模式 |
 
 ### Autocomplete（自动补全）
 
@@ -166,20 +164,6 @@
 | `Down` | `autocomplete:next` | 下一条建议 |
 | `Tab` | `autocomplete:accept` | 接受当前补全（补全激活时 Autocomplete 上下文活跃，Tab 归此绑定接管） |
 | `Escape` | `autocomplete:dismiss` | 关闭补全菜单 |
-
-### Transcript（对话区导航）
-
-`Ctrl+T` 进入导航模式：焦点移到对话流，状态栏显示「导航模式」，绑定上下文切换为导航。游标在**可交互行**（工具 / 思考 / 错误摘要行）之间跳转并高亮。流式响应期间禁止进入，开始响应时自动退出。
-
-| 快捷键 | 动作 | 说明 |
-|---|---|---|
-| `Esc` / `i` | `transcript:exit` | 退出导航模式，焦点回到输入框 |
-| `J` / `K` | `transcript:next` / `transcript:previous` | 下一个 / 上一个可交互行 |
-| `Enter` / `Space` | `transcript:toggle` | 展开 / 折叠当前块 |
-| `C` | `transcript:copyCode` | 复制游标行文本到剪贴板 |
-| `G` | `transcript:top` | 跳到第一个可交互行 |
-| `Shift+G` | `transcript:bottom` | 跳到最后一个可交互行 |
-| `↑↓ PgUp PgDn Home End` | — | 原生滚动（不经 Resolver，不可重映射） |
 
 ### Diff（差异审查）
 
@@ -215,7 +199,7 @@
 | `Tab`（空输入 + 占位建议） | 接受占位建议 | `ChatInputView.Keys.cs` | 行为依赖运行时状态（是否有建议），非单一动作 |
 | `Tab`（斜杠前缀，补全未激活） | 打开命令补全列表 | `ChatInputView.Keys.cs` | 同上（补全未激活时 `Autocomplete` 上下文不在场） |
 | `Ctrl+Right` / `Ctrl+Left` | 占位建议可见时循环切换建议 | `ChatInputView.Keys.cs` | 同上 |
-| `↑↓ PgUp PgDn Home End`（导航/Diff 视图聚焦时） | 原生滚动 | `MessageListView` / `DiffView` OnKeyDown 之前 | 滚动是视图基础能力；可交互跳转已由 transcript:* / diff:* 覆盖 |
+| `↑↓ PgUp PgDn Home End`（导航/Diff 视图聚焦时） | 原生滚动 | `MessageListView` / `DiffView` OnKeyDown 之前 | 滚动是视图基础能力；可交互跳转已由 diff:* 覆盖 |
 | `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch | 斜杠命令入口 |
 | `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch | 斜杠命令入口 |
 

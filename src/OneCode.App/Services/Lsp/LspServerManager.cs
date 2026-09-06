@@ -154,13 +154,17 @@ public sealed class LspServerManager : ILspServerManager, IAsyncDisposable
             Name = s.Config.Name,
             IsRunning = s.IsRunning,
             IsInitialized = s.IsInitialized,
-            Capabilities = s.Capabilities
+            Capabilities = s.Capabilities,
+            IsIndexing = s.IsIndexing
         }).ToList();
     }
 
     private async Task HealthCheckLoopAsync(CancellationToken ct)
     {
         var lastCleanup = DateTimeOffset.UtcNow;
+        // 崩溃自动恢复：记录每台服务器的重启次数与上次尝试时间（指数退避）。
+        var restartAttempts = new Dictionary<string, (int Count, DateTimeOffset LastAttempt)>(StringComparer.Ordinal);
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -171,7 +175,36 @@ public sealed class LspServerManager : ILspServerManager, IAsyncDisposable
                 {
                     if (instance.IsRunning && !instance.IsHealthy)
                     {
-                        _logger.LogWarning("LSP server {ServerName} is unhealthy", name);
+                        // 崩溃恢复：与 MCP 自动重连同策略——指数退避 + 上限放弃。
+                        var now = DateTimeOffset.UtcNow;
+                        if (!restartAttempts.TryGetValue(name, out var state))
+                            restartAttempts[name] = state = (0, DateTimeOffset.MinValue);
+
+                        var backoff = TimeSpan.FromSeconds(Math.Min(30 * Math.Pow(2, state.Count), 240));
+                        if (now - state.LastAttempt < backoff)
+                            continue;
+                        if (state.Count >= MaxCrashRestarts)
+                        {
+                            _logger.LogError(
+                                "LSP server {ServerName} still unhealthy after {Attempts} restart attempts — giving up. Use /lsp restart to recover manually.",
+                                name, state.Count);
+                            continue;
+                        }
+
+                        restartAttempts[name] = (state.Count + 1, now);
+                        _logger.LogWarning(
+                            "LSP server {ServerName} crashed — auto-restarting (attempt {Attempt}/{Max})",
+                            name, state.Count + 1, MaxCrashRestarts);
+
+                        _servers.TryRemove(name, out _);
+                        try { await instance.StopAsync().ConfigureAwait(false); }
+                        catch (Exception stopEx) { _logger.LogDebug(stopEx, "Failed to stop crashed LSP server {ServerName}", name); }
+
+                        if (await StartServerAsync(instance.Config, ct).ConfigureAwait(false))
+                        {
+                            _logger.LogInformation("LSP server {ServerName} auto-restarted successfully", name);
+                            restartAttempts.Remove(name);
+                        }
                     }
                 }
 
@@ -193,6 +226,9 @@ public sealed class LspServerManager : ILspServerManager, IAsyncDisposable
             }
         }
     }
+
+    /// <summary>崩溃自动重启的最大尝试次数，超过后提示用户手动 /lsp restart。</summary>
+    private const int MaxCrashRestarts = 3;
 
     public async ValueTask DisposeAsync()
     {

@@ -57,6 +57,12 @@ public sealed record TuiPermissionCheck(string ToolName, bool Allowed, string? D
 public sealed record TuiToolPoolReady(int TotalTools, int ReadOnlyTools, int McpTools) : TuiEvent;
 
 /// <summary>
+/// MCP 服务器集合变化 — 连接/断开 MCP 服务器后触发（TUI 内部事件，不来自 QueryEvent 映射）。
+/// TUI 层据此刷新状态栏的 MCP 指示器（连接数/工具数）。
+/// </summary>
+public sealed record TuiMcpServersChanged : TuiEvent;
+
+/// <summary>
 /// 查询完成 — 含 token 统计和终止原因。
 /// TerminalReason 表示运行终止的具体原因（正常完成、轮次上限、预算超支、取消、验证失败等）。
 /// TransactionRolledBack=true 表示文件变更已回滚（验证失败或取消时）。
@@ -107,7 +113,7 @@ public sealed record TuiTurnStarted(int TurnNumber) : TuiEvent;
 /// <summary>轮次结束 — 含是否执行了工具调用的标记。</summary>
 public sealed record TuiTurnCompleted(int TurnNumber, bool HadToolCalls) : TuiEvent;
 
-/// <summary>TEAM 模式下 agent 之间的协调消息 (design-spec §4.3)。</summary>
+/// <summary>TEAM 模式下 agent 之间的协调消息。</summary>
 public sealed record TuiAgentCoordination(string FromName, string? FromColor, string ToName, string? ToColor, string? Content) : TuiEvent;
 
 /// <summary>TEAM 模式下单个 agent 的消息输出。</summary>

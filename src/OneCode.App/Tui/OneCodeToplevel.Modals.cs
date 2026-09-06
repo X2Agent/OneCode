@@ -22,6 +22,15 @@ public sealed partial class OneCodeToplevel
         _applySettingsAsync = applySettingsAsync;
     }
 
+    /// <summary>
+    /// 配置 MCP 配置页弹层委托。<paramref name="showMcpConfigAsync"/> 返回保存摘要
+    /// （用户取消时为 null）；未配置时 /mcp 退回 /mcp list 文本输出。
+    /// </summary>
+    public void ConfigureMcpConfigModal(Func<CancellationToken, Task<string?>> showMcpConfigAsync)
+    {
+        _showMcpConfigAsync = showMcpConfigAsync;
+    }
+
     public async Task<PermissionPromptResult> ShowPermissionPromptAsync(PermissionPromptRequest request, CancellationToken ct = default)
     {
         var tcs = new TaskCompletionSource<PermissionPromptResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,6 +120,51 @@ public sealed partial class OneCodeToplevel
         {
             Invoke(() => _shell.Transcript.AddError($"Failed to switch session: {ex.Message}"));
         }
+    }
+
+    /// <summary>
+    /// /mcp（无参）→ 打开 MCP 工具白名单配置页；未接线（非 TUI 或未配置委托）时
+    /// 退回 /mcp list 文本输出。保存摘要与用户消息按 /config 的模式渲染到会话记录。
+    /// </summary>
+    private async Task HandleMcpConfigCommandAsync(CancellationToken ct)
+    {
+        if (_showMcpConfigAsync is null)
+        {
+            var listResult = await _ctx.ExecuteCommand("/mcp list", ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(listResult))
+            {
+                Invoke(() =>
+                {
+                    _shell.Transcript.AddUserMessage("/mcp");
+                    _shell.Transcript.AddCommandResult(listResult);
+                });
+            }
+            return;
+        }
+
+        string? summary;
+        try
+        {
+            summary = await _showMcpConfigAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Invoke(() => _shell.Transcript.AddError($"MCP config overlay failed: {ex.Message}"));
+            return;
+        }
+
+        if (summary is null)
+            return;
+
+        Invoke(() =>
+        {
+            _shell.Transcript.AddUserMessage("/mcp");
+            _shell.Transcript.AddCommandResult(summary);
+        });
     }
 
     private async Task HandleConfigCommandAsync(CancellationToken ct)

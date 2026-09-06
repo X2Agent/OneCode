@@ -27,6 +27,7 @@ public sealed class TuiHostConfigurator(
     IConfigManager configManager,
     IAppStateAccessor appStateAccessor,
     IMcpConnectionManager mcpConnectionManager,
+    Services.Mcp.McpConfigService mcpConfigService,
     ILogger<TuiHostConfigurator> logger,
     TuiOverlayDependencies overlay,
     TuiCommandSurfaceDependencies commandSurface)
@@ -119,6 +120,7 @@ public sealed class TuiHostConfigurator(
             WireSessionModals(toplevel, session, app);
             WireSessionRefreshCallback(toplevel, session, cmdState, app);
             WireSettingsModal(toplevel, app);
+            WireMcpConfigModal(toplevel);
             WireStartupHints(toplevel, app);
 
             return toplevel;
@@ -319,7 +321,7 @@ public sealed class TuiHostConfigurator(
                 await toplevel.ReplayCurrentBuildRunAsync(token).ConfigureAwait(false);
                 if (workflow is not null)
                 {
-                    // Stage 4c：PlanCardPublisher 已是统一总线发射器，重放订阅链路与实时同构。
+                    // PlanCardPublisher 已是统一总线发射器，重放订阅链路与实时同构。
                     overlay.PlanCardPublisher.Publish(workflow);
                     if (workflow.State == PlanWorkflowState.StartingExecution
                         && (workflow.NextRetryAt is null || workflow.NextRetryAt <= DateTimeOffset.UtcNow))
@@ -419,6 +421,29 @@ public sealed class TuiHostConfigurator(
                     summary);
                 return summary;
             });
+    }
+
+    /// <summary>
+    /// /mcp（无参）在 TUI 中打开 MCP 工具白名单配置页：
+    /// Prepare 拉取服务器快照 → overlay 勾选 → Apply 写回配置并热生效，
+    /// 保存摘要作为命令结果渲染到会话记录（与 /config 模式一致）。
+    /// </summary>
+    private void WireMcpConfigModal(OneCodeToplevel toplevel)
+    {
+        toplevel.ConfigureMcpConfigModal(async token =>
+        {
+            var entries = await mcpConfigService.PrepareAsync(token).ConfigureAwait(false);
+
+            var result = await OverlayLaunchers.ShowMcpConfigOverlayAsync(
+                toplevel.PushOverlay,
+                toplevel.PopTopOverlay,
+                entries,
+                token).ConfigureAwait(false);
+            if (result is null || result.Servers.Count == 0)
+                return null;
+
+            return await mcpConfigService.ApplyAsync(result, token).ConfigureAwait(false);
+        });
     }
 
     internal static IReadOnlyDictionary<string, ConfigMutation> BuildSettingsPatch(SettingsResult result)

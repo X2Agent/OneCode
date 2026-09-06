@@ -1,6 +1,6 @@
 namespace OneCode.App.Tui;
 
-/// <summary>Plan card decision from keyboard shortcut (design-spec §4.2).</summary>
+/// <summary>Plan card decision from keyboard shortcut.</summary>
 public enum PlanCardDecision { Approve, Reject, Edit }
 
 /// <summary>
@@ -62,7 +62,8 @@ public sealed record PlanCardStateSnapshot(
 
 /// <summary>
 /// <see cref="PlanStep"/> 的持久化 DTO——避免直接序列化 internal 类型。
-/// 与 <see cref="OneCode.App.Tools.PlanStepDto"/> 字段对齐，但用于持久化场景（跨会话恢复）。
+/// 用于持久化场景（跨会话恢复）；Label/Content 命名沿用历史快照 JSON 契约，
+/// 语义对应 <see cref="OneCode.App.Tools.PlanStepDto"/> 的 Title/Description。
 /// </summary>
 public sealed record PlanStepSnapshot(
     string Label,

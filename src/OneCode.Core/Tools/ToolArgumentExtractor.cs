@@ -125,7 +125,7 @@ public static class ToolArgumentExtractor
         }
         catch (Exception ex)
         {
-            // 静态方法无 ILogger 注入，按 AGENTS.md §5.1 兜底使用 Debug.WriteLine。
+            // 静态方法无 ILogger 注入，兜底使用 Debug.WriteLine。
             // 此处失败会导致权限校验退化为工具名匹配，必须有可观测信号。
             System.Diagnostics.Debug.WriteLine(
                 $"ToolArgumentExtractor.ExtractFilePath fallback serialization failed: {ex.Message}");

@@ -44,7 +44,7 @@ public sealed class ReviewCache
         }
         catch (Exception ex)
         {
-            // 缓存损坏，从空开始 — 按 §5.1 仍需记录日志
+            // 缓存损坏，从空开始 — 失败必须留日志，不允许静默
             if (logger is not null)
                 logger.LogDebug(ex, "Review cache load failed for {BaseRef}, starting fresh", baseRef ?? "HEAD");
             else
@@ -105,7 +105,7 @@ public sealed class ReviewCache
         }
         catch (Exception ex)
         {
-            // 写入失败不阻塞审查流程 — 按 §5.1 仍需记录日志
+            // 写入失败不阻塞审查流程 — 失败必须留日志，不允许静默
             if (logger is not null)
                 logger.LogDebug(ex, "Review cache save failed for {BaseRef}", baseRef ?? "HEAD");
             else

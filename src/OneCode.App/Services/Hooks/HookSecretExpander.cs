@@ -8,7 +8,7 @@ namespace OneCode.App.Services.Hooks;
 /// Hook 配置敏感字段展开器（C1）——webhookUrl / secret / url 等字段支持两种保密形式：
 /// <list type="bullet">
 /// <item><c>dpapi:</c> 前缀：值为 DPAPI(CurrentUser) 保护的 Base64 串，运行时解密
-/// （Windows 专属；生成方式见 docs/hooks.md §5.2）。</item>
+/// （Windows 专属；生成方式见 docs/hooks.md）。</item>
 /// <item><c>${ENV_VAR}</c>：展开进程环境变量；未定义的变量展开为空串。</item>
 /// </list>
 /// 解密失败抛 <see cref="CryptographicException"/>，由执行器统一转为 NonBlockingError。

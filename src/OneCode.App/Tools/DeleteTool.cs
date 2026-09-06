@@ -24,9 +24,10 @@ public sealed class DeleteTool
 {
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly SshRemoteService _ssh;
+    private readonly ILspNotifier? _notifier;
 
-    public DeleteTool(IWorkingDirectoryAccessor wd, SshRemoteService ssh)
-        => (_wd, _ssh) = (wd, ssh);
+    public DeleteTool(IWorkingDirectoryAccessor wd, SshRemoteService ssh, ILspNotifier? notifier = null)
+        => (_wd, _ssh, _notifier) = (wd, ssh, notifier);
 
     [Description("Delete a file or directory. Files and empty directories are deleted directly; " +
                  "non-empty directories require recursive=true. " +
@@ -67,6 +68,10 @@ public sealed class DeleteTool
                         $"[Dry run] Would delete file: {fullPath} ({size} bytes)"));
 
                 File.Delete(fullPath);
+                // 让 LSP 服务器停止跟踪已删除的文件（textDocument/didClose），
+                // 否则服务器继续为不存在的路径推送诊断。
+                if (_notifier is not null)
+                    _ = _notifier.NotifyFileClosedAsync(fullPath, ct);
                 return Task.FromResult(ToolResult.Success($"File deleted: {fullPath}"));
             }
 

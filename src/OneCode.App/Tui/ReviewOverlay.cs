@@ -3,7 +3,7 @@ using System.Collections.ObjectModel;
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Review overlay — design-spec §3. Triggered by <c>/diff</c> (no args).
+/// Review overlay. Triggered by <c>/diff</c> (no args).
 /// File list with diff stats + hunk navigation.
 /// ↑/↓ select file, Enter open, Esc returns.
 ///

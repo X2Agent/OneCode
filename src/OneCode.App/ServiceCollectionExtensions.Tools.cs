@@ -12,6 +12,7 @@ using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Automation;
+using OneCode.Infrastructure.Mcp;
 
 namespace OneCode.App;
 
@@ -24,6 +25,8 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<LspDiagnosticRegistry>();
         services.AddSingleton<EnhancedLspService>();
         services.AddSingleton<ILspNotifier, LspNotifier>();
+        // InProcess MCP 服务器扩展点：宿主/测试注册 IInProcessMcpServerProvider 即可按名接入。
+        services.AddSingleton<InProcessMcpServerRegistry>();
         services.AddSingleton<McpConnectionManager>();
         services.AddSingleton<IMcpConnectionManager>(sp => sp.GetRequiredService<McpConnectionManager>());
 
@@ -79,7 +82,7 @@ public static partial class ServiceCollectionExtensions
         // irreversible and always requires explicit approval (FileDelete feeds FileSystemInvariant).
         services.AddTool<DeleteTool>("Delete", nameof(DeleteTool.DeleteAsync), ToolRisk.Destructive, concurrency: false, searchHint: "delete a file or directory",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["delete", "remove"], category: ToolCategory.FileDelete);
-        services.AddTool<LSTool>("LS", nameof(LSTool.ListAsync), ToolRisk.ReadOnly, searchHint: "list directory contents");
+        services.AddTool<LsTool>("LS", nameof(LsTool.ListAsync), ToolRisk.ReadOnly, searchHint: "list directory contents");
         services.AddTool<GlobTool>("Glob", nameof(GlobTool.GlobAsync), ToolRisk.ReadOnly, searchHint: "glob pattern file search");
         services.AddTool<GrepTool>("Grep", nameof(GrepTool.SearchAsync), ToolRisk.ReadOnly, searchHint: "regex content search (ripgrep)");
         services.AddTool<FindReferencesTool>("FindReferences", nameof(FindReferencesTool.FindAsync), ToolRisk.ReadOnly, searchHint: "find code references",

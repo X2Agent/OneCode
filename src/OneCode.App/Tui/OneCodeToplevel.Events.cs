@@ -179,6 +179,12 @@ public sealed partial class OneCodeToplevel
                 UpdateLspStatusBar();
                 break;
 
+            // MCP 服务器集合变化 — 刷新状态栏三态指示（唯一实时出口；
+            // 欢迎页已不渲染 MCP 行，失败明细由一次性 startup hint 给出）。
+            case TuiMcpServersChanged:
+                UpdateMcpStatusBar();
+                break;
+
             // 用户提问请求 — 显示交互式提问对话框
             case TuiUserQuestionRequest { Question: var q, Options: var opts, ResponseSource: var rs }:
                 _ = HandleUserQuestionRequestAsync(q, opts, rs);
@@ -204,6 +210,17 @@ public sealed partial class OneCodeToplevel
         var errors = diagnostics.Count(d => d.Severity == LspDiagnosticSeverity.Error);
         var warnings = diagnostics.Count(d => d.Severity == LspDiagnosticSeverity.Warning);
         _shell.AgentStatusBar.SetLspStatus(serverCount, errors, warnings);
+    }
+
+    /// <summary>
+    /// Pulls the MCP connection tri-state summary from TuiContext
+    /// and updates the status bar's MCP indicator
+    /// (连接中 x/y / 已连 n / 失败 k；零活动时隐藏)。
+    /// </summary>
+    private void UpdateMcpStatusBar()
+    {
+        if (_ctx.GetMcpConnectionSummary is not { } getSummary) return;
+        _shell.AgentStatusBar.SetMcpStatus(getSummary());
     }
 
     /// <summary>

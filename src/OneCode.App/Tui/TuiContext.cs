@@ -8,6 +8,7 @@ using OneCode.Infrastructure.Media;
 
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
+using OneCode.Core.Mcp;
 
 namespace OneCode.App.Tui;
 
@@ -23,7 +24,9 @@ public sealed record TuiQueryServices(
     Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt = null,
     Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow = null,
     InputQueue? InputQueue = null,
-    Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun = null);
+    Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun = null,
+    /// <summary>MCP 预连接收尾等待（首条消息前的有界窗口，≤5s）。</summary>
+    Func<CancellationToken, Task>? WaitForMcpPreconnect = null);
 
 /// <summary>Current session, team, and workspace dependencies.</summary>
 public sealed record TuiSessionServices(
@@ -35,12 +38,16 @@ public sealed record TuiSessionServices(
     Func<string, string?>? GetTeamModeLabel = null,
     OneCode.Core.Commands.IGitHelper? GitHelper = null);
 
-/// <summary>LSP status and diagnostic subscriptions.</summary>
+/// <summary>LSP / MCP status and diagnostic subscriptions.</summary>
 public sealed record TuiDiagnosticServices(
     Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus = null,
     Func<IReadOnlyList<LspDiagnostic>>? GetLspDiagnostics = null,
     Action<Action>? SubscribeDiagnosticsChanged = null,
-    Action<Action>? UnsubscribeDiagnosticsChanged = null);
+    Action<Action>? UnsubscribeDiagnosticsChanged = null,
+    /// <summary>MCP 连接池三态快照（状态栏 + 欢迎页诊断）。</summary>
+    Func<McpConnectionSummary>? GetMcpConnectionSummary = null,
+    Action<Action>? SubscribeMcpServersChanged = null,
+    Action<Action>? UnsubscribeMcpServersChanged = null);
 
 /// <summary>Runtime collaborators shared by visual components.</summary>
 public sealed record TuiRuntimeServices(
@@ -104,6 +111,11 @@ public sealed record TuiContext(
     public Func<IReadOnlyList<LspDiagnostic>>? GetLspDiagnostics => Diagnostics.GetLspDiagnostics;
     public Action<Action>? SubscribeDiagnosticsChanged => Diagnostics.SubscribeDiagnosticsChanged;
     public Action<Action>? UnsubscribeDiagnosticsChanged => Diagnostics.UnsubscribeDiagnosticsChanged;
+
+    public Action<Action>? SubscribeMcpServersChanged => Diagnostics.SubscribeMcpServersChanged;
+    public Action<Action>? UnsubscribeMcpServersChanged => Diagnostics.UnsubscribeMcpServersChanged;
+    public Func<McpConnectionSummary>? GetMcpConnectionSummary => Diagnostics.GetMcpConnectionSummary;
+    public Func<CancellationToken, Task>? WaitForMcpPreconnect => Query.WaitForMcpPreconnect;
 
     public string Model => Runtime.Model;
     public IModelCatalog ModelCatalog => Runtime.ModelCatalog;
