@@ -316,7 +316,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 **用法**：
 
 ```
-/lsp [list|install <lang>|uninstall <lang>|status|enable <lang>|disable <lang>]
+/lsp [list|install <lang>|uninstall <lang>|status|enable <lang>|disable <lang>|restart <lang>]
 ```
 
 **参数**：
@@ -326,9 +326,10 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 无参数 / `list` / `ls` | 列出所有语言包及状态 |
 | `install <lang>` | 安装语言包服务器二进制 |
 | `uninstall <lang>` | 卸载语言包 |
-| `status` | 显示运行中的服务器状态和诊断 |
+| `status` | 显示运行中的服务器状态和诊断（启动失败的实例显示失败原因） |
 | `enable <lang>` | 启动 LSP 服务器 |
 | `disable <lang>` | 停止 LSP 服务器 |
+| `restart <lang>` | 重启（stop + start）运行中的 LSP 服务器，用于崩溃放弃自愈后的手动恢复 |
 
 ---
 

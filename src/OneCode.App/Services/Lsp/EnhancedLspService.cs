@@ -4,13 +4,15 @@ using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Lsp;
 
-public sealed class EnhancedLspService : IAsyncDisposable
+public sealed class EnhancedLspService : IEnhancedLspService, IAsyncDisposable
 {
     private readonly LspServerManager _serverManager;
     private readonly LspDiagnosticRegistry _diagnosticRegistry;
     private readonly ILogger<EnhancedLspService> _logger;
     // File sync state: tracks version numbers for open files (absent key = not opened yet)
     private readonly ConcurrentDictionary<string, int> _fileVersions = new();
+    // 每个 open 文档最近一次 didChange/didOpen 的发送时刻（P2 诊断新鲜度基线）。
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastDidChangeUtc = new(StringComparer.Ordinal);
 
     public EnhancedLspService(
         LspServerManager serverManager,
@@ -158,6 +160,11 @@ public sealed class EnhancedLspService : IAsyncDisposable
 
         var languageId = GetLanguageId(filePath);
 
+        // 新鲜度基线：didChange/didOpen 发送前置位。服务端诊断推送（快路径，不等待本次
+        // 广播返回）只会发生在此之后，GetDiagnosticsSummaryAsync 以此判定"新版本诊断"，
+        // 不会把推送窗口内合法到达的诊断误判为 stale。
+        _lastDidChangeUtc[uri] = DateTimeOffset.UtcNow;
+
         try
         {
             if (!_fileVersions.ContainsKey(uri))
@@ -201,6 +208,7 @@ public sealed class EnhancedLspService : IAsyncDisposable
         if (!_fileVersions.TryRemove(uri, out _))
             return; // never opened — nothing to close
 
+        _lastDidChangeUtc.TryRemove(uri, out _);
         try
         {
             var didCloseParams = JsonSerializer.Serialize(new { textDocument = new { uri } });
@@ -246,6 +254,54 @@ public sealed class EnhancedLspService : IAsyncDisposable
 
     /// <summary>是否有任何 LSP 服务器处于运行中。诊断等待的短路依据：无服务器时永远等不到新诊断。</summary>
     public bool HasRunningServer => _serverManager.GetStatus().Any(s => s.IsRunning);
+
+    /// <summary>是否有运行中的服务器正在索引（$/progress 进行中）。诊断等待预算的自适应延长依据。</summary>
+    public bool IsIndexing => _serverManager.GetStatus().Any(s => s.IsRunning && s.IsIndexing);
+
+    /// <summary>
+    /// 指定文件最近一次 didChange/didOpen 的发送时刻（诊断新鲜度基线，见
+    /// <see cref="NotifyFileUpdatedAsync"/>）。文件从未经过写通知路径时返回 null，
+    /// 调用方（LspNotifier）回落到调用时刻作为基线。
+    /// </summary>
+    public DateTimeOffset? GetLastDidChangeUtc(string filePath) =>
+        _lastDidChangeUtc.TryGetValue(LspUriHelper.BuildFileUri(filePath), out var t) ? t : null;
+
+    /// <summary>
+    /// Notify all servers that a directory (and everything under it) was deleted:
+    /// closes every tracked document under the directory so servers stop publishing
+    /// diagnostics for paths that no longer exist. 匹配的大小写语义随平台：Windows
+    /// 路径大小写不敏感（OrdinalIgnoreCase），Unix 严格（Ordinal）——同
+    /// <c>DeleteTool.IsWorkspaceRoot</c> 先例。Unix 上欠匹配是安全方向：漏发的
+    /// didClose 由诊断周期清理（CleanupExpired）兜底；过匹配反而会误关仍打开的文档。
+    /// 前缀匹配带分隔符边界（never matches siblings such as <c>/a/bc</c> when
+    /// deleting <c>/a/b</c>）。
+    /// </summary>
+    public async Task NotifyDirectoryDeletedAsync(string directoryPath, CancellationToken ct = default)
+    {
+        var normalizedDir = directoryPath.Replace('/', Path.DirectorySeparatorChar)
+            .TrimEnd(Path.DirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        var deletedUris = _fileVersions.Keys
+            .Where(uri => IsUnderDirectory(LspUriHelper.UriToFilePath(uri), normalizedDir, comparison))
+            .ToList();
+
+        foreach (var uri in deletedUris)
+            await NotifyFileClosedAsync(LspUriHelper.UriToFilePath(uri), ct).ConfigureAwait(false);
+
+        if (deletedUris.Count > 0)
+            _logger.LogDebug("Closed {Count} LSP documents under deleted directory {Path}", deletedUris.Count, directoryPath);
+    }
+
+    /// <summary>目录归属判定（internal 供单测）：带分隔符边界的前缀匹配，/a/b 不匹配 /a/bc。</summary>
+    internal static bool IsUnderDirectory(string filePath, string directory, StringComparison comparison)
+    {
+        var prefix = directory.Replace('/', Path.DirectorySeparatorChar)
+            .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return filePath.Replace('/', Path.DirectorySeparatorChar).StartsWith(prefix, comparison);
+    }
 
     public async ValueTask DisposeAsync()
     {

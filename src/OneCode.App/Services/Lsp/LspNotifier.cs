@@ -9,12 +9,27 @@ namespace OneCode.App.Services.Lsp;
 
 public sealed class LspNotifier : ILspNotifier
 {
-    private readonly EnhancedLspService _lspService;
+    /// <summary>
+    /// didChange 后诊断发布等待的轮询节奏（可注入先例同 <c>McpConnectionManager.AutoReconnectInterval</c>）：
+    /// 轮询新诊断而非单次 sleep——大项目首次分析远超固定 settle 时间，假阴性会误导模型。
+    /// internal 可变静态，供测试注入加速轮询。
+    /// </summary>
+    internal static int PollIntervalMs = 200;
+    internal static int WaitTotalMs = 2000;
+
+    /// <summary>
+    /// 服务器首次索引（$/progress 进行中）时的等待预算上限：大项目首次分析远超固定窗口，
+    /// 此时报 null 是假阴性、会误导模型。索引结束预算即回落 WaitTotalMs；窗口始终有上界
+    /// （Write/Edit 完成路径同步 await 此处，绝不无界等待）。internal 可变静态供测试注入。
+    /// </summary>
+    internal static int IndexingWaitTotalMs = 10_000;
+
+    private readonly IEnhancedLspService _lspService;
     private readonly LspDiagnosticRegistry _diagnosticRegistry;
     private readonly ILogger<LspNotifier> _logger;
 
     public LspNotifier(
-        EnhancedLspService lspService,
+        IEnhancedLspService lspService,
         LspDiagnosticRegistry diagnosticRegistry,
         ILogger<LspNotifier> logger)
     {
@@ -47,13 +62,29 @@ public sealed class LspNotifier : ILspNotifier
         }
     }
 
+    public async Task NotifyDirectoryDeletedAsync(string directoryPath, CancellationToken ct = default)
+    {
+        try
+        {
+            await _lspService.NotifyDirectoryDeletedAsync(directoryPath, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to notify LSP of directory deletion: {Path}", directoryPath);
+        }
+    }
+
     /// <summary>
     /// Wait for the LSP server to publish <b>fresh</b> diagnostics after a didChange,
     /// then return a concise summary of diagnostics for the given file.
-    /// Uses polling (registry timestamp newer than call time) instead of a fixed
-    /// sleep — large projects can take far longer than any static settle delay,
-    /// and a premature read yields a false "no diagnostics" answer.
-    /// Returns null if no diagnostics exist or no server is running.
+    /// Freshness baseline is the didChange send time recorded by
+    /// <see cref="EnhancedLspService.NotifyFileUpdatedAsync"/> (via GetLastDidChangeUtc) —
+    /// not the call time: diagnostics pushed while the write pipeline was still running
+    /// would otherwise be misjudged as stale. Files that never went through didChange
+    /// (read-only analysis paths) fall back to the call time.
+    /// Uses polling (fresh = registry timestamp newer than baseline) with check-before-wait.
+    /// Returns null if no server is running, or on timeout without fresh diagnostics —
+    /// stale (previous-version) diagnostics are never presented as the current result.
     /// </summary>
     public async Task<string?> GetDiagnosticsSummaryAsync(string fullPath, CancellationToken ct = default)
     {
@@ -64,31 +95,42 @@ public sealed class LspNotifier : ILspNotifier
             if (!_lspService.HasRunningServer)
                 return null;
 
-            var calledAt = DateTimeOffset.UtcNow;
             var uri = LspUriHelper.BuildFileUri(fullPath);
+            // 新鲜度基线：didChange 发送时刻（EnhancedLspService 发送前置位记录）。
+            // 快路径推送在基线之后到达，不会被误判 stale；未推送过的文件回落到调用时刻，
+            // 此时既有诊断按定义旧于基线，超时后返回 null 而非旧数据。
+            var baseline = _lspService.GetLastDidChangeUtc(fullPath) ?? DateTimeOffset.UtcNow;
 
-            IReadOnlyList<LspDiagnostic> diags = [];
+            IReadOnlyList<LspDiagnostic> fresh = [];
             var waited = 0;
-            while (waited <= Constants.Lsp.DiagnosticsWaitTotalMs)
+            while (true)
             {
-                await Task.Delay(Constants.Lsp.DiagnosticsPollIntervalMs, ct).ConfigureAwait(false);
-                waited += Constants.Lsp.DiagnosticsPollIntervalMs;
-
-                diags = _diagnosticRegistry.GetAllDiagnostics()
+                // 先查后等：多数场景新诊断已就绪，避免固定首跳延迟。
+                fresh = _diagnosticRegistry.GetAllDiagnostics()
                     .Where(d => string.Equals(d.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                    .Where(d => d.Timestamp >= baseline)
                     .ToList();
 
-                // 新诊断已到达（时间戳晚于调用时刻）——立即返回，不空等剩余窗口。
-                if (diags.Any(d => d.Timestamp >= calledAt))
+                // 等待预算按当前状态取值：服务器首次索引中（$/progress 进行中）延长到
+                // IndexingWaitTotalMs——大项目首次分析远超固定窗口，此时返回 null 是假阴性；
+                // 索引结束即回落 WaitTotalMs。窗口始终有上界，不会无界等待。
+                var budget = _lspService.IsIndexing ? IndexingWaitTotalMs : WaitTotalMs;
+
+                // 新版本诊断已到达——立即返回；超时仍未等到则退出（见下）。
+                if (fresh.Count > 0 || waited >= budget)
                     break;
+
+                await Task.Delay(PollIntervalMs, ct).ConfigureAwait(false);
+                waited += PollIntervalMs;
             }
 
-            if (diags.Count == 0)
+            // 超时且无新版本诊断：返回 null，不把上一版本 stale 诊断当结果误导模型。
+            if (fresh.Count == 0)
                 return null;
 
-            var errors = diags.Count(d => d.Severity == LspDiagnosticSeverity.Error);
-            var warnings = diags.Count(d => d.Severity == LspDiagnosticSeverity.Warning);
-            var hints = diags.Count(d => d.Severity is LspDiagnosticSeverity.Information or LspDiagnosticSeverity.Hint);
+            var errors = fresh.Count(d => d.Severity == LspDiagnosticSeverity.Error);
+            var warnings = fresh.Count(d => d.Severity == LspDiagnosticSeverity.Warning);
+            var hints = fresh.Count(d => d.Severity is LspDiagnosticSeverity.Information or LspDiagnosticSeverity.Hint);
 
             var parts = new List<string>();
             if (errors > 0) parts.Add($"{errors} error(s)");
@@ -98,7 +140,7 @@ public sealed class LspNotifier : ILspNotifier
             var header = $"LSP diagnostics: {string.Join(", ", parts)}";
 
             // Show up to 5 most severe diagnostics to keep the tool result concise
-            var top = diags
+            var top = fresh
                 .OrderBy(d => (int)d.Severity)
                 .Take(Constants.Lsp.MaxDiagnosticsInSummary)
                 .Select(d => $"  [{d.Severity}] L{d.Range.StartLine + 1}: {d.Message}")

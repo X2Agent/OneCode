@@ -48,6 +48,13 @@ public sealed class McpStartupPreconnector(
             return existing.Value;
 
         var created = new Lazy<Task>(() => RunAsync(onCompleted, ct));
+        // 竞争边界（落败方语义）：Interlocked.CompareExchange 落败方的 onCompleted/ct
+        // 被有意丢弃——胜者闭包代表唯一一次后台连接，落败方调用方只是提前拿到同一个
+        // 完成任务。当前这是安全的，因为两条调用路径的参数语义可被胜者完整表达：
+        //   - StartBackground：trust 通过后仅交互路径调用一次（onCompleted = 技能提供者重建）；
+        //   - EnsureConnectedAsync：onCompleted 恒为 null，ct 为应用级生命周期令牌。
+        // 若未来出现"后到调用方需要自己的回调/令牌生效"的场景，必须改为登记式
+        // （TaskCompletionSource + 回调列表），不得直接复用本方法。
         var winner = Interlocked.CompareExchange(ref _preconnect, created, null) ?? created;
         return winner.Value;
     }

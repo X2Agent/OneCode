@@ -14,6 +14,7 @@ namespace OneCode.App.Commands;
 ///   /lsp status             — show running server status and diagnostics
 ///   /lsp enable &lt;lang&gt;     — start the LSP server for a language
 ///   /lsp disable &lt;lang&gt;    — stop the LSP server for a language
+///   /lsp restart &lt;lang&gt;    — restart (stop + start) the LSP server for a language
 /// </summary>
 public sealed class LspCommand(
     LanguagePackRegistry registry,
@@ -24,7 +25,7 @@ public sealed class LspCommand(
     public override string Name => "lsp";
     public override string Description => "Manage language packs and LSP servers";
     public override CommandCategory Category => CommandCategory.Builtin;
-    public override string? ArgumentHint => "[list|install <lang>|uninstall <lang>|status|enable <lang>|disable <lang>]";
+    public override string? ArgumentHint => "[list|install <lang>|uninstall <lang>|status|enable <lang>|disable <lang>|restart <lang>]";
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
@@ -39,7 +40,8 @@ public sealed class LspCommand(
             "status" => ShowStatus(),
             "enable" => await EnableAsync(args[1..], ct).ConfigureAwait(false),
             "disable" => await DisableAsync(args[1..], ct).ConfigureAwait(false),
-            _ => CommandResult.Error($"Unknown subcommand: {args[0]}. Use: list, install, uninstall, status, enable, disable"),
+            "restart" => await RestartAsync(args[1..], ct).ConfigureAwait(false),
+            _ => CommandResult.Error($"Unknown subcommand: {args[0]}. Use: list, install, uninstall, status, enable, disable, restart"),
         };
     }
 
@@ -126,7 +128,7 @@ public sealed class LspCommand(
         {
             var state = s.IsRunning
                 ? (s.IsInitialized ? "running" : "starting")
-                : "stopped";
+                : (s.LastError is not null ? $"failed: {s.LastError}" : "stopped");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {s.Name,-15} {state}");
         }
 
@@ -178,14 +180,38 @@ public sealed class LspCommand(
 
             var config = pack.ToServerConfig() with { WorkingDirectory = sessionWorkingDir };
             var started = await serverManager.StartServerAsync(config, ct).ConfigureAwait(false);
-            return started
-                ? CommandResult.Text($"LSP server '{pack.Id}' started successfully.")
-                : CommandResult.Error($"Failed to start LSP server '{pack.Id}'. Use '/lsp install {pack.Id}' to install the server binary first.");
+            if (started)
+                return CommandResult.Text($"LSP server '{pack.Id}' started successfully.");
+
+            // 软失败落池：失败原因在 manager 的 LastError 中，透出给用户（对齐 MCP connect 失败语义）。
+            var lastError = serverManager.GetStatus()
+                .FirstOrDefault(s => string.Equals(s.Name, pack.Id, StringComparison.Ordinal) && !s.IsRunning)
+                ?.LastError;
+            var details = lastError is not null ? $" Details: {lastError}" : "";
+            return CommandResult.Error(
+                $"Failed to start LSP server '{pack.Id}'.{details} " +
+                $"Use '/lsp install {pack.Id}' to install the server binary first.");
         }
         catch (Exception ex)
         {
             return CommandResult.Error($"Failed to start LSP server '{pack.Id}': {ex.Message}");
         }
+    }
+
+    private async Task<CommandResult> RestartAsync(string[] args, CancellationToken ct)
+    {
+        if (args.Length < 1)
+            return CommandResult.Error("Usage: /lsp restart <lang>");
+
+        var packId = args[0];
+        var pack = registry.GetPack(packId);
+        if (pack is null)
+            return CommandResult.Error($"Language pack '{packId}' not found. Use '/lsp list' to see available packs.");
+
+        var restarted = await serverManager.RestartServerAsync(pack.Id, ct).ConfigureAwait(false);
+        return restarted
+            ? CommandResult.Text($"LSP server '{pack.Id}' restarted successfully.")
+            : CommandResult.Error($"LSP server '{pack.Id}' is not running. Use '/lsp enable {pack.Id}' to start it.");
     }
 
     private async Task<CommandResult> DisableAsync(string[] args, CancellationToken ct)

@@ -90,6 +90,8 @@ public sealed class LspDiagnosticRegistry : IDisposable
         }
 
         var prefix = $"{serverName}:";
+        // 前缀以 ':' 结尾（serverName 与 uri 的定界符），因此 "server1" 不会误匹配 "server10:..."。
+        // 该正确性依赖约定：serverName（语言包 id）本身不含 ':'。
         return _diagnostics
             .Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))
             .SelectMany(kv => kv.Value)

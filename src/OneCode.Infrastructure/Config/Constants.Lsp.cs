@@ -23,13 +23,18 @@ public static partial class Constants
         public static readonly TimeSpan DiagnosticsMaxAge = TimeSpan.FromHours(1);
         public static readonly TimeSpan DiagnosticsCleanupInterval = TimeSpan.FromMinutes(5);
 
+        // LspServerManager — 通知发送超时：stdin 管道直写（LspProtocol.WriteFrameAsync）无内建
+        // 超时，服务器假死（活着但不读 stdin、缓冲区写满）会永久阻塞 didOpen/didChange/didClose
+        // 广播——而广播在 Write/Edit/Delete 完成路径上同步 await。超时即标记 unhealthy，
+        // 由崩溃自愈循环（指数退避重启）接管。
+        public static readonly TimeSpan NotificationSendTimeout = TimeSpan.FromSeconds(2);
+
         // LspNotifier
         public const int MaxDiagnosticsInSummary = 5;
 
-        // LspNotifier — didChange 后诊断发布等待：轮询新诊断而非单次 sleep，
-        // 大项目首次分析远超固定 settle 时间，假阴性会误导模型。
-        public const int DiagnosticsPollIntervalMs = 200;
-        public const int DiagnosticsWaitTotalMs = 2000;
+        // LspNotifier — didChange 后诊断发布等待的轮询节奏常量已随实现移至
+        // LspNotifier（internal static，同 McpConnectionManager.AutoReconnectInterval 先例，
+        // 供测试注入加速轮询）。
 
         // LanguagePackInstaller
         public static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(5);

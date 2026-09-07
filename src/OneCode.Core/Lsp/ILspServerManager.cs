@@ -8,6 +8,11 @@ public interface ILspServerManager
 {
     Task<bool> StartServerAsync(LspServerConfig config, CancellationToken ct = default);
     Task<bool> StopServerAsync(string name, CancellationToken ct = default);
+    /// <summary>
+    /// 手动重启：stop + start（对齐 <c>/mcp connect</c> 的手动恢复语义）。
+    /// 成功即清零崩溃自动重启计数与最近启动错误。
+    /// </summary>
+    Task<bool> RestartServerAsync(string name, CancellationToken ct = default);
     Task<JsonElement?> SendRequestAsync(string serverName, string method, JsonElement parameters, CancellationToken ct = default);
     IReadOnlyList<LspServerStatus> GetStatus();
     IReadOnlyList<LspDiagnosticEntry> GetDiagnostics(string? serverName = null);
@@ -35,6 +40,11 @@ public sealed record LspServerStatus
     public JsonElement? Capabilities { get; init; }
     /// <summary>Server is pushing workDoneProgress (e.g. indexing a large solution) — ready-ness signal.</summary>
     public bool IsIndexing { get; init; }
+    /// <summary>
+    /// 最近一次启动失败的原因（对齐 MCP <c>McpServerConnection.LastError</c> 的软失败语义）：
+    /// manager 在启动失败后不保留实例，此字段由 manager 单独落池，保证失败原因对 <c>/lsp status</c> 可见。
+    /// </summary>
+    public string? LastError { get; init; }
 }
 
 /// <summary>

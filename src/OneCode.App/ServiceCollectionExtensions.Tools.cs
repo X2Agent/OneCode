@@ -24,6 +24,7 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<WebFetchCache>();
         services.AddSingleton<LspDiagnosticRegistry>();
         services.AddSingleton<EnhancedLspService>();
+        services.AddSingleton<IEnhancedLspService>(sp => sp.GetRequiredService<EnhancedLspService>());
         services.AddSingleton<ILspNotifier, LspNotifier>();
         // InProcess MCP 服务器扩展点：宿主/测试注册 IInProcessMcpServerProvider 即可按名接入。
         services.AddSingleton<InProcessMcpServerRegistry>();

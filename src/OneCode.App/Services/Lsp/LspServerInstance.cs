@@ -207,4 +207,14 @@ public sealed class LspServerInstance
         _isHealthy = false;
         _logger.LogError(ex, "LSP server {ServerName} crashed", _config.Name);
     }
+
+    /// <summary>
+    /// 发送超时等软故障时由 manager 标记不健康：IsRunning 且 !IsHealthy 的实例会被健康
+    /// 检查循环按崩溃自愈策略（指数退避重启）接管，无需额外恢复通道。
+    /// </summary>
+    internal void MarkUnhealthy(Exception reason)
+    {
+        _isHealthy = false;
+        _logger.LogError(reason, "LSP server {ServerName} marked unhealthy — auto-restart will take over", _config.Name);
+    }
 }

@@ -35,28 +35,28 @@ public sealed class DeleteTool
                  "Path safety: must resolve within the working directory; .git/ and sensitive paths are hard-blocked by FileSystemInvariant. " +
                  "Deletion is irreversible — prefer moving files to a trash directory or relying on git when recoverability matters. " +
                  "SSH remote: not supported over SSH; deletion is local-only.")]
-    public Task<ToolResult> DeleteAsync(
+    public async Task<ToolResult> DeleteAsync(
         [Description("Absolute or relative path of the file or directory to delete. Relative paths resolve against the working directory.")] string filePath,
         [Description("When true, delete directories recursively including all contents. Required for non-empty directories.")] bool recursive = false,
         [Description("When true, return a preview of what would be deleted without touching disk. Use to verify the scope before deleting.")] bool dryRun = false,
         CancellationToken ct = default)
     {
         if (_ssh is { IsConnected: true })
-            return Task.FromResult(ToolResult.Error(
-                "Error: Delete is not supported while an SSH remote is connected (local filesystem only)."));
+            return ToolResult.Error(
+                "Error: Delete is not supported while an SSH remote is connected (local filesystem only).");
 
         var resolveResult = PathsHelper.SafeResolve(filePath, _wd.WorkingDirectory, _wd.AdditionalDirectories);
         if (!resolveResult.IsSuccess)
-            return Task.FromResult(ToolResult.Error($"Error: {resolveResult.Error}"));
+            return ToolResult.Error($"Error: {resolveResult.Error}");
         var fullPath = resolveResult.Value!;
 
         // Workspace roots (working directory + additional directories) are never deletable —
         // neither SafeResolve nor FileSystemInvariant rejects them, and wiping the project
         // root is never a legitimate single-tool action.
         if (IsWorkspaceRoot(fullPath))
-            return Task.FromResult(ToolResult.Error(
+            return ToolResult.Error(
                 "Error: Refusing to delete a workspace root (the working directory or an additional directory). " +
-                "Delete specific files or subdirectories instead."));
+                "Delete specific files or subdirectories instead.");
 
         try
         {
@@ -64,43 +64,47 @@ public sealed class DeleteTool
             {
                 var size = new FileInfo(fullPath).Length;
                 if (dryRun)
-                    return Task.FromResult(ToolResult.Success(
-                        $"[Dry run] Would delete file: {fullPath} ({size} bytes)"));
+                    return ToolResult.Success(
+                        $"[Dry run] Would delete file: {fullPath} ({size} bytes)");
 
                 File.Delete(fullPath);
                 // 让 LSP 服务器停止跟踪已删除的文件（textDocument/didClose），
                 // 否则服务器继续为不存在的路径推送诊断。
                 if (_notifier is not null)
-                    _ = _notifier.NotifyFileClosedAsync(fullPath, ct);
-                return Task.FromResult(ToolResult.Success($"File deleted: {fullPath}"));
+                    await _notifier.NotifyFileClosedAsync(fullPath, ct).ConfigureAwait(false);
+                return ToolResult.Success($"File deleted: {fullPath}");
             }
 
             if (Directory.Exists(fullPath))
             {
                 var entries = Directory.GetFileSystemEntries(fullPath);
                 if (entries.Length > 0 && !recursive)
-                    return Task.FromResult(ToolResult.Error(
+                    return ToolResult.Error(
                         $"Error: Directory is not empty ({entries.Length} direct entries): {fullPath}. " +
-                        "Pass recursive=true to delete it with all contents."));
+                        "Pass recursive=true to delete it with all contents.");
 
                 if (dryRun)
                 {
                     var fileCount = CountFiles(fullPath);
-                    return Task.FromResult(ToolResult.Success(
+                    return ToolResult.Success(
                         $"[Dry run] Would delete directory recursively: {fullPath} " +
-                        $"({entries.Length} direct entries, {fileCount} files in total)"));
+                        $"({entries.Length} direct entries, {fileCount} files in total)");
                 }
 
                 Directory.Delete(fullPath, recursive: true);
-                return Task.FromResult(ToolResult.Success(
-                    $"Directory deleted: {fullPath} ({entries.Length} direct entries)"));
+                // 让 LSP 服务器停止跟踪该目录下所有已打开文档（逐个 didClose），
+                // 否则服务器继续为已删除路径推送诊断。
+                if (_notifier is not null)
+                    await _notifier.NotifyDirectoryDeletedAsync(fullPath, ct).ConfigureAwait(false);
+                return ToolResult.Success(
+                    $"Directory deleted: {fullPath} ({entries.Length} direct entries)");
             }
 
-            return Task.FromResult(ToolResult.Error($"Error: File or directory not found: {fullPath}"));
+            return ToolResult.Error($"Error: File or directory not found: {fullPath}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Task.FromResult(ToolResult.Error($"Error deleting {filePath}: {ex.Message}"));
+            return ToolResult.Error($"Error deleting {filePath}: {ex.Message}");
         }
     }
 

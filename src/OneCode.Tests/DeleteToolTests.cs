@@ -152,9 +152,36 @@ public sealed class DeleteToolTests : IDisposable
         return wd;
     }
 
-    private Task<ToolResult> RunDeleteAsync(string path, bool recursive = false, bool dryRun = false)
+    private Task<ToolResult> RunDeleteAsync(string path, bool recursive = false, bool dryRun = false, ILspNotifier? notifier = null)
     {
-        var tool = new DeleteTool(CreateWd(), ssh: null!);
+        var tool = new DeleteTool(CreateWd(), ssh: null!, notifier);
         return tool.DeleteAsync(path, recursive, dryRun, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Delete_File_NotifiesLspFileClosed()
+    {
+        var file = Write("lsp-a.cs", "class A { }");
+        var notifier = Substitute.For<ILspNotifier>();
+
+        var result = await RunDeleteAsync(file, notifier: notifier);
+
+        result.Content.Should().Contain("File deleted");
+        await notifier.Received(1).NotifyFileClosedAsync(file, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().NotifyDirectoryDeletedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Delete_RecursiveDirectory_NotifiesLspDirectoryDeleted()
+    {
+        var dir = Path.Combine(_tmpDir, "lsp-tree");
+        Write(Path.Combine("lsp-tree", "x.cs"), "x");
+        var notifier = Substitute.For<ILspNotifier>();
+
+        var result = await RunDeleteAsync(dir, recursive: true, notifier: notifier);
+
+        result.Content.Should().Contain("Directory deleted");
+        await notifier.Received(1).NotifyDirectoryDeletedAsync(dir, Arg.Any<CancellationToken>());
+        await notifier.DidNotReceive().NotifyFileClosedAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 }
