@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
+using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Services.Hooks;
 
@@ -14,7 +15,7 @@ namespace OneCode.App.Services.Hooks;
 /// </summary>
 public sealed class HttpHookExecutor : IHookExecutor
 {
-    private const string HttpClientName = "HookHttp";
+    private const string HttpClientName = Constants.HttpClientNames.HookHttp;
     private const string DefaultMethod = "POST";
 
     private readonly IHttpClientFactory _httpClientFactory;

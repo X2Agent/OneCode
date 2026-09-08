@@ -68,14 +68,14 @@ public sealed class BrowserFetchTool
                 suggestedNextAction: "传入要抓取的完整 http(s) URL"));
         }
 
-        if (!WebFetchTool.ValidateUrlForBrowser(url))
+        if (!FetchSafetyPolicy.ValidateUrl(url))
         {
             return ToolResult.Error($"Invalid URL: {url}");
         }
 
         // 与 WebFetch 同一套 DNS rebinding 预解析：主机名解析出私网地址即拒绝，
         // 避免浏览器进程成为绕过 WebFetch SSRF 防护的旁路。
-        var dnsBlock = await WebFetchTool.CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
+        var dnsBlock = await FetchSafetyPolicy.CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
         if (dnsBlock is not null)
         {
             return ToolResult.Error(dnsBlock);

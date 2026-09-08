@@ -1,14 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Services;
-using OneCode.App.Services.Compact;
-using OneCode.App.Services.Memory;
 using OneCode.Core.Memory;
 
-namespace OneCode.App;
+namespace OneCode.App.Services.Memory;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// Memory 领域 DI 注册——与记忆实现（<see cref="MemoryService"/> / <see cref="SessionMemoryService"/>）
+/// 同目录维护。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class MemoryServiceCollectionExtensions
 {
-    public static IServiceCollection RegisterMemoryServices(this IServiceCollection services)
+    public static IServiceCollection AddMemoryServices(this IServiceCollection services)
     {
         services.AddSingleton<IMemoryEntryStore>(sp => new MemoryEntryStore(
             sp.GetRequiredService<IWorkingDirectoryAccessor>(),
@@ -18,14 +19,6 @@ public static partial class ServiceCollectionExtensions
         services.AddSingleton<IMemoryService>(sp => sp.GetRequiredService<MemoryService>());
         services.AddSingleton<SessionMemoryService>();
         services.AddSingleton<ISessionMemoryService>(sp => sp.GetRequiredService<SessionMemoryService>());
-
-        services.AddSingleton<CompactSessionDependencies>();
-        services.AddSingleton<CompactService>();
-        services.AddSingleton<AutoCompactService>();
-        services.AddSingleton<ReviewCacheService>();
-
-        services.AddSingleton<CompactPromptBuilder>();
-        services.AddSingleton<CompactApplier>();
 
         return services;
     }

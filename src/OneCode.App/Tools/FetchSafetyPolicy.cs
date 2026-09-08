@@ -4,12 +4,15 @@ using OneCode.Infrastructure;
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// URL validation and SSRF protection helpers for WebFetchTool and BrowserFetchTool.
-/// All methods are private static — no instance state required.
+/// WebFetch / BrowserFetch 共用的 URL 校验与 SSRF 防护策略（纯静态、无状态）。
+/// <see cref="ValidateUrl"/> 为主入口；<see cref="CheckDnsRebindingAsync"/> 在请求前
+/// 解析 DNS 并拒绝私网记录（防 DNS rebinding）。测试经 InternalsVisibleTo 覆盖同一路径。
 /// </summary>
-public sealed partial class WebFetchTool
+internal static class FetchSafetyPolicy
 {
-    private static bool ValidateUrl(string url)
+    private const int MaxUrlLength = 2000;
+
+    internal static bool ValidateUrl(string url)
     {
         if (url.Length > MaxUrlLength) return false;
 
@@ -69,14 +72,7 @@ public sealed partial class WebFetchTool
         return true;
     }
 
-    /// <summary>
-    /// BrowserFetchTool 的 SSRF 校验入口：与 WebFetch 同一套 URL 校验、私网判定
-    /// 与 DNS rebinding 预解析（<see cref="CheckDnsRebindingAsync"/>），
-    /// 保证浏览器渲染不成为绕过 WebFetch 防护的旁路。
-    /// </summary>
-    internal static bool ValidateUrlForBrowser(string url) => ValidateUrl(url);
-
-    private static bool IsPermittedRedirect(string originalUrl, string redirectUrl)
+    internal static bool IsPermittedRedirect(string originalUrl, string redirectUrl)
     {
         if (!Uri.TryCreate(originalUrl, UriKind.Absolute, out var original) ||
             !Uri.TryCreate(redirectUrl, UriKind.Absolute, out var redirect))
@@ -175,14 +171,10 @@ public sealed partial class WebFetchTool
     /// <summary>
     /// Determines whether an IP address is private, loopback, link-local, or otherwise
     /// unsafe for outbound fetches. Covers IPv4 and IPv6 ranges to prevent SSRF attacks.
-    /// Exposed as internal so unit tests can cover the same private-range checks used by ValidateUrl.
+    /// Exposed as internal (InternalsVisibleTo) so unit tests cover the same
+    /// private-range checks used by <see cref="ValidateUrl"/>.
     /// </summary>
-    internal static bool IsPrivateOrLocalAddressPublic(IPAddress address)
-    {
-        return IsPrivateOrLocalAddress(address);
-    }
-
-    private static bool IsPrivateOrLocalAddress(IPAddress address)
+    internal static bool IsPrivateOrLocalAddress(IPAddress address)
     {
         if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
         {
@@ -233,4 +225,7 @@ public sealed partial class WebFetchTool
         // Unknown address family — treat as private for safety
         return true;
     }
+
+
+
 }

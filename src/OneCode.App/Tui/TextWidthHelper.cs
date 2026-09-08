@@ -73,9 +73,52 @@ public static class TextWidthHelper
                 i++; // skip low surrogate
                 continue;
             }
+            // 孤立代理项会被 StripInvalidScalars 剔除，宽度记 0 保持测量一致。
+            if (char.IsSurrogate(c)) continue;
             width += GetCharDisplayWidth(c);
         }
         return width;
+    }
+
+    /// <summary>
+    /// 移除字符串中的孤立代理项（不成对的 high/low surrogate），合法代理对原样保留。
+    /// 孤立代理项不是合法 Unicode 标量值，传入 View.AddStr 会令 Terminal.Gui 抛
+    /// <see cref="ArgumentException"/> 整屏崩溃。
+    /// </summary>
+    private static string StripInvalidScalars(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+                continue;
+            }
+            if (!char.IsSurrogate(c)) continue;
+
+            // 干净文本不进此分支，零分配；重建时合法代理对整体保留。
+            var sb = new StringBuilder(text.Length - 1);
+            sb.Append(text, 0, i);
+            for (; i < text.Length; i++)
+            {
+                c = text[i];
+                if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                {
+                    sb.Append(c);
+                    sb.Append(text[i + 1]);
+                    i++;
+                }
+                else if (!char.IsSurrogate(c))
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+        return text;
     }
 
     /// <summary>
@@ -124,7 +167,9 @@ public static class TextWidthHelper
     /// <summary>
     /// Clips text to the given display width without appending an ellipsis.
     /// A wide character (CJK / surrogate pair) that would straddle the boundary
-    /// is dropped whole. Unlike <see cref="TruncateByWidth"/>, no column is
+    /// is dropped whole. Lone surrogates (invalid Unicode scalars) are stripped
+    /// first — passing them to <c>View.AddStr</c> crashes Terminal.Gui. Unlike
+    /// <see cref="TruncateByWidth"/>, no column is
     /// reserved for an ellipsis: this is the draw-pass hard clip, where a row
     /// exactly at the content width must keep every character — the reserved
     /// ellipsis column would replace the last real character with "…" and make
@@ -134,6 +179,9 @@ public static class TextWidthHelper
     {
         if (maxDisplayWidth <= 0) return "";
         if (string.IsNullOrEmpty(text)) return text;
+
+        // 孤立代理项会使 AddStr 崩溃，先剔除；宽度按剔除后文本计算保持一致。
+        text = StripInvalidScalars(text);
 
         var width = 0;
         for (var i = 0; i < text.Length; i++)
@@ -170,6 +218,8 @@ public static class TextWidthHelper
         if (string.IsNullOrEmpty(text)) return result;
         if (maxWidth <= 0) maxWidth = 40;
 
+        // 先剔除孤立代理项，与 ClipByWidth 一致：换行产物必须可直接渲染。
+        text = StripInvalidScalars(text);
         var paragraphs = text.Replace("\r\n", "\n").Split('\n');
 
         foreach (var paragraph in paragraphs)

@@ -1,20 +1,21 @@
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services;
 using OneCode.App.Services.BuildMode;
-using OneCode.App.Services.Mcp;
 using OneCode.App.Services.Streaming;
-using OneCode.App.Tui;
 using OneCode.Infrastructure.Media;
 
-namespace OneCode.App;
+namespace OneCode.App.Tui;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// TUI 交互领域 DI 注册——与交互实现（<see cref="InteractiveModeExecutor"/> /
+/// <see cref="TuiHostConfigurator"/>）同目录维护。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class InteractiveServiceCollectionExtensions
 {
-    public static IServiceCollection RegisterInteractiveServices(this IServiceCollection services)
+    public static IServiceCollection AddInteractiveServices(this IServiceCollection services)
     {
         services.AddSingleton<PromptConfigBuilder>();
         services.AddSingleton<PromptRuntimeDependencies>();
-        services.AddSingleton<McpStartupPreconnector>();
         services.AddSingleton<ThinkingParamsResolver>();
         services.AddSingleton<TuiOverlayDependencies>();
         services.AddSingleton<TuiCommandSurfaceDependencies>();

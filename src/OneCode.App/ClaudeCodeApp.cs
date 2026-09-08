@@ -4,6 +4,29 @@ using Microsoft.Extensions.Hosting;
 using OneCode.App.Commands;
 using OneCode.App.Logging;
 using OneCode.App.Services;
+using OneCode.App.Services.Agent;
+using OneCode.App.Query;
+using OneCode.App.Services.BuildMode;
+using OneCode.App.Services.AutoDream;
+using OneCode.App.Services.Compact;
+using OneCode.App.Services.Coordinator;
+using OneCode.App.Services.GoalMode;
+using OneCode.App.Services.Setup;
+using OneCode.App.Services.Context;
+using OneCode.App.Services.Cron;
+using OneCode.App.Services.Hooks;
+using OneCode.App.Services.Lsp;
+using OneCode.App.Services.Memory;
+using OneCode.App.Services.Mcp;
+using OneCode.App.Services.Observability;
+using OneCode.App.Services.Permissions;
+using OneCode.App.Services.PlanMode;
+using OneCode.App.Services.Search;
+using OneCode.App.Services.Skills;
+using OneCode.App.Services.Tasks;
+using OneCode.App.Session;
+using OneCode.App.Tui;
+using OneCode.App.Tools;
 using OneCode.Core.Models;
 
 namespace OneCode.App;
@@ -43,17 +66,37 @@ public sealed class OneCodeApp : IAsyncDisposable
         var debugConfig = GetDebugConfig();
 
         builder.Services
-            .RegisterCoreServices(workingDir)
-            .RegisterSkillServices(workingDir)
-            .RegisterChatClient()
-            .RegisterBusinessServices()
-            .RegisterToolServices()
-            .RegisterMemoryServices()
-            .RegisterPromptManagement(workingDir)
-            .RegisterLspAndMcpServices()
-            .RegisterAdvancedServices(builder.Configuration)
+            .AddSkillServices(workingDir)
+            .AddChatClientServices()
+            .AddSessionServices(workingDir)
+            .AddTaskServices()
+            .AddPlanModeServices()
+            .AddContextServices()
+            .AddSearchServices()
+            .AddMcpServices()
+            .AddTokenObservabilityServices()
+            .AddHookServices()
+            .AddPermissionServices()
+            .AddCommandSourceServices()
+            .AddCronSchedulingServices()
+            .AddModelCatalogServices()
+            .AddBuildModeServices()
+            .AddPlanWorkflowServices()
+            .AddChatQueryServices()
+            .AddSetupServices()
+            .AddAgentRuntimeServices()
+            .AddGoalServices()
+            .AddToolServices()
+            .AddMemoryServices()
+            .AddCompactServices()
+            .AddPromptServices(workingDir)
+            .AddLspServices()
+            .AddNamedHttpClients()
+            .AddTeamServices()
+            .AddAutoDreamServices()
+            .AddPlatformServices()
             .AddCommands()
-            .RegisterInteractiveServices();
+            .AddInteractiveServices();
 
         builder.ConfigureApplicationLogging(debugConfig);
         startupTimer.Mark("services-registered");

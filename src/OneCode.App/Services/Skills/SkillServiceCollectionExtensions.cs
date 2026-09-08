@@ -1,16 +1,20 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Services.Skills;
 
-namespace OneCode.App;
+namespace OneCode.App.Services.Skills;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// Skills 领域 DI 注册——与技能实现（<see cref="SkillCatalog"/> / <see cref="SkillChangeWatcher"/> /
+/// <see cref="McpSkillsIntegrator"/>）同目录维护，注册代码不得漂移到按启动批次分组的 partial 桶。
+/// 由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class SkillServiceCollectionExtensions
 {
     /// <summary>
     /// 注册 MAF AgentSkillsProvider 作为单例，涵盖 managed/user/project 三个技能目录
     /// 以及 BundledSkills 内置技能。MCP 技能在构建时通过 <see cref="McpSkillsIntegrator"/> 注入。
     /// </summary>
-    public static IServiceCollection RegisterSkillServices(
+    public static IServiceCollection AddSkillServices(
         this IServiceCollection services, string workingDir)
     {
         services.AddSingleton(new SkillCatalog(workingDir));

@@ -61,7 +61,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 
 | 类型 | 原位置（App） | 新位置（Infrastructure） |
 |------|--------------|------------------------|
-| `ChatClientFactory` | `ServiceCollectionExtensions.ChatClient.cs` 内联工厂 | `OneCode.Infrastructure.Ai.ChatClientFactory` |
+| `ChatClientFactory` | 原 `ServiceCollectionExtensions.ChatClient.cs` 内联工厂 | `OneCode.Infrastructure.Ai.ChatClientFactory` |
 | `MaxOutputTokensDecorator` | `Services/Agent/MaxOutputTokensDecorator.cs` | `OneCode.Infrastructure.Ai.MaxOutputTokensDecorator` |
 | `ProviderAwareDecorator` | `Services/Agent/ProviderAwareDecorator.cs` | `OneCode.Infrastructure.Ai.ProviderAwareDecorator` |
 | `HyperlightCodeActService` | `Services/Agent/HyperlightCodeActService.cs` | `OneCode.Infrastructure.Agent.HyperlightCodeActService` |
@@ -103,7 +103,7 @@ App 层通过 `OneCode.Automation.ServiceCollectionExtensions` 的 `AddCronSched
 
 ## 工具开发规范（Tools/）
 
-所有 AI 工具均为普通 `sealed class`，通过 `[Description]` 特性描述方法与参数，由 `ToolCatalog` 在运行时反射解析为 `AIFunction`。新增工具在 `ServiceCollectionExtensions.Tools.cs` 的 `RegisterToolServices` 方法中通过 `AddTool<T>` 扩展方法注册，一次性完成 DI 注册与 `ToolMetadataRegistry` 元数据登记。
+所有 AI 工具均为普通 `sealed class`，通过 `[Description]` 特性描述方法与参数，由 `ToolCatalog` 在运行时反射解析为 `AIFunction`。新增工具在 `Tools/ToolServiceCollectionExtensions.cs` 的 `AddToolServices` 注册流中通过 `AddTool<T>` 扩展方法注册，一次性完成 DI 注册与 `ToolMetadataRegistry` 元数据登记。
 
 ### 工具类实现
 
@@ -128,7 +128,7 @@ public sealed class MyTool
 
 ### 工具注册
 
-在 `ServiceCollectionExtensions.Tools.cs` 的 `RegisterToolServices` 方法中追加：
+在 `Tools/ToolServiceCollectionExtensions.cs` 的 `AddToolServices` 注册流中追加：
 
 ```csharp
 services.AddTool<MyTool>("MyTool", nameof(MyTool.ExecuteAsync), ToolRisk.Destructive,

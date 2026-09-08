@@ -64,7 +64,7 @@ public interface ICronJobExecutor
 // OneCode.App/Services/Cron/CronJobExecutor.cs（App 层实现）
 public sealed class CronJobExecutor : ICronJobExecutor { ... }
 
-// OneCode.App/ServiceCollectionExtensions.Business.cs（DI 注册）
+// OneCode.App/Services/Cron/CronServiceCollectionExtensions.cs（DI 注册，AddCronSchedulingServices）
 services.AddSingleton<CronJobExecutor>();
 services.AddSingleton<ICronJobExecutor>(sp => sp.GetRequiredService<CronJobExecutor>());
 services.AddCronScheduler();  // Automation 提供的扩展方法

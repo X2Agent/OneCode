@@ -21,8 +21,13 @@ public sealed class AppSettings
     public bool NextPromptSuggesterEnabled { get => Get(CoreConstants.ConfigKeys.NextPromptSuggesterEnabled, true); init => _values[CoreConstants.ConfigKeys.NextPromptSuggesterEnabled] = value; }
     public bool NotificationsEnabled { get => Get(CoreConstants.ConfigKeys.NotificationsEnabled, false); init => _values[CoreConstants.ConfigKeys.NotificationsEnabled] = value; }
     public int OllamaContextWindow { get => Get(CoreConstants.ConfigKeys.OllamaContextWindow, 32_768); init => _values[CoreConstants.ConfigKeys.OllamaContextWindow] = value; }
-    public string WebSearchProvider { get => Get("webSearchProvider", "duckduckgo") ?? "duckduckgo"; init => _values["webSearchProvider"] = value; }
-    public string? WebSearchApiKey { get => Get<string>("webSearchApiKey"); init => _values["webSearchApiKey"] = value; }
+    /// <summary>
+    /// WebSearch 主提供方（<see cref="CoreConstants.ConfigKeys.WebSearchProvider"/>）：
+    /// <c>tavily</c> 或 <c>duckduckgo</c>。决定搜索链路首选提供者，失败时自动回退另一提供方。
+    /// </summary>
+    public string WebSearchProvider { get => Get(CoreConstants.ConfigKeys.WebSearchProvider, "duckduckgo") ?? "duckduckgo"; init => _values[CoreConstants.ConfigKeys.WebSearchProvider] = value; }
+    /// <summary>Tavily 搜索 API Key（<see cref="CoreConstants.ConfigKeys.TavilyApiKey"/>）。</summary>
+    public string? TavilyApiKey { get => Get<string>(CoreConstants.ConfigKeys.TavilyApiKey); init => _values[CoreConstants.ConfigKeys.TavilyApiKey] = value; }
     public bool HasTrustAccepted { get => Get("hasTrustAccepted", false); init => _values["hasTrustAccepted"] = value; }
     public List<string> TrustedDirectories { get => GetStringList("trustedDirectories"); init => _values["trustedDirectories"] = value?.ToArray() ?? []; }
     public List<string> AllowedDirectories { get => GetStringList("allowedDirectories"); init => _values["allowedDirectories"] = value?.ToArray() ?? []; }

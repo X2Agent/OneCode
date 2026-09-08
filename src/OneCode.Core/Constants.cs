@@ -9,9 +9,10 @@ public static class Constants
         public const string OneCodeModel = "ONECODE_MODEL";
         /// <summary>VCR 录像/回放模式开关。值为 off/空(不激活)、replay(回放)、record(录像)。</summary>
         public const string Vcr = "ONECODE_VCR";
-        public const string BraveSearchApiKey = "BRAVE_SEARCH_API_KEY";
+        /// <summary>Tavily 搜索 API Key（webSearchApiKeys.tavily 的环境变量映射，免费额度注册即得）。</summary>
+        public const string TavilyApiKey = "TAVILY_API_KEY";
+        /// <summary>WebSearch 主提供方（tavily | duckduckgo）。</summary>
         public const string OneCodeWebSearchProvider = "ONECODE_WEB_SEARCH_PROVIDER";
-        public const string OneCodeWebSearchApiKey = "ONECODE_WEB_SEARCH_API_KEY";
         public const string Home = "HOME";
         public const string UserHomeWindows = "USERPROFILE";
         public const string NoProxy = "NO_PROXY";
@@ -54,6 +55,10 @@ public static class Constants
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";
+        /// <summary>WebSearch 主提供方（tavily | duckduckgo），决定搜索链路首选提供者。</summary>
+        public const string WebSearchProvider = "webSearchProvider";
+        /// <summary>Tavily 搜索 API Key（密钥，允许项目作用域）。</summary>
+        public const string TavilyApiKey = "webSearchApiKeys.tavily";
     }
 
     public static class ModelProviders

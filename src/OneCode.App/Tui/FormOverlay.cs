@@ -90,6 +90,8 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
     private int _nextRowY = TuiSpacing.OverlayContentY;
     private readonly Label _errorLabel;
     private View? _actions;
+    // 按添加顺序登记的流式行（视图 + 占位高度），支撑 SetRowVisible 的整体平移。
+    private readonly List<(View View, int Height)> _flowEntries = [];
 
     protected FormOverlay(string title, int preferredWidth, int preferredHeight)
         : base(title, preferredWidth, preferredHeight)
@@ -116,6 +118,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
     {
         var row = new FormRow(labelText, field) { Y = _nextRowY };
         Add(row);
+        _flowEntries.Add((row, rowSpacing));
         _nextRowY += rowSpacing;
         return row;
     }
@@ -126,9 +129,38 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         {
             view.Y = _nextRowY + view.Y;
             Add(view);
+            _flowEntries.Add((view, height));
         }
 
         _nextRowY += height;
+    }
+
+    /// <summary>
+    /// 切换某表单行的可见性：隐藏时其后的所有行整体上移以收起空洞，显示时恢复。
+    /// 仅支持经 <see cref="AddRow"/> 添加的行；重复设置同一可见性为无操作。
+    /// </summary>
+    protected void SetRowVisible(FormRow row, bool visible)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.Visible == visible)
+            return;
+
+        row.Visible = visible;
+        row.TabStop = visible ? TabBehavior.TabGroup : TabBehavior.NoStop;
+
+        var entryIndex = _flowEntries.FindIndex(entry => entry.View == row);
+        if (entryIndex < 0)
+            return;
+
+        var delta = visible ? _flowEntries[entryIndex].Height : -_flowEntries[entryIndex].Height;
+        for (var i = entryIndex + 1; i < _flowEntries.Count; i++)
+        {
+            _flowEntries[i].View.Y += delta;
+        }
+
+        PreferredHeight += delta;
+        SetNeedsLayout();
+        SetNeedsDraw();
     }
 
     protected (Button Primary, Button Secondary) AddActionBar(

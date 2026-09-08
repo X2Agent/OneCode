@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.Core.Ai;
+using OneCode.Core.Search;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Ai;
 using OneCode.Infrastructure.Config;
+using OneCode.Infrastructure.Search;
 using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Infrastructure;
@@ -74,6 +76,17 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddSingleton<ChatClientFactory>();
         services.AddSingleton<IChatClientFactory>(sp => sp.GetRequiredService<ChatClientFactory>());
+        return services;
+    }
+
+    /// <summary>
+    /// 注册 WebSearch 提供方（当前为 Tavily）。App 层 <c>WebSearchTool</c> 依据
+    /// <c>webSearchProvider</c> 设置组装故障转移链（tavily ↔ duckduckgo），
+    /// 未配置 API Key 的提供方自动跳过。
+    /// </summary>
+    public static IServiceCollection AddWebSearchProviders(this IServiceCollection services)
+    {
+        services.AddSingleton<IWebSearchProvider, TavilySearchProvider>();
         return services;
     }
 

@@ -459,6 +459,7 @@ public sealed class TuiHostConfigurator(
             OneCode.Core.Constants.ConfigKeys.FastModel,
             effective.Get<string>(OneCode.Core.Constants.ConfigKeys.FastModel) ?? string.Empty,
             result.FastModel);
+        AddIfChanged(changes, OneCode.Core.Constants.ConfigKeys.WebSearchProvider, effective.WebSearchProvider, result.WebSearchProvider);
         AddIfChanged(changes, OneCode.Core.Constants.ConfigKeys.NotificationsEnabled, effective.NotificationsEnabled, result.NotificationsEnabled);
         AddIfChanged(changes, OneCode.Core.Constants.ConfigKeys.MaxTurns, effective.MaxTurns, result.MaxTurns);
         AddIfChanged(changes, "thinkingEnabled", effective.Get("thinkingEnabled", false), result.ThinkingEnabled);
@@ -470,6 +471,14 @@ public sealed class TuiHostConfigurator(
             changes[OneCode.Core.Constants.ConfigKeys.ApiKey] = string.IsNullOrEmpty(result.ApiKey)
                 ? new ConfigMutation.Remove()
                 : new ConfigMutation.Set(result.ApiKey);
+        }
+
+        if (result.TavilyApiKeyChanged)
+        {
+            // 语义与 LLM ApiKeyChanged 一致：空值 = 移除当前作用域的密钥。
+            changes[OneCode.Core.Constants.ConfigKeys.TavilyApiKey] = string.IsNullOrEmpty(result.TavilyApiKey)
+                ? new ConfigMutation.Remove()
+                : new ConfigMutation.Set(result.TavilyApiKey);
         }
 
         return changes;

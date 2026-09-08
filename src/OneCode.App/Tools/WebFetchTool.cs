@@ -2,13 +2,14 @@ using System.ComponentModel;
 using System.Net;
 using System.Text;
 using AngleSharp.Html.Parser;
+using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Tools;
 
 /// <summary>
 /// WebFetch tool - fetches content from a URL and applies a prompt to extract information.
 /// </summary>
-public sealed partial class WebFetchTool
+public sealed class WebFetchTool
 {
     private static readonly HtmlParser _htmlParser = new();
 
@@ -51,7 +52,7 @@ public sealed partial class WebFetchTool
 
     private HttpClient CreateFetchHttpClient()
     {
-        var client = _httpClientFactory.CreateClient("WebFetch");
+        var client = _httpClientFactory.CreateClient(Constants.HttpClientNames.WebFetch);
         client.Timeout = TimeSpan.FromMilliseconds(FetchTimeoutMs);
         client.MaxResponseContentBufferSize = MaxHttpContentLength;
         return client;
@@ -74,7 +75,7 @@ public sealed partial class WebFetchTool
     {
         var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        if (!ValidateUrl(url))
+        if (!FetchSafetyPolicy.ValidateUrl(url))
         {
             return ToolResult.Error($"Invalid URL: {url}");
         }
@@ -84,7 +85,7 @@ public sealed partial class WebFetchTool
             return ApplyPromptAndReturn(cachedContent, prompt, start);
         }
 
-        var dnsBlock = await CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
+        var dnsBlock = await FetchSafetyPolicy.CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
         if (dnsBlock is not null)
         {
             return ToolResult.Error(dnsBlock);
@@ -128,7 +129,7 @@ public sealed partial class WebFetchTool
             string markdownContent;
             if (contentType.Contains("text/html", StringComparison.OrdinalIgnoreCase))
             {
-                markdownContent = HtmlToMarkdown(content);
+                markdownContent = HtmlToMarkdownConverter.Convert(content);
             }
             else
             {
@@ -200,7 +201,7 @@ public sealed partial class WebFetchTool
                     location = new Uri(baseUri, relativeUri).ToString();
                 }
 
-                if (IsPermittedRedirect(originalUrl, location))
+                if (FetchSafetyPolicy.IsPermittedRedirect(originalUrl, location))
                 {
                     return await FetchWithRedirects(location, originalUrl, depth + 1, ct).ConfigureAwait(false);
                 }

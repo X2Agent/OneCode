@@ -1,22 +1,10 @@
 using System.Net;
-using System.Reflection;
 using OneCode.App.Tools;
 
 namespace OneCode.Tests;
 
 public sealed class WebFetchToolSsrfTests
 {
-    /// <summary>
-    /// ValidateUrl is private static — invoke it via reflection so the SSRF
-    /// guard can be tested in isolation without an HTTP client.
-    /// </summary>
-    private static bool InvokeValidateUrl(string url)
-    {
-        var method = typeof(WebFetchTool).GetMethod(
-            "ValidateUrl",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (bool)method.Invoke(null, new object[] { url })!;
-    }
 
     [Theory]
     [InlineData("10.0.0.1")]
@@ -30,7 +18,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var address = IPAddress.Parse(ip);
 
-        WebFetchTool.IsPrivateOrLocalAddressPublic(address).Should().BeTrue();
+        FetchSafetyPolicy.IsPrivateOrLocalAddress(address).Should().BeTrue();
     }
 
     [Theory]
@@ -42,7 +30,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var address = IPAddress.Parse(ip);
 
-        WebFetchTool.IsPrivateOrLocalAddressPublic(address).Should().BeTrue();
+        FetchSafetyPolicy.IsPrivateOrLocalAddress(address).Should().BeTrue();
     }
 
     [Theory]
@@ -53,7 +41,7 @@ public sealed class WebFetchToolSsrfTests
         // 172.16.0.0/12 covers only second octet 16..31; 15 and 32 must pass.
         var address = IPAddress.Parse(ip);
 
-        WebFetchTool.IsPrivateOrLocalAddressPublic(address).Should().BeFalse();
+        FetchSafetyPolicy.IsPrivateOrLocalAddress(address).Should().BeFalse();
     }
 
     [Theory]
@@ -63,7 +51,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var address = IPAddress.Parse(ip);
 
-        WebFetchTool.IsPrivateOrLocalAddressPublic(address).Should().BeFalse();
+        FetchSafetyPolicy.IsPrivateOrLocalAddress(address).Should().BeFalse();
     }
 
     [Fact]
@@ -71,7 +59,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var addresses = new[] { IPAddress.Parse("1.1.1.1"), IPAddress.Parse("127.0.0.1") };
 
-        WebFetchTool.FindUnsafeResolvedAddress(addresses).Should().Be(IPAddress.Parse("127.0.0.1"));
+        FetchSafetyPolicy.FindUnsafeResolvedAddress(addresses).Should().Be(IPAddress.Parse("127.0.0.1"));
     }
 
     [Fact]
@@ -79,7 +67,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var addresses = new[] { IPAddress.Parse("1.1.1.1"), IPAddress.Parse("8.8.8.8") };
 
-        WebFetchTool.FindUnsafeResolvedAddress(addresses).Should().BeNull();
+        FetchSafetyPolicy.FindUnsafeResolvedAddress(addresses).Should().BeNull();
     }
 
     [Fact]
@@ -87,7 +75,7 @@ public sealed class WebFetchToolSsrfTests
     {
         var mapped = IPAddress.Parse("::ffff:169.254.169.254");
 
-        WebFetchTool.FindUnsafeResolvedAddress([mapped]).Should().Be(mapped);
+        FetchSafetyPolicy.FindUnsafeResolvedAddress([mapped]).Should().Be(mapped);
     }
 
     [Theory]
@@ -98,7 +86,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("http://127.0.0.1:10808", "https://api.example.com/", ".example.com", false)]
     public void ResolvesViaProxy_DecidesFromProxyAndNoProxy(string? proxyUrl, string url, string? noProxyList, bool expected)
     {
-        WebFetchTool.ResolvesViaProxy(proxyUrl, url, noProxyList).Should().Be(expected);
+        FetchSafetyPolicy.ResolvesViaProxy(proxyUrl, url, noProxyList).Should().Be(expected);
     }
 
     [Theory]
@@ -111,7 +99,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("http://127.0.0.1/")]
     public void ValidateUrl_IPv4PrivateAddresses_ReturnsFalse(string url)
     {
-        InvokeValidateUrl(url).Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeFalse();
     }
 
     [Theory]
@@ -121,7 +109,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("http://[fd00::1]/")]
     public void ValidateUrl_IPv6PrivateAddresses_ReturnsFalse(string url)
     {
-        InvokeValidateUrl(url).Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeFalse();
     }
 
     [Theory]
@@ -131,7 +119,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("http://foo.localhost/")]
     public void ValidateUrl_LocalhostAndInternalNames_ReturnsFalse(string url)
     {
-        InvokeValidateUrl(url).Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeFalse();
     }
 
     [Theory]
@@ -139,7 +127,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("http://172.32.0.1/")]
     public void ValidateUrl_Outside172PrivateRange_ReturnsTrue(string url)
     {
-        InvokeValidateUrl(url).Should().BeTrue();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeTrue();
     }
 
     [Theory]
@@ -149,7 +137,7 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("https://github.com/")]
     public void ValidateUrl_PublicAddresses_ReturnsTrue(string url)
     {
-        InvokeValidateUrl(url).Should().BeTrue();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeTrue();
     }
 
     [Theory]
@@ -158,19 +146,19 @@ public sealed class WebFetchToolSsrfTests
     [InlineData("")]
     public void ValidateUrl_InvalidSchemeOrFormat_ReturnsFalse(string url)
     {
-        InvokeValidateUrl(url).Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl(url).Should().BeFalse();
     }
 
     [Fact]
     public void ValidateUrl_UrlWithCredentials_ReturnsFalse()
     {
-        InvokeValidateUrl("http://user:pass@8.8.8.8/").Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl("http://user:pass@8.8.8.8/").Should().BeFalse();
     }
 
     [Fact]
     public void ValidateUrl_OverlongUrl_ReturnsFalse()
     {
         var longHost = new string('a', 2100);
-        InvokeValidateUrl($"http://{longHost}.com/").Should().BeFalse();
+        FetchSafetyPolicy.ValidateUrl($"http://{longHost}.com/").Should().BeFalse();
     }
 }

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Tools;
+using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests;
 
@@ -35,7 +36,7 @@ public sealed class WebFetchToolJsHintTests
         var handler = new FixedHtmlHandler(htmlBody);
         var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         var factory = Substitute.For<IHttpClientFactory>();
-        factory.CreateClient("WebFetch").Returns(httpClient);
+        factory.CreateClient(Constants.HttpClientNames.WebFetch).Returns(httpClient);
 
         return new WebFetchTool(factory, new WebFetchCache(), NullLogger<WebFetchTool>.Instance);
     }

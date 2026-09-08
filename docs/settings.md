@@ -120,8 +120,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
-| `webSearchProvider` | `string` | `duckduckgo` | 搜索引擎提供方（`duckduckgo` / `brave` 等） |
-| `webSearchApiKey` | `string` | — | 搜索引擎 API 密钥（Brave 等付费引擎需要） |
+| `webSearchProvider` | `string` | `duckduckgo` | WebSearch 主提供方（`duckduckgo` / `tavily`）；失败时自动回退另一提供方，未配置 Key 的 Tavily 自动跳过 |
+| `webSearchApiKeys.tavily` | `string` | — | Tavily 搜索 API 密钥（tavily.com 免费注册，1000 次/月，无需信用卡） |
 
 ### 扩展思考（Thinking）
 
@@ -204,7 +204,7 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 | `ONECODE_PROVIDER_OVERRIDE` | `provider` |
 | `ONECODE_MODEL` | `model` |
 | `ONECODE_WEB_SEARCH_PROVIDER` | `webSearchProvider` |
-| `ONECODE_WEB_SEARCH_API_KEY` | `webSearchApiKey` |
+| `TAVILY_API_KEY` | `webSearchApiKeys.tavily` |
 | `ONECODE_AUTODREAM` | `autodream.enabled` |
 | `ONECODE_AUTODREAM_MIN_HOURS` | `autodream.minHours` |
 | `ONECODE_AUTODREAM_MIN_SESSIONS` | `autodream.minSessions` |
@@ -314,8 +314,8 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `hasTrustAccepted` | —（字面量） | `AppSettings.HasTrustAccepted` |
 | `maxTurns` | `ConfigKeys.MaxTurns` | `AppSettings.MaxTurns` |
 | `maxBudgetTokens` | `ConfigKeys.MaxBudgetTokens` | `AppSettings.MaxBudgetTokens` |
-| `webSearchProvider` | —（字面量） | `AppSettings.WebSearchProvider` |
-| `webSearchApiKey` | —（字面量） | `AppSettings.WebSearchApiKey` |
+| `webSearchProvider` | `ConfigKeys.WebSearchProvider` | `AppSettings.WebSearchProvider` |
+| `webSearchApiKeys.tavily` | `ConfigKeys.TavilyApiKey` | `AppSettings.TavilyApiKey` |
 | `effortValue` | —（字面量） | `InteractiveModeExecutor`、`EffortCommand`、`TuiHostConfigurator`、`ThinkingParamsResolver`（经 `AppState`） |
 | `thinkingEnabled` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
 | `showThinking` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |

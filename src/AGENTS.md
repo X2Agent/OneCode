@@ -803,11 +803,11 @@ var maxTurnsValue = _values["maxTurns"];
 var autoDreamEnv = Environment.GetEnvironmentVariable("ONECODE_AUTODREAM");
 
 // ✅ 正确：多文件共享的环境变量，必须使用常量
-// 在 ServiceCollectionExtensions.ChatClient.cs 和 DoctorCommand.cs 中多处使用
+// 在 Query/ChatClientServiceCollectionExtensions.cs 和 DoctorCommand.cs 中多处使用
 var apiKey = Environment.GetEnvironmentVariable(CoreConstants.EnvVars.OneCodeApiKey);
 
 // ❌ 错误：多文件共享的 Key 没有使用常量
-var key = _values["apiKey"];  // "apiKey" 在 ServiceCollectionExtensions.cs 和 ConfigManager.cs 中均使用
+var key = _values["apiKey"];  // "apiKey" 在多个文件中共享使用
 ```
 
 > **例外规则：** 标准操作系统环境变量（如 `HOME`、`USERPROFILE`、`PATH`）在多处使用时仍然建议定义为常量，已在 `Core.Constants.EnvVars` 中覆盖。
@@ -874,9 +874,27 @@ public PermissionCheckResult Check(...)
 
 权限模式行为由 <c>PermissionProfiles</c> 静态注册表定义（<c>GetProfile</c> / <c>Check</c>），
 <code>PermissionChecker</code> 在 Auto 模式下委托 <c>YoloClassifier</c>，其余模式直接查表。
-工具注册通过 <c>ToolRegistration</c> + <c>AddTool&lt;T&gt;</c> 扩展方法在 DI 注册时一并完成元数据登记（详见 [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md) 工具开发规范），由 <c>ToolCatalog</c> 在运行时通过反射解析为 <c>AIFunction</c>。新增工具时通过 <c>ServiceCollectionExtensions.Tools.cs</c> 中的 <c>AddTool&lt;T&gt;</c> 调用注册即可，无需修改集中注册表。
+工具注册通过 <c>ToolRegistration</c> + <c>AddTool&lt;T&gt;</c> 扩展方法在 DI 注册时一并完成元数据登记（详见 [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md) 工具开发规范），由 <c>ToolCatalog</c> 在运行时通过反射解析为 <c>AIFunction</c>。新增工具时在 <c>src/OneCode.App/Tools/ToolServiceCollectionExtensions.cs</c> 的 <c>AddToolServices</c> 注册流中调用 <c>AddTool&lt;T&gt;</c> 即可，无需修改集中注册表。
 
 ---
+
+
+---
+
+## DI 注册归属（强制）
+
+**规则：DI 注册代码随领域实现走，不进入按启动批次分组的中央 partial 文件。**
+
+- 每个领域的注册封装为该领域目录下的 `AddXxx()` 扩展类（如 `Services/Memory/MemoryServiceCollectionExtensions.cs` 的 `AddMemoryServices()`），与实现同目录维护。
+- 组合根 `OneCodeApp.Create` 保留**显式有序**的 `AddXxx()` 调用列表；领域内部不得假设其他领域的注册时机——组合根的调用顺序即注册顺序。
+- **顺序敏感点（变更须人工审查并重新生成快照基线）**：
+  1. HostedService 启动顺序 = `AddHostedService` 注册顺序（由 `ServiceCollectionSnapshotTests.HostedServices_ResolveInRegistrationOrder` 锁定）；
+  2. `IEnumerable<T>` 注入顺序（`AddTool` 注册流、`IHookExecutor`、`IWorkflowQualityGateValidator`、`INotificationProvider`、`IDynamicCommandSource`）。
+- 其余单实现/惰性工厂注册与位置无关，但跨领域搬移仍视为 DI 面变更。
+
+**快照护栏**：`src/OneCode.Tests/ServiceCollectionSnapshotTests.cs` 将完整注册面（类型+生命周期+实现+顺序）与 `ServiceRegistrationSnapshot.approved.txt` 基线比对。任何 DI 注册变更导致快照测试失败时：审查 diff 是否符合预期 → 设置环境变量 `ONECODE_UPDATE_SNAPSHOT=1` 运行该测试重新生成基线 → 人工确认 diff 后提交。
+
+**新增服务检查单**：实现类放在领域目录 → 注册写在同目录的 `XxxServiceCollectionExtensions`（已有则追加一行）→ 领域无注册类则新建并在组合根按语义位置插入 `AddXxx()` → 跑快照测试确认 DI 面变化符合预期。
 
 ## 文件和目录命名约定
 

@@ -1,27 +1,19 @@
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.AutoDream;
-using OneCode.App.Services.Coordinator;
 using OneCode.App.Services.Runtime;
-using OneCode.App.Services.Notifier;
 using OneCode.Infrastructure;
-
-using OneCode.Core.Lsp;
-using OneCode.Infrastructure.Media;
-using OneCode.Infrastructure.Remote;
 using OneCode.Infrastructure.Teams;
-using OneCode.Infrastructure.Workflows;
 
-namespace OneCode.App;
+namespace OneCode.App.Services.Coordinator;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// Team 编排领域 DI 注册——与编排实现（<see cref="TeamOrchestrationService"/> /
+/// <see cref="TeamRunApplicationService"/>）同目录维护；质量门校验器（Runtime）与
+/// Forked Agent 管线（Agent）在此一并组装。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class TeamServiceCollectionExtensions
 {
-    public static IServiceCollection RegisterAdvancedServices(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddTeamServices(this IServiceCollection services)
     {
         services.AddSingleton<Core.Tools.IVerificationProvider, Infrastructure.Tools.GenericVerificationProvider>();
         services.AddSingleton<ForkedAgentRuntimeDependencies>();
@@ -52,7 +44,7 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<TeamRunStateMachine>(),
             sp.GetRequiredService<WorkflowQualityGateRunner>(),
             sp.GetRequiredService<DeliveryReportBuilder>(),
-            sp.GetService<OneCode.Core.Build.IWorkspaceFingerprintProvider>()));
+            sp.GetService<Core.Build.IWorkspaceFingerprintProvider>()));
         // Team M5：将批准 TaskGraph 通过共享 MAF Durable Workflow Host 编排（Fan-out/Fan-in Barrier）。
         services.AddSingleton<TeamTaskWorkflowCompiler>();
         services.AddSingleton<TeamApprovalWorkflowCompiler>();
@@ -79,40 +71,6 @@ public static partial class ServiceCollectionExtensions
             sp.GetRequiredService<TeamOrchestrationService>());
         services.AddSingleton<WorkerAgentService>();
         services.AddSingleton<Core.Tools.IAgentRunner>(sp => sp.GetRequiredService<WorkerAgentService>());
-        // ParallelAgentsTool compiles a fresh MAF workflow and executor set for every invocation.
-        services.AddSingleton<AgentTaskWorkflowCompiler>();
-        services.AddSingleton<AgentTaskWorkflowHost>();
-        services.AddSingleton<Core.Workflows.IWorkflowRunRegistry, JsonWorkflowRunRegistry>();
-        services.AddSingleton<Core.Workflows.IOperationLedger>(
-            new OneCode.Infrastructure.Workflows.FileOperationLedger());
-        services.AddSingleton<IWorkflowCheckpointStoreFactory, WorkflowCheckpointStoreFactory>();
-        services.AddSingleton<IWorkflowEventAdapter, WorkflowEventAdapter>();
-        services.AddSingleton<IWorkflowRequestAdapter, WorkflowRequestAdapter>();
-        services.AddSingleton<IDurableWorkflowHost, DurableWorkflowHost>();
-        services.AddSingleton<Services.BuildMode.ControlledBuildAttemptWorkflowCompiler>();
-        services.AddSingleton<Services.BuildMode.ControlledBuildAttemptHost>();
-
-        // AutoDream: 后台记忆整合服务。注册为 Singleton + HostedService：
-        // - Singleton：供 /memory autodream trigger 命令通过 DI 获取并调用 Trigger()
-        // - HostedService：让 BackgroundService.ExecuteAsync 随宿主生命周期自动启停（1h 轮询是唯一自动触发路径）
-        services.AddSingleton<AutoDreamAgentDependencies>();
-        services.AddSingleton<AutoDreamStorageDependencies>();
-        services.AddSingleton<AutoDreamService>();
-        services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
-
-        services.AddSingleton<SshRemoteService>();
-
-        services.AddSingleton<ICodeIndexService, CodeIndexService>();
-        services.AddSingleton<CodeIndexHotReloader>();
-
-        // VCR (录像/回放) — Infrastructure 层基础设施，注册下沉到 AddVcrServices()。
-        // 未设 ONECODE_VCR 环境变量时零开销透传，不影响生产路径。
-        services.AddVcrServices();
-
-        services.AddSingleton<NotifierService>();
-        services.AddSingleton<INotifierService>(sp => sp.GetRequiredService<NotifierService>());
-
-        services.AddSingleton<ImagePipeline>();
 
         return services;
     }

@@ -1,37 +1,24 @@
-using OneCode.Core.Mcp;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
 using OneCode.App.Services;
-using OneCode.App.Services.Context;
-using OneCode.App.Services.Lsp;
-using OneCode.App.Services.Mcp;
-using OneCode.App.Services.PlanMode;
-using OneCode.App.Services.Search;
 using OneCode.App.Services.Streaming;
-using OneCode.App.Session;
-using OneCode.App.Tools;
 using OneCode.Automation;
-using OneCode.Infrastructure.Mcp;
+using OneCode.Core.Mcp;
 
-namespace OneCode.App;
+namespace OneCode.App.Tools;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// 工具目录与工具注册流 DI 注册——与工具实现（ToolCatalog / 各 Tool）同目录维护。
+/// <c>AddTool</c> 流的调用顺序即 <see cref="ToolRegistration"/> 的 IEnumerable 注入顺序，
+/// 重排会改变工具目录装配结果——除非有意变更，否则保持现有顺序。
+/// 由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class ToolServiceCollectionExtensions
 {
-    public static IServiceCollection RegisterToolServices(this IServiceCollection services)
+    public static IServiceCollection AddToolServices(this IServiceCollection services)
     {
-        services.AddSingleton<ITextSearchService, TextSearchService>();
         services.AddSingleton<WebFetchCache>();
-        services.AddSingleton<LspDiagnosticRegistry>();
-        services.AddSingleton<EnhancedLspService>();
-        services.AddSingleton<IEnhancedLspService>(sp => sp.GetRequiredService<EnhancedLspService>());
-        services.AddSingleton<ILspNotifier, LspNotifier>();
-        // InProcess MCP 服务器扩展点：宿主/测试注册 IInProcessMcpServerProvider 即可按名接入。
-        services.AddSingleton<InProcessMcpServerRegistry>();
-        services.AddSingleton<McpConnectionManager>();
-        services.AddSingleton<IMcpConnectionManager>(sp => sp.GetRequiredService<McpConnectionManager>());
-
-        services.AddSingleton<TaskContextProvider>();
 
         services.AddSingleton<ToolMetadataRegistry>();
         // Composition root owns IServiceProvider capture in Lazy — ToolCatalog itself does not.
@@ -47,25 +34,6 @@ public static partial class ServiceCollectionExtensions
         });
         services.AddSingleton<IToolCatalog>(sp => sp.GetRequiredService<ToolCatalog>());
         services.AddSingleton<IToolCapabilityResolver, ToolCapabilityResolver>();
-        services.AddSingleton<SessionToolSetManager>();
-        services.AddSingleton<ISessionToolSetManager>(sp => sp.GetRequiredService<SessionToolSetManager>());
-
-        // After tools: SessionManager requires ISessionToolSetManager.
-        services.AddSingleton<SessionManager>(sp =>
-        {
-            var store = sp.GetRequiredService<ISessionStore>();
-            var logger = sp.GetRequiredService<ILogger<SessionManager>>();
-            var sessionOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<SessionOptions>>().Value;
-            return new SessionManager(store, logger, sessionOptions.InitialWorkingDirectory,
-                hookExecutionService: sp.GetRequiredService<IHookExecutionService>(),
-                shellExecutorCleanup: sp.GetRequiredService<IShellExecutorCleanup>(),
-                tokenUsageTracker: sp.GetRequiredService<Services.Observability.ITokenUsageTracker>(),
-                sessionIdHolder: sp.GetRequiredService<SessionIdHolder>(),
-                sessionToolSetManager: sp.GetRequiredService<ISessionToolSetManager>());
-        });
-        services.AddSingleton<ISessionManager>(sp => sp.GetRequiredService<SessionManager>());
-        services.AddSingleton<ISessionConversationAccess>(sp => sp.GetRequiredService<SessionManager>());
-        services.AddSingleton<ISessionWorkingDirectory>(sp => sp.GetRequiredService<SessionManager>());
 
         services.AddTool<BashTool>("Bash", nameof(BashTool.ExecuteAsync), ToolRisk.Dynamic,
             aliases: ["shell", "sh", "ps"], concurrency: false,
@@ -118,6 +86,7 @@ public static partial class ServiceCollectionExtensions
             category: ToolCategory.PlanAllowed);
         services.AddTool<AskUserQuestionTool>("AskUserQuestions", nameof(AskUserQuestionTool.AskMultipleAsync), ToolRisk.ReadOnly, searchHint: "ask the user multiple related questions in one wizard",
             category: ToolCategory.PlanAllowed);
+
         services.AddTool<SymbolSearchTool>("SymbolSearch", nameof(SymbolSearchTool.SymbolSearchAsync), ToolRisk.ReadOnly, searchHint: "search code symbols",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["symbol"]);
         services.AddTool<LspTool>("Lsp", nameof(LspTool.ExecuteLspAsync), ToolRisk.ReadOnly, searchHint: "perform language-server operations",
@@ -133,7 +102,6 @@ public static partial class ServiceCollectionExtensions
         // approved-plan Build run must not re-plan via SubmitPlan (ToolCapabilityResolver
         // enforces this boundary).
         services.AddSingleton<OrchestrationEventBus>();
-        services.AddSingleton<PlanCardPublisher>();
         services.AddTool<CreatePlanTool>("SubmitPlan", nameof(CreatePlanTool.SubmitPlanAsync), ToolRisk.Safe, searchHint: "write and submit the finalized plan for persisted user approval",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed | ToolCategory.PlanExclusive);
 
@@ -161,7 +129,6 @@ public static partial class ServiceCollectionExtensions
         services.AddTool<BrowserFetchTool>("BrowserFetch", nameof(BrowserFetchTool.FetchAsync), ToolRisk.Dynamic,
             concurrency: false, searchHint: "render a JavaScript-only page in a real headless browser",
             loadPolicy: ToolLoadPolicy.Always);
-
 
         // ToolSearch (needs runtime metadata access)
         services.AddToolInstance("ToolSearch",

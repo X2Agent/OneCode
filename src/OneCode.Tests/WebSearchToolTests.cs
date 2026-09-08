@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 
 using OneCode.Core.Config;
+using OneCode.Core.Search;
 using System.Reflection;
 using NSubstitute;
 using OneCode.App.Tools;
@@ -10,9 +11,10 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Unit tests for <see cref="WebSearchTool"/> — covers query-length validation,
-/// the Brave-provider-without-API-key guard, and the private static helpers that
-/// implement DuckDuckGo HTML parsing, domain filtering, domain normalization,
-/// redirect resolution, and HTML-text cleaning.
+/// the failover-chain assembly (order by <c>webSearchProvider</c>, keyless Tavily skipped),
+/// failover error aggregation, the empty-results-as-challenge policy, query caching,
+/// and the private static helpers that implement DuckDuckGo HTML parsing, domain
+/// filtering, domain normalization, redirect resolution, and HTML-text cleaning.
 ///
 /// The private helpers carry the tool's real business logic (HTML parsing,
 /// domain matching) and are tested via reflection, mirroring the pattern in
@@ -126,7 +128,7 @@ public sealed class WebSearchToolTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var config = new ConfigManager(_tempDir);
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance);
+        var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance, []);
 
         var result = await sut.SearchAsync(query, ct: ct);
 
@@ -134,93 +136,155 @@ public sealed class WebSearchToolTests : IDisposable
         result.Content.Should().Contain("query must be at least 2 characters");
     }
 
-    // SearchAsync: Brave provider without API key
+    // BuildChain: 故障转移链组装（顺序由 webSearchProvider 设置决定，未配置 Key 的 Tavily 跳过）
 
-    [Fact]
-    public async Task SearchAsync_BraveProviderWithoutApiKey_ReturnsErrorJson()
+    private WebSearchTool CreateTool(IWebSearchProvider? tavily = null)
     {
-        var ct = TestContext.Current.CancellationToken;
-        const string providerKey = "ONECODE_WEB_SEARCH_PROVIDER";
-        const string braveKey = "BRAVE_SEARCH_API_KEY";
-        const string oneCodeKey = "ONECODE_WEB_SEARCH_API_KEY";
-        var originalProvider = Environment.GetEnvironmentVariable(providerKey);
-        var originalBrave = Environment.GetEnvironmentVariable(braveKey);
-        var originalOneCode = Environment.GetEnvironmentVariable(oneCodeKey);
-        try
-        {
-            Environment.SetEnvironmentVariable(providerKey, "brave");
-            Environment.SetEnvironmentVariable(braveKey, null);
-            Environment.SetEnvironmentVariable(oneCodeKey, null);
-
-            var config = new ConfigManager(_tempDir);
-            var httpClientFactory = Substitute.For<IHttpClientFactory>();
-            var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance);
-
-            var result = await sut.SearchAsync("test query", ct: ct);
-
-            result.IsError.Should().BeTrue();
-            result.Content.Should().Contain("Brave search requires BRAVE_SEARCH_API_KEY");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(providerKey, originalProvider);
-            Environment.SetEnvironmentVariable(braveKey, originalBrave);
-            Environment.SetEnvironmentVariable(oneCodeKey, originalOneCode);
-        }
+        var providers = tavily is null ? [] : new[] { tavily };
+        return new WebSearchTool(
+            new ConfigManager(_tempDir),
+            Substitute.For<IHttpClientFactory>(),
+            NullLogger<WebSearchTool>.Instance,
+            providers);
     }
 
-    // ResolveProvider consumes only the effective snapshot. Environment precedence is
-    // resolved once by ConfigManager and covered by ConfigManagerTests.
-
-    [Fact]
-    public void ResolveProvider_UsesEffectiveSnapshotWithoutReadingEnvironment()
+    private static IWebSearchProvider CreateTavilyProvider(bool configured)
     {
-        const string providerKey = "ONECODE_WEB_SEARCH_PROVIDER";
-        var original = Environment.GetEnvironmentVariable(providerKey);
-        try
-        {
-            Environment.SetEnvironmentVariable(providerKey, "brave");
-            var settings = new AppSettings { WebSearchProvider = "duckduckgo" };
+        var provider = Substitute.For<IWebSearchProvider>();
+        provider.Name.Returns("tavily");
+        provider.IsConfigured.Returns(configured);
+        return provider;
+    }
 
-            var result = InvokeResolveProvider(settings);
+    private static IReadOnlyList<string> InvokeChainNames(WebSearchTool tool, AppSettings settings)
+    {
+        var method = typeof(WebSearchTool).GetMethod(
+            "BuildChain", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var chain = (System.Collections.IEnumerable)method.Invoke(tool, new object?[] { settings, "test query" })!;
 
-            // WebSearchProvider is a private enum: Brave=0, DuckDuckGo=1
-            ((int)result).Should().Be(1, "provider consumers must not re-resolve environment variables");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(providerKey, original);
-        }
+        var names = new List<string>();
+        foreach (var entry in chain)
+            names.Add((string)entry.GetType().GetField("Item1")!.GetValue(entry)!);
+        return names;
     }
 
     [Fact]
-    public void ResolveProvider_EffectiveSnapshotValue_IsUsed()
+    public void BuildChain_TavilyPrimaryWithConfiguredKey_TavilyFirstThenDuckDuckGo()
     {
-        const string providerKey = "ONECODE_WEB_SEARCH_PROVIDER";
-        var original = Environment.GetEnvironmentVariable(providerKey);
-        try
-        {
-            Environment.SetEnvironmentVariable(providerKey, null);
-            var settings = new AppSettings { WebSearchProvider = "brave" };
+        var sut = CreateTool(CreateTavilyProvider(configured: true));
+        var settings = new AppSettings { WebSearchProvider = "tavily" };
 
-            var result = InvokeResolveProvider(settings);
-
-            ((int)result).Should().Be(0, "settings 'brave' should resolve to Brave when env var is absent");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(providerKey, original);
-        }
+        InvokeChainNames(sut, settings).Should().Equal("tavily", "duckduckgo");
     }
 
     [Fact]
-    public void ResolveProvider_InvalidSnapshotValue_DefaultsToDuckDuckGo()
+    public void BuildChain_TavilyPrimaryWithoutKey_SkipsTavilyStraightToDuckDuckGo()
     {
+        var sut = CreateTool(CreateTavilyProvider(configured: false));
+        var settings = new AppSettings { WebSearchProvider = "tavily" };
+
+        InvokeChainNames(sut, settings).Should().Equal("duckduckgo");
+    }
+
+    [Fact]
+    public void BuildChain_DefaultWithConfiguredKey_DuckDuckGoFirstThenTavily()
+    {
+        var sut = CreateTool(CreateTavilyProvider(configured: true));
+        var settings = new AppSettings { WebSearchProvider = "duckduckgo" };
+
+        InvokeChainNames(sut, settings).Should().Equal("duckduckgo", "tavily");
+    }
+
+    [Fact]
+    public void BuildChain_DefaultWithoutKey_OnlyDuckDuckGo()
+    {
+        var sut = CreateTool(CreateTavilyProvider(configured: false));
+        var settings = new AppSettings { WebSearchProvider = "duckduckgo" };
+
+        InvokeChainNames(sut, settings).Should().Equal("duckduckgo");
+    }
+
+    [Fact]
+    public void BuildChain_InvalidSettingValue_TreatedAsDuckDuckGoPrimary()
+    {
+        var sut = CreateTool(CreateTavilyProvider(configured: false));
         var settings = new AppSettings { WebSearchProvider = "not-a-real-provider" };
 
-        var result = InvokeResolveProvider(settings);
+        InvokeChainNames(sut, settings).Should().Equal("duckduckgo");
+    }
 
-        ((int)result).Should().Be(1, "invalid provider value must fall back to DuckDuckGo");
+    // SearchAsync: 故障转移与错误聚合
+
+    [Fact]
+    public async Task SearchAsync_TavilyFails_FallsBackToDuckDuckGoAndAggregatesErrors()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var config = new ConfigManager(_tempDir);
+        await config.ApplyAsync(ConfigPatch.Set(ConfigScope.User, "webSearchProvider", "tavily"), ct);
+
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<IReadOnlyList<WebSearchResult>>(new InvalidOperationException("quota")));
+        // IHttpClientFactory 替身 CreateClient 返回 null → DuckDuckGo 尝试同样失败，
+        // 错误中出现 "duckduckgo:" 即证明回退真实发生而非 Tavily 失败后直接报错。
+        var sut = new WebSearchTool(
+            config, Substitute.For<IHttpClientFactory>(), NullLogger<WebSearchTool>.Instance, [tavily]);
+
+        var result = await sut.SearchAsync("test query", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("tavily: quota");
+        result.Content.Should().Contain("duckduckgo:");
+    }
+
+    [Fact]
+    public async Task SearchAsync_ProviderReturnsEmptyResults_TreatedAsFailureAndFallsBack()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        var sut = CreateTool(tavily);
+
+        var result = await sut.SearchAsync("test query", ct: ct);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("returned no results");
+    }
+
+    [Fact]
+    public async Task SearchAsync_TavilyReturnsHits_UsesTavilyWithoutFallback()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([new WebSearchResult("OneCode", "https://example.com/cli", "cli")]);
+        var sut = CreateTool(tavily);
+
+        var result = await sut.SearchAsync("onecode cli", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("tavily");
+        result.Content.Should().Contain("https://example.com/cli");
+    }
+
+    [Fact]
+    public async Task SearchAsync_SameQueryTwice_SecondCallServedFromCacheWithoutProviderHit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([new WebSearchResult("OneCode", "https://example.com/cli", "cli")]);
+        var sut = CreateTool(tavily);
+
+        var first = await sut.SearchAsync("onecode cli", ct: ct);
+        var second = await sut.SearchAsync("onecode cli", ct: ct);
+
+        first.IsError.Should().BeFalse();
+        second.IsError.Should().BeFalse();
+        second.Content.Should().Contain("cached");
+        // 配额保护：TTL 内重复查询只允许触发一次真实提供方调用。
+        await tavily.Received(1).SearchAsync("onecode cli", Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     // ParseDuckDuckGoResults

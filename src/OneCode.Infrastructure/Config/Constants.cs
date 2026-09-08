@@ -27,6 +27,10 @@ public static partial class Constants
     {
         public const string McpRegistry = "OneCode.McpRegistry";
         public const string WebSearch = "WebSearch";
+        /// <summary>Named client for WebFetch (auto-redirect disabled, tool drives redirects).</summary>
+        public const string WebFetch = "WebFetch";
+        /// <summary>Named client for HTTP hook execution (generic user-defined HTTP calls).</summary>
+        public const string HookHttp = "HookHttp";
         public const string Upgrade = "upgrade";
         public const string ModelsDev = "ModelsDev";
         /// <summary>Named client for Ollama native API (infinite timeout, identity UA).</summary>
@@ -39,6 +43,8 @@ public static partial class Constants
     {
         /// <summary>Official MCP Registry (Anthropic/GitHub/PulseMCP/Microsoft), unauthenticated read-only API.</summary>
         public const string McpRegistry = "https://registry.modelcontextprotocol.io";
+        /// <summary>Tavily Search API 端点（Bearer 认证，POST JSON）。</summary>
+        public const string TavilySearch = "https://api.tavily.com/search";
     }
 
     public static class Subdirs

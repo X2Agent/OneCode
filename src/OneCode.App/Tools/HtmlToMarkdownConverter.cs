@@ -1,24 +1,26 @@
 using System.Text;
 using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// HTML→Markdown conversion helpers for WebFetchTool.
-/// Based on AngleSharp DOM traversal — all methods are private static except
-/// <see cref="HtmlToMarkdown"/> (internal for regression tests).
+/// HTML→Markdown 转换器（WebFetchTool 专用）——基于 AngleSharp DOM 遍历的纯静态实现。
+/// 测试经 InternalsVisibleTo 覆盖 <see cref="Convert"/>。
 /// </summary>
-public sealed partial class WebFetchTool
+internal static class HtmlToMarkdownConverter
 {
+    private static readonly HtmlParser Parser = new();
+
     // Markdown fenced-code opener/closer length (` ``` `).
     private const int MarkdownFenceLength = 3;
 
-    internal static string HtmlToMarkdown(string html)
+    internal static string Convert(string html)
     {
         if (string.IsNullOrWhiteSpace(html))
             return string.Empty;
 
-        var document = _htmlParser.ParseDocument(html);
+        var document = Parser.ParseDocument(html);
 
         foreach (var element in document.QuerySelectorAll("script, style").ToList())
             element.Remove();
@@ -120,6 +122,10 @@ public sealed partial class WebFetchTool
                 sb.Append('`');
                 break;
 
+            case "blockquote":
+                RenderChildren(sb, element);
+                break;
+
             case "br":
                 sb.Append('\n');
                 break;
@@ -137,7 +143,6 @@ public sealed partial class WebFetchTool
             case "main":
             case "nav":
             case "aside":
-            case "blockquote":
                 RenderChildren(sb, element);
                 break;
 
@@ -242,4 +247,6 @@ public sealed partial class WebFetchTool
             i++;
         return i;
     }
+
+
 }

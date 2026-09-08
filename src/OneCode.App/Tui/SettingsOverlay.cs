@@ -25,6 +25,11 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
     private readonly TextField _baseUrlField;
     private readonly TextField _apiKeyField;
     private readonly string _initialApiKey;
+    private readonly DropDownList _webSearchProviderField;
+    private readonly ObservableCollection<string> _webSearchProviderItems;
+    private readonly TextField _tavilyKeyField;
+    private readonly FormRow _tavilyKeyRow;
+    private readonly string _initialTavilyKey;
     private readonly Button _saveButton;
     private readonly Button _cancelButton;
     private readonly TextField _modelField;
@@ -45,11 +50,14 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
     internal TextField ModelField => _modelField;
     internal TextField MaxTurnsField => _maxTurnsField;
     internal TextField ApiKeyField => _apiKeyField;
+    internal TextField TavilyKeyField => _tavilyKeyField;
+    internal FormRow TavilyKeyRow => _tavilyKeyRow;
+    internal DropDownList WebSearchProviderField => _webSearchProviderField;
     internal Button SaveButton => _saveButton;
     internal Button CancelButton => _cancelButton;
 
     public SettingsOverlay(ConfigSnapshot snapshot, bool projectScopeAvailable)
-        : base("  设置  (Ctrl+S 保存 · Esc 取消)", preferredWidth: 78, preferredHeight: 28)
+        : base("  设置  (Ctrl+S 保存 · Esc 取消)", preferredWidth: 78, preferredHeight: 30)
     {
         _initialSnapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
         var settings = snapshot.Effective;
@@ -82,6 +90,22 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
             settings.Get<string>(OneCode.Core.Constants.ConfigKeys.FastModel) ?? string.Empty,
             Dim.Fill(TuiSpacing.Md));
         AddRow("快速模型：", _fastModelField);
+
+        _webSearchProviderItems = new ObservableCollection<string> { "duckduckgo", "tavily" };
+        _webSearchProviderField = CreateDropDown(
+            _webSearchProviderItems,
+            SelectIndex(_webSearchProviderItems, settings.WebSearchProvider, 0),
+            20);
+        AddRow("搜索提供方：", _webSearchProviderField);
+
+        _initialTavilyKey = settings.TavilyApiKey ?? string.Empty;
+        _tavilyKeyField = CreateTextField(_initialTavilyKey, Dim.Fill(TuiSpacing.Md));
+        _tavilyKeyField.Secret = true;
+        _tavilyKeyRow = AddRow("Tavily Key：", _tavilyKeyField);
+
+        // Tavily Key 仅在搜索提供方为 tavily 时有意义，按下拉当前值动态显隐（隐藏行不占位）。
+        UpdateTavilyKeyRowVisibility();
+        _webSearchProviderField.ValueChanged += (_, _) => UpdateTavilyKeyRowVisibility();
 
         _thinkingCheck = CreateCheckBox("扩展思考", settings.Get("thinkingEnabled", false));
         _showThinkingCheck = CreateCheckBox("显示思考", settings.Get("showThinking", false));
@@ -139,6 +163,9 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
             ApiKeyChanged: !string.Equals(_apiKeyField.Text, _initialApiKey, StringComparison.Ordinal),
             Model: _modelField.Text ?? string.Empty,
             FastModel: _fastModelField.Text ?? string.Empty,
+            WebSearchProvider: GetSelectedValue(_webSearchProviderField, _webSearchProviderItems, 0),
+            TavilyApiKey: _tavilyKeyField.Text ?? string.Empty,
+            TavilyApiKeyChanged: !string.Equals(_tavilyKeyField.Text, _initialTavilyKey, StringComparison.Ordinal),
             ThinkingEnabled: _thinkingCheck.Value == CheckState.Checked,
             ShowThinking: _showThinkingCheck.Value == CheckState.Checked,
             NotificationsEnabled: _notificationsCheck.Value == CheckState.Checked,
@@ -176,6 +203,10 @@ public sealed class SettingsOverlay : FormOverlay<SettingsResult?>
         checkBox.SetScheme(CheckScheme);
         return checkBox;
     }
+
+    /// <summary>搜索提供方为 tavily 时才显示 Tavily Key 输入行，避免无关配置项造成困惑。</summary>
+    private void UpdateTavilyKeyRowVisibility() =>
+        SetRowVisible(_tavilyKeyRow, GetSelectedValue(_webSearchProviderField, _webSearchProviderItems, 0) == "tavily");
 
     private static int SelectIndex(ObservableCollection<string> items, string value, int fallbackIndex)
     {
@@ -216,6 +247,9 @@ public sealed record SettingsResult(
     bool ApiKeyChanged,
     string Model,
     string FastModel,
+    string WebSearchProvider,
+    string TavilyApiKey,
+    bool TavilyApiKeyChanged,
     bool ThinkingEnabled,
     bool ShowThinking,
     bool NotificationsEnabled,

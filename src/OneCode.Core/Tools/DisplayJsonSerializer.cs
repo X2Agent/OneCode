@@ -159,7 +159,9 @@ public static class DisplayJsonSerializer
                 continue;
             }
 
-            builder.Append((char)codeUnit);
+            // 不成对的代理项转义替换为 U+FFFD：孤立代理项非合法 Unicode 标量值，
+            // 原样输出会令 Terminal.Gui 渲染抛 ArgumentException。
+            builder.Append(char.IsSurrogate((char)codeUnit) ? '\uFFFD' : (char)codeUnit);
             i += 5;
         }
 

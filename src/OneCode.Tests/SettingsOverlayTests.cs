@@ -84,6 +84,123 @@ public sealed class SettingsOverlayTests
     }
 
     [Fact]
+    public void TavilyKeyField_ShowsCurrentValueAsMaskedText()
+    {
+        var overlay = CreateOverlay();
+        overlay.TavilyKeyField.Text.Should().Be("tvly-secret");
+        overlay.TavilyKeyField.Secret.Should().BeTrue();
+    }
+
+    [Fact]
+    public void WebSearchProviderField_ReflectsConfiguredValue()
+    {
+        var settings = new AppSettings(new Dictionary<string, object?>
+        {
+            ["webSearchProvider"] = "tavily",
+        });
+        var overlay = new SettingsOverlay(ConfigSnapshot.FromEffective(settings), projectScopeAvailable: false);
+
+        overlay.WebSearchProviderField.Value.Should().Be("tavily");
+    }
+
+    [Fact]
+    public void TavilyKeyRow_Hidden_WhenProviderIsDuckDuckGo()
+    {
+        var settings = new AppSettings(new Dictionary<string, object?>
+        {
+            ["webSearchApiKeys.tavily"] = "tvly-secret",
+        });
+        var overlay = new SettingsOverlay(ConfigSnapshot.FromEffective(settings), projectScopeAvailable: false);
+
+        overlay.TavilyKeyRow.Visible.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TavilyKeyRow_Visible_WhenProviderIsTavily()
+    {
+        var settings = new AppSettings(new Dictionary<string, object?>
+        {
+            ["webSearchProvider"] = "tavily",
+        });
+        var overlay = new SettingsOverlay(ConfigSnapshot.FromEffective(settings), projectScopeAvailable: false);
+
+        overlay.TavilyKeyRow.Visible.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TavilyKeyRow_TogglesWithProviderSelection()
+    {
+        var overlay = CreateOverlay();
+        overlay.TavilyKeyRow.Visible.Should().BeFalse();
+
+        overlay.WebSearchProviderField.Value = "tavily";
+        overlay.TavilyKeyRow.Visible.Should().BeTrue();
+
+        overlay.WebSearchProviderField.Value = "duckduckgo";
+        overlay.TavilyKeyRow.Visible.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TrySave_ChangedTavilyKey_ReplacesCurrentScopeSecret()
+    {
+        var host = new OverlayHost(() => { });
+        var overlay = CreateOverlay();
+        var task = overlay.ShowAsync(host.Push, () => host.Pop(), TestContext.Current.CancellationToken);
+        overlay.TavilyKeyField.Text = "tvly-new";
+        overlay.TrySave();
+        var result = await task;
+
+        var changes = TuiHostConfigurator.BuildSettingsPatch(result!);
+
+        changes["webSearchApiKeys.tavily"].Should().BeEquivalentTo(new ConfigMutation.Set("tvly-new"));
+    }
+
+    [Fact]
+    public async Task TrySave_ClearedTavilyKey_RemovesCurrentScopeSecret()
+    {
+        var host = new OverlayHost(() => { });
+        var overlay = CreateOverlay();
+        var task = overlay.ShowAsync(host.Push, () => host.Pop(), TestContext.Current.CancellationToken);
+        overlay.TavilyKeyField.Text = string.Empty;
+        overlay.TrySave();
+        var result = await task;
+
+        var changes = TuiHostConfigurator.BuildSettingsPatch(result!);
+
+        changes["webSearchApiKeys.tavily"].Should().BeOfType<ConfigMutation.Remove>();
+    }
+
+    [Fact]
+    public async Task TrySave_UnchangedTavilyKey_DoesNotWriteSecret()
+    {
+        var host = new OverlayHost(() => { });
+        var overlay = CreateOverlay();
+        var task = overlay.ShowAsync(host.Push, () => host.Pop(), TestContext.Current.CancellationToken);
+        overlay.TrySave();
+        var result = await task;
+
+        result.Should().NotBeNull();
+        result!.TavilyApiKey.Should().Be("tvly-secret");
+        result.TavilyApiKeyChanged.Should().BeFalse();
+        TuiHostConfigurator.BuildSettingsPatch(result).Should().NotContainKey("webSearchApiKeys.tavily");
+    }
+
+    [Fact]
+    public async Task TrySave_ChangedWebSearchProvider_WritesPatch()
+    {
+        var host = new OverlayHost(() => { });
+        var overlay = CreateOverlay();
+        var task = overlay.ShowAsync(host.Push, () => host.Pop(), TestContext.Current.CancellationToken);
+        overlay.WebSearchProviderField.Value = "tavily";
+        overlay.TrySave();
+        var result = await task;
+
+        var changes = TuiHostConfigurator.BuildSettingsPatch(result!);
+
+        changes["webSearchProvider"].Should().BeEquivalentTo(new ConfigMutation.Set("tavily"));
+    }
+
+    [Fact]
     public void SaveAction_IsVisibleAndDocumentsShortcut()
     {
         var overlay = CreateOverlay();
@@ -173,6 +290,9 @@ public sealed class SettingsOverlayTests
             ApiKeyChanged: false,
             Model: "gpt-5.6",
             FastModel: string.Empty,
+            WebSearchProvider: "duckduckgo",
+            TavilyApiKey: string.Empty,
+            TavilyApiKeyChanged: false,
             ThinkingEnabled: false,
             ShowThinking: false,
             NotificationsEnabled: false,
@@ -188,6 +308,7 @@ public sealed class SettingsOverlayTests
             ["provider"] = "openai",
             ["baseUrl"] = "https://api.example.com",
             ["apiKey"] = "secret",
+            ["webSearchApiKeys.tavily"] = "tvly-secret",
             ["model"] = "gpt-5.6",
             ["fastModel"] = "gpt-5.6-mini",
             ["thinkingEnabled"] = true,

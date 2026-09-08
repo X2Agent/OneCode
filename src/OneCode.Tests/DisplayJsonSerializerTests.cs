@@ -85,4 +85,27 @@ public sealed class DisplayJsonSerializerTests
 
         result.Should().Be("""{"count":3,"ratio":0.5,"ok":true,"empty":null,"list":[1,"two"]}""");
     }
+
+    [Fact]
+    public void NormalizeForDisplay_PairedSurrogateEscapes_CombineToScalar()
+    {
+        // 成对的 \uD83D\uDE00 转义必须合并为合法标量值（😀），不得拆开输出。
+        const string text = "emoji：\\uD83D\\uDE00";
+
+        var result = DisplayJsonSerializer.NormalizeForDisplay(text, writeIndented: false);
+
+        result.Should().Be("emoji：\U0001F600");
+    }
+
+    [Fact]
+    public void NormalizeForDisplay_UnpairedSurrogateEscape_ReplacedNotEmitted()
+    {
+        // 回归：工具结果含不成对 \uD83D 转义时，旧实现原样输出孤立代理项，
+        // 进入 MessageListView 渲染令 Terminal.Gui 抛 ArgumentException 整屏崩溃。
+        const string text = "错误：\\uD83D\\uDE00\\uD83D 加载失败";
+
+        var result = DisplayJsonSerializer.NormalizeForDisplay(text, writeIndented: false);
+
+        result.Should().Be("错误：\U0001F600\uFFFD 加载失败");
+    }
 }

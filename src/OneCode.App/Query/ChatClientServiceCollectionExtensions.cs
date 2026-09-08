@@ -1,15 +1,20 @@
 using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Query;
 using OneCode.Core.Ai;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Ai;
 using CoreConstants = OneCode.Core.Constants;
 
-namespace OneCode.App;
+namespace OneCode.App.Query;
 
-public static partial class ServiceCollectionExtensions
+/// <summary>
+/// ChatClient 领域 DI 注册——与查询实现（<see cref="ChatService"/>）同目录维护；
+/// SDK 特化代码（Anthropic.SDK / OpenAI SDK / 装饰器链）下沉在
+/// <see cref="ChatClientFactory"/>，本文件仅负责 DI 注册。
+/// 由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// </summary>
+public static class ChatClientServiceCollectionExtensions
 {
     /// <summary>
     /// Ollama 不需要认证，apiKey 缺失时用此占位符绕过 ApiKeyCredential 的非空约束。
@@ -21,15 +26,12 @@ public static partial class ServiceCollectionExtensions
     ///
     /// 配置来源和优先级由 <see cref="IConfigManager.Current"/> 统一解析；本注册点只消费有效快照。
     ///
-    /// SDK 特化代码（Anthropic.SDK / OpenAI SDK / 装饰器链）已下沉到
-    /// <see cref="ChatClientFactory"/>，本方法仅负责 DI 注册。
-    ///
     /// apiKey 处理策略：
     ///   - Anthropic / OpenAI：apiKey 为空时注册 <see cref="MissingApiKeyChatClient"/> 哨兵，
     ///     首次调用时抛出可操作错误，避免应用启动即崩溃。
     ///   - Ollama：不需要认证，apiKey 为空时用占位符继续，保证应用正常启动。
     /// </summary>
-    public static IServiceCollection RegisterChatClient(this IServiceCollection services)
+    public static IServiceCollection AddChatClientServices(this IServiceCollection services)
     {
         services.AddChatHttpClients();
 
