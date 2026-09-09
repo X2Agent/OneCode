@@ -231,7 +231,8 @@ public sealed class FindReferencesToolTests : IDisposable
 
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(true);
-        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
+        // rg 以工作区根为运行目录（见计划 §5.4.1），此处模拟返回绝对 searchPath 前缀的结果。
+        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:var x = MySymbol();", "", false));
 
         var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);

@@ -13,7 +13,8 @@ public sealed record TextSearchRequest(
     bool Multiline = false,
     string OutputMode = "content",
     int ContextBefore = 0,
-    int ContextAfter = 0);
+    int ContextAfter = 0,
+    string? WorkspaceRoot = null);
 
 /// <summary>
 /// 文本内容搜索内核——ripgrep 优先，C# Regex 兜底。GrepTool 与 FindReferencesTool 共用，

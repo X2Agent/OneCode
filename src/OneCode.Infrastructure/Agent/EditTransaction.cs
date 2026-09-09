@@ -10,7 +10,6 @@ public sealed class EditTransaction : IDisposable
     private readonly Dictionary<string, byte[]> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _newFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _lastTouchedVersion = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string?> _expectedCurrentHashes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<EditTransaction>? _logger;
     private long _changeVersion;
     private bool _committed;
@@ -76,30 +75,6 @@ public sealed class EditTransaction : IDisposable
         lock (_gate)
             return _lastTouchedVersion
                 .Where(entry => entry.Value > version)
-                .Select(entry => entry.Key)
-                .ToList();
-    }
-
-    /// <summary>
-    /// Captures hashes of the transaction's current file contents immediately before validation.
-    /// A later mismatch indicates a write occurred outside the transaction validation window.
-    /// </summary>
-    public void CaptureValidationBaseline()
-    {
-        lock (_gate)
-        {
-            _expectedCurrentHashes.Clear();
-            foreach (var path in _snapshots.Keys)
-                _expectedCurrentHashes[path] = ComputeCurrentHash(path);
-        }
-    }
-
-    /// <summary>Returns files whose contents changed after <see cref="CaptureValidationBaseline"/>.</summary>
-    public IReadOnlyList<string> GetValidationConflicts()
-    {
-        lock (_gate)
-            return _expectedCurrentHashes
-                .Where(entry => !string.Equals(entry.Value, ComputeCurrentHash(entry.Key), StringComparison.Ordinal))
                 .Select(entry => entry.Key)
                 .ToList();
     }
@@ -171,22 +146,11 @@ public sealed class EditTransaction : IDisposable
     {
         lock (_gate)
         {
-            var conflicts = _expectedCurrentHashes
-                .Where(entry => !string.Equals(entry.Value, ComputeCurrentHash(entry.Key), StringComparison.Ordinal))
-                .Select(entry => entry.Key)
-                .ToList();
-            if (conflicts.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"EditTransaction commit conflict: {string.Join(", ", conflicts)} changed after final validation.");
-            }
-
             _committed = true;
             _logger?.LogInformation("EditTransaction committed: {Count} files", _snapshots.Count);
             _snapshots.Clear();
             _newFiles.Clear();
             _lastTouchedVersion.Clear();
-            _expectedCurrentHashes.Clear();
         }
     }
 
@@ -224,7 +188,6 @@ public sealed class EditTransaction : IDisposable
             _snapshots.Clear();
             _newFiles.Clear();
             _lastTouchedVersion.Clear();
-            _expectedCurrentHashes.Clear();
 
             if (errors > 0)
                 _logger?.LogError("Rollback completed with {Errors} errors", errors);

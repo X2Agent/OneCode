@@ -132,14 +132,6 @@ public static class TeamOrchestrationModeExtensions
         _ => TeamOrchestrationMode.GroupChat,
     };
 
-    /// <summary>序列化回 YAML template 字段名（与 <see cref="FromYamlTemplate"/> 往返一致）。</summary>
-    public static string ToYamlName(this TeamOrchestrationMode mode) => mode switch
-    {
-        TeamOrchestrationMode.Magentic => "magentic-orchestrator",
-        TeamOrchestrationMode.ParallelDag => "parallel-dag",
-        _ => "groupchat",
-    };
-
     /// <summary>TUI / CLI 显示标签。</summary>
     public static string ToLabel(this TeamOrchestrationMode mode) => mode switch
     {

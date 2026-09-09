@@ -104,13 +104,6 @@ public sealed class OverlayHost : View
         return true;
     }
 
-    /// <summary>Close every overlay (e.g. on quit) and complete pending results.</summary>
-    public void PopAll()
-    {
-        while (_stack.Count > 0)
-            CloseTop(OverlayCloseReason.HostShutdown);
-    }
-
     /// <summary>Dispatch an Esc keypress to the topmost overlay.</summary>
     public bool HandleEsc() => CloseTop(OverlayCloseReason.Escape);
 

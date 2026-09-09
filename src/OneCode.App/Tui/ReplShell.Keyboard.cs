@@ -9,12 +9,6 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ReplShell
 {
-    /// <summary>
-    /// Simulates a key reaching the shell's OnKeyDown (bubble from a focused
-    /// non-input view). Tests use this to exercise transcript-nav dispatch.
-    /// </summary>
-    internal bool DispatchShellKey(Key kb) => OnKeyDown(kb);
-
     protected override bool OnKeyDown(Key kb)
     {
         // 输入框持有焦点时，交互键已由 ChatInputView.OnInputKeyPress 处理。

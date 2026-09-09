@@ -209,6 +209,7 @@ public sealed class BashTool
         return null;
     }
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static bool IsSedDangerous(string command) =>
         command.Contains("sed", StringComparison.OrdinalIgnoreCase) &&
         ValidateSedCommand(command) != null;

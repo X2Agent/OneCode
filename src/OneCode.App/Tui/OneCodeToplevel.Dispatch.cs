@@ -187,14 +187,6 @@ public sealed partial class OneCodeToplevel
         }
     }
 
-    private void OnImagePasteRequested()
-    {
-        // Ctrl+V image paste: trigger OSC 52 paste flow.
-        // The actual image data comes via the Submitted event handler (Osc52Detector).
-        // Here we just signal the user to paste.
-        Invoke(() => _shell.Transcript.AddSystem("Paste an image (Ctrl+V in your terminal)..."));
-    }
-
     // Submit dispatch
     //
     // Slash commands are dispatched locally first (CommandRegistry);

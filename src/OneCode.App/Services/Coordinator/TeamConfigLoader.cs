@@ -126,13 +126,6 @@ internal static class TeamConfigLoader
         return config with { Members = members };
     }
 
-    /// <summary>从 YAML 文件加载团队配置。</summary>
-    public static TeamConfig LoadTeamFromYaml(string yamlPath, string teamName)
-    {
-        var template = AgentTemplateConfig.FromYamlFile(yamlPath);
-        return BuildTeamConfigFromTemplate(template, teamName) with { FilePath = yamlPath };
-    }
-
     /// <summary>
     /// 扫描用户团队目录（~/.onecode/teams/），加载所有 team.yaml。
     /// 在应用启动时调用，使 /team list 能显示用户自定义团队。

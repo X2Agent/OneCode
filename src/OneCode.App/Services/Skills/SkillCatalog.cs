@@ -24,9 +24,9 @@ public sealed partial class SkillCatalog(string workingDir)
         }
 
         Add(Path.Combine(AppContext.BaseDirectory, Constants.Subdirs.Skills));
-        foreach (var path in ConfigDirPaths.EnumerateExisting(PathsHelper.UserHome, Constants.Subdirs.Skills))
+        foreach (var path in ConfigDirPaths.EnumerateSkillDirectories(PathsHelper.UserHome))
             Add(path);
-        foreach (var path in ConfigDirPaths.EnumerateExisting(_workingDir, Constants.Subdirs.Skills))
+        foreach (var path in ConfigDirPaths.EnumerateSkillDirectories(_workingDir))
             Add(path);
         return result;
     }
@@ -79,13 +79,16 @@ public sealed partial class SkillCatalog(string workingDir)
 
     private static IEnumerable<string> EnumerateSkillFiles(string dir)
     {
-        foreach (var skillDir in Directory.EnumerateDirectories(dir))
+        foreach (var file in Directory.EnumerateFiles(dir, "*.md")
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            yield return file;
+
+        foreach (var skillDir in Directory.EnumerateDirectories(dir)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             var file = Path.Combine(skillDir, "SKILL.md");
             if (File.Exists(file)) yield return file;
         }
-        foreach (var file in Directory.EnumerateFiles(dir, "*.md"))
-            yield return file;
     }
 
     private static bool TryLoad(string path, string fallbackName, out SkillDocument skill)

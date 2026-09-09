@@ -107,25 +107,6 @@ public sealed class LspDiagnosticRegistry : IDisposable
     }
 
     /// <summary>
-    /// Get diagnostic count for a specific file.
-    /// </summary>
-    public int GetDiagnosticCount(string serverName, string uri)
-    {
-        var key = $"{serverName}:{uri}";
-        return _diagnostics.TryGetValue(key, out var diags) ? diags.Count : 0;
-    }
-
-    /// <summary>
-    /// Clear diagnostics for a specific file.
-    /// </summary>
-    public void ClearDiagnostics(string serverName, string uri)
-    {
-        var key = $"{serverName}:{uri}";
-        _diagnostics.TryRemove(key, out _);
-        _lastUpdated.TryRemove(key, out _);
-    }
-
-    /// <summary>
     /// Clear all diagnostics.
     /// </summary>
     public void ClearAll()
@@ -150,15 +131,6 @@ public sealed class LspDiagnosticRegistry : IDisposable
                 _lastUpdated.TryRemove(kv.Key, out _);
             }
         }
-    }
-
-    /// <summary>
-    /// Get last update time for a file's diagnostics.
-    /// </summary>
-    public DateTimeOffset? GetLastUpdated(string serverName, string uri)
-    {
-        var key = $"{serverName}:{uri}";
-        return _lastUpdated.TryGetValue(key, out var time) ? time : null;
     }
 
     /// <summary>

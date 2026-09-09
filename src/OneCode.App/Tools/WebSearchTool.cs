@@ -352,6 +352,7 @@ public sealed partial class WebSearchTool
     ///   <item>用 <see cref="NormalizeWhitespace"/> 压缩连续空白为单个空格</item>
     /// </list>
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     private static string CleanHtmlText(string text)
     {
         if (string.IsNullOrEmpty(text))

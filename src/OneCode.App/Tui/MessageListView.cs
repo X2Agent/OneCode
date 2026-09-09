@@ -141,27 +141,6 @@ public sealed partial class MessageListView : View
         SetNeedsDraw();
     }
 
-    public void UpdateLastLines(IEnumerable<FormattedLine> lines)
-    {
-        var updates = lines.ToList();
-        if (updates.Count == 0) return;
-
-        if (_lines.Count >= updates.Count)
-        {
-            var startIdx = _lines.Count - updates.Count;
-            for (var i = 0; i < updates.Count; i++)
-                _lines[startIdx + i] = new LineEntry(updates[i].FullText, updates[i].Color, updates[i].Segments, updates[i].Bg, updates[i].Tag);
-        }
-        else
-        {
-            _lines.Clear();
-            _lines.AddRange(updates.Select(l => new LineEntry(l.FullText, l.Color, l.Segments, l.Bg, l.Tag)));
-        }
-
-        _scroll.RequestScrollToBottomIfAutoScroll();
-        SetNeedsDraw();
-    }
-
     /// <summary>
     /// Removes the last <paramref name="removeCount"/> lines (the current streaming preview),
     /// then appends <paramref name="addLines"/>. Used to replace in-flight streaming lines
@@ -259,6 +238,7 @@ public sealed partial class MessageListView : View
         SetNeedsDraw();
     }
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     internal bool TryToggleExpansionAt(int lineIdx)
     {
         if (lineIdx < 0 || lineIdx >= _lines.Count)

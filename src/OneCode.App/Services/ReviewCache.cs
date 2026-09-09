@@ -57,6 +57,7 @@ public sealed class ReviewCache
     /// <summary>
     /// 检查 commit 是否已审查。
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public bool IsReviewed(string commitHash)
     {
         return _reviewed.ContainsKey(commitHash);

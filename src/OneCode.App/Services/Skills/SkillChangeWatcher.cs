@@ -108,56 +108,6 @@ public sealed class SkillChangeWatcher : BackgroundService
         _changeChannel.Writer.TryWrite(path);
     }
 
-    /// <summary>
-    /// Dynamically discovers and watches <c>.onecode/skills</c> directories
-    /// under the given base paths. Call this after file-tool operations that may
-    /// have created new skill directories (e.g., project clone, init, unzip).
-    /// New watchers are added without disrupting existing ones.
-    /// </summary>
-    public void DiscoverAndWatchSkillDirs(IEnumerable<string> basePaths)
-    {
-        bool anyNew = false;
-        foreach (var basePath in basePaths)
-        {
-            // Scan all candidate dir names (.onecode/.agent/.claude) under each base path.
-            foreach (var candidateDir in ConfigDirPaths.EnumerateExisting(basePath, Constants.Subdirs.Skills))
-            {
-                var realDir = Path.GetFullPath(candidateDir);
-                if (_watchers.Any(w => string.Equals(
-                        Path.GetFullPath(w.Path), realDir, StringComparison.OrdinalIgnoreCase)))
-                    continue;  // already watched
-
-                try
-                {
-                    var w = new FileSystemWatcher(realDir)
-                    {
-                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.DirectoryName,
-                        Filter = "*",
-                        IncludeSubdirectories = true,
-                        EnableRaisingEvents = true,
-                    };
-                    void Enqueue(object _, FileSystemEventArgs e) => EnqueueChange(e.FullPath);
-                    void EnqueueRename(object _, RenamedEventArgs e) => EnqueueChange(e.FullPath);
-                    w.Changed += Enqueue;
-                    w.Created += Enqueue;
-                    w.Deleted += Enqueue;
-                    w.Renamed += EnqueueRename;
-                    _watchers.Add(w);
-                    anyNew = true;
-                    _logger.LogInformation("DiscoverAndWatch — now watching {Dir}", realDir);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Cannot watch newly discovered skill dir: {Dir}", realDir);
-                }
-            }
-        }
-
-        // Trigger a provider rebuild if new directories were found
-        if (anyNew)
-            _changeChannel.Writer.TryWrite("[dynamic-discovery]");
-    }
-
     private async Task ProcessChangesAsync(CancellationToken ct)
     {
         var reader = _changeChannel.Reader;

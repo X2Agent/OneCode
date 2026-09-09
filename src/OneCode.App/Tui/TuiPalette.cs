@@ -185,33 +185,4 @@ internal static class TuiPalette
             _ => AgentPurple,
         };
     }
-
-    /// <summary>
-    /// 把 CSS 颜色名（"red"/"green"/"blue"/"yellow"/"magenta"/"cyan"/"white"/"gray" 等）
-    /// 解析成 <see cref="Color"/>。解析失败返回 <c>null</c>。
-    /// </summary>
-    public static Color? FromCssName(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return null;
-        return name.Trim().ToLowerInvariant() switch
-        {
-            "red" => Color.Red,
-            "brightred" => Color.BrightRed,
-            "green" => Color.Green,
-            "brightgreen" => Color.BrightGreen,
-            "yellow" => Color.Yellow,
-            "brightyellow" => Color.BrightYellow,
-            "blue" => Color.Blue,
-            "brightblue" => Color.BrightBlue,
-            "cyan" => Color.Cyan,
-            "brightcyan" => Color.BrightCyan,
-            "magenta" => Color.Magenta,
-            "brightmagenta" => Color.BrightMagenta,
-            "white" => Color.White,
-            "gray" or "grey" => Color.Gray,
-            "darkgray" or "darkgrey" => Color.DarkGray,
-            "black" => Color.Black,
-            _ => null,
-        };
-    }
 }

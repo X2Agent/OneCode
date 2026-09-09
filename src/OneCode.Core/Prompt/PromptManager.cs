@@ -18,6 +18,7 @@ public sealed class PromptManager : IPromptManager
         return this;
     }
 
+    // 仅单元测试使用：生产代码经文件加载模板（测试接缝）。
     public PromptManager RegisterTemplate(PromptTemplate template)
     {
         ArgumentNullException.ThrowIfNull(template);

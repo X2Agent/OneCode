@@ -30,11 +30,6 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
     public LocalShellExecutor? TryGet(SessionId conversationId) =>
         _executors.TryGetValue(conversationId, out var executor) ? executor : null;
 
-    public LocalShellExecutor? TryGetForeground(SessionManager sessionManager) =>
-        sessionManager.ForegroundConversation is { } conv
-            ? TryGet(conv.Id)
-            : null;
-
     public async Task<ShellResult> ExecuteAsync(
         SessionId conversationId,
         string workingDirectory,

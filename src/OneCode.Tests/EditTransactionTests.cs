@@ -77,30 +77,6 @@ public sealed class EditTransactionTests
     }
 
     [Fact]
-    public async Task Commit_WhenFileChangesAfterValidationBaseline_ThrowsConflict()
-    {
-        var tempDir = CreateTempDir();
-        try
-        {
-            var path = Path.Combine(tempDir, "file.txt");
-            await File.WriteAllTextAsync(path, "original", TestContext.Current.CancellationToken);
-            using var transaction = new EditTransaction();
-            transaction.Snapshot(path);
-            await File.WriteAllTextAsync(path, "validated", TestContext.Current.CancellationToken);
-            transaction.CaptureValidationBaseline();
-
-            await File.WriteAllTextAsync(path, "external", TestContext.Current.CancellationToken);
-
-            var act = () => transaction.Commit();
-            act.Should().Throw<InvalidOperationException>().WithMessage("*commit conflict*");
-        }
-        finally
-        {
-            SafeDeleteDir(tempDir);
-        }
-    }
-
-    [Fact]
     public async Task PreserveForManualReconciliation_DoesNotRestoreStaleSnapshot()
     {
         var tempDir = CreateTempDir();

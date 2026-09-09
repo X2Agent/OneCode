@@ -105,6 +105,7 @@ public static partial class ChatBlockRenderers
         return FitToWidth([FormattedLine.Plain(text, color)], viewWidth);
     }
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static IReadOnlyList<FormattedLine> RenderAgentMessage(string agentName, string? agentColor, string content,
         DateTimeOffset? timestamp = null, int viewWidth = 80)
     {

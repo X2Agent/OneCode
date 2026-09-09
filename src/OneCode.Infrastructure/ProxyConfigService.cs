@@ -160,20 +160,4 @@ public static class ProxyConfigService
         // Apply mTLS (preserves existing behavior)
         MtlsHelper.ApplyToHandler(handler);
     }
-
-    /// <summary>
-    /// Get the proxy URL for WebSocket connections (same as HTTP proxy).
-    /// Returns null if no proxy or URL should bypass.
-    /// </summary>
-    public static string? GetWebSocketProxyUrl(string urlString)
-    {
-        var proxyUrl = GetProxyUrl();
-        if (string.IsNullOrWhiteSpace(proxyUrl))
-            return null;
-
-        if (ShouldBypassProxy(urlString))
-            return null;
-
-        return proxyUrl;
-    }
 }

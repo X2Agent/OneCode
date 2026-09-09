@@ -35,7 +35,4 @@ public static class MemdirPaths
 
     public static string ProjectMemoryDir(string workingDirectory) =>
         Path.Combine(ProjectConfigDir(workingDirectory), MemoryDirName);
-
-    public static string ProjectEntrypointFile(string workingDirectory) =>
-        Path.Combine(ProjectMemoryDir(workingDirectory), EntrypointFileName);
 }

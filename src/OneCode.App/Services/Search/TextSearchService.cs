@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileSystemGlobbing;
+using OneCode.App.Tools;
 using OneCode.Core.IO;
 
 namespace OneCode.App.Services.Search;
@@ -10,8 +11,14 @@ namespace OneCode.App.Services.Search;
 public sealed class TextSearchService(
     IProcessRunner processRunner,
     IFileSystem fileSystem,
-    ILogger<TextSearchService> logger) : ITextSearchService
+    ILogger<TextSearchService> logger,
+    IWorkspaceIgnoreProvider? ignoreProvider = null) : ITextSearchService
 {
+    /// <summary>
+    /// 底层文件枚举默认排除目录（复用 <see cref="FileIgnore.Folders"/>），
+    /// 涵盖 .NET、Node、Rust、Python、Java、Go 等多语言构建与缓存产物。
+    /// </summary>
+    private static readonly string[] DefaultExcludes = [.. FileIgnore.Folders];
     public async Task<IReadOnlyList<string>> SearchAsync(TextSearchRequest request, CancellationToken ct = default)
     {
         var contextBefore = request.ContextBefore;
@@ -23,15 +30,49 @@ public sealed class TextSearchService(
             contextAfter = 0;
         }
 
+        var ignore = ignoreProvider is null
+            ? new WorkspaceIgnoreSnapshot(null, [], [])
+            : await ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
         return await processRunner.CommandExistsAsync("rg").ConfigureAwait(false)
-            ? await SearchRipgrepAsync(request, contextBefore, contextAfter, ct).ConfigureAwait(false)
-            : await SearchNativeAsync(request, contextBefore, contextAfter, ct).ConfigureAwait(false);
+            ? await SearchRipgrepAsync(request, ignore, contextBefore, contextAfter, ct).ConfigureAwait(false)
+            : await SearchNativeAsync(request, ignore, contextBefore, contextAfter, ct).ConfigureAwait(false);
     }
 
     private async Task<List<string>> SearchRipgrepAsync(
-        TextSearchRequest request, int contextBefore, int contextAfter, CancellationToken ct)
+        TextSearchRequest request, WorkspaceIgnoreSnapshot ignore,
+        int contextBefore, int contextAfter, CancellationToken ct)
     {
-        var args = new List<string> { "--hidden", "--glob", "!.git", "--glob", "!.svn", "--glob", "!node_modules", "--max-columns", "500" };
+        var workspaceRoot = request.WorkspaceRoot ?? request.SearchPath;
+        var args = new List<string>
+        {
+            "--hidden",
+            "--no-ignore",                    // 关闭 rg 原生 .gitignore/.ignore/.rgignore 读取，避免第三套语义
+            "--ignore-file-case-insensitive", // 与 C# fallback 的 OrdinalIgnoreCase 匹配对齐
+            "--glob-case-insensitive",        // 与 FileIgnore 的大小写不敏感匹配对齐
+            "--max-columns", "500",
+        };
+
+        // 内置排除规则由 OneCode 统一生成 rg glob 参数（与 FileIgnore / C# fallback 同一份清单），
+        // 不依赖 rg 自身的 ignore 文件解析——两条搜索路径对同一规则必须给出相同结果。
+        foreach (var dir in FileIgnore.Folders)
+        {
+            // 三个互补形态，与 fallback 判定（FileIgnore.IsIgnored 的段匹配 + FilePatterns glob）对齐：
+            // ① 任意层级下该目录的**内容**；② 根级目录的内容；③ 目录条目本身——
+            // 段匹配还会把"与目录同名的文件"排除（如 `ls out` 命中文件 `out`），rg 路径同样需要。
+            args.Add("--glob"); args.Add($"!{dir}/**");
+            args.Add("--glob"); args.Add($"!**/{dir}/**");
+            args.Add("--glob"); args.Add($"!{dir}");
+        }
+        foreach (var pattern in FileIgnore.FilePatterns)
+        { args.Add("--glob"); args.Add($"!{pattern}"); }
+
+        if (ignore.Path is not null)
+        {
+            // rg 以工作区根为运行目录，`--ignore-file` 的 `/foo` 根锚定与 `**/` 语义
+            // 与 fallback 判定器（工作区根相对路径）对齐。
+            args.Add("--ignore-file");
+            args.Add(ignore.Path);
+        }
         if (request.CaseInsensitive) args.Add("-i");
         if (request.Multiline) args.Add("--multiline");
         switch (request.OutputMode)
@@ -39,6 +80,9 @@ public sealed class TextSearchService(
             case "files_with_matches": args.Add("-l"); break;
             case "count": args.Add("-c"); break;
             default:
+                // content 模式：必须强制输出文件名和行号（重定向 stdout 与单文件搜索场景默认不输出）
+                args.Add("-n");
+                args.Add("-H");
                 if (contextBefore > 0 && contextAfter > 0 && contextBefore == contextAfter)
                 { args.Add("--context"); args.Add(contextBefore.ToString(CultureInfo.InvariantCulture)); }
                 else
@@ -62,7 +106,9 @@ public sealed class TextSearchService(
             { args.Add("--glob"); args.Add($"!{eg}"); }
         }
 
-        var result = await processRunner.ExecuteAsync("rg", args.ToArray(), request.SearchPath, ct: ct);
+        args.Add(request.SearchPath);
+
+        var result = await processRunner.ExecuteAsync("rg", args.ToArray(), workspaceRoot, ct: ct);
         if (result == null)
             return [];
 
@@ -76,12 +122,78 @@ public sealed class TextSearchService(
         }
 
         var lines = result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var prefix = request.SearchPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return lines.Select(l => l.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? l[prefix.Length..] : l).ToList();
+        return lines.Select(line => NormalizeRgPath(line, request.SearchPath, workspaceRoot)).ToList();
+    }
+
+    /// <summary>
+    /// rg 输出路径以进程运行目录（工作区根）为基准；换算为相对 <paramref name="searchPath"/>，
+    /// 使 ripgrep 路径的显示结果与 C# fallback（<see cref="GetRelativePath"/> 相对 searchPath）一致。
+    /// rg 在 Windows 输出反斜杠分隔符，因此两侧统一归一化为正斜杠后再比较前缀。
+    /// </summary>
+    private static string NormalizeRgPath(string line, string searchPath, string workspaceRoot)
+    {
+        if (string.IsNullOrEmpty(line)) return line;
+        var sep = Path.DirectorySeparatorChar;
+
+        // 若 searchPath 是具体文件，剥掉其父目录前缀，保留单文件名称
+        if (File.Exists(searchPath))
+        {
+            var dir = Path.GetDirectoryName(searchPath);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                var dirPrefix = dir.TrimEnd(sep, '/', '\\') + sep;
+                if (line.StartsWith(dirPrefix, StringComparison.OrdinalIgnoreCase))
+                    return line[dirPrefix.Length..];
+                var dirSlashPrefix = dir.Replace('\\', '/').TrimEnd('/') + "/";
+                if (line.Replace('\\', '/').StartsWith(dirSlashPrefix, StringComparison.OrdinalIgnoreCase))
+                    return line[dirSlashPrefix.Length..];
+
+                try
+                {
+                    var relDir = Path.GetRelativePath(workspaceRoot, dir).Replace('\\', '/');
+                    if (relDir != ".")
+                    {
+                        var relPrefix = relDir.TrimEnd('/') + "/";
+                        var normalisedLine = line.Replace('\\', '/');
+                        if (normalisedLine.StartsWith(relPrefix, StringComparison.OrdinalIgnoreCase))
+                            return normalisedLine[relPrefix.Length..];
+                    }
+                }
+                catch (Exception) { /* 跨盘符等异常场景保留原样 */ }
+            }
+            return line;
+        }
+
+        // rg 输出绝对路径的场景（如搜索目标是显式文件）：剥掉 searchPath 前缀（双分隔符兼容）。
+        var absPrefix = searchPath.TrimEnd(sep, '/', '\\') + sep;
+        if (line.StartsWith(absPrefix, StringComparison.OrdinalIgnoreCase))
+            return line[absPrefix.Length..];
+        var absSlashPrefix = searchPath.Replace('\\', '/').TrimEnd('/') + "/";
+        if (line.Replace('\\', '/').StartsWith(absSlashPrefix, StringComparison.OrdinalIgnoreCase))
+            return line[absSlashPrefix.Length..];
+
+        try
+        {
+            var relBase = Path.GetRelativePath(workspaceRoot, searchPath).Replace('\\', '/');
+            if (relBase != ".")
+            {
+                var relPrefix = relBase.TrimEnd('/') + "/";
+                // line 与前缀均归一化为 `/` 后比较：修复 Windows 下 rg 输出 `src\...` 无法匹配 `src/` 前缀的问题。
+                var normalisedLine = line.Replace('\\', '/');
+                if (normalisedLine.StartsWith(relPrefix, StringComparison.OrdinalIgnoreCase))
+                    return normalisedLine[relPrefix.Length..];
+            }
+        }
+        catch (Exception)
+        {
+            // 跨盘符等无法计算相对路径的场景：保留 rg 原样输出。
+        }
+        return line;
     }
 
     private async Task<List<string>> SearchNativeAsync(
-        TextSearchRequest request, int contextBefore, int contextAfter, CancellationToken ct)
+        TextSearchRequest request, WorkspaceIgnoreSnapshot ignore,
+        int contextBefore, int contextAfter, CancellationToken ct)
     {
         List<string> results = [];
         var regexOptions = request.CaseInsensitive ? RegexOptions.IgnoreCase | RegexOptions.Compiled : RegexOptions.Compiled;
@@ -94,8 +206,24 @@ public sealed class TextSearchService(
             ? []
             : request.ExcludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var defaultExcludes = new[] { ".git", ".svn", "node_modules", "bin", "obj" };
-        var files = fileSystem.FindFiles(request.SearchPath, request.Glob, defaultExcludes);
+        var workspaceRoot = request.WorkspaceRoot ?? request.SearchPath;
+        List<string> files;
+        var isSingleFile = File.Exists(request.SearchPath);
+
+        if (isSingleFile)
+        {
+            // 单文件搜索：直接检查 ignore 规则，无需且不能调用 FindFiles 目录枚举
+            var relToWs = GetRelativePath(request.SearchPath, workspaceRoot);
+            if (ignore.IsIgnored(relToWs))
+                return [];
+            files = [request.SearchPath];
+        }
+        else
+        {
+            files = fileSystem.FindFiles(request.SearchPath, request.Glob, DefaultExcludes)
+                .Where(file => !ignore.IsIgnored(GetRelativePath(file, workspaceRoot)))
+                .ToList();
+        }
 
         if (excludePatterns.Length > 0)
         {
@@ -106,11 +234,15 @@ public sealed class TextSearchService(
             }).ToList();
         }
 
+        var baseDirForRelPath = isSingleFile
+            ? (Path.GetDirectoryName(request.SearchPath) ?? request.SearchPath)
+            : request.SearchPath;
+
         foreach (var file in files)
         {
             try
             {
-                var relativePath = GetRelativePath(file, request.SearchPath);
+                var relativePath = GetRelativePath(file, baseDirForRelPath);
                 if (request.Multiline)
                 {
                     results.AddRange(await SearchNativeMultilineAsync(file, relativePath, regex, request.OutputMode, ct).ConfigureAwait(false));

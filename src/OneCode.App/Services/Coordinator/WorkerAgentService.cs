@@ -98,14 +98,4 @@ public sealed class WorkerAgentService(
             throw;
         }
     }
-
-    public async Task<AgentRunResult> RunWorkerAsync(
-        string prompt,
-        string agentName,
-        string? workingDirectory = null,
-        CancellationToken ct = default)
-        => await RunAsync(new AgentRunRequest(
-            Prompt: prompt,
-            Agent: agentName,
-            Description: agentName), ct).ConfigureAwait(false);
 }

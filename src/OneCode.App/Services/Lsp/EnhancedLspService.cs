@@ -30,19 +30,6 @@ public sealed class EnhancedLspService : IEnhancedLspService, IAsyncDisposable
     public Task<bool> StopServerAsync(string name, CancellationToken ct = default) =>
         _serverManager.StopServerAsync(name, ct);
 
-    public async Task<string?> GetCompletionsAsync(
-        string serverName, string filePath, int line, int column, CancellationToken ct = default)
-    {
-        var parameters = JsonSerializer.Serialize(new
-        {
-            textDocument = new { uri = LspUriHelper.BuildFileUri(filePath) },
-            position = new { line, character = column },
-        });
-
-        var result = await _serverManager.SendRequestAsync(serverName, "textDocument/completion", ParseJson(parameters), ct).ConfigureAwait(false);
-        return result?.GetRawText();
-    }
-
     public async Task<string?> GetDefinitionAsync(
         string serverName, string filePath, int line, int column, CancellationToken ct = default)
     {
@@ -249,8 +236,6 @@ public sealed class EnhancedLspService : IEnhancedLspService, IAsyncDisposable
             _ => "plaintext"
         };
     }
-
-    public IReadOnlyList<LspServerStatus> GetServerStatus() => _serverManager.GetStatus();
 
     /// <summary>是否有任何 LSP 服务器处于运行中。诊断等待的短路依据：无服务器时永远等不到新诊断。</summary>
     public bool HasRunningServer => _serverManager.GetStatus().Any(s => s.IsRunning);

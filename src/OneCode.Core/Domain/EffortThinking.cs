@@ -48,6 +48,7 @@ public static class EffortThinking
         return maxAllowed.HasValue ? Math.Min(budget, maxAllowed.Value) : budget;
     }
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static bool ShouldEnableThinking(ThinkingMode mode, EffortLevel effort)
     {
         return mode switch

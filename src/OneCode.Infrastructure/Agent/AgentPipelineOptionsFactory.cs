@@ -133,6 +133,7 @@ public static class AgentPipelineOptionsFactory
     /// <summary>
     /// 为 Worker 角色创建标准 pipeline options（便捷重载）。
     /// </summary>
+    // 仅单元测试使用：生产代码经 DI 工厂构建（测试接缝）。
     public static AgentPipelineOptions CreateForWorker(
         PipelineSecurityContext ctx,
         int maxToolCalls,

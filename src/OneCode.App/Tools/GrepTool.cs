@@ -48,7 +48,7 @@ public sealed class GrepTool
         var workingDir = _wd.WorkingDirectory;
         var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
         if (!resolveResult.IsSuccess)
-            return ToolResult.Error(resolveResult.Error);
+            return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
         var searchPath = resolveResult.Value;
 
         if (!Directory.Exists(searchPath) && !File.Exists(searchPath))
@@ -66,7 +66,8 @@ public sealed class GrepTool
                 Multiline: multiline,
                 OutputMode: om,
                 ContextBefore: contextSymmetric ?? (B ?? 0),
-                ContextAfter: contextSymmetric ?? (A ?? 0));
+                ContextAfter: contextSymmetric ?? (A ?? 0),
+                WorkspaceRoot: workingDir);
 
             results = [.. await _textSearch.SearchAsync(request, ct).ConfigureAwait(false)];
         }

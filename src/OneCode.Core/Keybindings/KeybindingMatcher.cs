@@ -111,6 +111,7 @@ public static class KeybindingMatcher
     /// 检查 IKeyInput 是否匹配某个绑定条目的第一个按键。
     /// 仅用于单按键绑定。
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static bool MatchesBinding(IKeyInput keyInput, KeybindingEntry binding)
     {
         if (binding.Chord.Length != 1) return false;

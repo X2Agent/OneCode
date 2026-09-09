@@ -11,8 +11,6 @@ public sealed partial class ChatTranscriptView : View
 
     private int _inputTokens;
     private int _outputTokens;
-    private int _turnNumber;
-    private int _toolCount;
 
     // Stored welcome info so we can re-render on resize (centering depends on width).
     private WelcomeInfo? _welcomeInfo;
@@ -77,8 +75,6 @@ public sealed partial class ChatTranscriptView : View
         _stream.Clear();
         _inputTokens = 0;
         _outputTokens = 0;
-        _turnNumber = 0;
-        _toolCount = 0;
         _isWelcomeShowing = false;
         _messageView.Clear();
         _committedJournal.Clear();
@@ -318,9 +314,6 @@ public sealed partial class ChatTranscriptView : View
 
     public (int InputTokens, int OutputTokens) GetTokenUsage()
         => (_inputTokens, _outputTokens);
-
-    public int GetTurnNumber() => _turnNumber;
-    public int GetToolCount() => _toolCount;
 
     public void NotifyLayoutChanged()
     {

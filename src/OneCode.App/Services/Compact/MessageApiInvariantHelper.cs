@@ -4,9 +4,6 @@ namespace OneCode.App.Services.Compact;
 
 public static partial class MessageApiInvariantHelper
 {
-    public static int AdjustIndexToPreserveApiInvariants(IReadOnlyList<Message> messages, int startIndex)
-        => AdjustRangeToAtomicBoundaries(messages, startIndex, messages.Count).FromIndex;
-
     /// <summary>
     /// Expands a half-open range so neither boundary cuts through an assistant tool-call
     /// message and its complete ordered result set. Non-tool messages are single-message groups.
@@ -60,35 +57,7 @@ public static partial class MessageApiInvariantHelper
         return groups;
     }
 
-    public static IEnumerable<string> GetToolResultIds(Message message)
-    {
-        if (message is ToolResultMessage trm)
-        {
-            return new[] { trm.ToolUseId };
-        }
-        return Enumerable.Empty<string>();
-    }
-
-    public static bool IsToolResultMessage(ChatMessage msg)
-    {
-        return msg.Role == ChatRole.User
-            && msg.Contents.OfType<FunctionResultContent>().Any();
-    }
-
-    public static string GetToolResultCallId(ChatMessage msg)
-    {
-        var fr = msg.Contents.OfType<FunctionResultContent>().FirstOrDefault();
-        if (fr is not null && !string.IsNullOrEmpty(fr.CallId))
-            return fr.CallId;
-
-        if (msg.AdditionalProperties is { } props
-            && props.TryGetValue("tool_call_id", out var id)
-            && id is string callId)
-            return callId;
-
-        return string.Empty;
-    }
-
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static IReadOnlyList<ChatMessage> NormalizeForToolCallingTransport(IEnumerable<ChatMessage> messages)
     {
         List<ChatMessage> normalized = [];
@@ -128,115 +97,4 @@ public static partial class MessageApiInvariantHelper
         return normalized;
     }
 
-    /// <summary>
-    /// Validates that tool_use → tool_result pairings are consistent across the message list.
-    /// Returns a list of orphaned tool_result IDs (referencing non-existent tool_use blocks)
-    /// that would cause HTTP 400 from the Anthropic API.
-    /// </summary>
-    public static IReadOnlyList<string> FindOrphanedToolResults(IReadOnlyList<ChatMessage> messages)
-    {
-        List<string> orphans = [];
-        var availableToolUseIds = new HashSet<string>();
-
-        for (var i = 0; i < messages.Count; i++)
-        {
-            var msg = messages[i];
-
-            if (msg.Role == ChatRole.Assistant)
-            {
-                foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
-                {
-                    if (!string.IsNullOrEmpty(fc.CallId))
-                        availableToolUseIds.Add(fc.CallId);
-                }
-            }
-
-            if (msg.Role == ChatRole.User)
-            {
-                foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
-                {
-                    if (!string.IsNullOrEmpty(fr.CallId) && !availableToolUseIds.Contains(fr.CallId))
-                        orphans.Add(fr.CallId);
-                }
-            }
-        }
-
-        return orphans;
-    }
-
-    public static IReadOnlyList<string> FindOrphanedToolUses(IReadOnlyList<ChatMessage> messages)
-    {
-        List<string> orphans = [];
-        var toolUseIds = new HashSet<string>();
-        var toolResultIds = new HashSet<string>();
-
-        foreach (var msg in messages)
-        {
-            if (msg.Role == ChatRole.Assistant)
-            {
-                foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
-                {
-                    if (!string.IsNullOrEmpty(fc.CallId))
-                        toolUseIds.Add(fc.CallId);
-                }
-            }
-
-            if (msg.Role == ChatRole.User)
-            {
-                foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
-                {
-                    if (!string.IsNullOrEmpty(fr.CallId))
-                        toolResultIds.Add(fr.CallId);
-                }
-            }
-        }
-
-        foreach (var id in toolUseIds)
-        {
-            if (!toolResultIds.Contains(id))
-                orphans.Add(id);
-        }
-
-        return orphans;
-    }
-
-    public static IReadOnlyList<ChatMessage> RemoveOrphanedToolUses(
-        IReadOnlyList<ChatMessage> messages, IReadOnlyList<string> orphanedIds)
-    {
-        if (orphanedIds.Count == 0)
-            return messages;
-
-        var orphanSet = new HashSet<string>(orphanedIds, StringComparer.Ordinal);
-        var result = new List<ChatMessage>(messages.Count);
-
-        foreach (var msg in messages)
-        {
-            if (msg.Role == ChatRole.Assistant)
-            {
-                var hasOrphan = msg.Contents
-                    .OfType<FunctionCallContent>()
-                    .Any(fc => orphanSet.Contains(fc.CallId));
-
-                if (hasOrphan)
-                {
-                    var filtered = msg.Contents.Where(c =>
-                        c is not FunctionCallContent fc || !orphanSet.Contains(fc.CallId)).ToList();
-
-                    if (filtered.Count == 0)
-                        continue;
-
-                    result.Add(new ChatMessage(msg.Role, filtered)
-                    {
-                        AdditionalProperties = msg.AdditionalProperties,
-                        AuthorName = msg.AuthorName,
-                    });
-                    continue;
-                }
-            }
-
-            result.Add(msg);
-        }
-
-        return result;
-    }
 }

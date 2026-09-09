@@ -34,13 +34,6 @@ public sealed class LanguagePackRegistry(ILogger<LanguagePackRegistry> logger)
         LoadUserPacks();
     }
 
-    /// <summary>Register or replace a language pack.</summary>
-    public void RegisterPack(LanguagePack pack)
-    {
-        EnsureInitialized();
-        RegisterPackInternal(pack);
-    }
-
     private void RegisterPackInternal(LanguagePack pack)
     {
         _packs[pack.Id] = pack;

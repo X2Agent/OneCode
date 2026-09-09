@@ -89,7 +89,20 @@ public static class FileIgnore
     ];
 
     /// <summary>
+    /// 热路径共享的内置文件 glob 判定器（无 extraPatterns/whitelist 的默认形态）。
+    /// <see cref="Matcher"/> 构建后只读使用，复用单例避免逐文件重复分配。
+    /// </summary>
+    private static readonly Lazy<Matcher> DefaultFileMatcher = new(() =>
+    {
+        var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+        foreach (var p in FilePatterns)
+            matcher.AddInclude(p);
+        return matcher;
+    });
+
+    /// <summary>
     /// Returns <see langword="true"/> when <paramref name="relativePath"/> should be ignored.
+    /// 生产调用方：<see cref="WorkspaceIgnoreSnapshot.IsIgnored"/>（内置规则优先判定）。
     /// </summary>
     /// <param name="relativePath">
     /// Relative path (using either slash direction) from the search root.
@@ -122,13 +135,14 @@ public static class FileIgnore
                 return true;
         }
 
-        // Check file glob patterns.
-        var allPatterns = extraPatterns is null
-            ? FilePatterns
-            : [.. FilePatterns, .. extraPatterns];
+        // Check file glob patterns. 默认形态复用静态单例，避免热路径逐文件重复构建 Matcher。
+        if (extraPatterns is null)
+            return DefaultFileMatcher.Value.Match(relativePath).HasMatches;
 
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-        foreach (var p in allPatterns)
+        foreach (var p in FilePatterns)
+            matcher.AddInclude(p);
+        foreach (var p in extraPatterns)
             matcher.AddInclude(p);
 
         return matcher.Match(relativePath).HasMatches;

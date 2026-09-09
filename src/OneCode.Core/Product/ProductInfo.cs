@@ -23,6 +23,4 @@ public sealed record ProductRepo
     public string IssuesUrl => $"{Url}/issues";
     public string LatestReleaseApiUrl =>
         $"https://api.github.com/repos/{Owner}/{Name}/releases/latest";
-    public string RawContentUrl(string branch, string path) =>
-        $"https://raw.githubusercontent.com/{Owner}/{Name}/{branch}/{path}";
 }

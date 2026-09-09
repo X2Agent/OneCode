@@ -1,5 +1,6 @@
 using NSubstitute;
 using OneCode.App.Tools;
+using OneCode.Core.IO;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;
@@ -192,6 +193,77 @@ public sealed class GlobToolTests : IDisposable
         result.Content.Should().Contain("real.cs");
         result.Content.Should().NotContain("generated.cs");
         result.Content.Should().NotContain("compiled.cs");
+    }
+
+    [Fact]
+    public async Task GlobAsync_UserIgnoreFile_ExcludesMatchingPaths()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile("src/keep.cs");
+        WriteFile("cache/drop.cs");
+        WriteFile("src/data/local.sqlite");
+        WriteFile(".env.local");
+
+        File.WriteAllText(Path.Combine(_projectDir, ".onecodeignore"), "cache/\n*.sqlite\n.env.*");
+
+        var wd = CreateWd();
+        var fileSystem = Substitute.For<IFileSystem>();
+        fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
+        {
+            var path = call.Arg<string>();
+            return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
+        });
+        fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var path = call.Arg<string>();
+                return File.Exists(path)
+                    ? Task.FromResult<string?>(File.ReadAllText(path))
+                    : Task.FromResult<string?>(null);
+            });
+        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd, fileSystem));
+
+        var result = await tool.GlobAsync("**/*", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("keep.cs");
+        result.Content.Should().NotContain("drop.cs");        // 目录规则 cache/
+        result.Content.Should().NotContain("local.sqlite");   // 文件规则 *.sqlite
+        result.Content.Should().NotContain(".env.local");     // 点文件规则 .env.*
+    }
+
+    [Fact]
+    public async Task GlobAsync_UserIgnoreFile_RootAnchoredRulesRespectedFromSubdirectorySearch()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile("src/keep.cs");
+        WriteFile("src/generated/artifact.cs");   // 子目录同名目录：不应被根锚定规则误伤
+        WriteFile("generated/artifact.cs");       // 根级目录：应被 `/generated/` 命中
+
+        File.WriteAllText(Path.Combine(_projectDir, ".onecodeignore"), "/generated/\n");
+
+        var wd = CreateWd();
+        var fileSystem = Substitute.For<IFileSystem>();
+        fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
+        {
+            var path = call.Arg<string>();
+            return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
+        });
+        fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var path = call.Arg<string>();
+                return File.Exists(path)
+                    ? Task.FromResult<string?>(File.ReadAllText(path))
+                    : Task.FromResult<string?>(null);
+            });
+        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd, fileSystem));
+
+        var result = await tool.GlobAsync("**/*.cs", path: "src", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("keep.cs");
+        result.Content.Should().Contain("artifact.cs");  // `src/generated/` 不受根锚定规则影响；未修复时 matcher 返回的 src 相对路径会被误判为根级 `/generated/`
     }
 
     [Fact]

@@ -359,30 +359,4 @@ public partial class MainAgentRunner : IMainAgentRunner
 
         return messages;
     }
-
-    /// <summary>
-    /// 从 <see cref="UsageDetails.AdditionalCounts"/> 中提取缓存写 token
-    /// （Anthropic 的 cache_creation_input_tokens）。
-    /// 与 UsageTrackingRunMiddleware.BuildUsageRecord 和 ChatService.ExtractAdditionalCount 逻辑一致。
-    /// </summary>
-    private static long ExtractCacheWriteTokens(UsageDetails? usage)
-    {
-        if (usage?.AdditionalCounts is null) return 0;
-
-        foreach (var key in s_cacheWriteKeys)
-        {
-            if (usage.AdditionalCounts.TryGetValue(key, out var value))
-                return value;
-        }
-
-        return 0;
-    }
-
-    private static readonly string[] s_cacheWriteKeys =
-    [
-        "cache_creation_input_tokens",
-        "cache_creation",
-        "cacheWriteInputTokens",
-        "cache_write_input_tokens",
-    ];
 }

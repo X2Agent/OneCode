@@ -16,7 +16,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 | **用户技能** | `~/{候选目录}/skills/` | 当前用户全局，跨项目共享 |
 | **项目技能** | `<项目>/{候选目录}/skills/` | 当前项目，团队共享 |
 
-> 读取/发现按优先级枚举三个候选配置目录：`.onecode` → `.agent` → `.claude`（`ConfigDirPaths.EnumerateExisting`，见 `Infrastructure/Config/Constants.cs` 的 `ConfigDirCandidates`）；写入/安装始终使用主目录 `.onecode`。
+> 读取/发现按固定优先级枚举 OneCode 与 Agent Skills 兼容目录：`.agents` → `.cursor` → `.onecode` → `.claude`；项目级目录在用户级目录之后加载，因此项目技能覆盖用户技能。写入/安装始终使用主目录 `.onecode`。技能列表、动态斜杠命令和热重载共用同一目录解析入口。
 
 同名技能**后加载者覆盖先加载者**：`BundledSkills`（硬编码）→ 打包技能目录 → 用户技能 → 项目技能（`SkillCatalog.LoadUserInvocableSkills` 按字典后写覆盖）。因此实际生效优先级为**项目 > 用户 > 内置**——项目级同名技能最后写入，会覆盖用户级/内置的同名技能。
 
@@ -218,7 +218,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 ### 文件格式
 
-自定义技能是一个 markdown 文件，放在 `~/.onecode/skills/`（用户级）或 `<项目>/.onecode/skills/`（项目级）下（`.agent`/`.claude` 候选目录下的技能也会被发现，但安装/生成始终写入 `.onecode`）。支持两种目录结构：
+自定义技能是一个 markdown 文件，放在 `~/.onecode/skills/`（用户级）或 `<项目>/.onecode/skills/`（项目级）下（`.agents`/`.cursor`/`.claude` 候选目录下的技能也会被发现，但安装/生成始终写入 `.onecode`）。支持两种目录结构：
 
 ```
 # 结构一：单文件

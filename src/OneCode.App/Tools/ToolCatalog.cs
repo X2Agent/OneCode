@@ -41,6 +41,7 @@ public sealed class ToolCatalog : IToolCatalog
     /// Test/composition helper: builds a catalog that resolves tools from registrations
     /// via <paramref name="services"/> on first <see cref="Tools"/> access.
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static ToolCatalog FromRegistrations(
         IServiceProvider services,
         ToolMetadataRegistry metadata,

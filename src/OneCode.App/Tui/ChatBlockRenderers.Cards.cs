@@ -74,36 +74,6 @@ public static partial class ChatBlockRenderers
             : $"已完成：{string.Join("，", details)}";
     }
 
-    public static IReadOnlyList<FormattedLine> RenderBuildScopeCard(
-        BuildScopeSnapshot scope,
-        int viewWidth = 80)
-    {
-        var requiredAcceptance = scope.AcceptanceCriteria.Count(item => item.Required);
-        var lines = new List<FormattedLine>
-        {
-            FormattedLine.WithBackground(
-                "  SCOPE CONFIRMATION  ·  CONFIRMED",
-                TuiPalette.Success,
-                TuiPalette.BgSuccess),
-        };
-        AddWrappedField(lines, "Goal", scope.Goal, viewWidth, TuiPalette.FgPrimary);
-        lines.Add(FormattedLine.Plain(
-            $"  In scope    {scope.InScope.Count} item(s)",
-            TuiPalette.FgPrimary));
-        foreach (var item in scope.InScope)
-            AddWrappedDetail(lines, item, viewWidth, TuiPalette.FgPrimary);
-        lines.Add(FormattedLine.Plain(
-            $"  Out scope   {scope.OutOfScope.Count} item(s)",
-            TuiPalette.FgSecondary));
-        lines.Add(FormattedLine.Plain(
-            $"  Acceptance  {requiredAcceptance} required / {scope.AcceptanceCriteria.Count} total",
-            TuiPalette.FgPrimary));
-        lines.Add(FormattedLine.Plain(
-            $"  Confirmed   {scope.ConfirmedBy} · {scope.ConfirmedAt:O}",
-            TuiPalette.FgSecondary));
-        return FitToWidth(lines, viewWidth);
-    }
-
     public static IReadOnlyList<FormattedLine> RenderBuildDeliveryCard(
         BuildRunResult result,
         int viewWidth = 80)

@@ -297,8 +297,9 @@ public sealed class GrepToolTests : IDisposable
 
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(true);
-        // Ripgrep returns full paths — GrepTool must strip the search-path prefix
-        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
+        // rg 以工作区根为运行目录（见计划 §5.4.1：--ignore-file 根锚定与 fallback 一致）；
+        // 这里模拟 rg 返回绝对 searchPath 前缀的结果，GrepTool 需剥离。
+        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:found", "", false));
 
         var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
@@ -319,7 +320,7 @@ public sealed class GrepToolTests : IDisposable
 
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(true);
-        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), searchPath, ct: Arg.Any<CancellationToken>())
+        processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(2, "", "ripgrep error: invalid regex", false));
 
         var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
@@ -328,5 +329,47 @@ public sealed class GrepToolTests : IDisposable
         var result = await tool.SearchAsync("pattern", path: "src", output_mode: "content", ct: ct);
 
         result.Content.Should().Contain("ripgrep error: invalid regex");
+    }
+
+    [Fact]
+    public async Task SearchAsync_SingleFileNativeSearch_FindsMatchesInSpecifiedFile()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile("src/target.cs", "line1\nneedle in file\nline3");
+
+        var processRunner = Substitute.For<IProcessRunner>();
+        processRunner.CommandExistsAsync("rg").Returns(false);
+
+        var wd = CreateWd();
+        IFileSystem fs = new LocalAgentFileStore(wd);
+        var textSearch = new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance);
+        var tool = new GrepTool(textSearch, wd);
+
+        var result = await tool.SearchAsync("needle", path: "src/target.cs", output_mode: "content", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("target.cs:2:needle in file");
+    }
+
+    [Fact]
+    public async Task SearchAsync_RipgrepContentMode_PassesLineNumberAndFilenameFlags()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile("src/sample.cs", "content");
+
+        string[]? capturedArgs = null;
+        var processRunner = Substitute.For<IProcessRunner>();
+        processRunner.CommandExistsAsync("rg").Returns(true);
+        processRunner.ExecuteAsync("rg", Arg.Do<string[]>(args => capturedArgs = args), _projectDir, ct: Arg.Any<CancellationToken>())
+            .Returns(new ProcessResult(0, "src/sample.cs:1:content", "", false));
+
+        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var tool = new GrepTool(textSearch, CreateWd());
+
+        await tool.SearchAsync("content", path: "src", output_mode: "content", ct: ct);
+
+        capturedArgs.Should().NotBeNull();
+        capturedArgs.Should().Contain("-n", "管道与重定向环境下需强制开启行号输出");
+        capturedArgs.Should().Contain("-H", "单文件检索等场景下需强制开启文件名输出");
     }
 }

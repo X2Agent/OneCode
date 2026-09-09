@@ -573,6 +573,7 @@ public sealed class AutoDreamService : BackgroundService
     /// <summary>当前 workingDirectory（来自 IWorkingDirectoryAccessor），可能为 null。</summary>
     internal string? GetCurrentProjectRoot() => _wdAccessor.WorkingDirectory;
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     internal string GetStateFilePath(string fileName) =>
         Path.Combine(GetProjectStateDir(), fileName);
 }

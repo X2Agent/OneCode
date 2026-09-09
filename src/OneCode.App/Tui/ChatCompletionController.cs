@@ -311,8 +311,6 @@ internal sealed class ChatCompletionController
         } while (IsNonSelectable(_filtered[_selectedIndex]));
     }
 
-    public void SetSelectedIndex(int idx) => _selectedIndex = idx;
-
     // Accept / Hide
 
     /// <summary>

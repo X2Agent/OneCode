@@ -25,12 +25,14 @@ public sealed partial class ChatInputView
     /// Dispatches a key as if the nested editor raised KeyDownEvent.
     /// Tests use this to exercise the OnInputKeyPress path without a live driver loop.
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     internal void DispatchInputKey(Key key) => OnInputKeyPress(_input, key);
 
     /// <summary>
     /// Simulates the same key bubbling to this view after OnInputKeyPress.
     /// Returns true when the bubble was swallowed (interaction already handled).
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     internal bool DispatchBubbledKeyDown(Key key) => OnKeyDown(key);
 
     protected override bool OnKeyDown(Key key)

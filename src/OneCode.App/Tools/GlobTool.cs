@@ -9,14 +9,17 @@ namespace OneCode.App.Tools;
 /// Glob pattern file finder using Microsoft.Extensions.FileSystemGlobbing.
 /// Supports full glob patterns including **, *.ts, src/**/*.cs, etc.
 ///
-/// Uses <see cref="FileIgnore"/> to exclude build outputs, caches, VCS internals, and
-/// other noise directories by default.
+/// Uses the workspace ignore snapshot (<see cref="WorkspaceIgnoreSnapshot"/>) to exclude
+/// build outputs, caches, VCS internals, other noise directories, and user-declared
+/// `.onecodeignore` paths by default.
 /// </summary>
 public sealed class GlobTool
 {
     private readonly IWorkingDirectoryAccessor _wd;
+    private readonly IWorkspaceIgnoreProvider? _ignoreProvider;
 
-    public GlobTool(IWorkingDirectoryAccessor wd) => _wd = wd;
+    public GlobTool(IWorkingDirectoryAccessor wd, IWorkspaceIgnoreProvider? ignoreProvider = null)
+        => (_wd, _ignoreProvider) = (wd, ignoreProvider);
 
     [Description("Find files by glob pattern, returning a sorted list of matching paths. " +
                  "Use this to discover files by name or extension when you do not need to inspect content (use Grep for content search). " +
@@ -36,7 +39,7 @@ public sealed class GlobTool
         var workingDir = _wd.WorkingDirectory;
         var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
         if (!resolveResult.IsSuccess)
-            return ToolResult.Error(resolveResult.Error);
+            return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
         var fullPath = resolveResult.Value;
 
         if (!Directory.Exists(fullPath))
@@ -44,7 +47,11 @@ public sealed class GlobTool
 
         try
         {
-            var files = await Task.Run(() => FindFiles(fullPath, pattern), ct);
+            var ignore = _ignoreProvider is null
+                ? new WorkspaceIgnoreSnapshot(null, [], [])
+                : await _ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+            var workspaceRoot = Path.GetFullPath(_wd.WorkingDirectory);
+            var files = await Task.Run(() => FindFiles(fullPath, pattern, ignore, workspaceRoot), ct);
 
             if (files.Count == 0)
                 return ToolResult.Success($"No files matching '{pattern}' in '{path}'");
@@ -61,21 +68,36 @@ public sealed class GlobTool
         }
     }
 
-    private static List<string> FindFiles(string baseDir, string pattern)
+    private static List<string> FindFiles(string baseDir, string pattern, WorkspaceIgnoreSnapshot ignore, string workspaceRoot)
     {
         pattern = pattern.Replace('\\', '/');
 
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
         matcher.AddInclude(pattern);
 
-        FileIgnore.ApplyExcludes(matcher);
+        ignore.ApplyBuiltInExcludes(matcher);
 
         var dirInfo = new DirectoryInfoWrapper(new DirectoryInfo(baseDir));
         var result = matcher.Execute(dirInfo);
 
         return result.Files
             .Select(f => f.Path.Replace('/', Path.DirectorySeparatorChar))
+            .Where(path => !ignore.IsIgnored(ToWorkspaceRelative(Path.Combine(baseDir, path), workspaceRoot)))
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Converts a matched file path to workspace-relative before ignore evaluation.
+    /// <see cref="Matcher.Execute"/> 返回相对搜索根（即 <see cref="FindFiles"/> 的 baseDir）的路径，
+    /// 而用户规则的 `/` 锚定与 `**/` 语义均以工作区根为基准，因此必须先与搜索根组合为绝对路径、
+    /// 再换算为工作区相对，才能交给 <see cref="WorkspaceIgnoreSnapshot.IsIgnored"/> 判定；
+    /// 否则从子目录搜索时根锚定规则（如 <c>/generated/</c>）会错误命中子目录下的同名路径。
+    /// </summary>
+    private static string ToWorkspaceRelative(string fullPath, string workspaceRoot)
+    {
+        if (string.IsNullOrEmpty(workspaceRoot)) return fullPath;
+        try { return Path.GetRelativePath(workspaceRoot, fullPath); }
+        catch (Exception) { return fullPath; }
     }
 }

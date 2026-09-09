@@ -1,7 +1,6 @@
 using System.Text;
 using OneCode.Core.Skills;
-using OneCode.Infrastructure;
-using OneCode.Infrastructure.Config;
+using OneCode.App.Services.Skills;
 
 namespace OneCode.App.Commands;
 
@@ -9,7 +8,7 @@ namespace OneCode.App.Commands;
 /// /skills — list and inspect skills. Execution is via the dynamic slash command
 /// <c>/&lt;skillname&gt;</c> registered by <see cref="SkillCommandSource"/>.
 /// </summary>
-public sealed class SkillsCommand : Command
+public sealed class SkillsCommand(SkillCatalog catalog) : Command
 {
     public override string Name => "skills";
     public override string Description => "List or inspect skills (run via /<skillname>)";
@@ -39,7 +38,7 @@ public sealed class SkillsCommand : Command
         return CommandResult.Error("Usage: /skills [list|show <name>] — run a skill with /<skillname>");
     }
 
-    private static async Task<string> ListSkillsAsync(CancellationToken ct)
+    private async Task<string> ListSkillsAsync(CancellationToken ct)
     {
         var sb = new StringBuilder();
 
@@ -52,50 +51,22 @@ public sealed class SkillsCommand : Command
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  /{name,-24} {skill.Description}");
         }
 
-        // Filesystem skills
-        var dirs = GetSkillDirectories();
-        var found = false;
-        var fsSection = new StringBuilder();
-        // De-dup by skill name across candidate config dirs (.onecode → .agent → .claude);
-        // first occurrence wins because dirs are enumerated in priority order.
-        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Custom skills (from catalog, resolved with precedence and valid frontmatter)
+        var allSkills = catalog.LoadUserInvocableSkills();
+        var customSkills = allSkills
+            .Where(s => !bundled.ContainsKey(s.Name))
+            .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        foreach (var dir in dirs)
-        {
-            if (!Directory.Exists(dir)) continue;
-
-            // Directory-format skills (name/SKILL.md)
-            foreach (var skillDir in Directory.GetDirectories(dir))
-            {
-                var name = Path.GetFileName(skillDir);
-                if (bundled.ContainsKey(name)) continue; // skip shadowed bundled skills
-                if (!emitted.Add(name)) continue;        // already listed from a higher-priority dir
-                var mdFile = Path.Combine(skillDir, "SKILL.md");
-                if (!File.Exists(mdFile)) continue;
-                var desc = (await File.ReadAllLinesAsync(mdFile, ct).ConfigureAwait(false))
-                    .FirstOrDefault()?.TrimStart('#', ' ') ?? "";
-                fsSection.AppendLine(CultureInfo.InvariantCulture, $"  /{name,-24} {desc}");
-                found = true;
-            }
-
-            // Flat-format skills (name.md)
-            foreach (var file in Directory.GetFiles(dir, "*.md"))
-            {
-                var name = Path.GetFileNameWithoutExtension(file);
-                if (bundled.ContainsKey(name)) continue; // skip shadowed bundled skills
-                if (!emitted.Add(name)) continue;        // already listed from a higher-priority dir
-                var desc = (await File.ReadAllLinesAsync(file, ct).ConfigureAwait(false))
-                    .FirstOrDefault()?.TrimStart('#', ' ') ?? "";
-                fsSection.AppendLine(CultureInfo.InvariantCulture, $"  /{name,-24} {desc}");
-                found = true;
-            }
-        }
-
-        if (found)
+        if (customSkills.Count > 0)
         {
             if (sb.Length > 0) sb.AppendLine();
             sb.AppendLine("Custom Skills:");
-            sb.Append(fsSection);
+            foreach (var skill in customSkills)
+            {
+                var desc = string.IsNullOrWhiteSpace(skill.Description) ? "" : skill.Description;
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  /{skill.Name,-24} {desc}");
+            }
         }
 
         if (sb.Length == 0) sb.AppendLine("No skills installed.");
@@ -108,7 +79,7 @@ public sealed class SkillsCommand : Command
         return sb.ToString().TrimEnd();
     }
 
-    private static async Task<string> ShowSkillAsync(string name, CancellationToken ct)
+    private async Task<string> ShowSkillAsync(string name, CancellationToken ct)
     {
         var bundled = BundledSkills.Get(name);
         if (bundled is not null)
@@ -116,8 +87,8 @@ public sealed class SkillsCommand : Command
             return $"# {bundled.Name}\n\n**Description:** {bundled.Description}\n\n---\n\n{bundled.Prompt}";
         }
 
-        // Then filesystem
-        foreach (var dir in GetSkillDirectories())
+        // Filesystem: 逆序枚举高优先级目录（项目级 > 用户级），与执行覆盖语义一致
+        foreach (var dir in catalog.GetSkillDirectories().Reverse())
         {
             var skillDir = Path.Combine(dir, name);
             var mdFile = Path.Combine(skillDir, "SKILL.md");
@@ -130,15 +101,5 @@ public sealed class SkillsCommand : Command
         }
 
         return $"Skill '{name}' not found. Use /skills list to see available skills.";
-    }
-
-    private static IEnumerable<string> GetSkillDirectories()
-    {
-        var home = PathsHelper.UserHome;
-        // User skills + project skills across all candidate dir names (.onecode/.agent/.claude).
-        foreach (var userDir in ConfigDirPaths.EnumerateExisting(home, Constants.Subdirs.Skills))
-            yield return userDir;
-        foreach (var projectDir in ConfigDirPaths.EnumerateExisting(Directory.GetCurrentDirectory(), Constants.Subdirs.Skills))
-            yield return projectDir;
     }
 }

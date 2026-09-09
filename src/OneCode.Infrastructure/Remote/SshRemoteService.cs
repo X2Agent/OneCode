@@ -290,37 +290,6 @@ public sealed class SshRemoteService : IAsyncDisposable
         }
     }
 
-    public async Task<bool> FileExistsAsync(string remotePath, CancellationToken ct = default)
-    {
-        if (_sftpClient == null || !_sftpClient.IsConnected)
-            return false;
-
-        return await Task.Run(() => _sftpClient.Exists(remotePath), ct).ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyList<string>> ListDirectoryAsync(string remotePath, CancellationToken ct = default)
-    {
-        if (_sftpClient == null || !_sftpClient.IsConnected)
-            return [];
-
-        try
-        {
-            return await Task.Run(() =>
-            {
-                return _sftpClient.ListDirectory(remotePath)
-                    .Select(f => f.Name)
-                    .Where(n => n != "." && n != "..")
-                    .ToList()
-                    .AsReadOnly();
-            }, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SSH list directory failed: {Path}", remotePath);
-            return [];
-        }
-    }
-
     public void Disconnect()
     {
         lock (_lock)

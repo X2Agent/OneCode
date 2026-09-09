@@ -144,31 +144,6 @@ public static class ToolResultSummarizer
     }
 
     /// <summary>
-    /// 从工具输入中提取文件名，用于显示在工具调用行中。
-    /// </summary>
-    public static string? ExtractFileName(string toolName, string? toolInput)
-    {
-        if (string.IsNullOrEmpty(toolInput))
-            return null;
-
-        // 尝试提取路径
-        var path = ExtractPathFromInput(toolInput);
-        if (!string.IsNullOrEmpty(path))
-        {
-            // 只返回文件名部分，如果路径太长
-            if (path.Length > 40)
-            {
-                var fileName = Path.GetFileName(path);
-                if (!string.IsNullOrEmpty(fileName))
-                    return "..." + fileName;
-            }
-            return path;
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// 格式化工具调用行的目标显示。
     /// 例如："path/to/file.cs" 或 "grep pattern"
     /// </summary>

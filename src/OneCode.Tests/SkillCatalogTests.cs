@@ -1,4 +1,6 @@
+using OneCode.App.Commands;
 using OneCode.App.Services.Skills;
+using OneCode.Core.Commands;
 using OneCode.Infrastructure.Skills;
 
 namespace OneCode.Tests;
@@ -71,6 +73,45 @@ public sealed class SkillCatalogTests : IDisposable
         skill.Should().NotBeNull();
         catalog.GetSkillDirectories().Should().Contain(Path.Combine(_root, ".onecode", "skills"));
         SkillCatalog.Render(skill!, ["world"]).Should().Be("Hello world");
+    }
+
+    [Fact]
+    public void Catalog_DiscoversAgentSkillsDirectoriesAndPrefersDirectoryLayout()
+    {
+        var standardDir = Path.Combine(_root, ".agents", "skills");
+        Directory.CreateDirectory(Path.Combine(standardDir, "shared"));
+        File.WriteAllText(Path.Combine(standardDir, "shared.md"), "---\nname: shared\nuser-invocable: true\n---\nflat");
+        File.WriteAllText(Path.Combine(standardDir, "shared", "SKILL.md"), "---\nname: shared\nuser-invocable: true\n---\ndirectory");
+
+        var skill = new SkillCatalog(_root).Find("shared");
+
+        skill.Should().NotBeNull();
+        skill!.Body.Should().Be("directory");
+    }
+
+    [Fact]
+    public async Task SkillsCommand_List_DisplaysParsedDescriptionInsteadOfFrontmatterDelimiter()
+    {
+        var skillDir = Path.Combine(_root, ".onecode", "skills", "custom-skill");
+        Directory.CreateDirectory(skillDir);
+        File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), """
+            ---
+            name: custom-skill
+            description: Clean custom skill description
+            user-invocable: true
+            ---
+            Custom prompt body
+            """);
+
+        var catalog = new SkillCatalog(_root);
+        var command = new SkillsCommand(catalog);
+
+        var result = await command.ExecuteAsync(["list"]);
+
+        result.Should().BeOfType<CommandResult.TextResult>();
+        var text = ((CommandResult.TextResult)result).Value;
+        text.Should().Contain("Clean custom skill description");
+        text.Should().NotContain("---");
     }
 
     public void Dispose()

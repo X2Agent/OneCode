@@ -263,13 +263,4 @@ public sealed partial class ChatInputView
         _pendingImages.Clear();
         return paths;
     }
-
-    /// <summary>
-    /// Resets the image counter. Call when a new session starts.
-    /// </summary>
-    public void ResetImageCounter()
-    {
-        _imageCount = 0;
-        _pendingImages.Clear();
-    }
 }

@@ -211,14 +211,6 @@ public sealed class ForkedAgentRunner : IAgentRunner
 
     public int ActiveRunCount => _activeRuns.Count;
 
-    public void CancelAll()
-    {
-        foreach (var run in _activeRuns.Values)
-        {
-            try { run.CancellationTokenSource?.Cancel(); } catch { /* already cancelled */ }
-        }
-    }
-
     public async Task<AgentRunResult> RunAsync(AgentRunRequest request, CancellationToken ct = default)
     {
         var profile = PipelineProfileBehavior.FromAgentType(request.Agent);

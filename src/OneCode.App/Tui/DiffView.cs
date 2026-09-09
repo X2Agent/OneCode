@@ -40,6 +40,7 @@ public sealed class DiffView : View
     public int ScrollOffset => _scrollOffset;
 
     /// <summary>Simulates a KeyDown reaching this view (test hook, mirrors OnKeyDown).</summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     internal bool DispatchKey(Key kb) => OnKeyDown(kb);
 
     public void SetDiff(string diffText)
@@ -68,46 +69,6 @@ public sealed class DiffView : View
                 _lines.Add(new DiffLine(DiffType.Removed, raw));
             else
                 _lines.Add(new DiffLine(DiffType.Context, raw));
-        }
-
-        SetNeedsDraw();
-    }
-
-    public void SetUnifiedDiff(IReadOnlyList<DiffHunk> hunks)
-    {
-        _lines.Clear();
-        _scrollOffset = 0;
-
-        if (hunks.Count == 0)
-        {
-            _lines.Add(new DiffLine(DiffType.Context, "（无变更）"));
-            SetNeedsDraw();
-            return;
-        }
-
-        foreach (var hunk in hunks)
-        {
-            _lines.Add(new DiffLine(DiffType.Hunk,
-                $"@@ -{hunk.OldStart},{hunk.OldCount} +{hunk.NewStart},{hunk.NewCount} @@"));
-
-            foreach (var segment in hunk.Segments)
-            {
-                var type = segment.Type switch
-                {
-                    DiffSegmentType.Added => DiffType.Added,
-                    DiffSegmentType.Removed => DiffType.Removed,
-                    _ => DiffType.Context
-                };
-
-                var prefix = segment.Type switch
-                {
-                    DiffSegmentType.Added => "+",
-                    DiffSegmentType.Removed => "-",
-                    _ => " "
-                };
-
-                _lines.Add(new DiffLine(type, $"{prefix}{segment.Text}"));
-            }
         }
 
         SetNeedsDraw();
@@ -218,15 +179,4 @@ public sealed class DiffView : View
     private enum DiffType { Context, Added, Removed, Hunk }
 }
 
-public enum DiffSegmentType { Context, Added, Removed }
 
-public readonly record struct DiffSegment(DiffSegmentType Type, string Text);
-
-public sealed class DiffHunk
-{
-    public int OldStart { get; set; }
-    public int OldCount { get; set; }
-    public int NewStart { get; set; }
-    public int NewCount { get; set; }
-    public List<DiffSegment> Segments { get; set; } = new();
-}

@@ -55,7 +55,6 @@ public sealed partial class ChatInputView : View
 
     private readonly ChatCompletionController _completion;
     private readonly ChatHistoryController _historyCtrl;
-    private readonly SmartPasteHandler _smartPaste;
     private readonly OneCode.Core.IO.IClipboardService? _clipboard;
 
     // Multimodal support
@@ -78,7 +77,6 @@ public sealed partial class ChatInputView : View
 
     public event Action<string>? Submitted;
     public event Action? QuitRequested;
-    public event Action? ImagePasteRequested;
     /// <summary>Raised when the user presses Tab in a non-completion context to cycle the working mode.</summary>
     public event Action? CycleModeRequested;
 
@@ -168,7 +166,6 @@ public sealed partial class ChatInputView : View
         // History source: current conversation's user prompts. Falls back to empty
         // list for tests/standalone construction without a session manager.
         _historyCtrl = new ChatHistoryController(historyProvider ?? (() => []));
-        _smartPaste = new SmartPasteHandler(app, clipboard);
 
         // Terminal.Gui v2 enables bracketed paste mode automatically.
         // Pasted text is delivered via IApplication.Paste event, NOT via
@@ -181,8 +178,6 @@ public sealed partial class ChatInputView : View
         _app.Paste += OnApplicationPaste;
 
         WireCompletionStateChanged();
-
-        _smartPaste.ImagePasteRequested += () => ImagePasteRequested?.Invoke();
 
         BuildViews();
     }

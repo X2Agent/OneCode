@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using OneCode.App.Tools;
 
 namespace OneCode.App.Services.Search;
 
@@ -10,6 +11,7 @@ public static class SearchServiceCollectionExtensions
 {
     public static IServiceCollection AddSearchServices(this IServiceCollection services)
     {
+        services.AddSingleton<IWorkspaceIgnoreProvider, WorkspaceIgnoreProvider>();
         services.AddSingleton<ITextSearchService, TextSearchService>();
 
         return services;

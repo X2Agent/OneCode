@@ -21,12 +21,6 @@ public sealed record AgentProblemDetails(
     public static string? CurrentTraceId =>
         System.Diagnostics.Activity.Current?.TraceId.ToHexString();
 
-    /// <summary>便捷工厂：权限拒绝 (403)。</summary>
-    public static AgentProblemDetails PermissionDenied(
-        string detail, string? toolName = null, string? traceId = null) =>
-        new("https://onecode/errors/permission-denied", "Permission Denied", 403,
-            detail, traceId ?? CurrentTraceId, toolName);
-
     /// <summary>便捷工厂：工具执行失败 (500)。</summary>
     public static AgentProblemDetails ToolExecutionFailed(
         string detail, string? toolName = null, string? traceId = null,

@@ -31,14 +31,6 @@ public static class ToolNames
     public static bool IsFileEditTool(string? toolName)
         => Registry.IsInCategory(toolName, ToolCategory.FileEdit);
 
-    /// <summary>会修改文件内容的工具（Write / Edit / ApplyWorkspaceEdit）。</summary>
-    public static bool IsFileWriteTool(string? toolName)
-        => Registry.IsInCategory(toolName, ToolCategory.FileWrite);
-
-    /// <summary>Plan 模式下允许的工具（超出 ReadOnly 范围）。</summary>
-    public static bool IsPlanAllowedTool(string? toolName)
-        => Registry.IsInCategory(toolName, ToolCategory.PlanAllowed);
-
     /// <summary>按分类查询工具（通用入口，供安全不变量等基础设施按需扩展类别）。</summary>
     public static bool IsInCategory(string? toolName, ToolCategory category)
         => Registry.IsInCategory(toolName, category);

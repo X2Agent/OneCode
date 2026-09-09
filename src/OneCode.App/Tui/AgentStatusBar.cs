@@ -75,7 +75,6 @@ public sealed class AgentStatusBar : View
     }
 
     public void SetModel(string m) { _model = string.IsNullOrWhiteSpace(m) ? "Opus" : m; SetNeedsDraw(); }
-    public void SetSandboxMode(string s) { _sandbox = string.IsNullOrWhiteSpace(s) ? "Sandbox" : s; SetNeedsDraw(); }
 
     /// <summary>
     /// 更新团队标签。<paramref name="teamModeLabel"/> 为该团队 team.yaml 声明的编排模式

@@ -80,7 +80,6 @@ public sealed partial class OneCodeToplevel : Window
         _transcriptPresenter = new TranscriptEventPresenter(_shell.Transcript);
         _shell.ChatInput.Submitted += OnUserSubmitted;
         _shell.ChatInput.QuitRequested += OnQuitRequested;
-        _shell.ChatInput.ImagePasteRequested += OnImagePasteRequested;
         _shell.ChatInput.InterruptRequested += OnInterruptRequested;
 
         // Wire multimodal support check and notifier for image paste rejection.

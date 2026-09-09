@@ -69,7 +69,7 @@ public sealed class FindReferencesTool
         var workingDir = _wd.WorkingDirectory;
         var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
         if (!resolveResult.IsSuccess)
-            return ToolResult.Error(resolveResult.Error);
+            return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
         var searchPath = resolveResult.Value;
 
         if (!Directory.Exists(searchPath) && !File.Exists(searchPath))
@@ -97,7 +97,8 @@ public sealed class FindReferencesTool
         var pattern = exactWord ? $@"\b{escapedSymbol}\b" : escapedSymbol;
 
         var results = await _textSearch.SearchAsync(
-            new TextSearchRequest(searchPath, pattern, glob, exclude_glob, OutputMode: "content"),
+            new TextSearchRequest(searchPath, pattern, glob, exclude_glob,
+                OutputMode: "content", WorkspaceRoot: workingDir),
             ct).ConfigureAwait(false);
 
         if (results.Count == 0)

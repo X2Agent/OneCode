@@ -68,6 +68,7 @@ public sealed class YoloRuleStore
         return null;
     }
 
+    // 仅单元测试使用：生产代码只读规则文件，不增量增删（测试接缝）。
     public void AddRule(UserRule rule)
     {
         lock (_lock)
@@ -94,6 +95,7 @@ public sealed class YoloRuleStore
     /// 清空所有规则。主要用于单元测试场景（隔离用户规则与内置默认规则）。
     /// 生产代码应通过 <see cref="ReplaceRules"/> 重新装载规则，而不是直接清空。
     /// </summary>
+    // 仅单元测试使用：生产代码只读规则文件，不增量增删（测试接缝）。
     public void ClearRules()
     {
         lock (_lock)
@@ -103,6 +105,7 @@ public sealed class YoloRuleStore
         }
     }
 
+    // 仅单元测试使用：生产代码只读规则文件，不增量增删（测试接缝）。
     public bool RemoveRule(string pattern)
     {
         lock (_lock)

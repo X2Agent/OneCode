@@ -40,6 +40,7 @@ public sealed class Result<T>
     /// <summary>
     /// Get the value or throw if failure.
     /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public T GetValueOrThrow() => IsSuccess && Value is not null
         ? Value
         : throw new InvalidOperationException(Error ?? "Result is not successful");

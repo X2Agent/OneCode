@@ -23,6 +23,7 @@ public enum RunStepStatus
 public static class RunStepStatusMap
 {
     // Build（BuildTaskStatus）
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static RunStepStatus FromBuild(OneCode.Core.Build.BuildTaskStatus status) => status switch
     {
         OneCode.Core.Build.BuildTaskStatus.InProgress => RunStepStatus.InProgress,
@@ -32,6 +33,7 @@ public static class RunStepStatusMap
         _ => RunStepStatus.Pending,
     };
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static OneCode.Core.Build.BuildTaskStatus ToBuild(RunStepStatus status) => status switch
     {
         RunStepStatus.InProgress => OneCode.Core.Build.BuildTaskStatus.InProgress,
@@ -42,6 +44,7 @@ public static class RunStepStatusMap
     };
 
     // Plan（PlanStepExecutionStatus）
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static RunStepStatus FromPlan(OneCode.Core.PlanMode.PlanStepExecutionStatus status) => status switch
     {
         OneCode.Core.PlanMode.PlanStepExecutionStatus.InProgress => RunStepStatus.InProgress,
@@ -51,6 +54,7 @@ public static class RunStepStatusMap
         _ => RunStepStatus.Pending,
     };
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static OneCode.Core.PlanMode.PlanStepExecutionStatus ToPlan(RunStepStatus status) => status switch
     {
         RunStepStatus.InProgress => OneCode.Core.PlanMode.PlanStepExecutionStatus.InProgress,
@@ -61,6 +65,7 @@ public static class RunStepStatusMap
     };
 
     // Goal（GoalStepState）
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static RunStepStatus FromGoal(OneCode.Core.Goals.GoalStepState state) => state switch
     {
         OneCode.Core.Goals.GoalStepState.InProgress => RunStepStatus.InProgress,
@@ -70,6 +75,7 @@ public static class RunStepStatusMap
         _ => RunStepStatus.Pending,
     };
 
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static OneCode.Core.Goals.GoalStepState ToGoal(RunStepStatus status) => status switch
     {
         RunStepStatus.InProgress => OneCode.Core.Goals.GoalStepState.InProgress,
@@ -80,6 +86,7 @@ public static class RunStepStatusMap
     };
 
     // Team（TeamTaskStatus）
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static RunStepStatus FromTeam(OneCode.Core.Coordinator.TeamTaskStatus status) => status switch
     {
         OneCode.Core.Coordinator.TeamTaskStatus.Succeeded => RunStepStatus.Completed,

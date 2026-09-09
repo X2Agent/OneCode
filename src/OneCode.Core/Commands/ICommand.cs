@@ -62,7 +62,6 @@ public abstract record CommandResult
     public sealed record ResumeWorkflowResult(string SessionId, WorkflowResumeKind Kind) : CommandResult;
 
     public static CommandResult Text(string value) => new TextResult(value);
-    public static CommandResult Silent() => new SilentResult();
     public static CommandResult Exit() => new ExitResult();
     public static CommandResult Prompt(string content, string[]? allowedTools = null) => new PromptResult(content, allowedTools);
     public static CommandResult Error(string message) => new ErrorResult(message);

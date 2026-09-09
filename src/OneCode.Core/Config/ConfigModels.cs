@@ -51,14 +51,7 @@ public sealed record ConfigSnapshot(
             ? info
             : new ConfigValueInfo(null, ConfigScope.BuiltIn, false);
 
-    public object? GetScopedValue(ConfigScope scope, string key) =>
-        ScopedValues.TryGetValue(scope, out var values) && values.TryGetValue(key, out var value)
-            ? value
-            : null;
-
-    public bool HasScopedValue(ConfigScope scope, string key) =>
-        ScopedValues.TryGetValue(scope, out var values) && values.ContainsKey(key);
-
+    // 仅单元测试使用：生产代码经配置管线构建快照（测试接缝）。
     public static ConfigSnapshot FromEffective(AppSettings effective, ConfigScope source = ConfigScope.User)
     {
         ArgumentNullException.ThrowIfNull(effective);
