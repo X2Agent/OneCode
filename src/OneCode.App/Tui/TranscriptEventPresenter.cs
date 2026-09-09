@@ -101,6 +101,10 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                 transcript.AddStreamingNotice($"💡 {message}", TuiPalette.Warning);
                 return true;
 
+            case TuiNotice notice:
+                transcript.AddStreamingNotice(notice.Message, TuiPalette.Warning);
+                return true;
+
             case TuiGoalBudgetWarning warning:
                 // Fix-6：GOAL 预算预警横幅——Early(70%) 黄色，Late(90%) 橙色。
                 var color = warning.Level == OneCode.Core.Goals.GoalBudgetWarningLevel.Late

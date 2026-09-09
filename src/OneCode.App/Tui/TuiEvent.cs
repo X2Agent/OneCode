@@ -243,6 +243,12 @@ public sealed record TuiGoalBudgetWarning(
     TimeSpan? Elapsed) : TuiEvent;
 
 /// <summary>
+/// 通用 TUI 系统提示（非错误、非助手输出）——例如 Goal 启动前的脏工作树说明。
+/// TUI 渲染为流式提示行；若文本包含 \n 会按预换行逐行显示。
+/// </summary>
+public sealed record TuiNotice(string Message) : TuiEvent;
+
+/// <summary>
 /// 用户提问请求事件 — AskUserQuestionTool 需要与用户交互时触发。
 /// TUI 可通过 <see cref="ResponseSource"/> 回传用户的回答。
 /// 支持预定义选项（单选）或自由文本输入。

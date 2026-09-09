@@ -97,7 +97,11 @@ public sealed record GoalWorkspaceSnapshot(
     string TargetBranch,
     string BaseCommit,
     string TargetWorkspaceFingerprint,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    // 创建 worktree 时带入的目标工作区未提交改动数（干净树为 null，便于区分“未知”与“没有”）。
+    int? CarriedUncommittedCount = null,
+    // 带入的未提交改动路径样本（与 CarriedUncommittedCount 对应，最多展示前若干条）。
+    IReadOnlyList<string>? CarriedUncommittedPaths = null);
 
 public sealed record GoalRun : IWorkflowRun
 {

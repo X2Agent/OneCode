@@ -4,6 +4,7 @@ using OneCode.Core.Build;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Goals;
+using System.Text.Json;
 
 namespace OneCode.Tests;
 
@@ -24,11 +25,14 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
         var sessionId = SessionId.NewId();
 
         var run = await sut.BeginAsync(
-            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a",
+            new JsonSerializerOptions(), TestContext.Current.CancellationToken);
 
         run.Version.Should().Be(1);
         run.Workspace.Should().NotBeNull();
-        run.DefinitionHash.Should().Be(GoalWorkflowCompiler.ComputeDefinitionHash(run, "model-a", "prompt-a", "tools-a"));
+        // 持久化 hash 与执行期 Compile 校验（同一 options）必须一致，否则 GoalRun 无法执行。
+        run.DefinitionHash.Should().Be(
+            GoalWorkflowCompiler.ComputeDefinitionHash(run, "model-a", "prompt-a", "tools-a", new JsonSerializerOptions()));
         await workspace.Received(1).PrepareAsync(Arg.Is<GoalRun>(candidate => candidate.Id == run.Id), Arg.Any<CancellationToken>());
     }
 
@@ -44,15 +48,18 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
         var sut = new GoalRunApplicationService(store, workspace, fingerprint);
         var sessionId = SessionId.NewId();
         var first = await sut.BeginAsync(
-            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a",
+            ct: TestContext.Current.CancellationToken);
 
         var second = await sut.BeginAsync(
-            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+            sessionId, "goal", _root, "model-a", "prompt-a", "tools-a",
+            ct: TestContext.Current.CancellationToken);
         second.Id.Should().Be(first.Id);
         await workspace.Received(1).PrepareAsync(Arg.Any<GoalRun>(), Arg.Any<CancellationToken>());
 
         var drift = () => sut.BeginAsync(
-            sessionId, "goal", _root, "model-b", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+            sessionId, "goal", _root, "model-b", "prompt-a", "tools-a",
+            ct: TestContext.Current.CancellationToken);
         await drift.Should().ThrowAsync<InvalidOperationException>().WithMessage("*definition changed*");
     }
 
@@ -67,9 +74,9 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
             .Returns(call => Workspace(call.ArgAt<GoalRun>(0)));
         var sut = new GoalRunApplicationService(store, workspace, fingerprint);
         var sessionId = SessionId.NewId();
-        _ = await sut.BeginAsync(sessionId, "first", _root, "m", "p", "t", TestContext.Current.CancellationToken);
+        _ = await sut.BeginAsync(sessionId, "first", _root, "m", "p", "t", ct: TestContext.Current.CancellationToken);
 
-        var act = () => sut.BeginAsync(sessionId, "second", _root, "m", "p", "t", TestContext.Current.CancellationToken);
+        var act = () => sut.BeginAsync(sessionId, "second", _root, "m", "p", "t", ct: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*different GoalRun*");
     }
 
@@ -87,10 +94,10 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
             .Returns(call => Workspace(call.ArgAt<GoalRun>(0)));
         var sut = new GoalRunApplicationService(store, workspace, fingerprint);
         var sessionId = SessionId.NewId();
-        _ = await sut.BeginAsync(sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+        _ = await sut.BeginAsync(sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", ct: TestContext.Current.CancellationToken);
 
         // Second call with drifted workspace fingerprint must fail-closed.
-        var act = () => sut.BeginAsync(sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", TestContext.Current.CancellationToken);
+        var act = () => sut.BeginAsync(sessionId, "goal", _root, "model-a", "prompt-a", "tools-a", ct: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Workspace fingerprint drift*")
             .WithMessage("*fingerprint-original*")

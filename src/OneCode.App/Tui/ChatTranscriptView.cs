@@ -177,14 +177,15 @@ public sealed partial class ChatTranscriptView : View
     /// <summary>
     /// 构建错误块（首行摘要 + 展开的详情行）。按 <paramref name="contentWidth"/>
     /// 换行/截断，供追加与宽度变化后的整体重渲共用。
+    /// 首行被截断时详情从首行起完整展示——单行超长错误
+    /// 无需点击即可读全。
     /// </summary>
     internal static IReadOnlyList<FormattedLine> RenderErrorBlock(string text, int contentWidth)
     {
-        var maxWidth = Math.Max(20, contentWidth - 6);
         var errorLines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
         var firstLine = errorLines[0];
         // 摘要预算按显示宽度判定——旧实现按字符数截断，CJK 摘要会成倍超宽。
-        var summaryBudget = Math.Max(1, maxWidth - 6);
+        var summaryBudget = ConversationRenderer.ErrorSummaryBudget(contentWidth);
         var summary = TextWidthHelper.GetDisplayWidth(firstLine) > summaryBudget
             ? TextWidthHelper.TruncateByWidth(firstLine, summaryBudget)
             : firstLine;
@@ -198,21 +199,19 @@ public sealed partial class ChatTranscriptView : View
             }, tag),
         };
 
-        if (errorLines.Length > 1)
+        var maxContentWidth = Math.Max(20, contentWidth - ConversationRenderer.ContentIndent - 2);
+        // 首行已完整出现在摘要中则跳过，否则从首行起展示（含单行超长错误）。
+        var startIdx = TextWidthHelper.GetDisplayWidth(firstLine) <= summaryBudget ? 1 : 0;
+        for (var li = startIdx; li < errorLines.Length; li++)
         {
-            var maxContentWidth = Math.Max(20, contentWidth - ConversationRenderer.ContentIndent - 2);
-            var startIdx = TextWidthHelper.GetDisplayWidth(firstLine) <= summaryBudget ? 1 : 0;
-            for (var li = startIdx; li < errorLines.Length; li++)
+            var line = errorLines[li];
+            if (string.IsNullOrEmpty(line))
             {
-                var line = errorLines[li];
-                if (string.IsNullOrEmpty(line))
-                {
-                    lines.Add(FormattedLine.Plain(ConversationRenderer.Indent, TuiPalette.Error));
-                    continue;
-                }
-                foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxContentWidth))
-                    lines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}  {w}", TuiPalette.Error));
+                lines.Add(FormattedLine.Plain(ConversationRenderer.Indent, TuiPalette.Error));
+                continue;
             }
+            foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxContentWidth))
+                lines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}  {w}", TuiPalette.Error));
         }
         return lines;
     }

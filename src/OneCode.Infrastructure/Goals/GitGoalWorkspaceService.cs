@@ -8,9 +8,6 @@ public sealed class GitGoalWorkspaceService(
     IGitHelper git,
     IWorkspaceFingerprintProvider fingerprintProvider) : IGoalWorkspaceService
 {
-    // 8: enough to show the dirty set without dumping a large status listing into the TUI error line.
-    private const int DirtyPathSampleLimit = 8;
-
     public async Task<GoalWorkspaceSnapshot> PrepareAsync(
         GoalRun run,
         CancellationToken ct = default)
@@ -19,11 +16,13 @@ public sealed class GitGoalWorkspaceService(
             ?? throw new InvalidOperationException("Goal isolated execution requires a Git repository.");
         var dirtyCount = await git.CountPorcelainChangesAsync(repositoryRoot, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Could not inspect the Goal target workspace.");
+        // 脏工作树不再阻断 Goal：未提交改动（WIP）会被带入隔离 worktree，
+        // Goal 直接基于 WIP 执行，发布时随步骤提交一起回到目标分支。
+        IReadOnlyList<string>? carriedPaths = null;
         if (dirtyCount != 0)
         {
             var status = await git.RunAsync(["status", "--porcelain"], repositoryRoot, ct).ConfigureAwait(false);
-            throw CreateDirtyWorkspaceException(
-                run.WorkingDirectory, repositoryRoot, dirtyCount, status?.Stdout);
+            carriedPaths = ParsePorcelainPaths(status?.Stdout).ToList();
         }
 
         var baseCommit = await ReadRequiredAsync(["rev-parse", "HEAD"], repositoryRoot, ct).ConfigureAwait(false);
@@ -55,6 +54,10 @@ public sealed class GitGoalWorkspaceService(
             }
         }
 
+        if (carriedPaths is { Count: > 0 })
+            await CarryUncommittedChangesIntoWorktreeAsync(
+                repositoryRoot, path, carriedPaths, ct).ConfigureAwait(false);
+
         return new GoalWorkspaceSnapshot(
             workspaceId,
             repositoryRoot,
@@ -63,7 +66,54 @@ public sealed class GitGoalWorkspaceService(
             targetBranch,
             baseCommit,
             targetFingerprint,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            dirtyCount != 0 ? dirtyCount : null,
+            carriedPaths is { Count: > 0 } ? carriedPaths : null);
+    }
+
+    /// <summary>
+    /// 把目标工作区的未提交改动复制进隔离 worktree（只读源工作区，绝不改动它）：
+    /// 已跟踪改动经 <c>git diff HEAD --binary</c> 导出补丁后在 worktree 内
+    /// <c>git apply --index</c>（含 staged 状态）；未跟踪文件逐个复制。
+    /// </summary>
+    private async Task CarryUncommittedChangesIntoWorktreeAsync(
+        string repositoryRoot,
+        string worktreePath,
+        IReadOnlyList<string> carriedPaths,
+        CancellationToken ct)
+    {
+        var trackedDiff = await git.RunAsync(
+            ["diff", "HEAD", "--binary"], repositoryRoot, ct).ConfigureAwait(false);
+        if (trackedDiff is not { Success: true })
+            throw new InvalidOperationException(
+                $"Failed to export uncommitted changes: {trackedDiff?.Stderr ?? "git unavailable"}");
+        if (!string.IsNullOrEmpty(trackedDiff.Stdout))
+        {
+            var patchPath = Path.Combine(
+                Path.GetTempPath(), $"onecode-goal-{Guid.NewGuid():N}.patch");
+            await File.WriteAllTextAsync(patchPath, trackedDiff.Stdout, ct).ConfigureAwait(false);
+            try
+            {
+                await RunRequiredAsync(
+                    ["apply", "--binary", "--whitespace=nowarn", "--index", patchPath],
+                    worktreePath,
+                    ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                File.Delete(patchPath);
+            }
+        }
+
+        foreach (var relative in carriedPaths.Where(p => !p.Contains(" -> ", StringComparison.Ordinal)))
+        {
+            var source = Path.Combine(repositoryRoot, relative);
+            if (!File.Exists(source))
+                continue; // rename 目标等已由补丁覆盖，或文件在准备期间消失
+            var destination = Path.Combine(worktreePath, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination, overwrite: true);
+        }
     }
 
     public async Task<GoalStepReceipt?> FindStepReceiptAsync(
@@ -274,31 +324,6 @@ public sealed class GitGoalWorkspaceService(
         var result = await git.RunAsync(arguments, directory, ct).ConfigureAwait(false);
         if (result is not { Success: true })
             throw new InvalidOperationException($"Git command failed: git {string.Join(' ', arguments)} — {result?.Stderr ?? "git unavailable"}");
-    }
-
-    private static InvalidOperationException CreateDirtyWorkspaceException(
-        string workingDirectory,
-        string repositoryRoot,
-        int dirtyCount,
-        string? porcelain)
-    {
-        var samples = ParsePorcelainPaths(porcelain).Take(DirtyPathSampleLimit).ToList();
-        var sampleText = samples.Count == 0
-            ? string.Empty
-            : " Examples: " + string.Join(", ", samples) + (dirtyCount > samples.Count ? ", …" : ".");
-
-        var sameDirectory = string.Equals(
-            Path.GetFullPath(workingDirectory),
-            Path.GetFullPath(repositoryRoot),
-            StringComparison.OrdinalIgnoreCase);
-        var location = sameDirectory
-            ? $"Checked Git repository '{repositoryRoot}'."
-            : $"Checked Git repository root '{repositoryRoot}' (session working directory is '{workingDirectory}').";
-
-        return new InvalidOperationException(
-            "Goal isolated execution requires a clean Git working tree. "
-            + $"{location} Found {dirtyCount} dirty path(s).{sampleText} "
-            + "Commit, stash, or discard those changes, then retry Goal mode.");
     }
 
     private static IEnumerable<string> ParsePorcelainPaths(string? porcelain)

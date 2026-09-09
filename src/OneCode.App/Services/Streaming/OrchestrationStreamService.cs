@@ -55,6 +55,9 @@ public sealed class OrchestrationStreamService(
         var tools = toolCatalog.Tools.ToList<AITool>();
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(session.SystemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
+        // Checkpoint 序列化选项单一来源：BeginAsync 计算 DefinitionHash 与执行期 Compile
+        // 校验必须使用同一实例，否则 hash 恒不一致（GoalRun definition hash mismatch）。
+        var serializerOptions = new JsonSerializerOptions();
         var goalRun = await goalRunApplicationService.BeginAsync(
             conversationId,
             text,
@@ -62,7 +65,20 @@ public sealed class OrchestrationStreamService(
             currentModelId,
             systemPromptHash,
             toolCapabilityHash,
+            serializerOptions,
             ct).ConfigureAwait(false);
+        // 脏工作树提示：WIP 已带入隔离 worktree，Goal 直接基于未提交改动执行。
+        if (goalRun.Workspace is { CarriedUncommittedCount: > 0 } carried)
+        {
+            var samples = carried.CarriedUncommittedPaths ?? [];
+            var sampleText = samples.Count == 0
+                ? string.Empty
+                : "\n" + string.Join("\n", samples.Take(8).Select(p => $"  · {p}"))
+                    + (samples.Count > 8 ? "\n  · …" : string.Empty);
+            yield return new TuiNotice(
+                $"⚠ 目标工作区有 {carried.CarriedUncommittedCount} 个未提交改动，已带入 Goal 隔离 worktree，"
+                + "发布时会随结果一起提交。" + sampleText);
+        }
         var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -99,7 +115,7 @@ public sealed class OrchestrationStreamService(
                     systemPromptHash,
                     toolCapabilityHash,
                     runtime,
-                    new JsonSerializerOptions(),
+                    serializerOptions,
                     ct: ct).ConfigureAwait(false);
                 var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");

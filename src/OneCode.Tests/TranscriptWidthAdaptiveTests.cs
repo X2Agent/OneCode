@@ -203,6 +203,37 @@ public sealed class TranscriptWidthAdaptiveTests
     }
 
     [Fact]
+    public void ErrorBlock_SingleOverLongLine_ShowsFullTextWithoutClick()
+    {
+        // 旧实现 errorLines.Length > 1 保护使单行超长错误（如 Goal 脏工作树异常）
+        // 永远没有详情行，摘要截断后内容不可达。
+        var message = string.Concat(Enumerable.Repeat("Goal isolated execution requires a clean tree", 5));
+        var lines = ChatTranscriptView.RenderErrorBlock(message, contentWidth: 80);
+        var text = string.Join("", lines.Select(l => l.FullText));
+
+        lines.Should().Contain(l => l.FullText.Contains("…")); // 摘要行仍截断
+        lines.Should().HaveCountGreaterThan(1);                // 详情行存在
+        text.Should().Contain("clean tree");                   // 原文尾部完整可见
+        lines.Select(l => TextWidthHelper.GetDisplayWidth(l.FullText))
+            .Should().OnlyContain(w => w <= 80);
+    }
+
+    [Fact]
+    public void ErrorBlock_SingleOverLongCjkLine_WrapsWithoutContentLoss()
+    {
+        // CJK 单行超长错误按显示宽度换行，内容逐字保留。
+        var message = string.Concat(Enumerable.Repeat("目标执行需要干净的Git工作树", 10));
+        var lines = ChatTranscriptView.RenderErrorBlock(message, contentWidth: 80);
+
+        lines.Select(l => TextWidthHelper.GetDisplayWidth(l.FullText))
+            .Should().OnlyContain(w => w <= 80);
+        lines.Should().HaveCountGreaterThan(1);
+        // 摘要行之外的详情行拼接后覆盖完整原文。
+        var detail = string.Join("", lines.Skip(1).Select(l => l.FullText.Trim()));
+        detail.Should().Be(message);
+    }
+
+    [Fact]
     public void InlineSelector_LongOptionLabel_TruncatesToViewport()
     {
         var options = new[]
