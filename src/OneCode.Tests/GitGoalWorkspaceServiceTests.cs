@@ -10,30 +10,70 @@ namespace OneCode.Tests;
 public sealed class GitGoalWorkspaceServiceTests
 {
     [Fact]
-    public async Task Prepare_DirtyWorkspace_ThrowsWithRepositoryRootAndDirtyCount()
+    public async Task Prepare_DirtyWorkspaceCarriesUncommittedChangesIntoWorktree()
     {
         var git = Substitute.For<IGitHelper>();
-        var run = CreateRun() with { WorkingDirectory = "C:/repo/.dev-workspace" };
+        var run = CreateRun();
         git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
         git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(2);
+        git.RunAsync(Arg.Any<string[]>(), "C:/repo", Arg.Any<CancellationToken>())
+            .Returns(call => GitResult(call.ArgAt<string[]>(0)));
         git.RunAsync(
                 Arg.Is<string[]>(args => args.SequenceEqual(new[] { "status", "--porcelain" })),
                 "C:/repo",
                 Arg.Any<CancellationToken>())
             .Returns(new GitCommandResult(true, " M src/A.cs\n?? .dev-workspace/notes.md\n", ""));
-        var service = new GitGoalWorkspaceService(git, Substitute.For<IWorkspaceFingerprintProvider>());
+        git.RunAsync(
+                Arg.Is<string[]>(args => args.Length > 0 && args[0] == "apply"),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new GitCommandResult(true, "", ""));
+        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
+        fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+        var service = new GitGoalWorkspaceService(git, fingerprints);
 
-        var act = () => service.PrepareAsync(run, TestContext.Current.CancellationToken);
+        var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
 
-        var error = await act.Should().ThrowAsync<InvalidOperationException>();
-        error.Which.Message.Should().Contain("clean Git working tree");
-        error.Which.Message.Should().Contain("C:/repo");
-        error.Which.Message.Should().Contain(".dev-workspace");
-        error.Which.Message.Should().Contain("2 dirty path");
-        error.Which.Message.Should().Contain("src/A.cs");
-        error.Which.Message.Should().Contain(".dev-workspace/notes.md");
+        result.CarriedUncommittedCount.Should().Be(2);
+        result.CarriedUncommittedPaths.Should().Equal("src/A.cs", ".dev-workspace/notes.md");
+        await git.Received().RunAsync(
+            Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
+            "C:/repo",
+            Arg.Any<CancellationToken>());
+        await git.Received().RunAsync(
+            Arg.Is<string[]>(args => args.SequenceEqual(new[] { "diff", "HEAD", "--binary" })),
+            "C:/repo",
+            Arg.Any<CancellationToken>());
+        await git.Received().RunAsync(
+            Arg.Is<string[]>(args => args.Length == 5
+                && args[0] == "apply"
+                && args[1] == "--binary"
+                && args[2] == "--whitespace=nowarn"
+                && args[3] == "--index"
+                && args[4].EndsWith(".patch", StringComparison.Ordinal)),
+            result.IsolatedPath,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Prepare_CleanWorkspaceCarriesNoWarning()
+    {
+        var git = Substitute.For<IGitHelper>();
+        var run = CreateRun();
+        git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
+        git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(0);
+        git.RunAsync(Arg.Any<string[]>(), "C:/repo", Arg.Any<CancellationToken>())
+            .Returns(call => GitResult(call.ArgAt<string[]>(0)));
+        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
+        fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+        var service = new GitGoalWorkspaceService(git, fingerprints);
+
+        var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
+
+        result.CarriedUncommittedCount.Should().BeNull();
+        result.CarriedUncommittedPaths.Should().BeNull();
         await git.DidNotReceive().RunAsync(
-            Arg.Is<string[]>(args => args.Length > 0 && args[0] == "worktree"),
+            Arg.Is<string[]>(args => args[0] == "diff" || args[0] == "apply"),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
@@ -237,6 +277,7 @@ public sealed class GitGoalWorkspaceServiceTests
         "rev-parse" => new(true, "base-head", ""),
         "symbolic-ref" => new(true, "main", ""),
         "worktree" => new(true, "", ""),
+        "diff" => new(true, "diff --git a/src/A.cs b/src/A.cs\n", ""),
         _ => throw new InvalidOperationException($"Unexpected git call: {string.Join(' ', args)}"),
     };
 }

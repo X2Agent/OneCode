@@ -236,13 +236,13 @@ public sealed partial class MessageListView
                 .Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
             // Skip the first line — already shown (possibly truncated) in the summary.
             // If it was truncated, still show the full first line in the detail block.
+            // 判定与 RenderErrorBlock 一致：按显示宽度 + 共享预算公式（旧实现按
+            // 字符数，CJK 首行会被误判为"已完整展示"而丢失详情）。
             var startIdx = 0;
-            if (contentLines.Length > 0)
+            if (contentLines.Length > 0
+                && TextWidthHelper.GetDisplayWidth(contentLines[0]) <= ConversationRenderer.ErrorSummaryBudget(ContentWidth))
             {
-                var first = contentLines[0];
-                var summaryBudget = Math.Max(20, ContentWidth - 6);
-                if (first.Length <= summaryBudget - 6)
-                    startIdx = 1;
+                startIdx = 1;
             }
 
             for (var li = startIdx; li < contentLines.Length; li++)

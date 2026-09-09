@@ -9,6 +9,13 @@ internal static class ConversationRenderer
     public static readonly string Indent = new(' ', ContentIndent);
 
     /// <summary>
+    /// 错误摘要的显示宽度预算：首行超出则截断，详情从首行起完整展示。
+    /// RenderErrorBlock 与 ToggleErrorExpansion 共用，保证两处 startIdx 判定一致。
+    /// </summary>
+    public static int ErrorSummaryBudget(int contentWidth)
+        => Math.Max(1, Math.Max(20, contentWidth - 6) - 6);
+
+    /// <summary>
     /// 构建已完成工具调用的格式化行（工具名 + 目标 + 结果摘要 + 耗时）。
     /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度（CJK 感知）截断中间内容段
     /// （目标 / 结果摘要），保证整行不超出视口宽度（尾部预留 1 列滚动条），

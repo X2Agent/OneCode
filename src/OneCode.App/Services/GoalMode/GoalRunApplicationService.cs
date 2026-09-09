@@ -15,6 +15,8 @@ public interface IGoalRunApplicationService
         string modelId,
         string systemPromptHash,
         string toolCapabilityHash,
+        // 必须与执行期 Compile 传入的 checkpoint 序列化选项一致，否则 DefinitionHash 校验必失败。
+        JsonSerializerOptions? serializerOptions = null,
         CancellationToken ct = default);
 }
 
@@ -36,6 +38,7 @@ public sealed class GoalRunApplicationService(
         string modelId,
         string systemPromptHash,
         string toolCapabilityHash,
+        JsonSerializerOptions? serializerOptions = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(goal))
@@ -59,7 +62,7 @@ public sealed class GoalRunApplicationService(
                     + $"stored='{existing.WorkspaceFingerprint}', current='{currentFingerprint}'. "
                     + "Recovery is rejected to prevent inconsistent state.");
             var expectedHash = GoalWorkflowCompiler.ComputeDefinitionHash(
-                existing, modelId, systemPromptHash, toolCapabilityHash);
+                existing, modelId, systemPromptHash, toolCapabilityHash, serializerOptions);
             if (!string.Equals(existing.DefinitionHash, expectedHash, StringComparison.Ordinal))
                 throw new InvalidOperationException("Goal workflow definition changed for an existing run.");
             return existing;
@@ -80,7 +83,7 @@ public sealed class GoalRunApplicationService(
         var run = withWorkspace with
         {
             DefinitionHash = GoalWorkflowCompiler.ComputeDefinitionHash(
-                withWorkspace, modelId, systemPromptHash, toolCapabilityHash),
+                withWorkspace, modelId, systemPromptHash, toolCapabilityHash, serializerOptions),
         };
         await store.SaveAsync(run, expectedVersion: 0, ct).ConfigureAwait(false);
         return await store.LoadByIdAsync(run.Id, ct).ConfigureAwait(false)
