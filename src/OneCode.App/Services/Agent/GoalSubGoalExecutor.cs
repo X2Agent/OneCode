@@ -247,9 +247,17 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 _ = update;
             }
 
-            // 兜底：如果 evaluator 未被触发（异常路径），至少记为 1 次
-            if (actualIterations == 0)
+            // evaluator 从未触发说明 LoopAgent 在首轮就停止——最常见原因是
+            // pending tool approval 无人解析（审批中间件未挂载或放行规则未生效）。
+            var evaluatorNeverRan = actualIterations == 0;
+            if (evaluatorNeverRan)
+            {
+                _logger.LogWarning(
+                    "Sub-goal {Id} stopped before first evaluation: suspected pending tool approval " +
+                    "(approval middleware missing or auto-approval rules not applied)",
+                    goal.Id);
                 actualIterations = 1;
+            }
 
             goal.Status = completed ? GoalStatus.Completed : GoalStatus.Failed;
             _logger.LogInformation("Sub-goal {Id} {Status} after {Iterations} iterations",
@@ -262,7 +270,11 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 InputTokens: totalInputTokens,
                 OutputTokens: totalOutputTokens,
                 AgentOutput: finalOutputText ?? string.Empty,
-                Evaluation: completed ? "Hard validation and semantic acceptance passed" : "Exhausted retry attempts",
+                Evaluation: completed
+                    ? "Hard validation and semantic acceptance passed"
+                    : evaluatorNeverRan
+                        ? "Stopped before first evaluation (suspected pending tool approval)"
+                        : "Exhausted retry attempts",
                 Evidence: finalEvidence);
         }
         catch (OperationCanceledException)

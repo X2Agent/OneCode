@@ -7,11 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace OneCode.Tests;
 
-/// <summary>
-/// 空 choices 响应检测测试：OpenRouter 等供应商在上游过载/内容过滤时
-/// 返回 HTTP 200 + 空 choices，官方 SDK 反序列化会在 ChatCompletion.get_Role()
-/// 内部抛 ArgumentOutOfRangeException。HasEmptyChoices 用于在 HTTP 层拦截。
-/// </summary>
+/// <summary>空 choices 响应检测与上游错误体提取/分类测试。</summary>
 public sealed class OpenAiResponseSanitizerEmptyChoicesTests
 {
     [Fact]
@@ -38,7 +34,6 @@ public sealed class OpenAiResponseSanitizerEmptyChoicesTests
     [Fact]
     public void HasEmptyChoices_ErrorBodyWithoutChoices_ReturnsTrue()
     {
-        // OpenRouter 中间件错误：HTTP 200 + {"error":{...}}，无 choices 字段。
         const string body = """{"error":{"message":"Upstream overloaded","code":503}}""";
         OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeTrue();
     }
@@ -49,25 +44,19 @@ public sealed class OpenAiResponseSanitizerEmptyChoicesTests
     [InlineData("")]
     public void HasEmptyChoices_NonJsonBody_ReturnsFalse(string body)
     {
-        // 非 JSON 响应体（网关 HTML 错误页/截断流）不是补全响应，
-        // 不得误判为 empty-choices 触发重试——应走上层协议错误路径。
+        // 非 JSON 体不是补全响应，不得误判触发重试。
         OpenAiResponseSanitizer.HasEmptyChoices(body).Should().BeFalse();
     }
 
     [Fact]
     public void HasEmptyChoices_JsonArrayOrScalarRoot_ReturnsFalse()
     {
-        // 顶层非对象（数组/标量）不是 chat.completion 形态。
         OpenAiResponseSanitizer.HasEmptyChoices("[1,2,3]").Should().BeFalse();
         OpenAiResponseSanitizer.HasEmptyChoices("\"plain string\"").Should().BeFalse();
     }
 }
 
-/// <summary>
-/// HTTP 200 + 显式错误体（{"error":{...}}）的提取与瞬时性分类测试。
-/// 上游真实错误消息/错误码必须被保留（不再笼统归为 empty choices），
-/// 且仅瞬时错误（5xx/429/过载措辞）参与重试，永久错误（401 等）快速失败。
-/// </summary>
+/// <summary>HTTP 200/400 + 显式错误体的提取与瞬时性分类测试。</summary>
 public sealed class UpstreamProviderErrorTests
 {
     [Theory]
@@ -83,6 +72,30 @@ public sealed class UpstreamProviderErrorTests
             .Should().BeTrue();
         message.Should().Be(expectedMessage);
         code.Should().Be(expectedCode);
+    }
+
+    [Fact]
+    public void TryExtractUpstreamError_OpenRouterMetadataFields_AreFoldedIntoMessage()
+    {
+        const string body = """{"error":{"message":"openai_error","code":"bad_response_status_code","metadata":{"error_type":"provider_overloaded","provider_code":502}}}""";
+
+        OpenAiResponseSanitizer.TryExtractUpstreamError(body, out var message, out var code)
+            .Should().BeTrue();
+        code.Should().Be("bad_response_status_code");
+        message.Should().Contain("openai_error");
+        message.Should().Contain("[error_type=provider_overloaded]");
+        message.Should().Contain("[provider_code=502]");
+    }
+
+    [Fact]
+    public void TryExtractUpstreamError_OpenAiTypeField_IsFoldedIntoMessage()
+    {
+        const string body = """{"error":{"message":"The server had an error","type":"server_error","code":500}}""";
+
+        OpenAiResponseSanitizer.TryExtractUpstreamError(body, out var message, out _)
+            .Should().BeTrue();
+        message.Should().Contain("The server had an error");
+        message.Should().Contain("[type=server_error]");
     }
 
     [Theory]
@@ -116,6 +129,102 @@ public sealed class UpstreamProviderErrorTests
             .Should().BeTrue();
         UpstreamProviderErrorException.ClassifyTransient("insufficient_quota", "quota exceeded")
             .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClassifyTransient_GatewayRelayError_IsTransientByDefault()
+    {
+        // 用户实际遇到的故障：网关掩码错误体（HTTP 400 外壳）必须默认瞬时可重试。
+        UpstreamProviderErrorException.ClassifyTransient("bad_response_status_code", "openai_error", 400)
+            .Should().BeTrue();
+        UpstreamProviderErrorException.ClassifyTransient("bad_response_status_code", "openai_error")
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("bad_response_status_code")]
+    [InlineData("bad_response")]
+    [InlineData("upstream_error")]
+    [InlineData("do_request_failed")]
+    [InlineData("read_response_body_failed")]
+    [InlineData("new_api_error")]
+    [InlineData("openai_error")]
+    [InlineData("api_error")]
+    [InlineData("server_error")]
+    [InlineData("internal_error")]
+    [InlineData("unmapped")]
+    [InlineData("provider_error")]
+    [InlineData("provider_overloaded")]
+    [InlineData("provider_unavailable")]
+    [InlineData("rate_limit_exceeded")]
+    [InlineData("timeout")]
+    public void ClassifyTransient_GatewayRelayCodes_DefaultToTransient(string code)
+    {
+        UpstreamProviderErrorException.ClassifyTransient(code, "opaque gateway failure")
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("context_length_exceeded")]
+    [InlineData("authentication")]
+    [InlineData("payment_required")]
+    [InlineData("content_policy_violation")]
+    [InlineData("refusal")]
+    [InlineData("invalid_request_error")]
+    [InlineData("model_not_found")]
+    [InlineData("permission_error")]
+    [InlineData("not_found_error")]
+    [InlineData("insufficient_quota")]
+    [InlineData("invalid_api_key")]
+    [InlineData("billing_hard_limit_reached")]
+    [InlineData("model_not_exists")]
+    public void ClassifyTransient_KnownPermanentCodes_FailFast(string code)
+    {
+        UpstreamProviderErrorException.ClassifyTransient(code, "opaque gateway failure")
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClassifyTransient_PermanentSignatureBeatsGatewayRelayCode()
+    {
+        UpstreamProviderErrorException.ClassifyTransient(
+                "bad_response_status_code", "Invalid API key provided", 400)
+            .Should().BeFalse();
+        UpstreamProviderErrorException.ClassifyTransient(
+                "openai_error", "This model's maximum context length is 8192 tokens", 400)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClassifyTransient_PermanentSignatureMatchesUnderscoredCode()
+    {
+        UpstreamProviderErrorException.ClassifyTransient("invalid_api_key", "request rejected")
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClassifyTransient_OpaqueCodeWithTransientHttpStatus_IsTransient()
+    {
+        UpstreamProviderErrorException.ClassifyTransient("some_unknown_code", "no keywords here", 502)
+            .Should().BeTrue();
+        UpstreamProviderErrorException.ClassifyTransient("some_unknown_code", "no keywords here", 504)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClassifyTransient_UnknownCodeWithPermanentHttpStatus_StaysPermanent()
+    {
+        UpstreamProviderErrorException.ClassifyTransient("some_unknown_code", "no keywords here", 400)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void Exception_CarriesHttpStatusCode()
+    {
+        var ex = new UpstreamProviderErrorException(
+            "Provider returned HTTP 400 with an upstream error body", "bad_response_status_code", 400);
+        ex.HttpStatusCode.Should().Be(400);
+        ex.IsTransient.Should().BeTrue();
     }
 
     [Fact]

@@ -1,8 +1,10 @@
 using System.Text;
 using OneCode.App.Services.Compact;
+using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.Core.Models;
+using OneCode.App.Services.GoalMode;
 
 namespace OneCode.App.Commands;
 
@@ -22,6 +24,7 @@ public sealed class StatusCommand(
     IPermissionModeProvider modeProvider,
     ITokenUsageTracker tokenUsageTracker,
     IModelManager modelManager,
+    IGoalRunApplicationService goalRunService,
     ILogger<StatusCommand>? logger = null) : Command
 {
     public override string Name => "status";
@@ -29,19 +32,19 @@ public sealed class StatusCommand(
     public override CommandCategory Category => CommandCategory.Diagnostic;
     public override string? ArgumentHint => "[info|stats|window]";
 
-    public override Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
+    public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
         var sub = args.Length > 0 ? args[0].ToLowerInvariant() : "info";
-        return Task.FromResult(sub switch
+        return sub switch
         {
-            "info" => ShowInfo(),
+            "info" => await ShowInfoAsync(ct).ConfigureAwait(false),
             "stats" => ShowStats(),
             "window" => ShowWindow(),
             _ => CommandResult.Error($"Unknown subcommand: {sub}. Use: info, stats, window"),
-        });
+        };
     }
 
-    private CommandResult ShowInfo()
+    private async Task<CommandResult> ShowInfoAsync(CancellationToken ct)
     {
         var conv = sessionManager.ForegroundConversation;
         var state = appState.Current;
@@ -63,6 +66,17 @@ public sealed class StatusCommand(
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Activity:    {conv.LastActivityAt:yyyy-MM-dd HH:mm:ss}");
             if (conv.Branch is not null)
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  Conv branch: {conv.Branch}");
+        }
+
+        // 当前会话的 Goal run 隔离 worktree——持久查询出口，避免启动 notice 滚屏后不可追溯。
+        if (conv is not null)
+        {
+            var goalRun = await goalRunService.GetBySessionAsync(conv.Id, ct).ConfigureAwait(false);
+            if (goalRun?.Workspace is { } workspace)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture,
+                    $"  Goal worktree: {workspace.IsolatedPath} (branch: {workspace.WorktreeBranch}, state: {goalRun.State})");
+            }
         }
 
         sb.AppendLine(CultureInfo.InvariantCulture, $"  Model:       {state.MainLoopModel ?? "(default)"}");

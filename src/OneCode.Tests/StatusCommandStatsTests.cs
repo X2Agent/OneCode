@@ -9,6 +9,8 @@ using OneCode.Core.Commands;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.App.Services.Observability;
+using OneCode.App.Services.GoalMode;
+using OneCode.Core.Goals;
 using OneCode.Infrastructure.Api;
 
 namespace OneCode.Tests;
@@ -35,7 +37,7 @@ public sealed class StatusCommandStatsTests
                 SystemPromptDetail: new SystemPromptBreakdown(
                     TemplateBody: 20, Environment: 10, ProjectContext: 15, Memory: 5, OtherSections: 0)));
 
-        var sut = new StatusCommand(sessionManager, appState, modeProvider, tracker, modelManager: null!);
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tracker, modelManager: null!, goalRunService: Substitute.For<IGoalRunApplicationService>());
 
         var result = await sut.ExecuteAsync(new[] { "stats" }, TestContext.Current.CancellationToken);
 
@@ -66,7 +68,7 @@ public sealed class StatusCommandStatsTests
         var sessionManager = CreateSessionManager();
         var appState = Substitute.For<IAppStateAccessor>();
         var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
-        var sut = new StatusCommand(sessionManager, appState, modeProvider, tokenUsageTracker: null!, modelManager: null!);
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tokenUsageTracker: null!, modelManager: null!, goalRunService: Substitute.For<IGoalRunApplicationService>());
 
         var result = await sut.ExecuteAsync(new[] { "stats" }, TestContext.Current.CancellationToken);
 
@@ -79,6 +81,69 @@ public sealed class StatusCommandStatsTests
         // 但仍显示基本统计
         text.Should().Contain("Input tokens");
         text.Should().Contain("Output tokens");
+    }
+
+    [Fact]
+    public async Task Info_WithGoalWorkspace_ShowsWorktreePath()
+    {
+        var sessionManager = CreateSessionManager();
+        await sessionManager.CreateAsync(new ConversationOptions(
+            WorkingDirectory: Path.GetTempPath()), TestContext.Current.CancellationToken);
+        var conv = sessionManager.ForegroundConversation!;
+
+        var appState = Substitute.For<IAppStateAccessor>();
+        appState.Current.Returns(new AppState());
+        var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
+        var goalRunService = Substitute.For<IGoalRunApplicationService>();
+        goalRunService.GetBySessionAsync(conv.Id, Arg.Any<CancellationToken>())
+            .Returns(new GoalRun
+            {
+                Id = new GoalRunId(Guid.NewGuid().ToString("N")),
+                SessionId = conv.Id,
+                Goal = "test goal",
+                WorkingDirectory = Path.GetTempPath(),
+                WorkspaceFingerprint = "fp",
+                DefinitionHash = "hash",
+                Workspace = new GoalWorkspaceSnapshot(
+                    WorkspaceId: "ws",
+                    RepositoryRoot: "C:/repo",
+                    IsolatedPath: "C:/repo/.onecode/goal-worktrees/run1",
+                    WorktreeBranch: "onecode/goal/run1",
+                    TargetBranch: "main",
+                    BaseCommit: "abc123",
+                    TargetWorkspaceFingerprint: "fp2",
+                    CreatedAt: DateTimeOffset.UtcNow),
+            });
+
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tokenUsageTracker: null!, modelManager: null!, goalRunService);
+
+        var result = await sut.ExecuteAsync(Array.Empty<string>(), TestContext.Current.CancellationToken);
+
+        var text = ((CommandResult.TextResult)result).Value;
+        text.Should().Contain("Goal worktree: C:/repo/.onecode/goal-worktrees/run1");
+        text.Should().Contain("onecode/goal/run1");
+    }
+
+    [Fact]
+    public async Task Info_WithoutGoalRun_OmitsWorktreeLine()
+    {
+        var sessionManager = CreateSessionManager();
+        await sessionManager.CreateAsync(new ConversationOptions(
+            WorkingDirectory: Path.GetTempPath()), TestContext.Current.CancellationToken);
+
+        var appState = Substitute.For<IAppStateAccessor>();
+        appState.Current.Returns(new AppState());
+        var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
+        var goalRunService = Substitute.For<IGoalRunApplicationService>();
+        goalRunService.GetBySessionAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>())
+            .Returns((GoalRun?)null);
+
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tokenUsageTracker: null!, modelManager: null!, goalRunService);
+
+        var result = await sut.ExecuteAsync(Array.Empty<string>(), TestContext.Current.CancellationToken);
+
+        var text = ((CommandResult.TextResult)result).Value;
+        text.Should().NotContain("Goal worktree");
     }
 
     private static SessionManager CreateSessionManager()

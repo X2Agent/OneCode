@@ -79,6 +79,15 @@ public sealed class OrchestrationStreamService(
                 $"⚠ 目标工作区有 {carried.CarriedUncommittedCount} 个未提交改动，已带入 Goal 隔离 worktree，"
                 + "发布时会随结果一起提交。" + sampleText);
         }
+
+        // 展示 Goal 隔离 worktree 位置，便于用户定位新建目录。
+        if (goalRun.Workspace is { } workspace)
+        {
+            yield return new TuiNotice(
+                $"🔒 Goal 隔离 worktree：{workspace.IsolatedPath}"
+                + $"（分支 {workspace.WorktreeBranch}，基于 {workspace.TargetBranch}）");
+        }
+
         var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
         {
             SingleReader = true,

@@ -47,42 +47,38 @@ public sealed class OpenAiResponseSanitizingHandler : DelegatingHandler
         CancellationToken cancellationToken)
     {
         var body = await response.Content!.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var statusCode = (int)response.StatusCode;
 
-        // 200 + 显式错误体（{"error":{...}}）：部分网关（OpenRouter → Nvidia 等）过载时
-        // 不返回 4xx/5xx 而是 200 + 错误体。提取上游真实错误消息与错误码，
-        // 用专用异常承载，避免被笼统归类为「empty choices」误导排查。
-        // 是否可重试由异常依据错误码/消息自行判定（瞬时错误自动重试，4xx 立即失败）。
+        // 网关过载时常返回 200/400 + 错误体，并把上游真实错误掩码为不透明码
+        // （如 "openai_error" / "bad_response_status_code"）。瞬时性由异常判定：
+        // 网关中继类默认瞬时（自动重试），仅永久性证据（无效密钥/配额等）快速失败。
         if (OpenAiResponseSanitizer.TryExtractUpstreamError(body, out var upstreamMessage, out var upstreamCode))
         {
-            const int MaxLoggedBodyLength = 512;
-            var preview = body.Length <= MaxLoggedBodyLength
-                ? body
-                : string.Concat(body.AsSpan(0, MaxLoggedBodyLength), "…(truncated)");
+            var preview = Preview(body);
             _logger?.LogWarning(
                 "Provider returned HTTP {Status} with an upstream error body — treating as {Kind}. Body: {Body}",
-                (int)response.StatusCode,
-                UpstreamProviderErrorException.ClassifyTransient(upstreamCode, upstreamMessage) ? "transient (retryable)" : "permanent (fail fast)",
+                statusCode,
+                UpstreamProviderErrorException.ClassifyTransient(upstreamCode, upstreamMessage, statusCode)
+                    ? "transient (retryable)"
+                    : "permanent (fail fast)",
                 preview);
             throw new UpstreamProviderErrorException(
-                $"Provider returned HTTP {(int)response.StatusCode} with an upstream error body: \"{upstreamMessage}\""
+                $"Provider returned HTTP {statusCode} with an upstream error body: \"{upstreamMessage}\""
                 + (upstreamCode is null ? "" : $" (code: {upstreamCode})"),
-                upstreamCode);
+                upstreamCode,
+                statusCode);
         }
 
-        // 200 + 空 choices：OpenRouter 等供应商在上游过载/内容过滤时返回这种"成功"响应，
-        // 官方 SDK 反序列化时会在 ChatCompletion.get_Role() 内部抛 ArgumentOutOfRangeException。
-        // 转为专用异常，交由 RetryOnOverloadChatClient 按瞬时上游错误重试。
+        // 200 + 空 choices：SDK 反序列化会在 ChatCompletion.get_Role() 内部越界崩溃，
+        // 转为专用异常交由 RetryOnOverloadChatClient 按瞬时上游错误重试。
         if (OpenAiResponseSanitizer.HasEmptyChoices(body))
         {
-            const int MaxLoggedBodyLength = 512;
-            var preview = body.Length <= MaxLoggedBodyLength
-                ? body
-                : string.Concat(body.AsSpan(0, MaxLoggedBodyLength), "…(truncated)");
+            var preview = Preview(body);
             _logger?.LogWarning(
                 "Provider returned HTTP {Status} with empty choices — treating as transient upstream error. Body: {Body}",
-                (int)response.StatusCode, preview);
+                statusCode, preview);
             throw new EmptyChoicesResponseException(
-                $"Provider returned HTTP {(int)response.StatusCode} with no completion choices "
+                $"Provider returned HTTP {statusCode} with no completion choices "
                 + $"(likely upstream overload or content filter). Body preview: {preview}");
         }
 
@@ -90,16 +86,8 @@ public sealed class OpenAiResponseSanitizingHandler : DelegatingHandler
 
         if (sanitized == body)
         {
-            // Diagnostic: a remaining null field was not rewritten. Helps locate missed array fields.
-            // Debug level + truncated preview: the full body may be large and contain conversation content.
             if (body.Contains("\":null", StringComparison.Ordinal))
-            {
-                const int MaxLoggedBodyLength = 512;
-                var preview = body.Length <= MaxLoggedBodyLength
-                    ? body
-                    : string.Concat(body.AsSpan(0, MaxLoggedBodyLength), "…(truncated)");
-                _logger?.LogDebug("Unsanitized null field in response: {Body}", preview);
-            }
+                _logger?.LogDebug("Unsanitized null field in response: {Body}", Preview(body));
 
             return response;
         }
@@ -107,4 +95,7 @@ public sealed class OpenAiResponseSanitizingHandler : DelegatingHandler
         response.Content = new StringContent(sanitized, Encoding.UTF8, "application/json");
         return response;
     }
+
+    private static string Preview(string body) =>
+        body.Length <= 512 ? body : string.Concat(body.AsSpan(0, 512), "…(truncated)");
 }

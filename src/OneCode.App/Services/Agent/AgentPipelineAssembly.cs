@@ -72,7 +72,13 @@ public sealed class AgentPipelineAssembly(
             MaxToolCalls: options.MaxTurns,
             ToolLimitMessage: $"Maximum tool call limit ({options.MaxTurns}) reached.",
             IsToolAllowed: options.IsToolAllowed,
-            EnableToolApproval: options.ApprovalBroker is not null,
+            // GoalAuto（GOAL 子目标路径）下 broker 为 null，但必须挂 MAF 审批中间件 +
+            // 全放行规则（AutoApprovalRulesFactory 对 GoalAuto 自动放行全部工具），
+            // 否则 LoopAgent 会因 pending tool approval 无人解析而直接停止。
+            // SuppressToolApproval 保留受控 Build（broker=null + 显式禁用）的语义。
+            EnableToolApproval: (options.ApprovalBroker is not null
+                || modeProvider.CurrentMode == PermissionMode.GoalAuto)
+                && !options.SuppressToolApproval,
             ApprovalBroker: options.ApprovalBroker);
     }
 

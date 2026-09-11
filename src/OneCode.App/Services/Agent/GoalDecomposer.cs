@@ -297,8 +297,16 @@ internal sealed class GoalDecomposer : IGoalPlanningService
                 messages, chatOptions, "goal-decomposer", goal, ct).ConfigureAwait(false);
 
             var plan = TryDeserializePlan(response.Text);
+            if (plan is not null)
+                return (plan, inputTokens, outputTokens, Error: null);
 
-            return (plan ?? new GoalPlan(), inputTokens, outputTokens, Error: null);
+            // 空文本通常意味着推理模型把 token 预算耗在 reasoning_content 上；
+            // 解析失败则说明输出里没有可提取的 JSON 计划块。两者都给出可诊断的错误，
+            // 供 DecomposeWithFallbackAsync 的 Warning 日志使用。
+            return (new GoalPlan(), inputTokens, outputTokens,
+                Error: string.IsNullOrWhiteSpace(response.Text)
+                    ? $"model returned empty text (reasoning budget likely exhausted; maxOutput={chatOptions.MaxOutputTokens})"
+                    : "model output contained no parseable JSON plan block");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -310,7 +318,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
     private static ChatOptions CreateStructuredChatOptions(string? modelId) => new()
     {
         ModelId = modelId,
-        MaxOutputTokens = 2048,
+        MaxOutputTokens = 8192,
         // Do not set ResponseFormat here. Some OpenAI-compatible gateways reject every
         // response_format variant, and exception-driven probing still raises a first-chance
         // ClientResultException while debugging. The goal-decomposer system prompt already

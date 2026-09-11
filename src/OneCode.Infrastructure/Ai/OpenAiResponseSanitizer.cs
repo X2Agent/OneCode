@@ -4,45 +4,21 @@ using System.Text.Json;
 
 /// <summary>
 /// Rewrites OpenAI-compatible JSON so the official OpenAI .NET SDK can deserialize it.
-/// Third-party providers often send empty or vendor-specific <c>finish_reason</c>
-/// values, and <c>null</c> in place of empty arrays.
 /// </summary>
 internal static partial class OpenAiResponseSanitizer
 {
-    /// <summary>
-    /// Matches <c>"tool_calls": null</c> or <c>"annotations": null</c> (with any whitespace).
-    /// These are the fields most commonly returned as null by third-party
-    /// OpenAI-compatible providers (DeepSeek, Qwen, Moonshot, etc.)
-    /// where the OpenAI SDK expects an array.
-    /// </summary>
     [GeneratedRegex(@"""(tool_calls|annotations)""\s*:\s*null\b")]
     private static partial Regex NullArrayRegex();
 
-    /// <summary>
-    /// Matches an empty <c>"choices": []</c> array. Providers like OpenRouter return
-    /// HTTP 200 with no choices on upstream overload / content filtering; the official
-    /// SDK then crashes inside <c>ChatCompletion.get_Role()</c> (index out of range).
-    /// </summary>
     [GeneratedRegex(@"""choices""\s*:\s*\[\s*\]")]
     private static partial Regex EmptyChoicesRegex();
 
-    /// <summary>
-    /// Returns true when the JSON payload is a chat-completion response whose
-    /// <c>choices</c> array is empty or missing — the SDK cannot deserialize it
-    /// and would throw ArgumentOutOfRangeException from ChatCompletion.get_Role().
-    /// 覆盖三种形态：空数组、缺失 choices 的 chat.completion 体、以及
-    /// OpenRouter 中间件错误体（HTTP 200 + {"error":{...}}，无 choices）。
-    /// 判定基于结构而非子串：非 JSON 响应体（HTML 错误页/截断流等）一律不判空，
-    /// 避免被误分类为可重试的 empty-choices。
-    /// </summary>
+    /// <summary>choices 为空或缺失（含 HTTP 200 + 错误体形态）；非 JSON 体不算。</summary>
     internal static bool HasEmptyChoices(string payload)
     {
-        // 快速路径：正常补全体必含 "choices"，正则确认是否为空数组。
         if (payload.Contains("""choices""", StringComparison.Ordinal))
             return EmptyChoicesRegex().IsMatch(payload);
 
-        // 不含 "choices" 字样：需确认是 JSON 对象且其上确实无 choices 属性才算缺失；
-        // 解析失败（HTML/纯文本/截断体）→ 不是补全响应 → false。
         try
         {
             using var doc = JsonDocument.Parse(payload);
@@ -55,23 +31,12 @@ internal static partial class OpenAiResponseSanitizer
         }
     }
 
-    /// <summary>
-    /// 尝试从 HTTP 200 响应体中提取显式的上游错误对象（<c>{"error":{...}}</c>）。
-    /// 一些 OpenAI 兼容网关（OpenRouter → 上游 Nvidia 等）过载时不返回 4xx/5xx，
-    /// 而是 200 + 错误体。支持三种形态：
-    /// <list type="bullet">
-    /// <item><c>error</c> 为对象：<c>message</c> / <c>code</c> 字段（OpenRouter 还可能嵌套 <c>metadata.raw</c>）</item>
-    /// <item><c>error</c> 为字符串：整体作为消息</item>
-    /// <item>其余情况返回 false（不是错误体）</item>
-    /// </list>
-    /// </summary>
+    /// <summary>提取响应体中的显式错误对象（{"error":{...}}），辅助字段折叠进 message。</summary>
     internal static bool TryExtractUpstreamError(string payload, out string message, out string? code)
     {
         message = string.Empty;
         code = null;
 
-        // 快速路径：绝大多数正常补全响应不含 "error" 字段，
-        // 子串检查避免对每个响应都做完整 JSON 解析（长补全体解析开销可观）。
         if (!payload.Contains("""error""", StringComparison.Ordinal))
             return false;
 
@@ -82,8 +47,6 @@ internal static partial class OpenAiResponseSanitizer
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("error", out var error))
                 return false;
 
-            // 补全优先：若响应同时携带非空 choices（有效补全），即使存在 error 字段
-            // 也不视为错误体——绝不因附带的 error 字段丢弃正常业务响应。
             if (root.TryGetProperty("choices", out var choices)
                 && choices.ValueKind == JsonValueKind.Array
                 && choices.GetArrayLength() > 0)
@@ -107,7 +70,6 @@ internal static partial class OpenAiResponseSanitizer
                             JsonValueKind.Number => c.GetRawText(),
                             _ => null,
                         };
-                    // OpenRouter 形态：{"error":{"metadata":{"raw":"..."}}}
                     if (string.IsNullOrWhiteSpace(message)
                         && error.TryGetProperty("metadata", out var md)
                         && md.ValueKind == JsonValueKind.Object
@@ -120,41 +82,64 @@ internal static partial class OpenAiResponseSanitizer
 
                 case JsonValueKind.Null:
                 case JsonValueKind.Undefined:
-                    // 某些网关在正常响应中附带 "error": null —— 不是错误。
                     return false;
 
                 default:
                     return false;
             }
 
+            if (error.ValueKind == JsonValueKind.Object)
+            {
+                var details = CollectErrorDetails(error);
+                if (details.Length > 0)
+                    message = string.Concat(message, " ", details).Trim();
+            }
+
             return !string.IsNullOrWhiteSpace(message) || code is not null;
         }
         catch (JsonException)
         {
-            // 非 JSON 或截断的响应体——不是可识别的错误体。
             return false;
         }
     }
 
-    /// <summary>
-    /// Matches a quoted <c>finish_reason</c> string. JSON <c>null</c> is left untouched
-    /// because the SDK already accepts it for in-progress streaming chunks.
-    /// </summary>
+    private static string CollectErrorDetails(JsonElement error)
+    {
+        List<string> parts = [];
+
+        void Add(string label, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                parts.Add($"[{label}={value}]");
+        }
+
+        if (error.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
+            Add("type", type.GetString());
+
+        if (error.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object)
+        {
+            if (metadata.TryGetProperty("error_type", out var errorType)
+                && errorType.ValueKind == JsonValueKind.String)
+                Add("error_type", errorType.GetString());
+
+            if (metadata.TryGetProperty("provider_code", out var providerCode))
+                Add("provider_code", providerCode.ValueKind == JsonValueKind.String
+                    ? providerCode.GetString()
+                    : providerCode.GetRawText());
+        }
+
+        return parts.Count == 0 ? string.Empty : string.Join(" ", parts);
+    }
+
     [GeneratedRegex(@"""finish_reason""\s*:\s*""(?<value>[^""]*)""")]
     private static partial Regex FinishReasonRegex();
 
-    /// <summary>
-    /// Sanitizes a JSON object (full response body or a single SSE <c>data:</c> payload).
-    /// </summary>
     internal static string SanitizePayload(string payload)
     {
         var withArrays = NullArrayRegex().Replace(payload, @"""$1"":[]");
         return FinishReasonRegex().Replace(withArrays, MapFinishReasonMatch);
     }
 
-    /// <summary>
-    /// Sanitizes one SSE line. Non-<c>data:</c> lines and the <c>[DONE]</c> marker are unchanged.
-    /// </summary>
     internal static string SanitizeSseLine(string line)
     {
         const string prefix = "data:";
@@ -190,10 +175,6 @@ internal static partial class OpenAiResponseSanitizer
         return @"""finish_reason"":""" + MapFinishReasonAlias(value) + @"""";
     }
 
-    /// <summary>
-    /// Empty / dummy values show up on in-progress streaming chunks. They must become
-    /// JSON <c>null</c> (not <c>"stop"</c>), otherwise later deltas look like a completed turn.
-    /// </summary>
     private static bool IsPlaceholderFinishReason(string value) =>
         string.IsNullOrWhiteSpace(value)
         || value.Equals(".", StringComparison.Ordinal)
