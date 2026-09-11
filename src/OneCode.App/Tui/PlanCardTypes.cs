@@ -92,7 +92,8 @@ internal sealed class PlanCardState(
     List<PlanStep> steps,
     PlanCardPhase phase,
     string? markdown = null,
-    string? documentPath = null)
+    string? documentPath = null,
+    bool isPendingRevision = false)
 {
     public string Title { get; } = title;
     public List<PlanStep> Steps { get; } = steps;
@@ -101,6 +102,12 @@ internal sealed class PlanCardState(
 
     /// <summary>Persisted markdown document path shown on the card so users can locate the plan file.</summary>
     public string? DocumentPath { get; } = documentPath;
+
+    /// <summary>
+    /// 用户已选择「输入修改意见」——侧边栏冻结当前内容、标题切换为待修改态，
+    /// 且 <see cref="ReplShell.RenderActivePlanCard"/> 不再叠加 Phase 后缀，直至下一次 ShowPlanCard 整体替换。
+    /// </summary>
+    public bool IsPendingRevision { get; } = isPendingRevision;
 }
 
 public enum PlanStepStatus { Pending = 0, Current = 1, Done = 2, }

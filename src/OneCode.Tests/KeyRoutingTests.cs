@@ -258,6 +258,9 @@ public sealed class KeyRoutingTests
 
         var decision = await decided.Task.WaitAsync(TimeSpan.FromSeconds(2));
         decision.Should().Be(PlanCardDecision.Edit);
+        shell.IsPlanSidebarVisible.Should().BeTrue("选择修改意见时，侧边栏必须保持展开可见供用户对照");
+        shell.ActivePlan.Should().NotBeNull();
+        shell.ActivePlan!.Title.Should().Contain("待修改");
     }
 
     [Fact]
@@ -297,6 +300,58 @@ public sealed class KeyRoutingTests
 
         shell.ShowPlanCard("重构", [new PlanStep("第一步")], PlanCardPhase.PendingApproval);
         shell.IsPlanSidebarVisible.Should().BeTrue("审批阶段侧边栏保持可见");
+    }
+
+    [Fact]
+    public void EscHierarchy_Overlays_DismissesFirst()
+    {
+        var shell = CreateShell();
+        var overlay = new Terminal.Gui.ViewBase.View { Width = 10, Height = 10 };
+        shell.Overlays.Push(overlay);
+        shell.Overlays.IsOverlayVisible.Should().BeTrue();
+
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.Esc);
+
+        shell.Overlays.IsOverlayVisible.Should().BeFalse("按 Esc 优先关闭顶层 Overlay");
+    }
+
+    [Fact]
+    public void EscHierarchy_ActiveInteraction_Dismisses()
+    {
+        var shell = CreateShell();
+        var selector = new InlineSelector("测试", [new InlineSelectorOption("1", "选项")]);
+        shell.ShowInlineSelector(selector);
+        shell.HasActiveInteractionSession().Should().BeTrue();
+
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.Esc);
+
+        shell.HasActiveInteractionSession().Should().BeFalse("在无 Overlay 时按 Esc 关闭内联选择器");
+    }
+
+    [Fact]
+    public void EscHierarchy_ChatInput_ClearsTextWhenIdle()
+    {
+        var shell = CreateShell();
+        shell.ChatInput.SetText("some text");
+        shell.ChatInput.CurrentText.Should().Be("some text");
+
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.Esc);
+
+        shell.ChatInput.CurrentText.Should().BeEmpty("输入框有文字时按 Esc 清空内容");
+    }
+
+    [Fact]
+    public void SidebarToggle_CtrlG_TogglesVisibility()
+    {
+        var shell = CreateShell();
+        shell.ShowPlanCard("重构", [new PlanStep("测试")], PlanCardPhase.Finalizing);
+        shell.IsPlanSidebarVisible.Should().BeTrue();
+
+        shell.ToggleSidebarVisibility();
+        shell.IsPlanSidebarVisible.Should().BeFalse("Ctrl+G 应收起已展开的侧边栏");
+
+        shell.ToggleSidebarVisibility();
+        shell.IsPlanSidebarVisible.Should().BeTrue("再次 Ctrl+G 应恢复展示侧边栏");
     }
 
     private static ReplShell CreateShell()

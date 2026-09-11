@@ -20,7 +20,7 @@ public sealed class AgentStatusBar : View
     private string? _teamModeLabel;
     private string _activity = "处理中";
     private string _model = "Opus";
-    private string _sandbox = "Sandbox";
+    private readonly string _sandbox = "Sandbox";
     private int _lspServerCount;
     private int _lspErrorCount;
     private int _lspWarningCount;
@@ -112,6 +112,29 @@ public sealed class AgentStatusBar : View
         SetNeedsDraw();
     }
 
+    internal static string ShortenModelName(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return "Opus";
+
+        var lower = model.ToLowerInvariant();
+        if (lower.Contains("3-7-sonnet") || lower.Contains("3.7-sonnet")) return "Sonnet 3.7";
+        if (lower.Contains("3-5-sonnet") || lower.Contains("3.5-sonnet")) return "Sonnet 3.5";
+        if (lower.Contains("3-5-haiku") || lower.Contains("3.5-haiku")) return "Haiku 3.5";
+        if (lower.Contains("3-opus") || lower.Contains("opus")) return "Opus";
+        if (lower.Contains("sonnet-4")) return "Sonnet 4";
+        if (lower.Contains("gpt-4o-mini")) return "GPT-4o-mini";
+        if (lower.Contains("gpt-4o")) return "GPT-4o";
+        if (lower.Contains("gpt-4-turbo")) return "GPT-4T";
+        if (lower.Contains("o3-mini")) return "o3-mini";
+        if (lower.Contains("o1-mini")) return "o1-mini";
+        if (lower.Contains("o1-preview") || lower.Equals("o1", StringComparison.OrdinalIgnoreCase)) return "o1";
+
+        if (model.Length > 12)
+            return model[..10] + TuiGlyphs.Ellipsis;
+
+        return model;
+    }
+
     protected override bool OnDrawingContent(DrawContext? context)
     {
         var w = Viewport.Width;
@@ -121,114 +144,196 @@ public sealed class AgentStatusBar : View
         SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
         AddStr(new string(' ', w));
 
-        // LEFT: live activity · model · cost · sandbox · LSP.
+        // Measure right-side Mode Tag first to establish strict boundary
+        var (modeTag, strategyLabel, teamLabel, rightWidth, rightCol) = MeasureModeTag(w);
+        var maxLeftCol = Math.Max(1, rightCol - 2);
+
+        // Determine degradation level (0..4) based on available width
+        var level = DetermineDegradationLevel(maxLeftCol);
+
         var col = 1;
-        Move(col, 0);
+
+        // Activity / Spinner
         if (_busy)
         {
-            SetAttribute(new Attribute(TuiPalette.Warning, TuiPalette.BgPrimary));
-            AddStr($"{_spinner.CurrentFrame} ");
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
-            AddStr(_activity);
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr(" \u00b7 ");
+            var act = level >= 4 && _activity.Length > 6 ? _activity[..5] + TuiGlyphs.Ellipsis : _activity;
+            if (!TryAddSegment($"{_spinner.CurrentFrame} ", TuiPalette.Warning, ref col, maxLeftCol)) goto DrawRight;
+            if (!TryAddSegment(act, TuiPalette.FgSecondary, ref col, maxLeftCol)) goto DrawRight;
+            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
         }
 
-        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
-        AddStr(_model);
+        // Model name (shortened if level >= 1)
+        var modelToDisplay = level >= 1 ? ShortenModelName(_model) : _model;
+        if (!TryAddSegment(modelToDisplay, TuiPalette.FgPrimary, ref col, maxLeftCol)) goto DrawRight;
 
-        if (_sandbox != "Normal")
+        // Sandbox (hidden if level >= 4)
+        if (_sandbox != "Normal" && level < 4)
         {
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr(" \u00b7 ");
-            SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
-            AddStr($"\U0001f512 {_sandbox}");
+            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+            if (!TryAddSegment($"\U0001f512 {_sandbox}", TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
         }
 
-        // LSP status: only rendered when at least one server is running (avoids noise).
-        // Format: LSP: 2s · ⚠ 3 · ✗ 1  (servers, warnings, errors)
-        if (_lspServerCount > 0)
+        // LSP Status (level 0..2: full; level 3: collapsed server count only; level >= 4: hidden)
+        if (_lspServerCount > 0 && level < 4)
         {
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr(" \u00b7 ");
-            // Server count — green when no errors, yellow when only warnings, red when errors present
+            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+
             var serverColor = _lspErrorCount > 0
                 ? TuiPalette.Error
                 : (_lspWarningCount > 0 ? TuiPalette.Warning : TuiPalette.StatusOk);
-            SetAttribute(new Attribute(serverColor, TuiPalette.BgPrimary));
-            AddStr($"LSP: {_lspServerCount}s");
+            if (!TryAddSegment($"LSP: {_lspServerCount}s", serverColor, ref col, maxLeftCol)) goto DrawRight;
 
-            if (_lspWarningCount > 0)
+            if (level < 3)
             {
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-                AddStr(" \u00b7 ");
-                SetAttribute(new Attribute(TuiPalette.Warning, TuiPalette.BgPrimary));
-                AddStr($"\u26a0 {_lspWarningCount}");
-            }
-            if (_lspErrorCount > 0)
-            {
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-                AddStr(" \u00b7 ");
-                SetAttribute(new Attribute(TuiPalette.Error, TuiPalette.BgPrimary));
-                AddStr($"\u2717 {_lspErrorCount}");
+                if (_lspWarningCount > 0)
+                {
+                    if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+                    if (!TryAddSegment($"\u26a0 {_lspWarningCount}", TuiPalette.Warning, ref col, maxLeftCol)) goto DrawRight;
+                }
+                if (_lspErrorCount > 0)
+                {
+                    if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+                    if (!TryAddSegment($"\u2717 {_lspErrorCount}", TuiPalette.Error, ref col, maxLeftCol)) goto DrawRight;
+                }
             }
         }
 
-        // MCP 状态三态（连接中 x/y / 已连 n / 失败 k）。零活动时隐藏降噪；
-        // 失败必须始终可见——此前 0 连接被隐藏，坏掉的服务器曾十几秒不可见。
-        if (_mcpSummary is { HasActivity: true } mcp)
+        // MCP Status (level 0..1: full; level 2..3: collapsed without tool count; level >= 4: hidden)
+        if (_mcpSummary is { HasActivity: true } mcp && level < 4)
         {
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr(" \u00b7 ");
+            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
 
             if (mcp.Connecting > 0)
             {
-                // 握手进行中：x = 已就绪数，y = 目标数（按需连接未走 ConnectAll 时 y 未知，仅显示"连接中"）。
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
-                AddStr(mcp.Expected > 0
-                    ? $"MCP: 连接中 {mcp.Connected}/{mcp.Expected}"
-                    : "MCP: 连接中");
+                var connectingText = mcp.Expected > 0 ? $"MCP: 连接中 {mcp.Connected}/{mcp.Expected}" : "MCP: 连接中";
+                if (!TryAddSegment(connectingText, TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
             }
             else if (mcp.Connected > 0)
             {
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
-                AddStr($"MCP: {mcp.Connected}s");
-                if (mcp.ToolCount > 0)
+                if (!TryAddSegment($"MCP: {mcp.Connected}s", TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
+                if (mcp.ToolCount > 0 && level < 2)
                 {
-                    SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-                    AddStr($" \u00b7 {mcp.ToolCount}t");
+                    if (!TryAddSegment($" \u00b7 {mcp.ToolCount}t", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
                 }
             }
 
             if (mcp.Failed > 0)
             {
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-                AddStr(" \u00b7 ");
-                SetAttribute(new Attribute(
-                    mcp.Connected > 0 ? TuiPalette.Warning : TuiPalette.Error,
-                    TuiPalette.BgPrimary));
-                if (mcp.Connected > 0 || mcp.Connecting > 0)
-                {
-                    // 已有 "MCP:" 前缀（连接中/已连分支），失败计数作后缀即可。
-                    AddStr($"\u2717{mcp.Failed}失败");
-                }
-                else
-                {
-                    // 全部失败（0 连接）：此处是 MCP 状态唯一出口，必须带前缀，
-                    // 否则 "✗k失败" 与 LSP 的 ⚠/✗ 计数无法区分（2026-09 反馈）。
-                    AddStr($"MCP: \u2717{mcp.Failed}失败");
-                }
+                if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+                var failColor = mcp.Connected > 0 ? TuiPalette.Warning : TuiPalette.Error;
+                var failText = (mcp.Connected > 0 || mcp.Connecting > 0)
+                    ? $"\u2717{mcp.Failed}失败"
+                    : $"MCP: \u2717{mcp.Failed}失败";
+                if (!TryAddSegment(failText, failColor, ref col, maxLeftCol)) goto DrawRight;
             }
         }
 
-        DrawModeTag(w);
+    DrawRight:
+        DrawModeTag(rightCol, modeTag, strategyLabel, teamLabel);
         return true;
     }
 
-    private void DrawModeTag(int width)
+    private int DetermineDegradationLevel(int maxLeftCol)
+    {
+        for (var level = 0; level <= 4; level++)
+        {
+            if (EstimateLeftWidth(level) <= maxLeftCol)
+                return level;
+        }
+        return 4;
+    }
+
+    private int EstimateLeftWidth(int level)
+    {
+        var width = 1; // initial col = 1
+
+        if (_busy)
+        {
+            var act = level >= 4 && _activity.Length > 6 ? _activity[..5] + TuiGlyphs.Ellipsis : _activity;
+            width += 2 + TextWidthHelper.GetDisplayWidth(act) + 3; // spinner + act + " · "
+        }
+
+        var modelToDisplay = level >= 1 ? ShortenModelName(_model) : _model;
+        width += TextWidthHelper.GetDisplayWidth(modelToDisplay);
+
+        if (_sandbox != "Normal" && level < 4)
+        {
+            width += 3 + 2 + 1 + TextWidthHelper.GetDisplayWidth(_sandbox); // " · " + lock + space + sandbox
+        }
+
+        if (_lspServerCount > 0 && level < 4)
+        {
+            width += 3 + 5 + DigitLength(_lspServerCount) + 1; // " · LSP: Ns"
+            if (level < 3)
+            {
+                if (_lspWarningCount > 0)
+                    width += 3 + 2 + DigitLength(_lspWarningCount);
+                if (_lspErrorCount > 0)
+                    width += 3 + 2 + DigitLength(_lspErrorCount);
+            }
+        }
+
+        if (_mcpSummary is { HasActivity: true } mcp && level < 4)
+        {
+            width += 3; // " · "
+            if (mcp.Connecting > 0)
+            {
+                width += mcp.Expected > 0 ? 15 : 9;
+            }
+            else if (mcp.Connected > 0)
+            {
+                width += 5 + DigitLength(mcp.Connected) + 1;
+                if (mcp.ToolCount > 0 && level < 2)
+                    width += 3 + DigitLength(mcp.ToolCount) + 1;
+            }
+
+            if (mcp.Failed > 0)
+            {
+                width += 3 + 4 + DigitLength(mcp.Failed);
+            }
+        }
+
+        return width;
+    }
+
+    private static int DigitLength(int n)
+    {
+        if (n <= 9) return 1;
+        if (n <= 99) return 2;
+        if (n <= 999) return 3;
+        return n.ToString(CultureInfo.InvariantCulture).Length;
+    }
+
+    private bool TryAddSegment(string text, Color fg, ref int col, int maxCol)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+        var width = TextWidthHelper.GetDisplayWidth(text);
+        if (col + width > maxCol)
+        {
+            if (maxCol - col > 2)
+            {
+                var truncated = TextWidthHelper.TruncateByWidth(text, maxCol - col);
+                if (!string.IsNullOrEmpty(truncated))
+                {
+                    Move(col, 0);
+                    SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
+                    AddStr(truncated);
+                    col += TextWidthHelper.GetDisplayWidth(truncated);
+                }
+            }
+            return false;
+        }
+
+        Move(col, 0);
+        SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
+        AddStr(text);
+        col += width;
+        return true;
+    }
+
+    private (string ModeTag, string StrategyLabel, string TeamLabel, int RightWidth, int RightCol) MeasureModeTag(int width)
     {
         var modeTag = _modeController.ModeTag;
-        // TEAM 模式下显示团队 YAML 声明的编排模式（固定属性，非运行期可变状态）。
         var strategyLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_teamModeLabel)
             ? $" \u00b7 {_teamModeLabel}"
             : "";
@@ -239,7 +344,11 @@ public sealed class AgentStatusBar : View
             + TextWidthHelper.GetDisplayWidth(strategyLabel)
             + TextWidthHelper.GetDisplayWidth(teamLabel) + 1;
         var rightCol = Math.Max(1, width - rightWidth);
+        return (modeTag, strategyLabel, teamLabel, rightWidth, rightCol);
+    }
 
+    private void DrawModeTag(int rightCol, string modeTag, string strategyLabel, string teamLabel)
+    {
         Move(rightCol, 0);
         var modeColor = _modeController.Mode switch
         {
@@ -249,9 +358,6 @@ public sealed class AgentStatusBar : View
             WorkingMode.Goal => TuiPalette.ModeGoalFg,
             _ => TuiPalette.FgSecondary,
         };
-        // Mode tag: steady state is a colored-background badge with
-        // dark (bg-root) text; the momentary flash inverts to a colored-text
-        // highlight so a mode change is still noticed.
         SetAttribute(_modeFlash
             ? new Attribute(modeColor, TuiPalette.BgPrimary)
             : new Attribute(TuiPalette.BgPrimary, modeColor));

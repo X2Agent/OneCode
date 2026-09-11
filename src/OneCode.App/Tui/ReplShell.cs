@@ -88,7 +88,7 @@ public sealed partial class ReplShell : View
         SetScheme(TuiTheme.Base);
 
         _chatInput.BottomOffset = TuiSpacing.SessionContextBarHeight + TuiSpacing.ChatInputContextGap;
-        _chatInput.Y = Pos.AnchorEnd(ChatInputView.MaxHeight + _chatInput.BottomOffset);
+        _chatInput.Y = Pos.AnchorEnd(ChatInputView.MinHeight + _chatInput.BottomOffset);
 
         // Forward global shortcuts from ChatInputView.
         // Editor consumes all keys when prompt is focused, so ReplShell.OnKeyDown
@@ -98,6 +98,25 @@ public sealed partial class ReplShell : View
         // ChatInputView 把挂起态/提问态的按键转发给会话（见 IInteractionSession），
         // 替代旧的松散转发事件。
         _chatInput.InteractionSession = this;
+
+        // 输入框高度动态自适应通知：当输入多行或清空提交时，更新主区预留高度，防抖锚定
+        _chatInput.InputHeightChanged += newHeight =>
+        {
+            var reservedBottom = TuiSpacing.SessionContextBarHeight
+                + TuiSpacing.StatusBarHeight
+                + TuiSpacing.StatusBarTopGap
+                + TuiSpacing.ChatInputContextGap
+                + newHeight;
+
+            _app.Invoke(() =>
+            {
+                _contentZone.Height = Dim.Fill(reservedBottom);
+                _contentZone.SetNeedsLayout();
+                _transcript.SetNeedsLayout();
+                SetNeedsLayout();
+                SetNeedsDraw();
+            });
+        };
 
         // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
         _chatInput.ScrollUpRequested += () => _transcript.MessageView.ScrollUp();
@@ -110,6 +129,7 @@ public sealed partial class ReplShell : View
         // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板）。
         _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
         _chatInput.SidebarNarrowerRequested += () => AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
+        _chatInput.SidebarToggleRequested += () => ToggleSidebarVisibility();
 
         // SessionContextBar sits at the bottom; ChatInputView and AgentStatusBar anchor above it.
         _sessionContextBar = new SessionContextBar()
@@ -141,7 +161,7 @@ public sealed partial class ReplShell : View
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - TuiSpacing.ContentZoneReservedBottom,
+            Height = Dim.Fill(TuiSpacing.ContentZoneReservedBottom),
         };
         _contentZone.SetScheme(TuiTheme.Base);
         _contentZone.Add(_transcript);
@@ -249,6 +269,35 @@ public sealed partial class ReplShell : View
         if (sidebar is null || !sidebar.AdjustWidth(delta))
             return;
 
+        RenderActivePlanCard();
+        RenderActiveTeamSidebar();
+        _transcript.RequestContentRerender();
+    }
+
+    /// <summary>
+    /// 切换当前侧边栏可见性（Ctrl+G，app:sidebarToggle）。
+    /// 若有活跃计划或团队面板，切换其展开/隐藏；若无，默认展开/隐藏计划面板。
+    /// </summary>
+    internal void ToggleSidebarVisibility()
+    {
+        if (_planSidebar.Visible)
+        {
+            _planSidebar.Visible = false;
+        }
+        else if (_teamSidebar.Visible)
+        {
+            _teamSidebar.Visible = false;
+        }
+        else
+        {
+            // 当前均未显示：优先显示已有内容的侧栏或 Plan 面板
+            if (_activeTeamRun is not null)
+                _teamSidebar.Visible = true;
+            else
+                _planSidebar.Visible = true;
+        }
+
+        ApplySidebarLayout();
         RenderActivePlanCard();
         RenderActiveTeamSidebar();
         _transcript.RequestContentRerender();

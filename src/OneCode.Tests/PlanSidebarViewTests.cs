@@ -36,21 +36,20 @@ public sealed class SidebarKeyboardResizeTests
     // —— AdjustWidth clamp 规则 ——
 
     [Fact]
-    public void AdjustWidth_Widening_ClampsAt60PercentOfScreen()
+    public void AdjustWidth_Widening_ClampsAtStandardBreakpointMax()
     {
-        // 60% of 100 = 60：54 → 58 → 60（封顶），继续加宽不再变化
-        var (view, _, widthChanges) = CreateView(screenWidth: 100);
+        // 30% of 140 = 42：初始 35 → 39 → 42（封顶），继续加宽不再变化
+        var (view, _, widthChanges) = CreateView(screenWidth: 140);
 
+        view.CurrentWidth.Should().Be(35);
         view.AdjustWidth(SidebarViewBase.KeyboardResizeStep).Should().BeTrue();
-        view.CurrentWidth.Should().Be(54);
+        view.CurrentWidth.Should().Be(39);
         view.AdjustWidth(SidebarViewBase.KeyboardResizeStep).Should().BeTrue();
-        view.CurrentWidth.Should().Be(58);
-        view.AdjustWidth(SidebarViewBase.KeyboardResizeStep).Should().BeTrue();
-        view.CurrentWidth.Should().Be(60);
+        view.CurrentWidth.Should().Be(42);
         view.AdjustWidth(SidebarViewBase.KeyboardResizeStep).Should().BeFalse(
-            "已到 60% 屏宽上限，宽度不得超出");
-        view.CurrentWidth.Should().Be(60);
-        widthChanges.Should().HaveCount(3, "被 clamp 抵消的调整不触发重排回调");
+            "已到 30% 屏宽上限 (42 列)，宽度不得超出");
+        view.CurrentWidth.Should().Be(42);
+        widthChanges.Should().HaveCount(2, "被 clamp 抵消的调整不触发重排回调");
     }
 
     [Fact]
@@ -58,9 +57,7 @@ public sealed class SidebarKeyboardResizeTests
     {
         var (view, _, _) = CreateView(screenWidth: 100);
 
-        for (var i = 0; i < 5; i++)
-            view.AdjustWidth(-SidebarViewBase.KeyboardResizeStep);
-
+        view.AdjustWidth(-SidebarViewBase.KeyboardResizeStep).Should().BeTrue();
         view.CurrentWidth.Should().Be(SidebarViewBase.MinWidth);
         view.AdjustWidth(-SidebarViewBase.KeyboardResizeStep).Should().BeFalse(
             "已到 MinWidth 下限，宽度不得再收窄");
@@ -70,18 +67,30 @@ public sealed class SidebarKeyboardResizeTests
     [Fact]
     public void AdjustWidth_NarrowTerminal_ClampsToScreenWidthNotBeyond()
     {
-        // 30 列终端放不下 MinWidth：首次收窄把超宽面板（默认 50）退化到屏幕宽，
-        // 之后宽度钉在屏幕宽，两个方向都不再变化（与拖拽退化规则一致）。
-        var (view, _, _) = CreateView(screenWidth: 30);
+        // 25 列终端放不下 MinWidth(28)：退化到屏幕宽，两个方向都不再变化
+        var (view, _, _) = CreateView(screenWidth: 25);
 
-        view.AdjustWidth(-SidebarViewBase.KeyboardResizeStep).Should().BeTrue();
-        view.CurrentWidth.Should().Be(30);
+        view.CurrentWidth.Should().Be(25);
         view.AdjustWidth(-SidebarViewBase.KeyboardResizeStep).Should().BeFalse();
         view.AdjustWidth(SidebarViewBase.KeyboardResizeStep).Should().BeFalse();
-        view.CurrentWidth.Should().Be(30);
+        view.CurrentWidth.Should().Be(25);
     }
 
     [Theory]
+    [InlineData(25, 25)]
+    [InlineData(80, 28)]
+    [InlineData(100, 30)]
+    [InlineData(120, 36)]
+    [InlineData(140, 42)]
+    [InlineData(160, 45)]
+    [InlineData(200, 45)]
+    public void ComputeMaxWidth_AlignsWithThreeTierBreakpoints(int screenWidth, int expectedMax)
+    {
+        SidebarViewBase.ComputeMaxWidth(screenWidth).Should().Be(expectedMax);
+    }
+
+    [Theory]
+    [InlineData(140)]
     [InlineData(100)]
     [InlineData(80)]
     [InlineData(40)]

@@ -112,6 +112,16 @@ public sealed partial class MessageListView
         if (showScrollbar)
             DrawScrollIndicator();
 
+        // 流式输出跳底浮标：当流式输出中且用户向上滚动（_scroll.AutoScroll == false）时
+        if (IsStreaming && !_scroll.AutoScroll && viewport.Height > 1)
+        {
+            var floatRow = viewport.Height - 1;
+            Move(0, floatRow);
+            SetAttribute(new Attribute(TuiPalette.Warning, TuiPalette.BgCard));
+            var indicatorText = " ↓ 新内容生成中 (按 End 滚到底部) ";
+            AddStr(TextWidthHelper.ClipByWidth(indicatorText, viewport.Width));
+        }
+
         return false;
     }
 

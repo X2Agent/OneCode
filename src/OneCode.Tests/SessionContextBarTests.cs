@@ -18,4 +18,23 @@ public sealed class SessionContextBarTests
     {
         SessionContextBar.ShowsContextGauge(mode).Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData("short-repo", 20, "short-repo")]
+    [InlineData("C:\\projects\\OneCode", 20, "OneCode")]
+    public void ShortenPath_WithinMaxChars_ReturnsOriginalName(string path, int maxChars, string expected)
+    {
+        SessionContextBar.ShortenPath(path, maxChars).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ShortenPath_ExceedsMaxChars_AppliesMiddleEllipsis()
+    {
+        var longName = "this-is-a-very-long-repository-name-that-exceeds";
+        var result = SessionContextBar.ShortenPath(longName, 20);
+        result.Length.Should().Be(20);
+        result.Should().Contain(TuiGlyphs.Ellipsis);
+        result.Should().StartWith("this-is-a");
+        result.Should().EndWith("t-exceeds");
+    }
 }

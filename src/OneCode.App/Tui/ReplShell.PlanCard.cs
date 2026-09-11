@@ -10,6 +10,8 @@ public sealed partial class ReplShell
 {
     private PlanCardState? _activePlan;
 
+    internal PlanCardState? ActivePlan => _activePlan;
+
     /// <summary>Raised when the user approves/rejects/edits a plan card via keyboard.</summary>
     public event Action<PlanCardDecision>? PlanDecisionMade;
 
@@ -74,10 +76,27 @@ public sealed partial class ReplShell
                 PlanDecisionMade?.Invoke(decision);
                 if (decision == PlanCardDecision.Edit)
                 {
+                    if (_activePlan is not null)
+                    {
+                        // 冻结当前内容并标记待修改态：标题更新、不再叠加 Phase 后缀，
+                        // 严禁 ClearPlan() 盲改——用户需对照原计划反馈。
+                        _activePlan = new PlanCardState(
+                            "📋 实施计划 · 待修改",
+                            _activePlan.Steps,
+                            _activePlan.Phase,
+                            _activePlan.Markdown,
+                            _activePlan.DocumentPath,
+                            isPendingRevision: true);
+                        RenderActivePlanCard();
+                        SetPlanSidebarVisible(true);
+                    }
                     _chatInput.SetInputText("请按以下意见修改计划：");
                     _chatInput.FocusInput();
                 }
-                ClearPlan();
+                else if (decision == PlanCardDecision.Reject)
+                {
+                    ClearPlan();
+                }
             });
         }, TaskScheduler.Default);
     }
@@ -87,18 +106,21 @@ public sealed partial class ReplShell
         if (_activePlan is not { } plan)
             return;
 
-        var displayTitle = plan.Phase switch
-        {
-            PlanCardPhase.Finalizing => $"{plan.Title} · 正在确认",
-            PlanCardPhase.PendingApproval => $"{plan.Title} · 等待审批",
-            PlanCardPhase.StartingExecution => $"{plan.Title} · 准备执行",
-            PlanCardPhase.Executing => $"{plan.Title} · 正在执行",
-            PlanCardPhase.Verifying => $"{plan.Title} · 正在验证",
-            PlanCardPhase.Completed => $"{plan.Title} · 已完成",
-            PlanCardPhase.Failed => $"{plan.Title} · 执行失败",
-            PlanCardPhase.Cancelled => $"{plan.Title} · 已取消",
-            _ => plan.Title,
-        };
+        // 待修改态保持冻结标题；其余阶段叠加 Phase 状态后缀。
+        var displayTitle = plan.IsPendingRevision
+            ? plan.Title
+            : plan.Phase switch
+            {
+                PlanCardPhase.Finalizing => $"{plan.Title} · 正在确认",
+                PlanCardPhase.PendingApproval => $"{plan.Title} · 等待审批",
+                PlanCardPhase.StartingExecution => $"{plan.Title} · 准备执行",
+                PlanCardPhase.Executing => $"{plan.Title} · 正在执行",
+                PlanCardPhase.Verifying => $"{plan.Title} · 正在验证",
+                PlanCardPhase.Completed => $"{plan.Title} · 已完成",
+                PlanCardPhase.Failed => $"{plan.Title} · 执行失败",
+                PlanCardPhase.Cancelled => $"{plan.Title} · 已取消",
+                _ => plan.Title,
+            };
         // 侧边栏内容按当前面板宽度（可拖动调整）换行渲染；只含计划内容，
         // 辅助性说明由 LLM 在对话流中提供。
         var lines = ChatBlockRenderers.RenderPlanCard(

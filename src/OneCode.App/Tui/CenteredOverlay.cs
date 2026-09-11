@@ -38,7 +38,7 @@ public abstract class CenteredOverlay : View
     /// 边框/标题上（McpConfigOverlay 的红框缺陷），且容器自身没有按键绑定，
     /// ←/→ 等按键会失控冒泡到 shell 层走会话记录导航。
     /// </summary>
-    internal void FocusInitialView()
+    internal virtual void FocusInitialView()
     {
         if (InitialFocusView is { } initial && (initial.SetFocus() || initial.HasFocus))
         {

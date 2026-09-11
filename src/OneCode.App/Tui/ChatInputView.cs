@@ -14,8 +14,15 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView : View
 {
-    private const int MinVisibleLines = 3;
-    public const int MaxHeight = 1 + ChatTextEditor.MaxVisibleLines;
+    public const int MinVisibleLines = 1;
+    public const int MinHeight = 1 + MinVisibleLines; // 2
+    public const int MaxHeight = 1 + ChatTextEditor.MaxVisibleLines; // 6
+
+    /// <summary>
+    /// 输入框总高度变化通知（当物理行数增减导致总高度在 2~6 行间变化时触发）。
+    /// 参数为新的总行数（1 行分隔线 + N 行编辑器文本）。
+    /// </summary>
+    public event Action<int>? InputHeightChanged;
 
     private readonly IApplication _app;
     private readonly WorkingModeController _modeController;
@@ -24,7 +31,7 @@ public sealed partial class ChatInputView : View
     // 子控件在 BuildViews()（构造函数调用）中创建，见 ChatInputView.Layout.cs
     private Label _separatorLabel = null!;
     private ChatTextEditor _input = null!;
-    private int _lastHeight = 1 + MinVisibleLines;
+    private int _lastHeight = MinHeight;
     private int _lastBottomOffset;
     private ListView _completionList = null!;
     private FrameView _completionFrame = null!;
@@ -37,17 +44,11 @@ public sealed partial class ChatInputView : View
 
     private ObservableCollection<string> _completionItems = [];
 
-    // Paste collapse state
-    // When users paste long multi-line text, store the real content and
-    // display a one-line summary "[Pasted text #N +L lines]" instead.
-    private string? _pastedText;
-    private int _pasteCount;
-
-    // Image attachment state
-    // Pasted images are saved to temp files; the input shows [Image #N] tags
-    // and the real file paths are stored for submission.
-    private int _imageCount;
-    private readonly Dictionary<int, string> _pendingImages = new();
+    // Attachment management state
+    // Pasted large text is collapsed into [Pasted text #N +L lines] tokens,
+    // and pasted images are saved to temp files with [Image #N] tags.
+    // Both are managed by _attachmentRegistry with atomic lifecycles.
+    private readonly PendingAttachmentRegistry _attachmentRegistry = new();
 
     private Label _placeholderLabel = null!;
     private IReadOnlyList<string> _suggestions = [];
@@ -85,6 +86,9 @@ public sealed partial class ChatInputView : View
 
     /// <summary>收窄右侧侧边栏（Ctrl+Shift+←，app:sidebarNarrower）。由 ReplShell 接线到宽度调整。</summary>
     public event Action? SidebarNarrowerRequested;
+
+    /// <summary>切换右侧侧边栏可见性（Ctrl+G，app:sidebarToggle）。由 ReplShell 接线。</summary>
+    public event Action? SidebarToggleRequested;
 
     /// <summary>
     /// 直达指定工作模式（Alt+1..4，app:mode* 动作）。
@@ -213,6 +217,8 @@ public sealed partial class ChatInputView : View
         _suppressCompletion = true;
         _input.Text = text ?? string.Empty;
         _suppressCompletion = false;
+        // 程序化整体替换不触发 ContentsChanged，需显式对账附件生命周期。
+        _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
         SetNeedsDraw();
     }
 
@@ -271,8 +277,7 @@ public sealed partial class ChatInputView : View
 
     public void ClearInput()
     {
-        _pastedText = null;
-        _pendingImages.Clear();
+        _attachmentRegistry.Clear();
         _input.Text = string.Empty;
     }
 
@@ -295,16 +300,10 @@ public sealed partial class ChatInputView : View
     /// </summary>
     private void OnInputTextChanged(object? sender, EventArgs e)
     {
+        // 生命周期对账：剔除占位符已随文本编辑消失的附件（含 Editor 内部撤销）。
+        _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
+
         if (_suppressCompletion) return;
-
-        // Don't clear _pastedText when the text is still our paste summary —
-        // the Editor fires deferred text change events after _suppressCompletion
-        // is reset, which would prematurely clear the stored original text.
-        if (_pastedText is not null && CurrentText.StartsWith("[Pasted text #", StringComparison.Ordinal))
-            return;
-
-        // User manually edited the input — discard stored paste content
-        _pastedText = null;
 
         var t = _input.Text ?? string.Empty;
         var firstLine = t.Contains('\n') ? t[..t.IndexOf('\n')] : t;
@@ -348,10 +347,17 @@ public sealed partial class ChatInputView : View
 
     public void SetInputText(string text)
     {
-        _pastedText = null;
         _suppressCompletion = true;
         _input.Text = text;
         _input.InsertionPoint = (_input.Text?.Length ?? 0);
         _suppressCompletion = false;
+        // 程序化整体替换不触发 ContentsChanged，需显式对账附件生命周期。
+        _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
     }
+
+    /// <summary>
+    /// Expands all Unicode PUA tokenized paste attachments back into their original text.
+    /// Preserves all user-typed text before, between, and after folded attachments.
+    /// </summary>
+    public string ExpandAttachments(string text) => _attachmentRegistry.ExpandAttachments(text);
 }

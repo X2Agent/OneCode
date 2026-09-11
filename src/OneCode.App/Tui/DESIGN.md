@@ -2,9 +2,8 @@
 name: OneCode Dark
 description: >
   Dark-first terminal UI design system for a multi-mode AI coding assistant.
-  Constrained to the ANSI 16-color palette of Terminal.Gui v2.
-  OKLCH hex values represent design intent; Terminal.Gui colors are the
-  closest 16-color approximation used at render time.
+  Constrained to the ANSI 16-color palette of Terminal.Gui v2 and monospace
+  character cells (Columns × Rows).
 colors:
   # ── Primary ────────────────────────────────────
   primary: "#5b8dee"
@@ -52,29 +51,45 @@ colors:
   tool-use: "#e5b14c"
   tool-result: "#c4a03c"
   system-message: "#a386d8"
-typography:
-  body:
-    fontFamily: JetBrains Mono, Cascadia Code, Fira Code, Consolas, monospace
-    fontSize: 13px
-    lineHeight: 1.55
-  status-bar:
-    fontFamily: JetBrains Mono, Cascadia Code, Consolas, monospace
-    fontSize: 10.5px
-  heading:
-    fontFamily: JetBrains Mono, Cascadia Code, Consolas, monospace
-    fontSize: 15px
-    fontWeight: 700
+grid:
+  unit: cell
+  charWidthAscii: 1
+  charWidthWide: 2
+  rowHeight: 1
+breakpoints:
+  compact:
+    width: "< 100"
+    layout: single-column
+    sidebar: drawer-overlay
+    chatMinWidth: 65
+  standard:
+    width: "100 - 140"
+    layout: elastic-sidebar
+    sidebarRatio: "0.25 - 0.30"
+    sidebarWidth: "28 - 42"
+    chatMinWidth: 65
+  wide:
+    width: "> 140"
+    layout: dual-column
+    sidebarWidth: "40 - 45"
+    chatMinWidth: 95
 spacing:
-  xs: 2px
-  sm: 4px
-  md: 8px
-  lg: 12px
-  xl: 16px
+  none: 0
+  xs: 1
+  sm: 1
+  md: 2
+  lg: 3
 components:
   status-bar:
     backgroundColor: "{colors.bg-surface}"
     textColor: "{colors.text-secondary}"
-    padding: 0 8px
+    paddingCols: 1
+    heightRows: 1
+  session-context-bar:
+    backgroundColor: "{colors.bg-surface}"
+    textColor: "{colors.text-secondary}"
+    paddingCols: 1
+    heightRows: 1
   border-default:
     backgroundColor: "{colors.border}"
   border-focus:
@@ -82,7 +97,8 @@ components:
   input-bar:
     backgroundColor: "{colors.bg-input}"
     textColor: "{colors.text-primary}"
-    padding: 0 8px
+    minHeightRows: 2
+    maxHeightRows: 6
   input-mode-tag-build:
     backgroundColor: "{colors.mode-build}"
     textColor: "{colors.bg-root}"
@@ -135,7 +151,6 @@ components:
     textColor: "{colors.text-primary}"
   muted-label:
     textColor: "{colors.text-muted}"
-  # ── Agent avatars (TEAM mode) ──────────────────
   agent-avatar-orchestrator:
     textColor: "{colors.agent-orchestrator}"
   agent-avatar-researcher:
@@ -152,387 +167,165 @@ components:
     textColor: "{colors.agent-debugger}"
   agent-avatar-assistant:
     textColor: "{colors.agent-assistant}"
-  # ── Brand accent usage ─────────────────────────
   accent-mark:
     textColor: "{colors.accent-teal}"
 ---
 
-## Overview
+# OneCode TUI 设计系统规范 (Design System Specification)
 
-**Developer-dark terminal aesthetic.** A high-contrast, low-chroma palette designed
-for extended coding sessions. The UI feels like a premium IDE theme — deep ink
-backgrounds, soft foreground text, and a single blue accent that drives all
-interaction affordances.
+## 1. 核心架构与设计哲学 (Overview & Philosophy)
 
-The design serves a multi-mode AI coding assistant running inside a terminal.
-Four work modes (BUILD, PLAN, TEAM, GOAL) share a single chat view; modes are
-distinguished by one color-coded tag in `AgentStatusBar`, not by separate panels or tabs.
+**极客深色终端美学 (Developer-Dark Terminal Aesthetic)**。
+本设计规范是 OneCode CLI 全屏 TUI（基于 Terminal.Gui v2）的单一真相源（Single Source of Truth）。
 
-**Core principle:** The chat stream is the only permanent surface. No sidebars,
-no bottom panels. Every auxiliary function is an ephemeral overlay, dismissed
-with `Esc`.
+### 1.1 彻底抛弃 Web 假定，回归字符单元格 (Cell-Based Model)
+终端不是浏览器。终端屏幕由离散的、等宽的字符单元格网格（Grid of Monospace Cells）构成：
+- **水平坐标 (Columns / Width)**：以字符列（Col）为度量。普通 ASCII 字符占 1 列，CJK 全角字符、象形符号、部分 Emoji 占用 2 列。
+- **垂直坐标 (Rows / Height)**：以字符行（Row）为度量，无子像素，无连续 line-height。
+- **严禁概念**：代码与规范中彻底清除 `px`、`rem`、`line-height`、`font-size`、`box-shadow`、`border-radius` 等 Web CSS 伪属性。所有内边距、间隙、高度计算一律基于整数单元格。
 
-**Terminal constraint:** All colors are mapped to the ANSI 16-color palette of
-Terminal.Gui v2. OKLCH hex values above represent design intent; the actual
-rendering uses the closest named Terminal.Gui color (e.g. `accent #5b8dee` →
-`BrightBlue`, `success #4caf84` → `BrightGreen`). No true-color or 256-color
-fallback is assumed.
+### 1.2 会话流主权与弹性侧栏共存
+- **会话流优先**：中央会话区（`MessageListView`）是用户生产力的核心空间。
+- **侧栏响应式自适应**：Plan / Team / Review 侧边栏依据终端宽度弹性伸缩；在小屏（<100 列）下自动收起为按需呼出的抽屉浮层（Drawer Overlay，按 `Ctrl+G` 切换），绝不强占会话视口。
 
-## Colors
+---
 
-The palette is divided into five functional groups.
+## 2. 三档响应式断点体系 (Three-Tier Responsive Breakpoints)
 
-### Backgrounds (4 levels)
-
-- **bg-root (`#12151a`):** Terminal canvas — the deepest surface, used for the
-  chat stream and input line.
-- **bg-surface (`#181b22`):** Slightly elevated — agent status and session context bars.
-- **bg-elevated (`#1e212a`):** Overlays, popups, diff blocks, plan cards,
-  thinking panels. Distinguished from bg-root by its lighter tone.
-- **bg-input (`#0f1218`):** Input field — the darkest surface, creating a
-  recessed feel for the text entry area.
-
-In 16-color mode, all four backgrounds collapse to `Black` / `DarkGray`.
-Visual separation is achieved through borders (`DarkGray` vs `Cyan`) rather
-than background contrast.
-
-### Brand & Semantic (5 colors)
-
-- **accent (`#5b8dee`):** The sole interaction driver in full-color contexts —
-  links, active borders, PLAN mode, focused states. Never used for decoration.
-  **Terminal mapping (normative):** interactive accent duty in the terminal is
-  rendered by `accent-teal` via `TuiPalette.Accent`; `#5b8dee` appears only as
-  the researcher role color (`TuiPalette.AgentBlue`).
-- **accent-teal (`#14B8A6`):** Secondary brand color used as the product
-  accent in terminal rendering (mapped to `BrightCyan`) — the single
-  interaction driver color for TUI code (`TuiPalette.Accent`).
-- **success (`#4caf84`):** BUILD mode identity, completed states, diff additions.
-- **warning (`#e5b14c`):** Pending confirmations, tool-call indicators.
-- **error (`#e0556a`):** Failures, rejected states, diff deletions.
-
-### Text hierarchy (3 levels)
-
-- **text-primary (`#d4d8e0`):** Body text, agent messages — the default foreground.
-- **text-secondary (`#9298a4`):** Descriptions, status items, timestamps.
-- **text-muted (`#5c6270`):** Separators, disabled states, placeholder text.
-
-### Diff (4 tokens)
-
-Standard unified-diff semantics: `diff-add` (green), `diff-del` (red),
-`diff-hunk` (cyan for `@@ ... @@` headers), `diff-context` (gray for
-unchanged lines).
-
-### Agent 8-color system
-
-Each AI agent role has a unique color for visual identification in TEAM mode's
-multi-agent conversation stream:
-
-| Role | Color | Hex | Semantic |
-|------|-------|-----|----------|
-| orchestrator | Purple | `#a386d8` | Leadership, coordination |
-| researcher | Blue | `#5b8dee` | Investigation, analysis |
-| planner | Green | `#4caf84` | Architecture, planning |
-| executor | Orange | `#e08b5c` | Execution, building |
-| reviewer | Yellow | `#e5b14c` | Code review, critique |
-| tester | Red | `#e0556a` | Testing, validation |
-| debugger | Pink | `#e07ba5` | Debugging, troubleshooting |
-| assistant | Cyan | `#5bb8c8` | General assistance |
-
-## Typography
-
-All text is monospace. The type stack prioritizes programming fonts with
-ligature support.
-
-| Token | Font | Size | Weight | Line Height | Usage |
-|-------|------|------|--------|-------------|-------|
-| `heading` | JetBrains Mono | 15px | bold | — | Section headers in overlays |
-| `body` | JetBrains Mono | 13px | normal | 1.55 | Chat messages, prose and input |
-| `status-bar` | JetBrains Mono | 10.5px | normal | — | Status bar items |
-
-Fallback chain: `JetBrains Mono → Cascadia Code → Fira Code → Consolas → monospace`.
-
-In terminal rendering, font metrics are controlled by the terminal emulator,
-not by the application. These tokens describe the **design intent**; actual
-rendering uses the terminal's configured monospace font.
-
-## Layout
-
-### Component architecture
-
-```
-ReplShell
-├── ChatTranscriptView
-│   └── MessageListView
-├── AgentStatusBar
-├── ChatInputView
-│   └── ChatTextEditor
-├── SessionContextBar
-└── OverlayHost
-```
+为彻底解决窄屏字符折叠、侧栏与主会话算术冲突（如 28 列侧栏下限与 65 列主区保底），确立以下三档严格断点：
 
 ```text
-│                                                       │
-│       CHAT TRANSCRIPT — sole permanent surface        │
-│                                                       │
-├─ AgentStatusBar ─────────────────────────────────────┤
-│ ⠋ 思考中 · Opus · 🔒 Sandbox · LSP: 2s              BUILD │
-├─ ChatInputView ──────────────────────────────────────┤
-│ _                                                     │
-│                                                       │
-├─ SessionContextBar ──────────────────────────────────┤
-│ 📁 project · 🌿 main     轮次 5 · 12.5K↓ 8.3K↑ · ctx 45% │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────┬───────────────────────────────┬─────────────────────────┐
+│   Compact (< 100 列)    │      Standard (100~140 列)    │     Wide (> 140 列)     │
+├─────────────────────────┼───────────────────────────────┼─────────────────────────┤
+│ • 纯单栏模式 (100% 宽度) │ • 弹性侧边栏 (占比 25%~30%)   │ • 并列双栏模式          │
+│ • 侧边栏退化为抽屉浮层   │ • 侧栏宽度: 28 ~ 42 列        │ • 侧栏固定: 40 ~ 45 列   │
+│ • Ctrl+G 弹出 / Esc 退出 │ • 主区保底: ChatMinWidth ≥ 65 │ • 主区宽度: ≥ 95 列     │
+└─────────────────────────┴───────────────────────────────┴─────────────────────────┘
 ```
 
-The visible components have explicit, non-overlapping responsibilities:
-**ChatTranscriptView** owns the current conversation transcript and streaming
-lifecycle, while **MessageListView** owns rendered rows, scrolling, search,
-copy, expansion, and reflow. **AgentStatusBar** is the single source of agent
-runtime and orientation state (activity, model, cost, sandbox, LSP, working
-mode, TEAM strategy/team). **ChatInputView** owns the separator, chat-input
-state, multiline editing, completion, paste handling, mode-shortcut bridge,
-and dynamic height; its **ChatTextEditor** child is the sole input focus target.
-**SessionContextBar** shows workspace identity and session consumption metrics.
-**OverlayHost** owns temporary modal and side-cover surfaces.
+### 2.1 断点数学严密约束
+- **下界保底公式**：
+  $$\text{ScreenWidth} \ge \text{ChatColumnMinWidth} (65) + \text{SidebarMinWidth} (28) + \text{Divider} (1) = 94 \text{ 列}$$
+  在 `Standard` 模式起点（100 列）时，主会话区拥有 $100 - 28 - 1 = 71 \ge 65$ 列，留有 6 列充足裕量，绝不发生断点越界溢出。
+- **收缩降级保护**：
+  若用户通过拖拽手柄或快捷键强行调整，侧栏宽度恒受 `Math.Clamp(requested, 28, maxAllowed)` 保护，其中 `maxAllowed = Math.Min((int)(width * 0.30), width - 65 - 1)`。
 
-### Structural rules
+---
 
-1. **Chat is the only permanent content surface.** Auxiliary views are overlays
-   managed by `OverlayHost` and dismissed with `Esc`.
-2. **No independent top header.** Agent activity and working mode live together
-   in `AgentStatusBar`; do not recreate `TuiTitleBar` or `WorkspaceHeader`.
-3. **One input owner.** `ChatInputView` directly owns `ChatTextEditor`; do not add
-   a wrapper bar solely for layout or mode-shortcut forwarding.
-4. **Dynamic input height.** `ChatInputView` is 4 lines at minimum and 5 lines at
-   maximum: one separator plus 3–4 visible editor lines. The content zone reserves
-   the maximum height to prevent overlap.
-5. **SessionContextBar is always visible.** Left side shows workspace/git/session
-   identity; right side shows turn, token and context-window metrics. Segments are
-   conditional to avoid startup clutter.
-6. **Spacing unit is 4px** in design mockups. In terminal cells, horizontal
-   padding is expressed as character-width gaps (typically 1–2 cells).
+## 3. 终端物理深度与层级规范 (Physical Elevation & Depth)
 
-### Overlay system
+终端色彩映射高度依赖宿主终端调色板（从 16 色 ANSI 到 256 色/TrueColor 各异），依靠细微的灰阶背景色差传递层级不可靠。OneCode 确立以**字符边界（Borders）**与**焦点状态（Focus）**为核心的物理深度体系：
 
-All overlays are managed by a central `OverlayHost`. They stack above the
-chat view and follow a uniform lifecycle:
+| 层级 (Elevation) | 界面角色 | 字符表现 (Boundary) | 视觉语义 |
+|---|---|---|---|
+| **Level 0（底座画布）** | 消息会话主区 (`MessageListView`) | 无边框，使用终端默认根背景 (`bg-root`) | 最深基底，全量呈现代码流与对话 |
+| **Level 1（分割行/状态）** | `AgentStatusBar`、`SessionContextBar` | 单横线 `─` 物理硬隔离，`FgSecondary` 静音色 | 固定锚点，呈现运行期状态 |
+| **Level 2（停靠面板）** | 侧边栏 (`SidebarViewBase`) | 左侧单竖线 `│` 分隔；拖拽手柄激活时为双竖线 `║` | 与主区分栏并列的内容区 |
+| **Level 3（模态浮层）** | Overlays、设置、选择器、表单 | 全包围单线方角 `┌─┐ │ └─┘`；活动顶层使用重点色高亮边框 (`border-active`) | 模态挂起，Esc 逐级安全退出 |
 
-- **Open:** keyboard shortcut or command
-- **Close:** `Esc` (universal), or auto-close on selection
-- **Types:** centered popup (Settings, Resume, Review) or side cover (Diff detail)
+---
 
-| Overlay | Trigger | Type |
-|---------|---------|------|
-| Review mode | `/diff` | centered |
-| Settings | `/config` | centered |
-| Resume chooser | `/session` | centered |
-| Diff detail | Enter on Review file | side panel |
+## 4. 界面布局拓扑与垂直空间压缩 (Layout & Space Optimization)
 
-Slash commands are discovered via `/` completion — there is no separate command-palette shortcut.
-
-## Elevation & Depth
-
-Terminal UIs cannot render box-shadows. Elevation is communicated through
-**background contrast** and **border emphasis** alone:
-
-| Level | Surface | Background | Border | Usage |
-|-------|---------|------------|--------|-------|
-| 0 — Root | Chat view | bg-root | none | Default surface |
-| 1 — Raised | Agent/Session status bars | bg-surface | DarkGray | Slightly elevated bars |
-| 2 — Elevated | Popup / Card | bg-elevated | DarkGray | Overlays, diff blocks, plan cards |
-| 3 — Active | Focused overlay | bg-elevated | Cyan (border-active) | Currently focused overlay |
-
-The transition from level 0 → 2 is a noticeable lightening of the background,
-signaling that the overlay sits "above" the chat. An active overlay further
-distinguishes itself with a cyan border.
-
-## Shapes
-
-Terminal UIs have no border-radius. All elements are rectangular, drawn with
-box-drawing characters (`─ │ ┌ ┐ └ ┘`). Visual "softness" is achieved through
-character choice:
-
-- **Standard borders:** Single-line box-drawing (`─ │ ┌ ┐ └ ┘`)
-- **Emphasis:** Double-line or heavy borders for focused/active elements
-- **Separators:** Thin horizontal rules (`─`) between logical sections
-- **Vertical indicators:** Left-border color bars (e.g., thinking block uses a
-  cyan left-border to mark AI reasoning content)
-
-The only "shape variation" in the system is the **colored dot** (`●`) used
-for status indicators (agent active, strategy type) and the **colored bar**
-(`▎`) used as a mode indicator prefix on user messages.
-
-## Components
-
-### Mode tag
-
-A colored badge displayed on the right side of `AgentStatusBar`, identifying the
-current work mode. This is the single persistent visual differentiator between modes.
-
-| Variant | Background | Text | Border |
-|---------|-----------|------|--------|
-| BUILD | `success` | bg-root | none |
-| PLAN | `accent` | bg-root | none |
-| TEAM | `mode-team` | bg-root | none |
-| GOAL | `mode-goal` | bg-root | none |
-
-### Message blocks
-
-Each message in the chat stream is a self-contained block:
-
-- **User message:** Cyan `▎` left-bar + content + right-aligned timestamp
-- **Assistant message:** Agent-colored avatar + name + markdown body
-- **Thinking block:** Cyan left-bar + bg-elevated background + gray analysis
-  text with breathing-dot animation while streaming
-- **Tool call row:** Orange `⚡` icon + tool name + truncated args + green `✓`
-  on completion
-- **Diff block:** Unified diff format with green/red line backgrounds
-
-### Plan card (PLAN mode)
-
-An interactive card embedded in the chat stream. The agent's first response
-in PLAN mode always contains a plan card.
-
-- Background: bg-elevated
-- Border: DarkGray (default) → Cyan (focused)
-- Steps: numbered list, each tagged with an assigned agent color
-- PendingApproval 阶段由对话流内 InlineSelector 决策面板提供
-  批准 / 输入修改意见 / 拒绝 选择（↑↓ + Enter 确认、Esc 取消）
-
-After approval, steps are progressively marked as completed (green check).
-
-### Agent coordination message (TEAM mode)
-
-A compact message showing inter-agent delegation:
-
-```
-orchestrator → researcher    Investigate Terminal.Gui constraints
+```text
+ReplShell (Window Root)
+├── MessageListView (Chat Transcript - 弹性占据全部剩余视口)
+├── AgentStatusBar (1 Row: 运行期状态 · 模型 · 沙箱 · LSP · ModeTag)
+├── ChatInputView (动态 2~6 Rows: 边框线 + 自适应编辑区)
+├── SessionContextBar (1 Row: 路径 · 分支 · 轮次 · 消耗指标)
+└── OverlayHost (Z-Top 模态浮层宿主)
 ```
 
-- Left side: sender agent color
-- Arrow: text-muted
-- Right side: receiver agent color + task description
+### 4.1 垂直空间瘦身（底部 9 行 $\rightarrow$ 4~8 行）
+- **消除冗余空行**：`StatusBarTopGap = 0`，`ChatInputContextGap = 0`。
+- **输入框视口动态弹性伸展**：
+  - 单行输入时仅占 2 行（1 行顶部分隔线 + 1 行输入文本）；
+  - 多行输入时按终端高度自适应拓展：$$\text{MaxHeight} = \text{Math.Clamp}(\text{Height} / 6, 2, 6)$$
+  - 24 行终端下限制在 4 行内（1 分隔线 + 3 编辑行），40+ 行高终端可展开至 6 行。
+- **视口抖动防御**：
+  - 引入**行数防抖检测**，仅在物理换行增加或减少时触发重绘；
+  - `MessageListView` 采用 `Pos.AnchorEnd(reservedBottom)` 底部相对锚定，流式输出与输入高度变化交错时不产生全屏重排闪烁。
 
-### Agent status bar
+---
 
-A single-line bar showing **agent runtime state and orientation**:
+## 5. 纯键盘交互体系 (Keyboard Interaction)
 
-```
-⠋ 思考中 · Opus · 🔒 Sandbox · LSP: 2s                   BUILD
-```
+终端操作的核心生命力在于纯键盘高效闭环。按键分发按**输入态（焦点在 ChatInputView）**与**非输入态（焦点游离）**两级路由；对话区滚动由不切焦点的转发键（Shift+Up/Down、Ctrl+PgUp/PgDn、Ctrl+U）承担。对话区漫游浏览模式已评估并剔除（见 §5.3）。
 
-- Left group: animated activity indicator while busy, activity phase, model,
-  running cost, sandbox and conditional LSP diagnostics
-- Right group: current mode badge, plus TEAM strategy and active team when applicable
-- Idle state omits the spinner/activity label instead of showing a decorative dot
-- Text color: text-secondary; separators use muted `·`
+### 5.1 Esc 六级绝对拦截链 (Esc Hierarchy)
+`Escape` 键是全系统最敏感的撤销/中断键，必须遵循严格的优先级链，严防关闭补全菜单时误杀后台正在执行的 Agent 任务：
 
-The activity indicator is driven by `SpinnerController` so timing and repaint
-logic remain outside the rendering method.
-
-### Session context bar
-
-A single-line `SessionContextBar` at the very bottom showing **workspace identity
-and session consumption metrics**:
-
-```
-📁 project  🌿 main  · 轮次 5  · 1.2K↓ 800↑  · ctx 200K [██████░░░░] 45%
-```
-
-Segments are conditionally rendered (only when non-zero / non-default):
-
-| Segment | Icon | Condition | Color |
-|---------|------|-----------|-------|
-| Workspace | 📁 | always | fg-primary |
-| Git branch | 🌿 | git available | accent |
-| Worktree | 📦 | inside linked worktree | info |
-| Turn number | — | `turn > 0` | fg-secondary |
-| Token usage | ↓↑ | `tokens > 0` | fg-secondary |
-| Context window | ctx | `maxContext > 0` | max-context value fg-secondary; bar/percent ratio-colored (green/amber/red) |
-
-Context-window ratio uses a three-tier color scheme: green (<50%),
-amber (50–80%), red (≥80%) to give early warning before the context
-window fills.
-
-### Empty state (welcome screen)
-
-When the conversation has no messages (startup or after conversation reset), the
-chat view renders a centered welcome screen instead of being blank:
-
+```text
+[按下 Escape]
+   │
+   ├─► 1. 存在活动 Overlay 弹层？ ────────────► 仅关闭顶层 Overlay
+   │
+   ├─► 2. 存在 Autocomplete 补全菜单？ ───────► 仅关闭补全菜单
+   │
+   ├─► 3. 存在 InlineSelector 决策面板？ ──────► 取消选择器决策
+   │
+   ├─► 4. AgentRunner 正在执行流式任务？ ──────► 发送取消信号 (Cancel Task)
+   │
+   ├─► 5. ChatInputView 包含非空文本？ ───────► 清空当前输入行
+   │
+   └─► 6. 空闲且输入框为空 ──────────────────► 无动作 (No-op)
 ```
 
+### 5.2 核心按键行为映射表
 
+| 上下文 (Context) | 按键 (Key) | 动作 (Action) | 说明 |
+|---|---|---|---|
+| **Global** | `Ctrl+G` | `app:sidebarToggle` | 一键展开/收起右侧 Plan/Team 侧边栏 |
+| | `Ctrl+Shift+→ / ←` | `app:sidebarWider/Narrower` | 键盘微调侧边栏宽度（步进 4 列） |
+| | `Ctrl+D` | `app:exit` | **保留退出键**，任何上下文不得遮蔽 |
+| **Input (打字)** | `Enter` | `chat:submit` | 提交当前消息（自动无损展开 PUA 折叠块） |
+| | `Shift+Enter` | `chat:newline` | 插入换行符 |
+| | `Ctrl+V` | `chat:paste` | 长文本 Unicode PUA 折叠安全粘贴 |
+| | `Escape` | `chat:cancel` | 沿六级拦截链分发 |
+| | `Ctrl+U` | `chat:pageUp` | 跨终端兼容的对话区翻页（Ctrl+D 已让位给保留退出键） |
 
-          █████   ████  ██████  █████
-          █       █  █  █    █  █
-          █       █  █  █    █  ███
-          █       █  █  █    █  █
-          █████   ████  ██████  █████
+### 5.3 已剔除：对话区漫游浏览模式 (Browse Mode)
+历史上曾引入过 `Ctrl+T` 进入的 Transcript 导航模式（`transcript:*` 动作族），后判定 obsolete 删除（commit c731b49）。本次重构再次评估后确认：滚动需求已被不切焦点的转发键完整覆盖，对话区漫游的增量价值不足，且 `MessageListView.CanFocus=true` 会动摇全局单焦点模型的基石。**本规范不设立 Browse 上下文与 browse:* 动作族；`MessageListView.CanFocus` 恒为 false。**
 
-                  v1.0.0
+---
 
-    / 斜杠命令 · @ 提及文件 · Tab 空输入切模式 · Esc 中断 · /find 搜索
+## 6. 核心色彩体系与调色板规范 (Color System)
 
-```
+系统映射到 ANSI 16 色调色板。OKLCH 真实色彩定义设计愿景，终端运行时映射到语义常量：
 
-This is **not** a separate view — it is rendered inline by
-`ChatTranscriptView` via `WelcomeRenderer` as the first block in the
-`MessageListView`. Once the user sends a message or the agent responds,
-the welcome screen is replaced by the transcript content.
-The welcome screen re-renders on terminal resize to stay centered.
+### 6.1 语义色彩槽位 (Semantic Roles)
+- **`TuiPalette.Accent` (`#14B8A6` / BrightCyan)**：交互主键。用于聚焦边框、激活状态、快捷提示、链接文字。绝不用于大面积装饰。
+- **`TuiPalette.Success` (`#4caf84` / BrightGreen)**：BUILD 模式标识、成功状态、Diff 新增行。
+- **`TuiPalette.Warning` (`#e5b14c` / BrightYellow)**：待审批提醒、Tool 执行中微光、Diff 警告。
+- **`TuiPalette.Error` (`#e0556a` / BrightRed)**：执行失败、拒绝状态、Diff 删除行。
+- **`TuiPalette.Info` (`#58A6FF` / BrightBlue)**：MCP 与沙箱运行标记、辅助提示。
 
-## Do's and Don'ts
+### 6.2 Agent 8 色协同矩阵 (TEAM Mode)
+| 角色 (Role) | 颜色 (Color) | Hex | 语义职责 |
+|---|---|---|---|
+| orchestrator | Purple | `#a386d8` | 架构协调、全局分发 |
+| researcher | Blue | `#5b8dee` | 代码调研、模式探索 |
+| planner | Green | `#4caf84` | 任务拆解、步骤规划 |
+| executor | Orange | `#e08b5c` | 代码落地、文件修改 |
+| reviewer | Yellow | `#e5b14c` | 代码复核、质量门禁 |
+| tester | Red | `#e0556a` | 单元测试、断言验证 |
+| debugger | Pink | `#e07ba5` | 故障排查、根因定位 |
+| assistant | Cyan | `#5bb8c8` | 通用答疑、状态协助 |
 
-### Do's
+---
 
-- **Use the palette constants for all colors.** Never hard-code named
-  Terminal.Gui colors or hex values in component code — always reference
-  the palette's semantic tokens (e.g. `Accent`, `Success`, `AgentPurple`).
-- **Use semantic color names.** Reference colors by their role (`success`,
-  `error`, `accent`), not by their Terminal.Gui mapping (`BrightGreen`,
-  `BrightRed`, `BrightBlue`).
-- **Keep the chat view sacred.** All auxiliary UI must be an overlay that
-  can be dismissed with `Esc`. Never add persistent panels to the chat area.
-- **Indicate mode once.** Render the current mode and TEAM strategy/team only in
-  `AgentStatusBar`. `ChatInputView` handles mode shortcuts but does not duplicate
-  mode labels. A single **transient** mode-change banner in the transcript (rendered
-  once on switch and replaced in place, never accumulating) is permitted as change
-  feedback; it must never become a persistent per-message label.
-- **Advertise only real interactions.** Welcome-screen tips and inline hints must
-  match actual key behavior (e.g. Esc interrupts/cancels; it does not clear input).
-- **Use the agent 8-color system consistently.** When rendering any
-  agent-identified content (messages, plan steps, coordination lines),
-  color-code it with `TuiPalette.FromAgentName()`.
-- **Animate thinking states.** Use the breathing-dot animation for
-  in-progress thinking blocks. Use spinner animation for tool calls in
-  progress.
-- **Respect overlay stacking.** Multiple overlays may stack. Always use
-  `OverlayHost` to manage z-order and `Esc` propagation.
-- **Every mouse behavior must have a keyboard equivalent action.** Any
-  click-driven interaction (expand/collapse, copy, navigation) must also be
-  reachable via a `KeybindingDefaults` action so `keybindings.json` users can
-   remap it. Register new interactions in the appropriate context
-   (`Chat` / `Transcript` / `Diff` / `Selector`) and surface them in the
-   `/keybindings` panel and the welcome-screen tips when they are part of the primary flow.
+## 7. 规范执行与编码准则 (Do's and Don'ts)
 
-### Don'ts
+### 7.1 必须遵守 (Do's)
+1. **度量全部使用整数字符单元格**：在 `Layout` 与 `Drawing` 代码中，所有边界与偏移一律使用整型列数与行数。
+2. **状态栏左右防对撞**：先测量右侧内容宽度，左侧绘制文本严格遵守 `maxLeftCol = width - rightWidth - 2` 截断守卫。
+3. **安全粘贴 PUA 标记**：长文本折叠占位符必须使用 `\uE001#N\uE002`，严禁使用用户可手打的裸方括号字面量。
+4. **Plan 审批修改保留**：用户选择 `edit` 输入意见时，严禁清空侧栏计划，保持全景对照。
+5. **全键盘无障碍覆盖**：任何鼠标可点击操作（展开、折叠、复制、切换）必须提供对应的键盘动作注册。
 
-- **Don't use pure black `#000000` for backgrounds.** Use `bg-root` (`#12151a`)
-  — it's warmer and reduces eye strain.
-- **Don't add box-shadows or gradients.** Terminal UIs cannot render them.
-  Use background contrast and border emphasis for depth.
-- **Don't use more than 3 font sizes.** The system defines heading, body and
-  status-bar sizes. Prefer `body` for content and input.
-- **Don't hard-code agent colors.** Always resolve agent colors through the
-  8-color agent system defined above. Unknown agents fall back to
-  `agent-orchestrator` (purple).
-- **Don't split agent state across multiple bars.** Activity, model, cost,
-  sandbox, LSP and working-mode orientation belong to `AgentStatusBar`.
-  Workspace and context-window metrics belong to `SessionContextBar`.
-- **Don't use the accent color for decoration.** It is reserved exclusively
-  for interactive affordances (links, focused borders, PLAN mode tag).
-  Overuse dilutes its signal.
-- **Don't render thinking text in primary color.** Thinking blocks should
-  use `text-secondary` or `text-muted` to visually de-emphasize AI reasoning
-  relative to final responses.
-
+### 7.2 严格禁止 (Don'ts)
+1. **禁止在代码或注释中硬编码 Web 概念**：禁止出现 `px`、`line-height`、`font-size` 等误导性词汇。
+2. **禁止破坏 ANSI 16 色调色板常量**：组件代码禁止随意使用未在 `TuiPalette` 登记的裸字面量颜色。
+3. **禁止让输入框高度超过屏幕约 1/6**：输入框弹性上限严格控制在 `Math.Clamp(Height / 6, 2, 6)`，保障会话区视口高度。
+4. **禁止单按 Esc 直接杀后台任务**：严格执行六级拦截链，保障操作安全性。

@@ -132,12 +132,19 @@ public sealed class SessionContextBar : View
         return null;
     }
 
-    private static string ShortenPath(string path)
+    internal static string ShortenPath(string path, int maxChars = 20)
     {
         if (string.IsNullOrEmpty(path)) return string.Empty;
         var name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
-        if (!string.IsNullOrEmpty(name)) return name;
-        return path;
+        if (string.IsNullOrEmpty(name)) name = path;
+
+        if (name.Length <= maxChars) return name;
+        if (maxChars <= 3) return name[..maxChars];
+
+        var keepChars = maxChars - 1; // 1 for ellipsis
+        var head = keepChars / 2;
+        var tail = keepChars - head;
+        return name[..head] + TuiGlyphs.Ellipsis + name[^tail..];
     }
 
     private static string FormatTokens(int tokens)
@@ -157,70 +164,104 @@ public sealed class SessionContextBar : View
         SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
         AddStr(new string(' ', w));
 
-        var col = 1;
-        Move(col, 0);
+        var rightSegs = BuildRightSegments(w);
+        var rightWidth = 0;
+        foreach (var s in rightSegs)
+            rightWidth += TextWidthHelper.GetDisplayWidth(s.Text);
 
-        // 📁 workspace (always shown)
-        SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
-        AddStr("\U0001f4c1 ");
-        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
-        AddStr(_workspace);
-        // Emoji 📁 is a surrogate pair (display width 2) + trailing space = 3 cols.
-        // Use display width for workspace so CJK / emoji names don't misalign the right side.
-        col += 2 + TextWidthHelper.GetDisplayWidth(_workspace);
+        var maxLeftCol = rightWidth > 0 ? Math.Max(1, w - rightWidth - 2) : w - 1;
+        var col = 1;
+
+        // 📁 workspace (always shown, shortened if needed)
+        var wsWidth = TextWidthHelper.GetDisplayWidth(_workspace);
+        var availForWs = maxLeftCol - col - 3; // for emoji + space
+        var displayWs = _workspace;
+        if (availForWs < wsWidth && availForWs > 3)
+        {
+            displayWs = ShortenPath(_workspace, availForWs);
+        }
+
+        if (col + 3 + TextWidthHelper.GetDisplayWidth(displayWs) <= maxLeftCol || col == 1)
+        {
+            Move(col, 0);
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+            AddStr("\U0001f4c1 ");
+            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+            AddStr(displayWs);
+            col += 2 + TextWidthHelper.GetDisplayWidth(displayWs);
+        }
 
         // 🌿 branch (if git available)
         if (_gitAvailable && !string.IsNullOrEmpty(_branch))
         {
-            col += 2;
-            Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr("\u00b7 ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
-            AddStr("\U0001f33f ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
-            AddStr(_branch);
-            col += TextWidthHelper.GetDisplayWidth(_branch);
+            var branchWidth = 4 + 2 + TextWidthHelper.GetDisplayWidth(_branch);
+            if (col + branchWidth <= maxLeftCol)
+            {
+                Move(col, 0);
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                AddStr(" \u00b7 ");
+                col += 3;
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+                AddStr("\U0001f33f ");
+                col += 2;
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+                AddStr(_branch);
+                col += TextWidthHelper.GetDisplayWidth(_branch);
+            }
+            else if (maxLeftCol - col >= 10)
+            {
+                var availBranch = maxLeftCol - col - 5;
+                var shortBranch = TextWidthHelper.TruncateByWidth(_branch, availBranch);
+                Move(col, 0);
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                AddStr(" \u00b7 ");
+                col += 3;
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+                AddStr("\U0001f33f ");
+                col += 2;
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+                AddStr(shortBranch);
+                col += TextWidthHelper.GetDisplayWidth(shortBranch);
+            }
         }
 
         // 📦 worktree (only if inside a linked worktree AND terminal is wide enough)
         if (_gitAvailable && !string.IsNullOrEmpty(_worktree) && w >= 90)
         {
-            col += 2;
-            Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr("\u00b7 ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
-            AddStr("\U0001f4e6 ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
-            AddStr(_worktree);
-            col += TextWidthHelper.GetDisplayWidth(_worktree);
+            var wtWidth = 5 + TextWidthHelper.GetDisplayWidth(_worktree);
+            if (col + wtWidth <= maxLeftCol)
+            {
+                Move(col, 0);
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                AddStr(" \u00b7 ");
+                col += 3;
+                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
+                AddStr("\U0001f4e6 ");
+                col += 2;
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+                AddStr(_worktree);
+                col += TextWidthHelper.GetDisplayWidth(_worktree);
+            }
         }
 
         // Session name (if set and terminal is wide enough)
         if (!string.IsNullOrEmpty(_sessionName) && w >= 80)
         {
-            col += 2;
-            Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
-            AddStr("\u00b7 ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
-            AddStr("\U0001f4dd ");
-            col += 2;
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
-            AddStr(_sessionName);
-            col += TextWidthHelper.GetDisplayWidth(_sessionName);
+            var snWidth = 5 + TextWidthHelper.GetDisplayWidth(_sessionName);
+            if (col + snWidth <= maxLeftCol)
+            {
+                Move(col, 0);
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                AddStr(" \u00b7 ");
+                col += 3;
+                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
+                AddStr("\U0001f4dd ");
+                col += 2;
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+                AddStr(_sessionName);
+                col += TextWidthHelper.GetDisplayWidth(_sessionName);
+            }
         }
-
-        var rightSegs = BuildRightSegments(w);
-        var rightWidth = 0;
-        foreach (var s in rightSegs)
-            rightWidth += TextWidthHelper.GetDisplayWidth(s.Text);
 
         if (rightWidth > 0)
         {

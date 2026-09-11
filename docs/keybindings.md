@@ -130,6 +130,7 @@
 | 快捷键 | 动作 | 说明 |
 |---|---|---|
 | `Ctrl+D` | `app:exit` | 退出应用 * |
+| `Ctrl+G` | `app:sidebarToggle` | 一键展开/收起右侧侧边栏（Plan/TEAM 面板） |
 | `Ctrl+Shift+→` | `app:sidebarWider` | 加宽右侧侧边栏（Plan/TEAM 面板，步进 4 列） |
 | `Ctrl+Shift+←` | `app:sidebarNarrower` | 收窄右侧侧边栏（与分隔线拖拽共用 clamp 规则） |
 
@@ -151,7 +152,7 @@
 | `Ctrl+V` | `chat:paste` | 智能粘贴（图片/路径/大文本折叠） |
 | `Shift+Up` / `Ctrl+PgUp` | `chat:scrollUp` | 对话区向上滚动（行级，3行） |
 | `Shift+Down` / `Ctrl+PgDn` | `chat:scrollDown` | 对话区向下滚动（行级，3行） |
-| `PageUp` | `chat:pageUp` | 对话区向上翻页 |
+| `PageUp` / `Ctrl+U` | `chat:pageUp` | 对话区向上翻页（Ctrl+U 跨终端 100% 兼容） |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Shift+Tab` | `chat:cycleTeam` | TEAM 模式下循环切换已注册团队（编排模式由团队 team.yaml 固定声明） |
 | `Alt+1` .. `Alt+4` | `app:modeBuild/Plan/Team/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |

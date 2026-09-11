@@ -106,6 +106,10 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         serverFrame.Width = Dim.Func(_ =>
         {
             var hostWidth = (int?)serverFrame.SuperView?.Frame.Width ?? TuiSpacing.OverlayDefaultWidth;
+            if (hostWidth <= 0 && serverFrame.SuperView?.SuperView is { } grandparent && grandparent.Frame.Width > 0)
+            {
+                hostWidth = grandparent.Frame.Width;
+            }
             var available = hostWidth - 2 * TuiSpacing.OverlayContentX - TuiSpacing.McpPaneGap - TuiSpacing.McpToolPaneMinWidth;
             return Math.Clamp(
                 TuiSpacing.McpServerPaneWidth,
@@ -144,14 +148,25 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         {
             X = Pos.Right(serverFrame) + TuiSpacing.McpPaneGap,
             Y = 0,
-            // Terminal.Gui v2 的 Dim.Fill(margin) 是 X 感知的：宽 = 父宽 − 自身X − margin。
-            // margin 只取右侧对称留白 OverlayContentX；配合服务器窗格 Dim.Func 收缩
-            //（S ≤ 父宽 − 2*OverlayContentX − McpPaneGap − McpToolPaneMinWidth），
-            // 方法窗格宽 = 父宽 − (3+S+2) − 3 ≥ McpToolPaneMinWidth，窄对话框下永不塌缩。
-            Width = Dim.Fill(TuiSpacing.OverlayContentX),
             Height = 13,
             Title = " 方法 ",
         };
+        // Terminal.Gui v2 的 Dim.Fill(margin) 是 X 感知的：宽 = 父宽 − 自身X − margin。
+        // margin 只取右侧对称留白 OverlayContentX；配合服务器窗格 Dim.Func 收缩
+        //（S ≤ 父宽 − 2*OverlayContentX − McpPaneGap − McpToolPaneMinWidth），
+        // 方法窗格宽 = 父宽 − (3+S+2) − 3 ≥ McpToolPaneMinWidth，窄对话框下永不塌缩。
+        // 但如果父宽来自带有更大 ContentSize 的可滚动容器，父宽需基于当前 Viewport 或 Overlay 实际宽度。
+        toolFrame.Width = Dim.Func(_ =>
+        {
+            var hostWidth = (int?)serverFrame.SuperView?.Frame.Width ?? TuiSpacing.OverlayDefaultWidth;
+            if (hostWidth <= 0 && serverFrame.SuperView?.SuperView is { } grandparent && grandparent.Frame.Width > 0)
+            {
+                hostWidth = grandparent.Frame.Width;
+            }
+            var serverRight = serverFrame.Frame.Right > 0 ? serverFrame.Frame.Right : (TuiSpacing.OverlayContentX + TuiSpacing.McpServerPaneMinWidth);
+            var w = hostWidth - (serverRight + TuiSpacing.McpPaneGap) - TuiSpacing.OverlayContentX;
+            return Math.Max(TuiSpacing.McpToolPaneMinWidth, w);
+        }, toolFrame);
         _toolList = new ListView
         {
             X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true,

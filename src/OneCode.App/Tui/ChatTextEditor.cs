@@ -11,7 +11,7 @@ using Terminal.Gui.Input;
 /// </summary>
 internal sealed class ChatTextEditor : View
 {
-    public const int MaxVisibleLines = 4;
+    public const int MaxVisibleLines = 5;
 
     private readonly Editor _editor;
     private int _currentHeight = 1;
@@ -116,6 +116,14 @@ internal sealed class ChatTextEditor : View
                 // reaching ChatInputView. Strip modifiers: terminals often report Esc
                 // with Meta/Alt set, so `e == Key.Esc` alone misses those events.
                 KeyDownEvent?.Invoke(this, e);
+                e.Handled = true;
+            }
+            else if (!_suppressEvents && HandleTokenCaretAndDeletion(e))
+            {
+                e.Handled = true;
+            }
+            else if (!_suppressEvents && TrySnapCaretMoveAroundTokens(e))
+            {
                 e.Handled = true;
             }
             else if (!_suppressEvents &&
@@ -293,6 +301,188 @@ internal sealed class ChatTextEditor : View
         }
         return base.OnKeyDown(e);
     }
+
+    private bool HandleTokenCaretAndDeletion(Key e)
+    {
+        var bare = e.NoShift.NoCtrl.NoAlt;
+        var text = _editor.Text ?? string.Empty;
+        var offset = _editor.CaretOffset;
+
+        if (bare == Key.Backspace && !e.IsCtrl && !e.IsAlt && !_editor.ReadOnly)
+        {
+            if (offset > 0 && offset <= text.Length && text[offset - 1] == '\uE002')
+            {
+                var start = text.LastIndexOf('\uE001', offset - 1);
+                if (start >= 0)
+                {
+                    _editor.Document.Remove(start, offset - start);
+                    _editor.CaretOffset = start;
+                    AdjustHeight();
+                    ContentsChanged?.Invoke(this, EventArgs.Empty);
+                    return true;
+                }
+            }
+        }
+        else if (bare == Key.Delete && !e.IsCtrl && !e.IsAlt && !_editor.ReadOnly)
+        {
+            if (offset >= 0 && offset < text.Length && text[offset] == '\uE001')
+            {
+                var end = text.IndexOf('\uE002', offset);
+                if (end >= 0)
+                {
+                    _editor.Document.Remove(offset, end - offset + 1);
+                    AdjustHeight();
+                    ContentsChanged?.Invoke(this, EventArgs.Empty);
+                    return true;
+                }
+            }
+        }
+        else if (bare == Key.CursorLeft && !e.IsShift && !e.IsCtrl && !e.IsAlt)
+        {
+            if (offset > 0 && offset <= text.Length && text[offset - 1] == '\uE002')
+            {
+                var start = text.LastIndexOf('\uE001', offset - 1);
+                if (start >= 0)
+                {
+                    _editor.CaretOffset = start;
+                    return true;
+                }
+            }
+        }
+        else if (bare == Key.CursorRight && !e.IsShift && !e.IsCtrl && !e.IsAlt)
+        {
+            if (offset >= 0 && offset < text.Length && text[offset] == '\uE001')
+            {
+                var end = text.IndexOf('\uE002', offset);
+                if (end >= 0)
+                {
+                    _editor.CaretOffset = end + 1;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 定位键（Up/Down/Ctrl+Left/Ctrl+Right）的计算落点落入 PUA Token 内部、
+    /// 或当前光标已在 Token 内部（如鼠标点入）时，接管移动并沿移动方向吸附到
+    /// Token 边界之外，杜绝嵌入编辑撕裂 Token（提交时静默丢字）。
+    /// 其余情况返回 false，交还 Editor 原生处理（零行为漂移）。
+    /// Home/End 落点恒为行首/行尾——Token 不跨行，行边界必在 Token 外，无需接管。
+    /// </summary>
+    private bool TrySnapCaretMoveAroundTokens(Key e)
+    {
+        var bare = e.NoShift.NoCtrl.NoAlt;
+        var isVertical = !e.IsCtrl && !e.IsShift && !e.IsAlt
+            && (bare == Key.CursorUp || bare == Key.CursorDown);
+        var isWordMove = e.IsCtrl && !e.IsShift && !e.IsAlt
+            && (bare == Key.CursorLeft || bare == Key.CursorRight);
+        if (!isVertical && !isWordMove)
+            return false;
+
+        var text = _editor.Text ?? string.Empty;
+        if (text.Length == 0)
+            return false;
+
+        var offset = _editor.CaretOffset;
+        var forward = bare == Key.CursorDown || bare == Key.CursorRight;
+
+        // Key 常量为静态属性而非编译期常量，不能用于常量模式，改用相等比较分发。
+        int? target = bare == Key.CursorUp ? PrevLineSameColumn(text, offset)
+            : bare == Key.CursorDown ? NextLineSameColumn(text, offset)
+            : bare == Key.CursorRight ? NextWordStart(text, offset)
+            : PrevWordStart(text, offset);
+
+        if (target is int t && IsInsideToken(text, t))
+        {
+            _editor.CaretOffset = SnapCaretOutOfToken(text, t, forward);
+            return true;
+        }
+        if (IsInsideToken(text, offset))
+        {
+            _editor.CaretOffset = SnapCaretOutOfToken(text, offset, forward);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 光标是否处于 PUA Token 内部（\uE001 之后至 \uE002 及其后）。
+    /// 边界位置（\uE001 处、\uE002 后一位）视为安全。
+    /// </summary>
+    internal static bool IsInsideToken(string text, int caret)
+    {
+        if (string.IsNullOrEmpty(text) || caret <= 0 || caret >= text.Length)
+            return false;
+        var start = text.LastIndexOf('\uE001', caret - 1);
+        if (start < 0)
+            return false;
+        var end = text.IndexOf('\uE002', start);
+        return end >= 0 && caret > start && caret <= end;
+    }
+
+    /// <summary>
+    /// 把处于 Token 内部的光标沿移动方向吸附到边界之外：
+    /// 向前（offset 增大方向）→ \uE002 之后一位；向后 → \uE001 处。
+    /// 位置本就安全时原样返回。
+    /// </summary>
+    internal static int SnapCaretOutOfToken(string text, int caret, bool forward)
+    {
+        if (string.IsNullOrEmpty(text) || caret <= 0 || caret >= text.Length)
+            return caret;
+        var start = text.LastIndexOf('\uE001', caret - 1);
+        if (start < 0)
+            return caret;
+        var end = text.IndexOf('\uE002', start);
+        if (end < 0 || caret <= start || caret > end)
+            return caret;
+        return forward ? end + 1 : start;
+    }
+
+    private static int LineStart(string text, int offset)
+        => offset <= 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
+
+    private static int? PrevLineSameColumn(string text, int offset)
+    {
+        var lineStart = LineStart(text, offset);
+        if (lineStart == 0)
+            return null;
+        var prevLineEnd = lineStart - 1;
+        var col = offset - lineStart;
+        return LineStart(text, prevLineEnd) + Math.Min(col, prevLineEnd - LineStart(text, prevLineEnd));
+    }
+
+    private static int? NextLineSameColumn(string text, int offset)
+    {
+        var nl = text.IndexOf('\n', offset);
+        if (nl < 0)
+            return null;
+        var nextStart = nl + 1;
+        var col = offset - LineStart(text, offset);
+        var nextEnd = text.IndexOf('\n', nextStart);
+        var nextLen = (nextEnd < 0 ? text.Length : nextEnd) - nextStart;
+        return nextStart + Math.Min(col, nextLen);
+    }
+
+    private static int? PrevWordStart(string text, int offset)
+    {
+        var i = Math.Min(offset, text.Length);
+        while (i > 0 && !IsWordChar(text[i - 1])) i--;
+        while (i > 0 && IsWordChar(text[i - 1])) i--;
+        return i < offset ? i : null;
+    }
+
+    private static int? NextWordStart(string text, int offset)
+    {
+        var i = Math.Max(offset, 0);
+        while (i < text.Length && !IsWordChar(text[i])) i++;
+        while (i < text.Length && IsWordChar(text[i])) i++;
+        return i > offset ? i : null;
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>
     /// Checks if the key is a scroll-related key that should bypass Editor

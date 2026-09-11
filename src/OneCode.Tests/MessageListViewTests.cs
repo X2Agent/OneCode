@@ -55,6 +55,20 @@ public sealed class MessageListViewTests
         view.RenderedLines.Should().Equal("history line", "final committed text", "option B");
     }
 
+    [Fact]
+    public void OnKeyDown_HomeAndEnd_Scrolls()
+    {
+        var view = new MessageListView();
+        var lines = Enumerable.Range(1, 50).Select(i => Line($"line {i}")).ToList();
+        view.AppendLines(lines);
+
+        view.DispatchKeyDown(Terminal.Gui.Input.Key.Home);
+        view.IsAutoScroll.Should().BeFalse();
+
+        view.DispatchKeyDown(Terminal.Gui.Input.Key.End);
+        view.IsAutoScroll.Should().BeTrue();
+    }
+
     private static FormattedLine Line(string text) =>
         FormattedLine.Plain(text, Terminal.Gui.Drawing.Color.White);
 }

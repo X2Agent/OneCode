@@ -47,6 +47,22 @@ public sealed partial class MessageListView : View
     public int StreamingPreviewLineCount
         => _streamingPreviewStart < 0 ? 0 : Math.Max(0, _lines.Count - _streamingPreviewStart);
 
+    /// <summary>
+    /// 是否正处于自动滚动跟随模式。
+    /// </summary>
+    public bool IsAutoScroll => _scroll.AutoScroll;
+
+    /// <summary>
+    /// 调度测试用的按键分发入口（测试接缝，生产代码无调用方）。
+    /// </summary>
+    internal bool DispatchKeyDown(Key kb) => OnKeyDown(kb);
+
+    /// <summary>
+    /// 是否正处于流式输出中（由流式预览区间派生，避免跨视图同步漂移）。
+    /// 当流式中且用户往上翻页脱离跟随（AutoScroll == false）时，绘制跳底浮标。
+    /// </summary>
+    public bool IsStreaming => _streamingPreviewStart >= 0;
+
     public MessageListView(OneCode.Core.IO.IClipboardService? clipboard = null)
     {
         _clipboard = clipboard;

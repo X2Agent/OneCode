@@ -73,7 +73,8 @@ public sealed partial class OneCodeToplevel
         if (_isQueryRunning && _ctx.InputQueue is not null)
         {
             _ctx.InputQueue.Enqueue(text, images.Count > 0 ? images : null);
-            Invoke(() => _shell.Transcript.AddSystem($"Queued: {text}"));
+            var queueCount = _ctx.InputQueue.Count;
+            Invoke(() => _shell.Transcript.AddSystem($"[排队中: {queueCount} 条命令 - Esc 取消] {text}"));
             return;
         }
 

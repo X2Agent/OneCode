@@ -9,8 +9,37 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ReplShell
 {
+    internal bool DispatchKeyDown(Key kb) => OnKeyDown(kb);
+
     protected override bool OnKeyDown(Key kb)
     {
+        // ── Esc 拦截链（非输入态集中调度；输入态的中断/清空分发在 ChatInputView） ──
+        if (kb == Key.Esc)
+        {
+            // Level 1: 弹层遮罩 (Overlay)
+            if (_overlayHost.IsOverlayVisible)
+            {
+                _overlayHost.HandleEsc();
+                _overlayHost.Visible = _overlayHost.IsOverlayVisible;
+                return true;
+            }
+
+            // Level 2: 自动补全浮窗 (Autocomplete)
+            if (_completionVisible)
+            {
+                _chatInput.HideCompletion();
+                FocusChatInput();
+                return true;
+            }
+
+            // Level 3: 内联交互卡片 (Inline Selector / Question Wizard)
+            if (HasActiveInteractionSession())
+            {
+                DismissActiveSession();
+                return true;
+            }
+        }
+
         // 输入框持有焦点时，交互键已由 ChatInputView.OnInputKeyPress 处理。
         // 仅在焦点不在输入框（焦点异常）时兜底，避免同一键被 HandleInteractionKey
         // 处理两次（例如 Down 连跳两格）。
@@ -44,8 +73,13 @@ public sealed partial class ReplShell
         // dismissal must always work regardless of keybinding overrides.
         var action = TuiKeyAdapter.ResolveAction(kb, _keyResolver, _keyContextManager.ActiveContexts);
 
-        // app:sidebar* — 键盘调整侧边栏宽度（焦点不在输入框时的兜底路径；
+        // app:sidebar* — 键盘调整侧边栏宽度与可见性（焦点不在输入框时的兜底路径；
         // 输入框聚焦时经 ChatInputView 的 SidebarWider/NarrowerRequested 转发到这里）。
+        if (action == KeybindingDefaults.ActionAppSidebarToggle)
+        {
+            ToggleSidebarVisibility();
+            return true;
+        }
         if (action == KeybindingDefaults.ActionAppSidebarWider)
         {
             AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);

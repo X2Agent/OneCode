@@ -232,6 +232,30 @@ public sealed class SettingsOverlayTests
     }
 
     [Fact]
+    public void Layout_SmallScreen24Lines_KeepsActionBarVisibleAndAnchored()
+    {
+        // 模拟 24 行终端（OverlayHost 会将 Fill 模式的高度分配为 22 行或 Dialog 模式的 75% = 18 行）
+        var overlay = CreateOverlay();
+        var host = new OverlayHost(() => { });
+        host.Push(overlay);
+        host.Position(overlay, 80, 24);
+        overlay.Layout();
+
+        // 验证表单内容视口与操作栏绝对定位在底部
+        overlay.Actions.Should().NotBeNull();
+        overlay.Actions!.Frame.Y.Should().BeGreaterThan(0);
+        overlay.Actions.Frame.Bottom.Should().BeLessThanOrEqualTo(overlay.Frame.Height);
+
+        // 验证保存按钮与取消按钮均处于可用且可见位置
+        overlay.SaveButton.Frame.Width.Should().BeGreaterThan(0);
+        overlay.CancelButton.Frame.Width.Should().BeGreaterThan(0);
+
+        // 表单字段容器高度受限但拥有垂直滚动能力
+        overlay.FormContent.Frame.Height.Should().BeGreaterThan(5);
+        overlay.FormContent.Frame.Bottom.Should().BeLessThanOrEqualTo(overlay.Actions.Frame.Y);
+    }
+
+    [Fact]
     public async Task TrySave_UnchangedApiKey_DoesNotWriteSecret()
     {
         var host = new OverlayHost(() => { });

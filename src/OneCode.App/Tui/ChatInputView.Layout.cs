@@ -10,7 +10,7 @@ public sealed partial class ChatInputView
     {
         X = 0;
         Width = Dim.Fill();
-        Height = 1 + MinVisibleLines;
+        Height = MinHeight;
         SetScheme(TuiTheme.ChatInput);
         // Focus belongs exclusively to ChatTextEditor.Editor; the wrapper only
         // keeps the ancestor focus path valid and must not become a tab target.
@@ -100,15 +100,22 @@ public sealed partial class ChatInputView
         if (width <= 0)
             return false;
 
-        var inputLines = Math.Clamp(_input.LineCount, MinVisibleLines, ChatTextEditor.MaxVisibleLines);
+        var screenHeight = _app.Screen.Height > 0 ? _app.Screen.Height : 24;
+        var dynamicMax = TuiSpacing.GetInputMaxTotalHeight(screenHeight);
+        var inputLines = Math.Clamp(_input.LineCount, MinVisibleLines, dynamicMax - 1);
         var totalHeight = 1 + inputLines;
         if (_lastHeight != totalHeight || _lastBottomOffset != BottomOffset)
         {
+            var oldHeight = _lastHeight;
             _lastHeight = totalHeight;
             _lastBottomOffset = BottomOffset;
             Height = totalHeight;
             Y = Pos.AnchorEnd(totalHeight + BottomOffset);
             SetNeedsLayout();
+            if (oldHeight != totalHeight)
+            {
+                InputHeightChanged?.Invoke(totalHeight);
+            }
         }
 
         _separatorLabel.Width = width;

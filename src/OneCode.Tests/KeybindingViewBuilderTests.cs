@@ -65,11 +65,11 @@ public sealed class KeybindingViewBuilderTests
     [Fact]
     public void Build_CustomCommandBinding_HasNoDescription()
     {
-        var merged = MergeDefaults(UserBlock(("ctrl+g", "command:foo")));
+        var merged = MergeDefaults(UserBlock(("ctrl+k ctrl+x", "command:foo")));
 
         var views = KeybindingViewBuilder.Build(merged);
 
-        views.Single(v => v.KeyDisplay == "Ctrl+G").Description.Should().BeNull();
+        views.Single(v => v.KeyDisplay == "Ctrl+K Ctrl+X").Description.Should().BeNull();
     }
 
     [Fact]

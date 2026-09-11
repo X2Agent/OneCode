@@ -128,7 +128,15 @@ public sealed partial class ChatInputView
                 return;
             }
 
-            // Idle: do not clear input text (user can Ctrl+A + Delete).
+            // Level 6: If text is not empty, clear it
+            if (!string.IsNullOrEmpty(CurrentText))
+            {
+                ClearInput();
+                e.Handled = true;
+                return;
+            }
+
+            // 空闲且输入框为空：无动作（Esc 链末级 No-op）。
             e.Handled = true;
             return;
         }
@@ -329,6 +337,13 @@ public sealed partial class ChatInputView
             return;
         }
 
+        if (action == KeybindingDefaults.ActionAppSidebarToggle)
+        {
+            SidebarToggleRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+
         // Smart paste: Ctrl+V resolves to chat:paste via KeybindingResolver.
         // Routes to SmartPasteHandler (supports images, file paths, large-text collapsing).
         if (action == KeybindingDefaults.ActionChatPaste)
@@ -349,8 +364,8 @@ public sealed partial class ChatInputView
         }
 
         // busy 时不再阻止提交——OnUserSubmitted 中的队列逻辑会自动入队
-        var text = (_pastedText ?? CurrentText).Trim();
-        if (string.IsNullOrEmpty(text) && _pendingImages.Count == 0) return;
+        var text = ExpandAttachments(CurrentText).Trim();
+        if (string.IsNullOrEmpty(text) && _attachmentRegistry.ImageCount == 0) return;
 
         if (text is "/quit" or "/q" or "/exit" or "exit" or "quit")
         {

@@ -76,6 +76,9 @@ public sealed partial class ReplShell : IInteractionSession
         FocusChatInput();
     }
 
+    public bool HasActiveInteractionSession() =>
+        _activeInlineSelector is not null || _activeQuestionWizard is not null;
+
     /// <summary>
     /// Tears down whichever session is showing. Tail region is a single slot,
     /// so Show* must never leave both pointers non-null.

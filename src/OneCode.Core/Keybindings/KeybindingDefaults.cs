@@ -44,6 +44,7 @@ public static class KeybindingDefaults
 
     // App 级别动作
     public const string ActionAppExit = "app:exit";
+    public const string ActionAppSidebarToggle = "app:sidebarToggle";
 
     // 右侧侧边栏（Plan/TEAM）宽度键盘调整——与分隔线鼠标拖拽等价的键盘路径。
     // 注册于 Global 上下文：输入框聚焦时经 ChatInputView 转发，非聚焦时经
@@ -106,6 +107,7 @@ public static class KeybindingDefaults
     public static readonly string[] AllActions =
     [
         ActionAppExit,
+        ActionAppSidebarToggle,
         ActionAppSidebarWider, ActionAppSidebarNarrower,
         ActionAppModeBuild, ActionAppModePlan, ActionAppModeTeam, ActionAppModeGoal,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
@@ -133,6 +135,7 @@ public static class KeybindingDefaults
     {
         // App 级别
         [ActionAppExit] = "退出应用",
+        [ActionAppSidebarToggle] = "切换右侧侧边栏可见性（Plan/TEAM 面板）",
         [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan/TEAM 面板）",
         [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan/TEAM 面板）",
         [ActionAppModeBuild] = "切换到 BUILD 模式",
@@ -201,6 +204,7 @@ public static class KeybindingDefaults
         new(ContextGlobal, new Dictionary<string, string?>
         {
             ["ctrl+d"] = ActionAppExit,
+            ["ctrl+g"] = ActionAppSidebarToggle,
 
             // 侧边栏宽度调整（Plan/TEAM 面板）：Ctrl+Shift+方向键，步进见
             // SidebarViewBase.KeyboardResizeStep。不占用 ctrl+left/right（占位建议循环）。
@@ -218,11 +222,15 @@ public static class KeybindingDefaults
             ["alt+enter"] = ActionChatNewline,
             ["ctrl+v"] = ActionChatPaste,
 
-            // 对话区键盘滚动（不干扰输入）
+            // 对话区键盘滚动（不干扰输入）。
+            // ctrl+u 保留给 chat:pageUp（跨终端兼容的翻页键）；
+            // ctrl+d 不在此绑定——它是 Global 保留退出键（app:exit），
+            // 且 Chat 块声明在 Global 之后，「后匹配生效」会永久遮蔽退出键。
             ["shift+up"] = ActionChatScrollUp,
             ["shift+down"] = ActionChatScrollDown,
             ["ctrl+pgup"] = ActionChatScrollUp,
             ["ctrl+pgdn"] = ActionChatScrollDown,
+            ["ctrl+u"] = ActionChatPageUp,
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
 

@@ -91,12 +91,6 @@ public sealed partial class ChatInputView
         if (_isBusy || _interactionSuspended)
             return;
 
-        if (_pastedText != null)
-        {
-            e.Handled = true;
-            return;
-        }
-
         var text = e.Text;
         if (string.IsNullOrEmpty(text))
             return;
@@ -156,20 +150,30 @@ public sealed partial class ChatInputView
 
         if (lineCount > ChatTextEditor.MaxVisibleLines)
         {
-            _pasteCount++;
-            _pastedText = normalized;
+            var id = _attachmentRegistry.RegisterTextFold(normalized, lineCount);
+            var token = $"\uE001[Pasted text #{id} +{lineCount} lines]\uE002";
+
             // Restore Editor's read-only state BEFORE setting Text — the
             // LargeTextPasted detection sets ReadOnly=true to block further
             // raw-text insertion, but we need it cleared to set the summary.
             _input.ResumeAfterPaste();
             _suppressCompletion = true;
-            _input.Text = $"[Pasted text #{_pasteCount} +{lineCount} lines]";
-            _input.InsertionPoint = (_input.Text?.Length ?? 0);
+            if (isFullText)
+            {
+                _input.Text = token;
+                _input.InsertionPoint = (_input.Text?.Length ?? 0);
+                // 程序化整体替换不触发 ContentsChanged，需显式对账附件生命周期
+                //（新折叠已注册且在文本中；此前遗留的旧附件随替换一并剔除）。
+                _attachmentRegistry.PruneMissing(token);
+            }
+            else
+            {
+                _input.InsertTextAtCursor(token);
+            }
             _suppressCompletion = false;
         }
         else
         {
-            _pastedText = null;
             if (isFullText)
             {
                 // LargeTextPasted path: text is the full document — replace.
@@ -198,10 +202,7 @@ public sealed partial class ChatInputView
             return;
         }
 
-        _imageCount++;
-        var index = _imageCount;
-        _pendingImages[index] = imagePath;
-
+        var index = _attachmentRegistry.RegisterImage(imagePath);
         var tag = $"[Image #{index}]";
         _suppressCompletion = true;
         _input.InsertTextAtCursor(tag);
@@ -243,7 +244,7 @@ public sealed partial class ChatInputView
         {
             var bytes = await File.ReadAllBytesAsync(originalPath).ConfigureAwait(false);
             var result = await ImagePipeline!.ProcessAsync(bytes).ConfigureAwait(false);
-            _pendingImages[index] = result.FilePath;
+            _attachmentRegistry.UpdateImagePath(index, result.FilePath);
         }
         catch
         {
@@ -255,12 +256,5 @@ public sealed partial class ChatInputView
     /// Returns and clears all pending image paths. Called on submit to retrieve
     /// images for the multimodal message. Keys are the image numbers.
     /// </summary>
-    public IReadOnlyList<string> TakePendingImages()
-    {
-        if (_pendingImages.Count == 0)
-            return [];
-        var paths = _pendingImages.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList();
-        _pendingImages.Clear();
-        return paths;
-    }
+    public IReadOnlyList<string> TakePendingImages() => _attachmentRegistry.TakeImages();
 }

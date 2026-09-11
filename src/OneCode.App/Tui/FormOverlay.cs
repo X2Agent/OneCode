@@ -87,7 +87,8 @@ public static class FormValidators
 /// </summary>
 public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
 {
-    private int _nextRowY = TuiSpacing.OverlayContentY;
+    private int _nextRowY;
+    private readonly View _formContent;
     private readonly Label _errorLabel;
     private View? _actions;
     // 按添加顺序登记的流式行（视图 + 占位高度），支撑 SetRowVisible 的整体平移。
@@ -96,10 +97,23 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
     protected FormOverlay(string title, int preferredWidth, int preferredHeight)
         : base(title, preferredWidth, preferredHeight)
     {
+        _formContent = new View
+        {
+            X = 0,
+            Y = TuiSpacing.OverlayContentY,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(4),
+            CanFocus = true,
+            TabStop = TabBehavior.TabGroup,
+        };
+        _formContent.VerticalScrollBar.Visible = true;
+        Add(_formContent);
+
         _errorLabel = new Label
         {
             Text = string.Empty,
             X = TuiSpacing.OverlayContentX,
+            Y = Pos.AnchorEnd(3),
             Width = Dim.Fill(TuiSpacing.OverlayContentX),
             Height = 1,
             CanFocus = false,
@@ -111,15 +125,31 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
 
     internal string ValidationMessage => _errorLabel.Text;
 
+    /// <summary>表单可滚动字段视口容器（internal 供 headless 测试视口滚动断言）。</summary>
+    internal View FormContent => _formContent;
+
     /// <summary>底部操作栏容器（internal 供 headless 测试定位保存/取消焦点断言）。</summary>
     internal View? Actions => _actions;
 
     protected FormRow AddRow(string labelText, View field, int rowSpacing = TuiSpacing.Sm)
     {
         var row = new FormRow(labelText, field) { Y = _nextRowY };
-        Add(row);
+        _formContent.Add(row);
         _flowEntries.Add((row, rowSpacing));
         _nextRowY += rowSpacing;
+
+        row.HasFocusChanged += (_, _) =>
+        {
+            if (row.HasFocus)
+                EnsureVisible(row);
+        };
+        field.HasFocusChanged += (_, _) =>
+        {
+            if (field.HasFocus)
+                EnsureVisible(field);
+        };
+
+        UpdateContentSize();
         return row;
     }
 
@@ -128,11 +158,18 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         foreach (var view in views)
         {
             view.Y = _nextRowY + view.Y;
-            Add(view);
+            _formContent.Add(view);
             _flowEntries.Add((view, height));
+
+            view.HasFocusChanged += (_, _) =>
+            {
+                if (view.HasFocus)
+                    EnsureVisible(view);
+            };
         }
 
         _nextRowY += height;
+        UpdateContentSize();
     }
 
     /// <summary>
@@ -158,7 +195,9 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             _flowEntries[i].View.Y += delta;
         }
 
+        _nextRowY += delta;
         PreferredHeight += delta;
+        UpdateContentSize();
         SetNeedsLayout();
         SetNeedsDraw();
     }
@@ -169,15 +208,14 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         string secondaryText,
         Action secondaryAction)
     {
-        _errorLabel.Y = _nextRowY;
+        _errorLabel.Y = Pos.AnchorEnd(3);
         Add(_errorLabel);
-        _nextRowY++;
 
         var secondary = new Button
         {
             Text = secondaryText,
             X = Pos.AnchorEnd(),
-            Y = _nextRowY,
+            Y = 0,
         };
         secondary.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         secondary.Accepting += (_, _) => secondaryAction();
@@ -186,7 +224,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         {
             Text = primaryText,
             X = 0,
-            Y = _nextRowY,
+            Y = 0,
         };
         primary.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         primary.Accepting += (_, _) => primaryAction();
@@ -194,7 +232,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         var actions = new View
         {
             X = Pos.AnchorEnd(),
-            Y = _nextRowY,
+            Y = Pos.AnchorEnd(TuiSpacing.Sm),
             Width = Dim.Auto(),
             Height = 1,
             CanFocus = true,
@@ -206,7 +244,8 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         secondary.Y = 0;
         actions.Add(primary, secondary);
         Add(actions);
-        PreferredHeight = _nextRowY + 3;
+        PreferredHeight = _nextRowY + TuiSpacing.OverlayContentY + 4;
+        UpdateContentSize();
         return (primary, secondary);
     }
 
@@ -220,8 +259,85 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         }
 
         _errorLabel.Text = failure.Message;
-        failure.Target?.SetFocus();
+        if (failure.Target is { } target)
+        {
+            EnsureVisible(target);
+            target.SetFocus();
+        }
         SetNeedsDraw();
         return true;
+    }
+
+    internal override void FocusInitialView()
+    {
+        if (InitialFocusView is { } initial)
+        {
+            EnsureVisible(initial);
+        }
+
+        base.FocusInitialView();
+    }
+
+    protected override bool OnKeyDown(Key kb)
+    {
+        // 注意：Ctrl+D 是保留退出键（app:exit），此处不得绑定翻页——Overlay 内同样放行，
+        // 由 ChatInputView/ReplShell 的退出路径统一处理。
+        if (kb == Key.PageDown)
+        {
+            if (_formContent.ScrollVertical(Math.Max(1, _formContent.Viewport.Height / 2)) == true)
+            {
+                SetNeedsDraw();
+                return true;
+            }
+        }
+        else if (kb == Key.PageUp || kb == Key.U.WithCtrl)
+        {
+            if (_formContent.ScrollVertical(-Math.Max(1, _formContent.Viewport.Height / 2)) == true)
+            {
+                SetNeedsDraw();
+                return true;
+            }
+        }
+
+        return base.OnKeyDown(kb);
+    }
+
+    private void UpdateContentSize()
+    {
+        var contentHeight = Math.Max(1, _nextRowY);
+        var contentWidth = Math.Max(1, PreferredWidth);
+        _formContent.SetContentSize(new System.Drawing.Size(contentWidth, contentHeight));
+    }
+
+    private void EnsureVisible(View? target)
+    {
+        if (target == null || _formContent.Viewport.Height <= 0)
+            return;
+
+        var current = target;
+        var relY = 0;
+        while (current != null && current != _formContent)
+        {
+            relY += current.Frame.Y;
+            current = current.SuperView;
+        }
+
+        if (current == null)
+            return;
+
+        var targetHeight = Math.Max(1, target.Frame.Height);
+        var top = relY;
+        var bottom = relY + targetHeight;
+
+        if (top < _formContent.Viewport.Y)
+        {
+            _formContent.ScrollVertical(top - _formContent.Viewport.Y);
+            SetNeedsDraw();
+        }
+        else if (bottom > _formContent.Viewport.Y + _formContent.Viewport.Height)
+        {
+            _formContent.ScrollVertical(bottom - (_formContent.Viewport.Y + _formContent.Viewport.Height));
+            SetNeedsDraw();
+        }
     }
 }
