@@ -77,7 +77,7 @@ public sealed class TrustService
 
         foreach (var trustedDir in trusted)
         {
-            if (PathBoundary.IsWithinDirectory(normalizedCwd, trustedDir, PathComparison))
+            if (PathBoundary.IsWithinDirectory(normalizedCwd, trustedDir, PathBoundary.DefaultComparison))
                 return true;
         }
 
@@ -153,7 +153,7 @@ public sealed class TrustService
             return;
 
         trusted.RemoveAll(existing =>
-            PathBoundary.IsWithinDirectory(existing, normalized, PathComparison));
+            PathBoundary.IsWithinDirectory(existing, normalized, PathBoundary.DefaultComparison));
 
         trusted.Add(normalized);
         var result = await _configManager.ApplyAsync(
@@ -162,9 +162,6 @@ public sealed class TrustService
         if (!result.Saved)
             throw new IOException(result.Error ?? "Failed to save trusted directories.");
     }
-
-    private static StringComparison PathComparison =>
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     private static async Task<bool> ShowConsolePromptAsync(string cwd, CancellationToken ct)
     {

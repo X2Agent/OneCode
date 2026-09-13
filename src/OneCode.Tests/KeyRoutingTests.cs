@@ -354,6 +354,19 @@ public sealed class KeyRoutingTests
         shell.IsPlanSidebarVisible.Should().BeTrue("再次 Ctrl+G 应恢复展示侧边栏");
     }
 
+    // 无计划也无团队时 Ctrl+G 不应展开空面板（空侧栏只增视觉噪声；
+    // 计划/团队一旦出现会自动展开）。
+    [Fact]
+    public void SidebarToggle_CtrlG_DoesNotExpandEmptySidebar()
+    {
+        var shell = CreateShell();
+        shell.IsPlanSidebarVisible.Should().BeFalse();
+
+        shell.ToggleSidebarVisibility();
+
+        shell.IsPlanSidebarVisible.Should().BeFalse("无内容时 Ctrl+G 不应展开空侧栏");
+    }
+
     private static ReplShell CreateShell()
     {
         var app = Substitute.For<IApplication>();

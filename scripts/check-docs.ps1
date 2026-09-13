@@ -3,7 +3,7 @@
 .SYNOPSIS
     校验 docs/commands.md 与斜杠命令注册表（CommandServiceExtensions.AddCommands）同步。
 .DESCRIPTION
-    真相源：src/OneCode.App/Commands/CommandServiceExtensions.cs 中 AddSingleton<ICommand, XxxCommand> 注册。
+    真相源：src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs 中 AddSingleton<ICommand, XxxCommand> 注册。
     脚本从各命令源码解析 Name => "xxx"，与 docs/commands.md 中的 "### /xxx" 标题集合做 diff。
     不一致时退出码为 1，供 CI / release workflow 调用。
 #>
@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$registryPath = Join-Path $RepoRoot 'src/OneCode.App/Commands/CommandServiceExtensions.cs'
+$registryPath = Join-Path $RepoRoot 'src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs'
 $commandsDir  = Join-Path $RepoRoot 'src/OneCode.App/Commands'
 $docsPath     = Join-Path $RepoRoot 'docs/commands.md'
 
@@ -59,7 +59,7 @@ if ($missingInDocs -or $staleInDocs) {
         Write-Host "❌ docs/commands.md 记录了已不存在的命令：" -ForegroundColor Red
         $staleInDocs | ForEach-Object { Write-Host "   /$_" }
     }
-    Write-Host "`n请在 src/OneCode.App/Commands/CommandServiceExtensions.cs 与 docs/commands.md 之间同步。" -ForegroundColor Yellow
+    Write-Host "`n请在 src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs 与 docs/commands.md 之间同步。" -ForegroundColor Yellow
     exit 1
 }
 

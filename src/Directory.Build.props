@@ -14,7 +14,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <!--
       Phase 0: 关闭噪声类规则，避免警告淹没真正的问题。
-      Phase-1 计划 (ปลอด): 移除 CA1305, CA1310, CA1311, CA1510, CA1846 (StringComparison.Ordinal/ArgumentNullException.ThrowIfNull/AsSpan)。
+      Phase-1 计划 (安全): 移除 CA1305, CA1310, CA1311, CA1510, CA1846 (StringComparison.Ordinal/ArgumentNullException.ThrowIfNull/AsSpan)。
       Phase-2 计划: 移除 CA1861, CA1862, CA1860 (集合性能类)。
       Phase-3 计划: 移除 CA1725, CA1513 (风格一致性类)。
       Phase-4 计划: 移除 CA2007 (确保所有 await 使用 ConfigureAwait(false) 后可启用)。

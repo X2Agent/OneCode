@@ -9,15 +9,36 @@ namespace OneCode.App.Tui;
 /// </summary>
 internal sealed partial class PendingAttachmentRegistry
 {
+    /// <summary>PUA 私有区标记：Token 起始符。用户无法手工键入，杜绝占位符碰撞。</summary>
+    internal const char TokenStart = '\uE001';
+
+    /// <summary>PUA 私有区标记：Token 结束符。</summary>
+    internal const char TokenEnd = '\uE002';
+
     private readonly Dictionary<int, TextFoldAttachment> _textFolds = new();
     private readonly Dictionary<int, ImageAttachment> _images = new();
     private int _nextId;
 
-    [GeneratedRegex(@"\uE001(?:\[Pasted(?: text)? #(?<id>\d+)[^\]\uE002]*\]|#(?<id>\d+))\uE002")]
+    [GeneratedRegex(@"\uE001\[Pasted(?: text)? #(?<id>\d+)[^\]\uE002]*\]\uE002")]
     private static partial Regex TextFoldTokenRegex();
 
-    [GeneratedRegex(@"\[Image #(?<id>\d+)\]")]
+    [GeneratedRegex(@"\uE001\[Image #(?<id>\d+)\]\uE002")]
     private static partial Regex ImageTagRegex();
+
+    /// <summary>
+    /// 构造长文本折叠占位符（PUA 包裹，不可手工键入）。
+    /// 生成与解析共用同一格式，避免两处各自拼串漂移。
+    /// </summary>
+    public static string TextFoldTag(int id, int lineCount)
+        => $"{TokenStart}[Pasted text #{id} +{lineCount} lines]{TokenEnd}";
+
+    /// <summary>
+    /// 构造图片占位符（PUA 包裹，不可手工键入）。
+    /// 与文本折叠共用 <see cref="TokenStart"/>/<see cref="TokenEnd"/> 定界符，
+    /// 因此自动获得原子删除与光标吸附语义——半截删除不会再留下孤立的 `[Image #`。
+    /// </summary>
+    public static string ImageTag(int id)
+        => $"{TokenStart}[Image #{id}]{TokenEnd}";
 
     public int RegisterTextFold(string fullText, int lineCount)
     {

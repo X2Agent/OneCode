@@ -315,10 +315,8 @@ internal sealed class ChatTextEditor : View
                 var start = text.LastIndexOf('\uE001', offset - 1);
                 if (start >= 0)
                 {
-                    _editor.Document.Remove(start, offset - start);
+                    RemoveTokenRange(start, offset - start);
                     _editor.CaretOffset = start;
-                    AdjustHeight();
-                    ContentsChanged?.Invoke(this, EventArgs.Empty);
                     return true;
                 }
             }
@@ -330,9 +328,7 @@ internal sealed class ChatTextEditor : View
                 var end = text.IndexOf('\uE002', offset);
                 if (end >= 0)
                 {
-                    _editor.Document.Remove(offset, end - offset + 1);
-                    AdjustHeight();
-                    ContentsChanged?.Invoke(this, EventArgs.Empty);
+                    RemoveTokenRange(offset, end - offset + 1);
                     return true;
                 }
             }
@@ -366,6 +362,36 @@ internal sealed class ChatTextEditor : View
     }
 
     /// <summary>
+    /// 删除一段 PUA Token 文本并**只派发一次** <see cref="ContentsChanged"/>。
+    /// <c>Document.Remove</c> 会同步触发 <c>TextChanged → OnDocumentChanged</c>，其内部
+    /// 已按 <see cref="_insertingText"/> 抑制嵌套派发并完成高度重算；此处复用同一抑制
+    /// 机制，避免「嵌套派发 + 手动派发」叠加导致 <c>OnInputTextChanged</c> /
+    /// <c>PruneMissing</c> / 补全逻辑重复执行两次。
+    /// </summary>
+    private void RemoveTokenRange(int start, int count)
+    {
+        _insertingText = true;
+        try
+        {
+            _editor.Document.Remove(start, count);
+        }
+        finally
+        {
+            _insertingText = false;
+        }
+
+        ContentsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Dispatches a key through the PUA Token 原子编辑拦截器（原子删除 / 光标吸附）。
+    /// Tests use this to exercise the token path without a live driver loop.
+    /// </summary>
+    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
+    internal bool DispatchTokenKey(Key key)
+        => HandleTokenCaretAndDeletion(key) || TrySnapCaretMoveAroundTokens(key);
+
+    /// <summary>
     /// 定位键（Up/Down/Ctrl+Left/Ctrl+Right）的计算落点落入 PUA Token 内部、
     /// 或当前光标已在 Token 内部（如鼠标点入）时，接管移动并沿移动方向吸附到
     /// Token 边界之外，杜绝嵌入编辑撕裂 Token（提交时静默丢字）。
@@ -390,10 +416,9 @@ internal sealed class ChatTextEditor : View
         var forward = bare == Key.CursorDown || bare == Key.CursorRight;
 
         // Key 常量为静态属性而非编译期常量，不能用于常量模式，改用相等比较分发。
-        int? target = bare == Key.CursorUp ? PrevLineSameColumn(text, offset)
-            : bare == Key.CursorDown ? NextLineSameColumn(text, offset)
-            : bare == Key.CursorRight ? NextWordStart(text, offset)
-            : PrevWordStart(text, offset);
+        int? target = isVertical
+            ? VerticalSameColumn(text, offset, forward)
+            : WordBoundary(text, offset, forward);
 
         if (target is int t && IsInsideToken(text, t))
         {
@@ -444,42 +469,55 @@ internal sealed class ChatTextEditor : View
     private static int LineStart(string text, int offset)
         => offset <= 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
 
-    private static int? PrevLineSameColumn(string text, int offset)
+    /// <summary>
+    /// 垂直移动（Up/Down）的「同列」落点，等价于 Editor 的原生行为；
+    /// 越过首/末行时返回 null，交还 Editor 处理。
+    /// 之所以自行计算，是因为必须在落点生效**前**判断它是否落在 PUA Token 内部。
+    /// </summary>
+    internal static int? VerticalSameColumn(string text, int offset, bool forward)
     {
-        var lineStart = LineStart(text, offset);
-        if (lineStart == 0)
-            return null;
-        var prevLineEnd = lineStart - 1;
-        var col = offset - lineStart;
-        return LineStart(text, prevLineEnd) + Math.Min(col, prevLineEnd - LineStart(text, prevLineEnd));
+        if (forward)
+        {
+            var nl = text.IndexOf('\n', offset);
+            if (nl < 0)
+                return null;
+            var nextStart = nl + 1;
+            var col = offset - LineStart(text, offset);
+            var nextEnd = text.IndexOf('\n', nextStart);
+            var nextLen = (nextEnd < 0 ? text.Length : nextEnd) - nextStart;
+            return nextStart + Math.Min(col, nextLen);
+        }
+        else
+        {
+            var lineStart = LineStart(text, offset);
+            if (lineStart == 0)
+                return null;
+            var prevLineEnd = lineStart - 1;
+            var prevStart = LineStart(text, prevLineEnd);
+            return prevStart + Math.Min(offset - lineStart, prevLineEnd - prevStart);
+        }
     }
 
-    private static int? NextLineSameColumn(string text, int offset)
+    /// <summary>
+    /// 词移动（Ctrl+Left/Right）的落点，等价于 Editor 的原生行为；
+    /// 未发生位移时返回 null。理由同 <see cref="VerticalSameColumn"/>。
+    /// </summary>
+    internal static int? WordBoundary(string text, int offset, bool forward)
     {
-        var nl = text.IndexOf('\n', offset);
-        if (nl < 0)
-            return null;
-        var nextStart = nl + 1;
-        var col = offset - LineStart(text, offset);
-        var nextEnd = text.IndexOf('\n', nextStart);
-        var nextLen = (nextEnd < 0 ? text.Length : nextEnd) - nextStart;
-        return nextStart + Math.Min(col, nextLen);
-    }
-
-    private static int? PrevWordStart(string text, int offset)
-    {
-        var i = Math.Min(offset, text.Length);
-        while (i > 0 && !IsWordChar(text[i - 1])) i--;
-        while (i > 0 && IsWordChar(text[i - 1])) i--;
-        return i < offset ? i : null;
-    }
-
-    private static int? NextWordStart(string text, int offset)
-    {
-        var i = Math.Max(offset, 0);
-        while (i < text.Length && !IsWordChar(text[i])) i++;
-        while (i < text.Length && IsWordChar(text[i])) i++;
-        return i > offset ? i : null;
+        if (forward)
+        {
+            var i = Math.Max(offset, 0);
+            while (i < text.Length && !IsWordChar(text[i])) i++;
+            while (i < text.Length && IsWordChar(text[i])) i++;
+            return i > offset ? i : null;
+        }
+        else
+        {
+            var i = Math.Min(offset, text.Length);
+            while (i > 0 && !IsWordChar(text[i - 1])) i--;
+            while (i > 0 && IsWordChar(text[i - 1])) i--;
+            return i < offset ? i : null;
+        }
     }
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';

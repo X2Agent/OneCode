@@ -53,7 +53,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 **四阶段流程**：
 1. **Research and Plan** — 理解范围、分解为独立单元、确定 e2e 测试方案
-2. **Create Worktrees** — `git worktree add ../worktree-<N> -b batch-<N>`
+2. **Create Worktrees** — `git worktree add ../<项目名>.worktree/worktree-<N> -b batch-<N>`
 3. **Dispatch Workers** — 每个 worktree 派发一个 worker agent
 4. **Collect and Merge** — 合并所有 worktree 回 main
 
@@ -277,7 +277,7 @@ $ARGUMENTS
 
 > `/skills run` 已移除，避免与 `/<skill-name>` 双路径重复。
 
-> 技能通过 `SkillCommandSource` 动态加载，不需要在 `CommandServiceExtensions.cs` 中注册。新增或删除内置技能时，修改 `BundledSkills.cs` 的 `LoadBundledSkills()` 方法；新增自定义技能时，放入对应目录即可，无需改动代码。
+> 技能通过 `SkillCommandSource` 动态加载，不需要在 `CommandServiceCollectionExtensions.cs` 中注册。新增或删除内置技能时，修改 `BundledSkills.cs` 的 `LoadBundledSkills()` 方法；新增自定义技能时，放入对应目录即可，无需改动代码。
 
 ---
 

@@ -68,4 +68,91 @@ public sealed class ChatTextEditorTokenCaretTests
         ChatTextEditor.IsInsideToken(text, 5).Should().BeFalse("两 Token 之间的用户文本是安全区");
         ChatTextEditor.IsInsideToken(text, text.Length - 2).Should().BeTrue("落在第二个 Token 内部");
     }
+
+    // 回归防护：原子删除 Token 只派发一次 ContentsChanged。
+    // Document.Remove 会同步触发 OnDocumentChanged → ContentsChanged，若再手动派发
+    // 一次，OnInputTextChanged / PruneMissing / 补全逻辑会重复执行两次。
+    [Fact]
+    public void TokenBackspace_AtomicDelete_FiresContentsChangedExactlyOnce()
+    {
+        var editor = new ChatTextEditor();
+        editor.Text = Text;
+        editor.InsertionPoint = TokenEnd + 1; // \uE002 之后一位
+
+        var fires = 0;
+        editor.ContentsChanged += (_, _) => fires++;
+
+        editor.DispatchTokenKey(Terminal.Gui.Input.Key.Backspace).Should().BeTrue();
+
+        editor.Text.Should().Be("abcd");
+        fires.Should().Be(1, "原子删除 Token 只应派发一次 ContentsChanged");
+    }
+
+    [Fact]
+    public void TokenDelete_AtomicDelete_FiresContentsChangedExactlyOnce()
+    {
+        var editor = new ChatTextEditor();
+        editor.Text = Text;
+        editor.InsertionPoint = TokenStart; // \uE001 处
+
+        var fires = 0;
+        editor.ContentsChanged += (_, _) => fires++;
+
+        editor.DispatchTokenKey(Terminal.Gui.Input.Key.Delete).Should().BeTrue();
+
+        editor.Text.Should().Be("abcd");
+        fires.Should().Be(1, "原子删除 Token 只应派发一次 ContentsChanged");
+    }
+
+    // 图片占位符与文本折叠共用 PUA 定界符，因此同样获得原子删除语义——
+    // 半截删除不会再留下孤立的 "[Image #"。
+    [Fact]
+    public void ImageTag_IsAtomicOnBackspace()
+    {
+        var editor = new ChatTextEditor();
+        editor.Text = "see \uE001[Image #1]\uE002 now";
+        editor.InsertionPoint = 16; // \uE002 之后一位
+
+        editor.DispatchTokenKey(Terminal.Gui.Input.Key.Backspace).Should().BeTrue();
+
+        editor.Text.Should().Be("see  now");
+    }
+
+    // 落点计算等价于 Editor 原生行为（自行计算只为在落点生效前检查 Token 内部）。
+    [Fact]
+    public void VerticalSameColumn_MovesToSameColumnAcrossLines()
+    {
+        const string text = "abc\nde\nfghi"; // 行起点：0 / 4 / 7
+
+        ChatTextEditor.VerticalSameColumn(text, 1, forward: true).Should().Be(5);
+        ChatTextEditor.VerticalSameColumn(text, 5, forward: true).Should().Be(8);
+        ChatTextEditor.VerticalSameColumn(text, 8, forward: true).Should().BeNull("末行无下一行");
+
+        ChatTextEditor.VerticalSameColumn(text, 8, forward: false).Should().Be(5);
+        ChatTextEditor.VerticalSameColumn(text, 5, forward: false).Should().Be(1);
+        ChatTextEditor.VerticalSameColumn(text, 1, forward: false).Should().BeNull("首行无上一行");
+    }
+
+    [Fact]
+    public void VerticalSameColumn_ClampsToShorterLineLength()
+    {
+        const string text = "abcdef\nxy"; // 下一行仅 2 列
+
+        ChatTextEditor.VerticalSameColumn(text, 5, forward: true).Should().Be(text.Length);
+    }
+
+    [Fact]
+    public void WordBoundary_MovesByWordAndStopsAtEdges()
+    {
+        const string text = "foo bar_baz qux"; // 长度 15
+
+        ChatTextEditor.WordBoundary(text, 0, forward: true).Should().Be(3);
+        ChatTextEditor.WordBoundary(text, 3, forward: true).Should().Be(11);
+        ChatTextEditor.WordBoundary(text, 11, forward: true).Should().Be(15);
+        ChatTextEditor.WordBoundary(text, 15, forward: true).Should().BeNull();
+
+        ChatTextEditor.WordBoundary(text, 15, forward: false).Should().Be(12);
+        ChatTextEditor.WordBoundary(text, 3, forward: false).Should().Be(0);
+        ChatTextEditor.WordBoundary(text, 0, forward: false).Should().BeNull();
+    }
 }

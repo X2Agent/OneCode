@@ -118,7 +118,10 @@ public sealed partial class MessageListView
             var floatRow = viewport.Height - 1;
             Move(0, floatRow);
             SetAttribute(new Attribute(TuiPalette.Warning, TuiPalette.BgCard));
-            var indicatorText = " ↓ 新内容生成中 (按 End 滚到底部) ";
+            // 提示必须指向真实可用的按键：MessageListView 不可聚焦，Key.End 在本视图中
+            // 虽有分支（MessageListView.OnKeyDown）但生产路径无路由入口，故此处只提示
+            // 经 ChatInputView 转发的滚动键（Ctrl+PgDn = chat:scrollDown）。
+            var indicatorText = " ↓ 新内容生成中 · Ctrl+PgDn 向下滚动 ";
             AddStr(TextWidthHelper.ClipByWidth(indicatorText, viewport.Width));
         }
 

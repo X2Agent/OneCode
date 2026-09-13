@@ -95,7 +95,7 @@ public sealed class GitGoalWorkspaceServiceTests
 
         result.WorkspaceId.Should().Be($"goal-{run.Id}");
         result.WorktreeBranch.Should().Be($"onecode/goal/{run.Id}");
-        result.IsolatedPath.Replace('\\', '/').Should().EndWith($"/.onecode/goal-worktrees/{run.Id}");
+        result.IsolatedPath.Replace('\\', '/').Should().EndWith($"/repo.worktree/{run.Id}");
         await git.Received().RunAsync(
             Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
             "C:/repo",
@@ -132,7 +132,7 @@ public sealed class GitGoalWorkspaceServiceTests
         var git = Substitute.For<IGitHelper>();
         var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
         var run = CreateClaimedRun();
-        git.CountPorcelainChangesAsync("C:/repo/.onecode/goal-worktrees/run", Arg.Any<CancellationToken>()).Returns(0);
+        git.CountPorcelainChangesAsync("C:/repo.worktree/run", Arg.Any<CancellationToken>()).Returns(0);
         fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
         var targetHeadReads = 0;
         git.RunAsync(Arg.Any<string[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -192,7 +192,7 @@ public sealed class GitGoalWorkspaceServiceTests
                 && args[args.Length - 1].Contains("OneCode-Operation-Id: goal/run/step/1", StringComparison.Ordinal)
                 && args[args.Length - 1].Contains("OneCode-Evidence-Blob: evidence-blob", StringComparison.Ordinal)
                 && !args[args.Length - 1].Contains("AgentOutput", StringComparison.Ordinal)),
-            "C:/repo/.onecode/goal-worktrees/run",
+            "C:/repo.worktree/run",
             Arg.Any<CancellationToken>());
     }
 
@@ -264,7 +264,7 @@ public sealed class GitGoalWorkspaceServiceTests
         Workspace = new GoalWorkspaceSnapshot(
             "goal-run",
             "C:/repo",
-            "C:/repo/.onecode/goal-worktrees/run",
+            "C:/repo.worktree/run",
             "onecode/goal/run",
             "main",
             "base-head",

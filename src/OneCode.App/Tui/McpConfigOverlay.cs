@@ -105,12 +105,8 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         // 服务器窗格常规宽 36；对话框变窄时让位给方法窗格，但自身保底不折叠。
         serverFrame.Width = Dim.Func(_ =>
         {
-            var hostWidth = (int?)serverFrame.SuperView?.Frame.Width ?? TuiSpacing.OverlayDefaultWidth;
-            if (hostWidth <= 0 && serverFrame.SuperView?.SuperView is { } grandparent && grandparent.Frame.Width > 0)
-            {
-                hostWidth = grandparent.Frame.Width;
-            }
-            var available = hostWidth - 2 * TuiSpacing.OverlayContentX - TuiSpacing.McpPaneGap - TuiSpacing.McpToolPaneMinWidth;
+            var available = ResolveHostWidth(serverFrame)
+                - 2 * TuiSpacing.OverlayContentX - TuiSpacing.McpPaneGap - TuiSpacing.McpToolPaneMinWidth;
             return Math.Clamp(
                 TuiSpacing.McpServerPaneWidth,
                 TuiSpacing.McpServerPaneMinWidth,
@@ -158,13 +154,8 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         // 但如果父宽来自带有更大 ContentSize 的可滚动容器，父宽需基于当前 Viewport 或 Overlay 实际宽度。
         toolFrame.Width = Dim.Func(_ =>
         {
-            var hostWidth = (int?)serverFrame.SuperView?.Frame.Width ?? TuiSpacing.OverlayDefaultWidth;
-            if (hostWidth <= 0 && serverFrame.SuperView?.SuperView is { } grandparent && grandparent.Frame.Width > 0)
-            {
-                hostWidth = grandparent.Frame.Width;
-            }
             var serverRight = serverFrame.Frame.Right > 0 ? serverFrame.Frame.Right : (TuiSpacing.OverlayContentX + TuiSpacing.McpServerPaneMinWidth);
-            var w = hostWidth - (serverRight + TuiSpacing.McpPaneGap) - TuiSpacing.OverlayContentX;
+            var w = ResolveHostWidth(serverFrame) - (serverRight + TuiSpacing.McpPaneGap) - TuiSpacing.OverlayContentX;
             return Math.Max(TuiSpacing.McpToolPaneMinWidth, w);
         }, toolFrame);
         _toolList = new ListView
@@ -203,6 +194,19 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
 
         if (_entries.Count > 0)
             SelectServer(0);
+    }
+
+    /// <summary>
+    /// 解析双栏布局的可用父宽度：优先取直接父容器宽度；父容器尚未测量（宽 ≤ 0）时
+    /// 回退到祖父（Overlay）宽度。Dim.Func 的求值可能早于父容器布局，故需此回退。
+    /// 集中一处，避免服务器/方法两个窗格各自维护同一段兜底逻辑而漂移。
+    /// </summary>
+    private static int ResolveHostWidth(View anchor)
+    {
+        var hostWidth = (int?)anchor.SuperView?.Frame.Width ?? TuiSpacing.OverlayDefaultWidth;
+        if (hostWidth <= 0 && anchor.SuperView?.SuperView is { } grandparent && grandparent.Frame.Width > 0)
+            hostWidth = grandparent.Frame.Width;
+        return hostWidth;
     }
 
     protected override McpConfigResult? GetDismissedResult(OverlayCloseReason reason) => null;

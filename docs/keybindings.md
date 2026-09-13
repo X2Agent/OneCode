@@ -227,8 +227,8 @@
 
 | 快捷键 | 原因 | 严重级别 |
 |---|---|---|
-| `Ctrl+D` | 退出，终端协议硬编码 | Error |
-| `Ctrl+M` | 与 Enter 等价（终端均发送 CR） | Error |
+| `Ctrl+D` | 保留为应用退出键（`app:exit`），任何上下文不得占用（含 Chat 翻页） | Error |
+| `Ctrl+M` | 与 Enter 等价（终端均发送 CR），终端协议硬编码 | Error |
 
 ### 终端保留
 

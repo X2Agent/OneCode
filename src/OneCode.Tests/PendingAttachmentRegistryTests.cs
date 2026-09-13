@@ -125,7 +125,7 @@ public sealed class PendingAttachmentRegistryTests
         var foldId = registry.RegisterTextFold("folded code", 5);
         var imageId = registry.RegisterImage("temp/img.png");
 
-        var text = $"fix \uE001[Pasted text #{foldId} +5 lines]\uE002 using [Image #{imageId}] please";
+        var text = $"fix {PendingAttachmentRegistry.TextFoldTag(foldId, 5)} using {PendingAttachmentRegistry.ImageTag(imageId)} please";
         registry.PruneMissing(text);
 
         registry.TryGetTextFold(foldId, out _).Should().BeTrue();
@@ -133,17 +133,42 @@ public sealed class PendingAttachmentRegistryTests
     }
 
     [Fact]
-    public void PruneMissing_HandTypedImageTagWithoutRegistration_HasNoEffect()
+    public void PruneMissing_HandTypedPlainImageTag_CannotSpoofOrPreserveAttachment()
     {
         var registry = new PendingAttachmentRegistry();
         registry.RegisterImage("temp/real.png");
-        var realId = 1;
 
-        // 文本中的 [Image #99] 未注册——对账只做交集裁剪，不凭空注册
-        registry.PruneMissing($"look [Image #99] and [Image #{realId}]");
+        // 手打的裸 [Image #1] 不含 PUA 定界符——既不凭空注册，也不能保住已注册附件
+        registry.PruneMissing("look [Image #99] and [Image #1]");
 
-        registry.ImageCount.Should().Be(1);
-        registry.TryGetImage(realId, out var img).Should().BeTrue();
-        img.FilePath.Should().Be("temp/real.png");
+        registry.ImageCount.Should().Be(0, "手打裸标签不匹配 PUA Token，注册表按交集剔除");
+    }
+
+    [Fact]
+    public void ImageTag_IsPuaWrapped_SoItCannotBeHandTyped()
+    {
+        PendingAttachmentRegistry.ImageTag(3).Should().Be("\uE001[Image #3]\uE002");
+    }
+
+    [Fact]
+    public void TextFoldTag_RoundTripsThroughExpandAttachments()
+    {
+        var registry = new PendingAttachmentRegistry();
+        var id = registry.RegisterTextFold("line1\nline2", 2);
+
+        var text = $"fix {PendingAttachmentRegistry.TextFoldTag(id, 2)}";
+        registry.ExpandAttachments(text).Should().Be("fix line1\nline2");
+    }
+
+    [Fact]
+    public void ExpandAttachments_PlanDocShorthandToken_IsNotAMatch()
+    {
+        // 计划文档写的 \uE001#N\uE002 简写并无生产方；实际格式是
+        // \uE001[Pasted text #N +K lines]\uE002。正则不得保留无生产方的简写分支。
+        var registry = new PendingAttachmentRegistry();
+        var id = registry.RegisterTextFold("code", 5);
+
+        var input = $"pre \uE001#{id}\uE002 post";
+        registry.ExpandAttachments(input).Should().Be(input);
     }
 }

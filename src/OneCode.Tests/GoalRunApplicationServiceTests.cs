@@ -114,7 +114,7 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
     private static GoalWorkspaceSnapshot Workspace(GoalRun run) => new(
         $"goal-{run.Id}",
         run.WorkingDirectory,
-        Path.Combine(run.WorkingDirectory, ".onecode", "goal-worktrees", run.Id.Value),
+        Path.Combine(Path.GetDirectoryName(run.WorkingDirectory)!, $"{Path.GetFileName(run.WorkingDirectory)}.worktree", run.Id.Value),
         $"onecode/goal/{run.Id}",
         "main",
         "base-head",

@@ -1,5 +1,4 @@
 using System.Text;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OneCode.App;
@@ -94,6 +93,36 @@ public sealed class ServiceCollectionSnapshotTests
             "PlanExecutionRecoveryService",  // Plan：恢复中断的执行
             "LspHostedService",              // LSP：语言服务器自动启动（不阻塞启动）
             "AutoDreamService");             // AutoDream：后台记忆整合（1h 轮询）
+    }
+
+    /// <summary>
+    /// 启动期冒烟：组合根注册图必须可解析。
+    ///
+    /// 发版最常见的启动期故障是「某服务缺依赖 / 生命周期不匹配」，这类问题只有真正把 TUI
+    /// 跑起来才会暴露，普通单测抓不到。此处用 <c>ValidateOnBuild</c> 静态校验全部调用点
+    /// ——**不实例化任何服务、无副作用**，等价于「宿主能否成功构建服务图」的冒烟。
+    /// </summary>
+    [Fact]
+    public void ProductionRegistrations_ValidateOnBuild_ServiceGraphIsResolvable()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(Substitute.For<IHostApplicationLifetime>());
+        PopulateProductionRegistrations(services);
+
+        var options = new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        };
+
+        ServiceProvider? provider = null;
+        var build = () => provider = services.BuildServiceProvider(options);
+
+        build.Should().NotThrow(
+            "组合根注册图必须可解析——否则 TUI 启动即崩，而这类故障在无终端环境下无法冒烟");
+
+        provider?.Dispose();
     }
 
     /// <summary>

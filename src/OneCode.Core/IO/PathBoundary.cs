@@ -6,6 +6,24 @@ namespace OneCode.Core.IO;
 public static class PathBoundary
 {
     /// <summary>
+    /// Platform-aware path comparison used when no explicit comparison is supplied:
+    /// case-insensitive on Windows (case-insensitive filesystem), case-sensitive
+    /// elsewhere (Linux and macOS honour case). Comparing with
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> unconditionally would make
+    /// containment checks too permissive on case-sensitive filesystems, where
+    /// <c>/work</c> and <c>/WORK</c> are distinct directories.
+    /// </summary>
+    public static StringComparison DefaultComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    /// <summary>
+    /// Returns whether <paramref name="path"/> is <paramref name="baseDir"/> itself
+    /// or a descendant of it, using <see cref="DefaultComparison"/>.
+    /// </summary>
+    public static bool IsWithinDirectory(string path, string baseDir)
+        => IsWithinDirectory(path, baseDir, DefaultComparison);
+
+    /// <summary>
     /// Returns whether <paramref name="path"/> is <paramref name="baseDir"/> itself
     /// or a descendant of it. Rejects prefix spoofs such as <c>C:\App</c> vs <c>C:\Application</c>.
     /// </summary>
@@ -17,7 +35,7 @@ public static class PathBoundary
     public static bool IsWithinDirectory(
         string path,
         string baseDir,
-        StringComparison comparison = StringComparison.OrdinalIgnoreCase)
+        StringComparison comparison)
     {
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         var baseFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDir));

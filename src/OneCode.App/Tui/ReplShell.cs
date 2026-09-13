@@ -8,17 +8,18 @@ namespace OneCode.App.Tui;
 /// <code>
 /// │                                        │               │
 /// │  Chat — sole main view (scrollable)    │  PlanSidebar  │  Dim.Fill()
-/// │  (sidebar auto-shrinks the chat width  │  (auto, 42col │  when a plan
+/// │  (sidebar auto-shrinks the chat width  │  (auto, ≤45col│  when a plan
 /// │   when a plan exists; Ctrl+G toggles)  │   Ctrl+G)     │   exists)
 /// │                                        │               │
-/// │  (StatusBarTopGap — blank row)                         │  1 row
 /// ├─ AgentStatusBar ───────────────────────────────────────┤  1 row
-/// │  ⠋ 思考中 · Opus · $0.04 · Sandbox              BUILD │
-/// ├─ ChatInputView ────────────────────────────────────────┤  4–5 rows
-/// │ > _                                                    │
-/// │  (ChatInputContextGap — 空行)                          │  1 row
+/// │  ⠋ 思考中 · Opus · 🔒 Sandbox                  BUILD   │
+/// ├─ ChatInputView ────────────────────────────────────────┤  2–6 rows
+/// │ > _                                                    │  (dynamic)
 /// └─ SessionContextBar ────────────────────────────────────┘  1 row
 /// </code>
+///
+/// 注意：<c>StatusBarTopGap</c> / <c>ChatInputContextGap</c> 已置 0（见 <see cref="TuiSpacing"/>），
+/// 图中不再有额外空行；输入区高度按 <c>Clamp(H/6, 2, 6)</c> 动态伸缩。
 /// </summary>
 public sealed partial class ReplShell : View
 {
@@ -276,7 +277,7 @@ public sealed partial class ReplShell : View
 
     /// <summary>
     /// 切换当前侧边栏可见性（Ctrl+G，app:sidebarToggle）。
-    /// 若有活跃计划或团队面板，切换其展开/隐藏；若无，默认展开/隐藏计划面板。
+    /// 有活跃计划或团队面板时切换其展开/隐藏；两者都无内容时不展开空面板。
     /// </summary>
     internal void ToggleSidebarVisibility()
     {
@@ -290,11 +291,15 @@ public sealed partial class ReplShell : View
         }
         else
         {
-            // 当前均未显示：优先显示已有内容的侧栏或 Plan 面板
+            // 当前均未显示：优先显示已有内容的侧栏。
+            // 两者都没有内容时不展开空面板——Ctrl+G 虽是显式动作，但空侧栏只增视觉噪声；
+            // 计划/团队一旦出现会自动展开（见 SetPlanSidebarVisible / ShowPlanCard）。
             if (_activeTeamRun is not null)
                 _teamSidebar.Visible = true;
-            else
+            else if (_activePlan is not null)
                 _planSidebar.Visible = true;
+            else
+                return;
         }
 
         ApplySidebarLayout();

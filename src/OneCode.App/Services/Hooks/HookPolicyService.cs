@@ -23,12 +23,9 @@ public sealed class HookPolicyService
 
         foreach (var trustedDir in trusted)
         {
-            if (PathBoundary.IsWithinDirectory(cwd, trustedDir, PathComparison))
+            if (PathBoundary.IsWithinDirectory(cwd, trustedDir, PathBoundary.DefaultComparison))
                 return true;
         }
         return false;
     }
-
-    private static readonly StringComparison PathComparison =
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 }

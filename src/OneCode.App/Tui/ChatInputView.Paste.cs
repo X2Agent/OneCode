@@ -151,7 +151,7 @@ public sealed partial class ChatInputView
         if (lineCount > ChatTextEditor.MaxVisibleLines)
         {
             var id = _attachmentRegistry.RegisterTextFold(normalized, lineCount);
-            var token = $"\uE001[Pasted text #{id} +{lineCount} lines]\uE002";
+            var token = PendingAttachmentRegistry.TextFoldTag(id, lineCount);
 
             // Restore Editor's read-only state BEFORE setting Text — the
             // LargeTextPasted detection sets ReadOnly=true to block further
@@ -203,7 +203,7 @@ public sealed partial class ChatInputView
         }
 
         var index = _attachmentRegistry.RegisterImage(imagePath);
-        var tag = $"[Image #{index}]";
+        var tag = PendingAttachmentRegistry.ImageTag(index);
         _suppressCompletion = true;
         _input.InsertTextAtCursor(tag);
         _suppressCompletion = false;

@@ -1,6 +1,7 @@
 using OneCode.Core.Build;
 using OneCode.Core.Commands;
 using OneCode.Core.Goals;
+using OneCode.Infrastructure.Git;
 
 namespace OneCode.Infrastructure.Goals;
 
@@ -31,7 +32,7 @@ public sealed class GitGoalWorkspaceService(
         var targetFingerprint = await fingerprintProvider.ComputeAsync(repositoryRoot, ct).ConfigureAwait(false);
         var workspaceId = $"goal-{run.Id}";
         var branch = $"onecode/goal/{run.Id}";
-        var path = Path.Combine(repositoryRoot, ".onecode", "goal-worktrees", run.Id.Value);
+        var path = WorktreeLayout.GetWorktreePath(repositoryRoot, run.Id.Value);
 
         if (Directory.Exists(path))
         {
@@ -42,7 +43,6 @@ public sealed class GitGoalWorkspaceService(
         }
         else
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var created = await git.RunAsync(
                 ["worktree", "add", "-b", branch, path, baseCommit], repositoryRoot, ct).ConfigureAwait(false);
             if (created is not { Success: true })

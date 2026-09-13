@@ -4,7 +4,7 @@ namespace OneCode.App.Tui;
 /// 集中管理 TUI 的布局间距与尺寸常量，落地 DESIGN.md §spacing 定义的 token 体系。
 ///
 /// DESIGN.md 以整数字符单元格（列/行）度量（Compact &lt;100 / Standard 100~140 / Wide &gt;140）。
-/// Xs/Sm/Md/Lg/Xl 为历史遗留间距刻度（当前仅 Overlay/Form/按钮间隙使用），不得用于新的行高计算。
+/// Xs/Sm/Md 为间距刻度（仅 Overlay/Form/按钮间隙使用），不得用于新的行高计算。
 ///
 /// 所有 TUI 组件的 padding/margin/起点坐标都应从这里取值，禁止散落硬编码。
 /// </summary>
@@ -27,10 +27,6 @@ internal static class TuiSpacing
 
     public const int Md = 4;
 
-    public const int Lg = 6;
-
-    public const int Xl = 8;
-
     // Overlay 内容起点（统一规则）
     public const int OverlayContentX = 3;
 
@@ -39,9 +35,6 @@ internal static class TuiSpacing
     public const int OverlayHeaderX = 2;
 
     public const int OverlayHeaderY = 1;
-
-    // 标题栏 / 状态栏 / 输入栏
-    public const int BarPaddingX = 1;
 
     public const int StatusBarHeight = 1;
 
@@ -53,8 +46,6 @@ internal static class TuiSpacing
 
     /// <summary>消息头时间戳与右侧应用内滚动条之间的安全间距。</summary>
     public const int MessageTimestampRightPadding = Sm;
-
-    public const int MessageSpacing = 1;
 
     /// <summary>
     /// Fallback width when the viewport has not been measured yet (e.g. before
@@ -82,13 +73,6 @@ internal static class TuiSpacing
     public const int OverlayDefaultWidth = 60;
 
     public const int OverlayDefaultHeight = 16;
-
-    public const int OverlayMaxHeight = 28;
-
-    // 按钮与交互元素
-    public const int ButtonPaddingX = 1;
-
-    public const int ButtonGap = 2;
 
     // 表单字段
     public const int FormLabelWidth = 14;
@@ -118,7 +102,7 @@ internal static class TuiSpacing
     /// <summary>
     /// ContentZone 底部预留高度基线（单行输入时的紧凑高度）：
     /// 会话上下文栏 1 + Agent 状态栏 1 + 两处间距各 0 + 单行聊天输入区高度 2 = 4。
-    /// 当输入框输入多行时，动态根据实际高度调整（最多 8 行）。
+    /// 当输入框输入多行时，动态根据实际高度调整（上限见 <see cref="ChatInputView.MaxHeight"/>，即 6 行）。
     /// </summary>
     public const int ContentZoneReservedBottom =
         SessionContextBarHeight + StatusBarHeight + StatusBarTopGap + ChatInputContextGap + ChatInputView.MinHeight;

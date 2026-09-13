@@ -46,28 +46,6 @@ public sealed partial class ReplShell
         if (!_chatInput.HasInputFocus && HandleInteractionKey(kb))
             return true;
 
-        // Completion popup ESC handling — the completion popup is NOT managed by
-        // OverlayHost (it's added/removed via OnCompletionStateChanged), so it
-        // needs its own ESC handler here. This catches ESC even when the Editor
-        // consumes it internally (e.g., for canceling selection) before it reaches
-        // ChatInputView.OnInputKeyPress.
-        if (kb == Key.Esc && _completionVisible)
-        {
-            _chatInput.HideCompletion();
-            FocusChatInput();
-            return true;
-        }
-
-        // Overlay Esc handling — safety net for when neither the overlay itself
-        // nor OverlayHost.OnKeyDown consumed the key (e.g., focus anomaly).
-        // Under normal conditions OverlayHost.OnKeyDown handles ESC first.
-        if (kb == Key.Esc && _overlayHost.IsOverlayVisible)
-        {
-            _overlayHost.HandleEsc();
-            _overlayHost.Visible = _overlayHost.IsOverlayVisible;
-            return true;
-        }
-
         // KeybindingResolver — all configurable shortcuts go through here.
         // ESC for overlays/completion is handled above (not configurable) because
         // dismissal must always work regardless of keybinding overrides.

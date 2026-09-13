@@ -1078,4 +1078,4 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
   | `/team` | `teams` |
   | `/find` | `search` |
 
-> **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceExtensions.cs` 中的 `AddCommands()` 方法。本文档与此注册表保持同步，新增或删除命令时请同时更新。
+> **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs` 中的 `AddCommands()` 方法。本文档与此注册表保持同步，新增或删除命令时请同时更新。

@@ -57,7 +57,7 @@ You are orchestrating a large, parallelizable change across this codebase.
 
 ## Phase 2: Create Worktrees
 
-Create a worktree for each unit: `git worktree add ../worktree-<N> -b batch-<N>`
+Create a worktree for each unit under the sibling worktree directory `<project>.worktree`: `git worktree add ../<project>.worktree/worktree-<N> -b batch-<N>` (where `<project>` is the current repository folder name)
 
 ## Phase 3: Dispatch Workers
 

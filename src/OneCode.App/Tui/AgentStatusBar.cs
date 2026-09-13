@@ -11,6 +11,9 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed class AgentStatusBar : View
 {
+    /// <summary>Activity 文案的最大显示宽度（列）。超出即截断，避免挤占模型名与状态段。</summary>
+    internal const int ActivityMaxWidth = 24;
+
     private readonly SpinnerController _spinner;
     private readonly WorkingModeController _modeController;
     private bool _busy;
@@ -112,29 +115,6 @@ public sealed class AgentStatusBar : View
         SetNeedsDraw();
     }
 
-    internal static string ShortenModelName(string model)
-    {
-        if (string.IsNullOrWhiteSpace(model)) return "Opus";
-
-        var lower = model.ToLowerInvariant();
-        if (lower.Contains("3-7-sonnet") || lower.Contains("3.7-sonnet")) return "Sonnet 3.7";
-        if (lower.Contains("3-5-sonnet") || lower.Contains("3.5-sonnet")) return "Sonnet 3.5";
-        if (lower.Contains("3-5-haiku") || lower.Contains("3.5-haiku")) return "Haiku 3.5";
-        if (lower.Contains("3-opus") || lower.Contains("opus")) return "Opus";
-        if (lower.Contains("sonnet-4")) return "Sonnet 4";
-        if (lower.Contains("gpt-4o-mini")) return "GPT-4o-mini";
-        if (lower.Contains("gpt-4o")) return "GPT-4o";
-        if (lower.Contains("gpt-4-turbo")) return "GPT-4T";
-        if (lower.Contains("o3-mini")) return "o3-mini";
-        if (lower.Contains("o1-mini")) return "o1-mini";
-        if (lower.Contains("o1-preview") || lower.Equals("o1", StringComparison.OrdinalIgnoreCase)) return "o1";
-
-        if (model.Length > 12)
-            return model[..10] + TuiGlyphs.Ellipsis;
-
-        return model;
-    }
-
     protected override bool OnDrawingContent(DrawContext? context)
     {
         var w = Viewport.Width;
@@ -145,163 +125,119 @@ public sealed class AgentStatusBar : View
         AddStr(new string(' ', w));
 
         // Measure right-side Mode Tag first to establish strict boundary
-        var (modeTag, strategyLabel, teamLabel, rightWidth, rightCol) = MeasureModeTag(w);
+        var (modeTag, strategyLabel, teamLabel, rightCol) = MeasureModeTag(w);
         var maxLeftCol = Math.Max(1, rightCol - 2);
 
-        // Determine degradation level (0..4) based on available width
-        var level = DetermineDegradationLevel(maxLeftCol);
-
         var col = 1;
-
-        // Activity / Spinner
-        if (_busy)
+        foreach (var item in Fit(BuildLeftItems(), maxLeftCol))
         {
-            var act = level >= 4 && _activity.Length > 6 ? _activity[..5] + TuiGlyphs.Ellipsis : _activity;
-            if (!TryAddSegment($"{_spinner.CurrentFrame} ", TuiPalette.Warning, ref col, maxLeftCol)) goto DrawRight;
-            if (!TryAddSegment(act, TuiPalette.FgSecondary, ref col, maxLeftCol)) goto DrawRight;
-            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
+            if (item.Separator.Length > 0 && !TryAddSegment(item.Separator, TuiPalette.FgMuted, ref col, maxLeftCol))
+                break;
+            if (!TryAddSegment(item.Text, item.Fg, ref col, maxLeftCol))
+                break;
         }
 
-        // Model name (shortened if level >= 1)
-        var modelToDisplay = level >= 1 ? ShortenModelName(_model) : _model;
-        if (!TryAddSegment(modelToDisplay, TuiPalette.FgPrimary, ref col, maxLeftCol)) goto DrawRight;
-
-        // Sandbox (hidden if level >= 4)
-        if (_sandbox != "Normal" && level < 4)
-        {
-            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-            if (!TryAddSegment($"\U0001f512 {_sandbox}", TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
-        }
-
-        // LSP Status (level 0..2: full; level 3: collapsed server count only; level >= 4: hidden)
-        if (_lspServerCount > 0 && level < 4)
-        {
-            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-
-            var serverColor = _lspErrorCount > 0
-                ? TuiPalette.Error
-                : (_lspWarningCount > 0 ? TuiPalette.Warning : TuiPalette.StatusOk);
-            if (!TryAddSegment($"LSP: {_lspServerCount}s", serverColor, ref col, maxLeftCol)) goto DrawRight;
-
-            if (level < 3)
-            {
-                if (_lspWarningCount > 0)
-                {
-                    if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-                    if (!TryAddSegment($"\u26a0 {_lspWarningCount}", TuiPalette.Warning, ref col, maxLeftCol)) goto DrawRight;
-                }
-                if (_lspErrorCount > 0)
-                {
-                    if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-                    if (!TryAddSegment($"\u2717 {_lspErrorCount}", TuiPalette.Error, ref col, maxLeftCol)) goto DrawRight;
-                }
-            }
-        }
-
-        // MCP Status (level 0..1: full; level 2..3: collapsed without tool count; level >= 4: hidden)
-        if (_mcpSummary is { HasActivity: true } mcp && level < 4)
-        {
-            if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-
-            if (mcp.Connecting > 0)
-            {
-                var connectingText = mcp.Expected > 0 ? $"MCP: 连接中 {mcp.Connected}/{mcp.Expected}" : "MCP: 连接中";
-                if (!TryAddSegment(connectingText, TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
-            }
-            else if (mcp.Connected > 0)
-            {
-                if (!TryAddSegment($"MCP: {mcp.Connected}s", TuiPalette.Info, ref col, maxLeftCol)) goto DrawRight;
-                if (mcp.ToolCount > 0 && level < 2)
-                {
-                    if (!TryAddSegment($" \u00b7 {mcp.ToolCount}t", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-                }
-            }
-
-            if (mcp.Failed > 0)
-            {
-                if (!TryAddSegment(" \u00b7 ", TuiPalette.FgMuted, ref col, maxLeftCol)) goto DrawRight;
-                var failColor = mcp.Connected > 0 ? TuiPalette.Warning : TuiPalette.Error;
-                var failText = (mcp.Connected > 0 || mcp.Connecting > 0)
-                    ? $"\u2717{mcp.Failed}失败"
-                    : $"MCP: \u2717{mcp.Failed}失败";
-                if (!TryAddSegment(failText, failColor, ref col, maxLeftCol)) goto DrawRight;
-            }
-        }
-
-    DrawRight:
         DrawModeTag(rightCol, modeTag, strategyLabel, teamLabel);
         return true;
     }
 
-    private int DetermineDegradationLevel(int maxLeftCol)
+    /// <summary>
+    /// 左侧信息条目的唯一事实源：绘制（<see cref="OnDrawingContent"/>）与空间裁剪
+    /// （<see cref="Fit"/>）共用同一列表，杜绝两套实现各自维护魔数导致的错位。
+    /// 列表顺序即绘制顺序，也是空间不足时由后向前丢弃的顺序。
+    /// </summary>
+    internal List<LeftItem> BuildLeftItems()
     {
-        for (var level = 0; level <= 4; level++)
-        {
-            if (EstimateLeftWidth(level) <= maxLeftCol)
-                return level;
-        }
-        return 4;
-    }
-
-    private int EstimateLeftWidth(int level)
-    {
-        var width = 1; // initial col = 1
-
+        var items = new List<LeftItem>();
+        // Activity / Spinner（必显，文案按固定显示宽度截断）
         if (_busy)
         {
-            var act = level >= 4 && _activity.Length > 6 ? _activity[..5] + TuiGlyphs.Ellipsis : _activity;
-            width += 2 + TextWidthHelper.GetDisplayWidth(act) + 3; // spinner + act + " · "
+            var activity = TextWidthHelper.TruncateByWidth(_activity, ActivityMaxWidth);
+            items.Add(new LeftItem("", $"{_spinner.CurrentFrame} {activity}", TuiPalette.Warning, Droppable: false));
         }
 
-        var modelToDisplay = level >= 1 ? ShortenModelName(_model) : _model;
-        width += TextWidthHelper.GetDisplayWidth(modelToDisplay);
+        // Model name（必显，原样显示；超宽由 TryAddSegment 按显示宽度截断兜底）
+        items.Add(new LeftItem(items.Count == 0 ? "" : " · ", _model, TuiPalette.FgPrimary, Droppable: false));
 
-        if (_sandbox != "Normal" && level < 4)
+        // 以下均为可丢弃条目：空间不足时从尾部整条移除。
+        if (_sandbox != "Normal")
+            items.Add(new LeftItem(" · ", $"\U0001f512 {_sandbox}", TuiPalette.Info, Droppable: true));
+
+        if (_lspServerCount > 0)
         {
-            width += 3 + 2 + 1 + TextWidthHelper.GetDisplayWidth(_sandbox); // " · " + lock + space + sandbox
+            var serverColor = _lspErrorCount > 0
+                ? TuiPalette.Error
+                : (_lspWarningCount > 0 ? TuiPalette.Warning : TuiPalette.StatusOk);
+            items.Add(new LeftItem(" · ", $"LSP: {_lspServerCount}s", serverColor, Droppable: true));
+
+            if (_lspWarningCount > 0)
+                items.Add(new LeftItem(" · ", $"\u26a0 {_lspWarningCount}", TuiPalette.Warning, Droppable: true));
+            if (_lspErrorCount > 0)
+                items.Add(new LeftItem(" · ", $"\u2717 {_lspErrorCount}", TuiPalette.Error, Droppable: true));
         }
 
-        if (_lspServerCount > 0 && level < 4)
+        if (_mcpSummary is { HasActivity: true } mcp)
         {
-            width += 3 + 5 + DigitLength(_lspServerCount) + 1; // " · LSP: Ns"
-            if (level < 3)
-            {
-                if (_lspWarningCount > 0)
-                    width += 3 + 2 + DigitLength(_lspWarningCount);
-                if (_lspErrorCount > 0)
-                    width += 3 + 2 + DigitLength(_lspErrorCount);
-            }
-        }
-
-        if (_mcpSummary is { HasActivity: true } mcp && level < 4)
-        {
-            width += 3; // " · "
             if (mcp.Connecting > 0)
             {
-                width += mcp.Expected > 0 ? 15 : 9;
+                var text = mcp.Expected > 0 ? $"MCP: 连接中 {mcp.Connected}/{mcp.Expected}" : "MCP: 连接中";
+                items.Add(new LeftItem(" · ", text, TuiPalette.Info, Droppable: true));
             }
             else if (mcp.Connected > 0)
             {
-                width += 5 + DigitLength(mcp.Connected) + 1;
-                if (mcp.ToolCount > 0 && level < 2)
-                    width += 3 + DigitLength(mcp.ToolCount) + 1;
+                items.Add(new LeftItem(" · ", $"MCP: {mcp.Connected}s", TuiPalette.Info, Droppable: true));
+                if (mcp.ToolCount > 0)
+                    items.Add(new LeftItem(" · ", $"{mcp.ToolCount}t", TuiPalette.FgMuted, Droppable: true));
             }
 
             if (mcp.Failed > 0)
             {
-                width += 3 + 4 + DigitLength(mcp.Failed);
+                var failColor = mcp.Connected > 0 ? TuiPalette.Warning : TuiPalette.Error;
+                var failText = (mcp.Connected > 0 || mcp.Connecting > 0)
+                    ? $"\u2717{mcp.Failed}失败"
+                    : $"MCP: \u2717{mcp.Failed}失败";
+                items.Add(new LeftItem(" · ", failText, failColor, Droppable: true));
             }
         }
 
-        return width;
+        return items;
     }
 
-    private static int DigitLength(int n)
+    /// <summary>
+    /// 空间不足时从尾部丢弃可丢弃条目，直到总显示宽度不超过 <paramref name="maxWidth"/>。
+    /// 必显条目（<see cref="LeftItem.Droppable"/> = false）永不丢弃，剩余超宽交给
+    /// <see cref="TryAddSegment"/> 按列截断。
+    /// </summary>
+    internal static List<LeftItem> Fit(IReadOnlyList<LeftItem> items, int maxWidth)
     {
-        if (n <= 9) return 1;
-        if (n <= 99) return 2;
-        if (n <= 999) return 3;
-        return n.ToString(CultureInfo.InvariantCulture).Length;
+        var result = new List<LeftItem>(items);
+        while (MeasureWidth(result) > maxWidth)
+        {
+            var lastDroppable = -1;
+            for (var i = result.Count - 1; i >= 0; i--)
+            {
+                if (result[i].Droppable)
+                {
+                    lastDroppable = i;
+                    break;
+                }
+            }
+            if (lastDroppable < 0) break;
+            result.RemoveAt(lastDroppable);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 条目总显示宽度（含各自分隔符与起始列偏移）。与绘制共用同一列表，
+    /// 宽度全部由 <see cref="TextWidthHelper"/> 实测，无独立魔数。
+    /// </summary>
+    internal static int MeasureWidth(IReadOnlyList<LeftItem> items)
+    {
+        var width = 1; // 起始列 col = 1
+        foreach (var item in items)
+            width += TextWidthHelper.GetDisplayWidth(item.Separator) + TextWidthHelper.GetDisplayWidth(item.Text);
+        return width;
     }
 
     private bool TryAddSegment(string text, Color fg, ref int col, int maxCol)
@@ -331,7 +267,7 @@ public sealed class AgentStatusBar : View
         return true;
     }
 
-    private (string ModeTag, string StrategyLabel, string TeamLabel, int RightWidth, int RightCol) MeasureModeTag(int width)
+    private (string ModeTag, string StrategyLabel, string TeamLabel, int RightCol) MeasureModeTag(int width)
     {
         var modeTag = _modeController.ModeTag;
         var strategyLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_teamModeLabel)
@@ -344,7 +280,7 @@ public sealed class AgentStatusBar : View
             + TextWidthHelper.GetDisplayWidth(strategyLabel)
             + TextWidthHelper.GetDisplayWidth(teamLabel) + 1;
         var rightCol = Math.Max(1, width - rightWidth);
-        return (modeTag, strategyLabel, teamLabel, rightWidth, rightCol);
+        return (modeTag, strategyLabel, teamLabel, rightCol);
     }
 
     private void DrawModeTag(int rightCol, string modeTag, string strategyLabel, string teamLabel)
@@ -374,4 +310,10 @@ public sealed class AgentStatusBar : View
             AddStr(teamLabel);
         }
     }
+
+    /// <summary>
+    /// 左侧一个逻辑条目：可选分隔符 + 正文。
+    /// <paramref name="Droppable"/> 为 true 时，空间不足会从列表尾部整条丢弃（连同其分隔符）。
+    /// </summary>
+    internal readonly record struct LeftItem(string Separator, string Text, Color Fg, bool Droppable);
 }

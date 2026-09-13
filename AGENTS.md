@@ -40,7 +40,7 @@ src/
 - **测试**：见 [src/OneCode.Tests/AGENTS.md](src/OneCode.Tests/AGENTS.md)——测试即防回归，7 类无意义测试禁写。
 - **Prompt 管理**：文件化 prompt（三层覆盖），缺失处理双策略见 [src/OneCode.App/AGENTS.md](src/OneCode.App/AGENTS.md)。
 - **快捷键**：默认绑定源头在 `src/OneCode.Core/Keybindings/KeybindingDefaults.cs`，参考 [docs/keybindings.md](docs/keybindings.md)。
-- **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceExtensions.AddCommands()`，新增/删除命令须同步 [docs/commands.md](docs/commands.md)。
+- **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs` 的 `AddCommands()`，新增/删除命令须同步 [docs/commands.md](docs/commands.md)。
 
 ## Agent Guidelines
 

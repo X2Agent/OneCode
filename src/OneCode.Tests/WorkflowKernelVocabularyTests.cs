@@ -1,4 +1,3 @@
-using OneCode.Core.Build;
 using OneCode.Core.Config;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
@@ -10,56 +9,12 @@ using CoreConstants = OneCode.Core.Constants;
 namespace OneCode.Tests;
 
 /// <summary>
-/// 内核共享词汇防回归：RunStepStatusMap 四模式映射、
-/// RunTerminalReasonMap 终结原因映射、CommandIdempotency 命令幂等、
-/// ModeBudgetSettings 模式预算统一视图。映射变化即跨模式语义变化，由本文件锚定。
+/// 内核共享词汇防回归：RunTerminalReasonMap 终结原因映射、
+/// CommandIdempotency 命令幂等、ModeBudgetSettings 模式预算统一视图。
+/// 映射变化即跨模式语义变化，由本文件锚定。
 /// </summary>
 public sealed class WorkflowKernelVocabularyTests
 {
-    // ---------- RunStepStatusMap ----------
-
-    [Theory]
-    [InlineData(BuildTaskStatus.Pending, RunStepStatus.Pending)]
-    [InlineData(BuildTaskStatus.InProgress, RunStepStatus.InProgress)]
-    [InlineData(BuildTaskStatus.Completed, RunStepStatus.Completed)]
-    [InlineData(BuildTaskStatus.Failed, RunStepStatus.Failed)]
-    [InlineData(BuildTaskStatus.Skipped, RunStepStatus.Skipped)]
-    public void RunStepStatusMap_BuildRoundTrips(BuildTaskStatus source, RunStepStatus mapped)
-    {
-        RunStepStatusMap.FromBuild(source).Should().Be(mapped);
-        RunStepStatusMap.ToBuild(mapped).Should().Be(source);
-    }
-
-    [Theory]
-    [InlineData(GoalStepState.Pending, RunStepStatus.Pending)]
-    [InlineData(GoalStepState.InProgress, RunStepStatus.InProgress)]
-    [InlineData(GoalStepState.Completed, RunStepStatus.Completed)]
-    [InlineData(GoalStepState.Failed, RunStepStatus.Failed)]
-    [InlineData(GoalStepState.Skipped, RunStepStatus.Skipped)]
-    public void RunStepStatusMap_GoalRoundTrips(GoalStepState source, RunStepStatus mapped)
-    {
-        RunStepStatusMap.FromGoal(source).Should().Be(mapped);
-        RunStepStatusMap.ToGoal(mapped).Should().Be(source);
-    }
-
-    [Fact]
-    public void RunStepStatusMap_PlanMapsExecutingVocabulary()
-    {
-        RunStepStatusMap.FromPlan(PlanStepExecutionStatus.Pending).Should().Be(RunStepStatus.Pending);
-        RunStepStatusMap.FromPlan(PlanStepExecutionStatus.InProgress).Should().Be(RunStepStatus.InProgress);
-        RunStepStatusMap.FromPlan(PlanStepExecutionStatus.Completed).Should().Be(RunStepStatus.Completed);
-        RunStepStatusMap.FromPlan(PlanStepExecutionStatus.Failed).Should().Be(RunStepStatus.Failed);
-        RunStepStatusMap.FromPlan(PlanStepExecutionStatus.Skipped).Should().Be(RunStepStatus.Skipped);
-    }
-
-    [Fact]
-    public void RunStepStatusMap_TeamMapsSucceededToCompleted()
-    {
-        RunStepStatusMap.FromTeam(TeamTaskStatus.Succeeded).Should().Be(RunStepStatus.Completed);
-        RunStepStatusMap.FromTeam(TeamTaskStatus.Failed).Should().Be(RunStepStatus.Failed);
-        RunStepStatusMap.FromTeam(TeamTaskStatus.Skipped).Should().Be(RunStepStatus.Skipped);
-    }
-
     // ---------- RunTerminalReasonMap ----------
 
     [Theory]

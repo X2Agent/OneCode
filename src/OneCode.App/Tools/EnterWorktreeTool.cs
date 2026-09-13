@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using OneCode.App.Session;
 using OneCode.Infrastructure;
+using OneCode.Infrastructure.Git;
 
 namespace OneCode.App.Tools;
 
@@ -30,9 +31,12 @@ public sealed class EnterWorktreeTool
         if (gitRoot == null) return ToolResult.Error("Not in a git repository");
 
         var slug = !string.IsNullOrWhiteSpace(name) ? SanitizeSlug(name!) : GenerateSlug();
+        if (slug.Length == 0) slug = GenerateSlug();
         var sessionId = Guid.NewGuid().ToString("N")[..8];
-        var worktreePath = Path.Combine(gitRoot, ".git-worktrees", sessionId, slug);
-        var branchName = $"worktree/{slug}";
+        var worktreePath = WorktreeLayout.GetWorktreePath(gitRoot, slug);
+        if (Directory.Exists(worktreePath))
+            worktreePath = WorktreeLayout.GetWorktreePath(gitRoot, $"{slug}-{sessionId}");
+        var branchName = $"worktree/{Path.GetFileName(worktreePath)}";
 
         var result = await _gitHelper.RunAsync(
             ["worktree", "add", "-b", branchName, worktreePath],
