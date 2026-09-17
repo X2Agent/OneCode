@@ -1,6 +1,8 @@
 # 上下文压缩阈值说明（Compact Thresholds）
 
-上下文压缩统一由 MAF in-pipeline（`CompactionProvider`）自动完成，按**模型上下文窗口比例**计算阈值，自动适配不同模型（32K ~ 1M+）。App 层 `AutoCompactService` 不再执行任何压缩动作，仅保留 **0.70 告警**（提醒用户执行 `/compact`）——这是 MAF 没有的能力（MAF 只在 token 超阈值时静默压缩，不会提前提醒用户）。
+自动上下文压缩由 MAF in-pipeline（`CompactionProvider`）完成，按**模型上下文窗口比例**计算阈值。显式 `/compact` 仍由 App 层管理产品历史。`AutoCompactService` 不执行压缩，仅在 turn 结束后提供 **0.70 历史规模告警**；其完整历史估算与模型实际输入不是同一口径，不能称为压缩前预警。
+
+> **现状与计划分开**：本文描述当前运行时代码。已发现的缺陷及重构目标见 [Harness 审计 §4.5](plan/harness-defaults-replacement-audit.md#45-compaction先修正确性与状态边界再评估装配入口)。计划移除 L0、修复手动压缩边界与统一预算，但尚未实施，下面仍保留当前策略表。
 
 ---
 
@@ -26,12 +28,16 @@
 
 | 层 | 策略 | 触发 | 行为 | LLM |
 |----|------|------|------|-----|
-| L0 | `SnipDuplicateCallsCompactionStrategy` | 压缩轮次执行时 | 移除重复的 `(toolName, args)` 调用组，只保留最近一次（项目自定义策略） | 否 |
-| L1 | `ToolResultCompactionStrategy` | ≥ 0.50（Main）/ 0.40（Worker） | 折叠旧 tool call 组为 YAML 摘要，保留最近 2 组 | 否 |
-| L2 | `SummarizationCompactionStrategy` | ≥ 0.70（Main）/ 0.60（Worker） | LLM 深度摘要；失败时自动恢复 excluded groups，保留最近 8 组硬下限 | 是 |
-| L3 | `TruncationCompactionStrategy` | ≥ 0.85（Main）/ 0.80（Worker） | 兜底截断最旧的非系统消息组，保留最近 2 组 | 否 |
+| L0 | `SnipDuplicateCallsCompactionStrategy` | Always（策略基类守卫通过时） | 最近 10 个非系统组不参与判重；其余同名同参数调用组仅保留最后一次，不比较结果（自定义，计划移除） | 否 |
+| L1 | `ToolResultCompactionStrategy` | > 0.50（Main）/ 0.40（Worker）对应 token 阈值 | 合并旧调用组为 YAML-like 文本；默认保留结果正文但不保留调用参数，无正文长度上限；保护最近 2 组 | 否 |
+| L2 | `SummarizationCompactionStrategy` | > 0.70（Main）/ 0.60（Worker）对应 token 阈值 | LLM 摘要；普通异常恢复 excluded groups，取消不走该恢复分支，空响应以占位文本替换；本层保护最近 8 组 | 是 |
+| L3 | `TruncationCompactionStrategy` | > 0.85（Main）/ 0.80（Worker）对应 token 阈值 | 截断最旧非系统组，本层保护最近 2 组；不继承 L2 的 8 组保护 | 否 |
 
-> 摘要 prompt 经 `CompactPromptBuilder` 统一加载（system/compact + 内置兜底）。
+各层依据前一层处理后的 included groups 重算，不按原始使用率一次选档。默认 Target 是 Trigger 的反条件；摘要插入后的净收益及最终预算不是原生 L2 的硬保证。
+
+> 摘要 prompt 经 `CompactPromptBuilder` 统一加载（`system/compact`，所有存储均缺失时 fail-fast，无此处所称的内置兜底）。当前手动路径还进行格式后处理，自动 L2 直接保存模型文本；统一契约属于待实施重构。
+
+**计数限制**：当前 Provider 未传 tokenizer，索引按消息内容 UTF-8 字节数/4估算；独立 instructions、工具 schema 和协议开销未完整计入。比例阈值不保证最终请求不超窗；保护尾部或系统消息过大也可能无法达标。非法预算当前被 `max(1, …)` 钳制，改为显式校验属于待实施计划。
 
 ---
 
@@ -56,10 +62,10 @@
 | 维度 | MAF in-pipeline（CompactionProvider） | App 层（AutoCompactService） |
 |------|---------------------------------------|------------------------------|
 | 所在层 | Infrastructure / App（Builder） | App |
-| 触发时机 | agent turn 内（pipeline 中） | agent turn 结束后 |
-| 触发阈值 | 按上下文窗口比例（Main 0.5/0.7/0.85，Worker 0.4/0.6/0.8） | 0.70 告警（不压缩） |
+| 触发时机 | agent turn 内（pipeline 中，每次模型调用前） | agent turn 结束后 |
+| 触发阈值 | 按上下文窗口比例（Main 0.5/0.7/0.85，Worker 0.4/0.6/0.8，逐层按剩余 groups 重算，严格 `>`） | 0.70 历史规模告警（不压缩） |
 | 是否调用 LLM | L2 Summarization 调用 | 否 |
-| 用户感知 | 无（静默压缩） | 0.70 时提示执行 `/compact` |
+| 用户感知 | 无（静默压缩） | 0.70 时提示执行 `/compact`（历史规模提示，非模型输入口径） |
 | 配置 | 零配置（比例自适应） | 零配置 |
 
 ---
@@ -73,7 +79,8 @@
 
 现行设计：
 
-- **压缩收敛到 MAF in-pipeline 单一机制**，阈值全部按 `inputBudget` 比例计算，`BuildAggressive` 与 App 层三档压缩、熔断退避全部移除。
-- **App 层只保留 MAF 没有的能力**——0.70 提前告警，让用户在压缩前有感知、可主动 `/compact`。
+- **自动压缩收敛到 MAF in-pipeline 单一机制**，阈值全部按 `inputBudget` 比例计算，`BuildAggressive` 与 App 层三档压缩、熔断退避全部移除。
+- **App 层保留 MAF 没有的产品编排**：显式 `/compact`（指定范围、边界标记、Conversation 落盘与 hooks），以及 0.70 历史规模告警。MAF 本身提供 `CompactionProvider.CompactAsync` 与 `AsChatReducer`，并非没有历史压缩能力。
+- 0.70 通知在 turn 结束后按完整历史计算，可能晚于已发生的静默压缩；重新定位为历史规模提示。把通知与模型输入预算严格对齐属于待实施计划（审计 §4.5 批次二）。
 
 > 显式 `/compact` 命令（用户主动触发）始终可用，不受阈值控制。
