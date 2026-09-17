@@ -12,26 +12,16 @@ public sealed class ChatInputLayoutTests
     }
 
     [Fact]
-    public void Spacing_ContentZoneReservedBottom_IsFourRowsForSingleLine()
+    public void Spacing_ContentZoneReservedBottom_IsSixRowsForFixedInput()
     {
-        // 1(SessionBar) + 1(StatusBar) + 0(TopGap) + 0(ContextGap) + 2(MinHeight) = 4
-        TuiSpacing.ContentZoneReservedBottom.Should().Be(4);
+        // 1(SessionBar) + 1(StatusBar) + 0(TopGap) + 0(ContextGap) + 4(FixedHeight) = 6
+        TuiSpacing.ContentZoneReservedBottom.Should().Be(6);
     }
 
     [Fact]
-    public void ChatInput_HeightBounds_FollowSpecification()
+    public void ChatInput_FixedHeight_FollowsSpecification()
     {
-        ChatInputView.MinHeight.Should().Be(2);
-        ChatInputView.MaxHeight.Should().Be(6);
-    }
-
-    [Theory]
-    [InlineData(24, 4)]  // 24 行终端：上限 4 行（1 分隔线 + 3 编辑行），兑现小屏承诺
-    [InlineData(40, 6)]  // 40 行终端：可优雅展开至 6 行
-    [InlineData(50, 6)]  // 大屏封顶 6 行
-    [InlineData(12, 2)]  // 极小屏退化为最小 2 行
-    public void GetInputMaxTotalHeight_FollowsSixthOfViewportRule(int screenHeight, int expected)
-    {
-        TuiSpacing.GetInputMaxTotalHeight(screenHeight).Should().Be(expected);
+        ChatInputView.EditorLines.Should().Be(3);
+        ChatInputView.FixedHeight.Should().Be(4);
     }
 }

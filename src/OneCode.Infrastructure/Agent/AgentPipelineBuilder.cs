@@ -1,6 +1,5 @@
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Contracts;
-using OneCode.Infrastructure.Middleware.Invariants;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Core.Tokens;
 using OneCode.Core.Coordinator;
@@ -34,7 +33,6 @@ public sealed record ChatClientAgentBuildOptions
     public required AgentPipelineOptions PipelineOptions { get; init; }
     public IReadOnlyList<AIContextProvider>? ChatClientContextProviders { get; init; }
     public IReadOnlyList<AIContextProvider>? AgentContextProviders { get; init; }
-    public ToolMetadataRegistry? ToolMetadata { get; init; }
 }
 
 public sealed record AgentPipelineOptions
@@ -49,6 +47,11 @@ public sealed record AgentPipelineOptions
     public Func<string, bool>? IsToolAllowed { get; init; }
     public IHookExecutionService? HookExecutionService { get; init; }
     public bool EnableEditTransaction { get; init; } = true;
+    /// <summary>
+    /// When true, installs tool-result size truncation middleware (character budget).
+    /// Unrelated to <see cref="MaxToolCalls"/> / Harness MaximumIterationsPerRequest
+    /// which limit invocation count or rounds.
+    /// </summary>
     public bool EnableToolResultBudget { get; init; } = true;
 
     // Harness Engineering: safety invariants + state machine (Layer 0 + Layer 2)
@@ -145,36 +148,51 @@ public static class AgentPipelineBuilder
             chatClient = builder.Build();
         }
 
-        if (options.ChatOptions.Tools is { Count: > 0 } tools)
-            options.ChatOptions.Tools = WrapApprovalRequiredTools(tools, options.ToolMetadata);
+        var harnessToolApproval = options.PipelineOptions.EnableToolApproval
+            ? new ToolApprovalAgentOptions
+            {
+                AutoApprovalRules = options.PipelineOptions.AutoApprovalRules
+                    ?? AutoApprovalRulesFactory.Create(
+                        options.PipelineOptions.PermissionMode,
+                        options.PipelineOptions.WorkingDirectory,
+                        options.PipelineOptions.RulesBySource,
+                        options.PipelineOptions.AdditionalWorkingDirectories,
+                        options.PipelineOptions.SessionAllowlist),
+            }
+            : null;
 
-        var agentOptions = new ChatClientAgentOptions
+        var agentOptions = new HarnessAgentOptions
         {
             Name = options.Name,
             ChatOptions = options.ChatOptions,
             AIContextProviders = options.AgentContextProviders,
-            // Persist chat history after each service call for crash recovery.
-            RequirePerServiceCallChatHistoryPersistence = true,
-            // Enable mid-stream message injection (e.g., user interrupts).
-            EnableMessageInjection = true,
-            // In-memory chat history provider for within-loop history load/store.
+            // W5-B: MAF core package (1.21.0) still ships InMemory only — official file-backed
+            // ChatHistoryProviders (CosmosNoSql / Valkey) live in separate packages.
+            // Interactive multi-turn history is Session transcript → Messages; InMemory is
+            // cleared after mafSession restore when Messages are present (see AgentSessionStore W5-A).
             ChatHistoryProvider = new InMemoryChatHistoryProvider(),
+            ToolApprovalAgentOptions = harnessToolApproval,
+            DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
+            // P1: same numeric source as middleware MaxToolCalls (iteration rounds ≈ tool-call budget).
+            MaximumIterationsPerRequest = options.PipelineOptions.MaxToolCalls,
         };
+        OneCodeHarnessDefaults.ApplyProductOptOuts(agentOptions);
 
-        var agent = new ChatClientAgent(
+        var agent = new HarnessAgent(
             chatClient,
             agentOptions,
             options.LoggerFactory,
             options.ServiceProvider);
 
-        return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider);
+        return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider, harnessToolApproval is not null);
     }
 
     public static AgentPipelineHandle Build(
-        ChatClientAgent agent,
+        AIAgent agent,
         AgentPipelineOptions options,
         ILoggerFactory loggerFactory,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        bool harnessOwnsToolApproval = false)
     {
         var metrics = new AgentPipelineMetrics();
 
@@ -225,140 +243,99 @@ public static class AgentPipelineBuilder
             builder = builder.Use(ptlRun, ptlStream);
         }
 
-        // Layer 0: Safety Invariants (BypassPermissions 也必须执行)
+        // Tool middleware install order (source order == MAF AsBuilder.Use order).
+        // Optional stages are skipped when disabled; relative order of enabled stages stays fixed:
+        // SafetyInvariant → Hook → ToolCallEvent → PermissionAndLimit → StateMachine →
+        // EditTransaction → EditGuard(contract pre + verification) → ResultBudget → ResultUnwrap → ToolApproval.
+        // Custom behavior belongs in these middleware / MAF extension points — not a Stage registry.
+
         if (options.EnableSafetyInvariants)
         {
             var invariants = options.SafetyInvariants
-                ?? CreateDefaultSafetyInvariants(options.WorkingDirectory);
-            builder = builder.Use(SafetyInvariantMiddleware.Create(
-                invariants, loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
+                ?? OneCodeToolMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory);
+            builder = builder.Use(
+                SafetyInvariantMiddleware.Create(
+                    invariants, loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
         }
 
-        // Hook（单段包裹 Pre/Post）
-        // 传入 logger 用于 Pre/Post-hook 异常日志记录（Pre-hook 异常 fail-closed，
-        // Post-hook 异常 fail-soft 保留工具结果）。
-        // 仅在 HookExecutionService 可用时注册，避免无 hook 场景下的空调用层。
         if (options.HookExecutionService is not null)
         {
-            builder = builder
-                .Use(HookMiddleware.Create(options, loggerFactory.CreateLogger("HookMiddleware")));
+            builder = builder.Use(
+                HookMiddleware.Create(options, loggerFactory.CreateLogger("HookMiddleware")));
         }
 
-        // Tool call event streaming (TEAM mode transparency):
-        // emits ToolStart/ToolDone events to the sink for real-time TUI display.
-        // 传入 logger 用于 sink 异常日志记录，避免订阅者异常掩盖原始工具异常。
         if (options.OrchestrationEventSink is not null)
         {
-            builder = builder.Use(ToolCallEventMiddleware.Create(
-                options, loggerFactory.CreateLogger("ToolCallEventMiddleware")));
+            builder = builder.Use(
+                ToolCallEventMiddleware.Create(
+                    options, loggerFactory.CreateLogger("ToolCallEventMiddleware")));
         }
 
-        // Layer 1: 权限 + 工具上限
         builder = builder.Use(PermissionAndLimitMiddleware.Create(options, metrics));
 
-        // Layer 2: 状态机 + 错误恢复（3-strike guidance 在 Main 路径开启，Worker/Team 关闭）
         if (options.EnableStateMachine)
         {
-            builder = builder.Use(StateMachineMiddleware.Create(
-                loggerFactory.CreateLogger("StateMachineMiddleware"),
-                enableStrikeGuidance: options.EnableTaskRecovery));
+            builder = builder.Use(
+                StateMachineMiddleware.Create(
+                    loggerFactory.CreateLogger("StateMachineMiddleware"),
+                    enableStrikeGuidance: options.EnableTaskRecovery));
         }
 
         if (options.EnableEditTransaction && options.EditTransaction is not null)
         {
-            builder = builder.Use(new EditTransactionMiddleware(
-                options.EditTransaction, options.WorkingDirectory, options.FileChangeCallback,
-                loggerFactory.CreateLogger<EditTransactionMiddleware>()).CreateDelegate());
+            builder = builder.Use(
+                new EditTransactionMiddleware(
+                    options.EditTransaction,
+                    options.WorkingDirectory,
+                    options.FileChangeCallback,
+                    loggerFactory.CreateLogger<EditTransactionMiddleware>()).CreateDelegate());
         }
 
-        // Post-tool 验证检查（Layer 1）：在 EditTransaction 之后触发 build/type-check，
-        // 验证失败时把错误回注 LLM 上下文。防抖：每 N 次源码文件编辑触发一次。
-        // 多语言路由：由 IVerificationProvider.IsSourceFile 判断 + VerificationProfile 配置驱动。
-        if (options.EnableVerification && options.VerificationProvider is not null)
+        // W2-B: one EditGuard middleware (contract pre + optional verification post).
+        var editContracts = options.EnableBehaviorContracts ? options.BehaviorContracts : null;
+        var editVerification = options.EnableVerification ? options.VerificationProvider : null;
+        if (editContracts is { Count: > 0 } || editVerification is not null)
         {
-            builder = builder.Use(new VerificationMiddleware(
-                options.VerificationProvider,
-                options.WorkingDirectory,
-                options.VerificationOptions ?? Middleware.VerificationOptions.Default,
-                loggerFactory.CreateLogger<VerificationMiddleware>()).CreateDelegate());
+            builder = builder.Use(
+                EditGuardMiddleware.Create(
+                    editContracts,
+                    editVerification,
+                    options.WorkingDirectory,
+                    options.VerificationOptions ?? Middleware.VerificationOptions.Default,
+                    loggerFactory.CreateLogger("EditGuardMiddleware")));
         }
 
         if (options.EnableToolResultBudget)
         {
-            builder = builder.Use(new ToolExecutionBudgetMiddleware(
-                logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
+            builder = builder.Use(
+                new ToolExecutionBudgetMiddleware(
+                    logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
         }
 
-        // ToolResult 解包（双职责）：
-        //   1. ToolResult → string：经 ToolResultSerializer 按模型能力序列化（JSON/Markdown），
-        //      避免 IChatClient 适配器把 record 序列化为 JSON 包装对象；下游 ToolExecutionBudget
-        //      （按长度截断）依赖 string 输入。
-        //   2. ToolResult.IsError → ToolExecutionContext.IsError：用强类型字段传递错误语义，
-        //      外层 StateMachine/ToolCallEvent 从 context 读取，不依赖字符串前缀匹配。
-        //   3. 可恢复错误检测（overloaded/529）：检查 ToolResult 内容，标记为 Recovery guidance。
-        // 位置：在 Contract（返回 ToolResult）之外，
-        //      在 ToolExecutionBudget（消费 string）之内。
-        builder = builder.Use(new ToolResultUnwrapMiddleware(
-            modelId: options.ModelId,
-            providerId: options.ProviderId,
-            logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate());
+        builder = builder.Use(
+            new ToolResultUnwrapMiddleware(
+                modelId: options.ModelId,
+                providerId: options.ProviderId,
+                logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate());
 
-        // 行为契约（Layer 2）：工具执行前后验证
-        if (options.EnableBehaviorContracts && options.BehaviorContracts is not null)
-        {
-            builder = builder.Use(ContractMiddleware.Create(
-                options.BehaviorContracts,
-                loggerFactory.CreateLogger("ContractMiddleware")));
-        }
-
-        // MAF UseToolApproval: satisfies MAF protocol for built-in ToolApprovalRequestContent.
-        //
-        // Architecture (single-gate model):
-        //   Permission middleware (CheckPermissionAndExecuteAsync) handles Allow/Deny.
-        //   Ask → 放行到此层，由 AutoApprovalRules 决定：
-        //     匹配规则 → 自动放行
-        //     不匹配 → 产生 ToolApprovalRequestContent → MainAgentRunner 事件驱动审批 → 续跑
-        //
-        // 所有路径统一由 AutoApprovalRulesFactory 生成（含 AgentSkillsProvider 只读技能工具规则 + Profile 驱动规则）。
-        if (options.EnableToolApproval)
+        if (options.EnableToolApproval && !harnessOwnsToolApproval)
         {
             var rules = options.AutoApprovalRules
-                ?? AutoApprovalRulesFactory.Create(options.PermissionMode);
-
-            builder = builder.UseToolApproval(new ToolApprovalAgentOptions
-            {
-                AutoApprovalRules = rules,
-            });
+                ?? AutoApprovalRulesFactory.Create(
+                    options.PermissionMode,
+                    options.WorkingDirectory,
+                    options.RulesBySource,
+                    options.AdditionalWorkingDirectories,
+                    options.SessionAllowlist);
+            // Prefer assignment so approval wraps the pipeline (MAF builder chaining).
+            builder = builder.UseToolApproval(
+                new ToolApprovalAgentOptions
+                {
+                    AutoApprovalRules = rules,
+                });
         }
 
         return new AgentPipelineHandle(builder.Build(serviceProvider), metrics);
     }
-
-    private static IList<AITool> WrapApprovalRequiredTools(
-        IEnumerable<AITool> tools,
-        ToolMetadataRegistry? metadata)
-    {
-        return tools
-            .Select(tool =>
-            {
-                if (tool is not AIFunction function)
-                    return tool;
-
-                var requiresBoundary = metadata is null
-                    || metadata.RequiresApprovalBoundary(function.Name);
-
-                return requiresBoundary && function is not ApprovalRequiredAIFunction
-                    ? new ApprovalRequiredAIFunction(function)
-                    : tool;
-            })
-            .ToList();
-    }
-
-    /// <summary>创建默认安全不变量列表。</summary>
-    private static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(string workingDirectory) =>
-    [
-        new FileSystemInvariant(workingDirectory),
-        new BashCommandInvariant(),
-        new ResourceInvariant(),
-    ];
 }
+

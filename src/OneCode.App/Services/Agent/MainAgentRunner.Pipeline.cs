@@ -21,13 +21,12 @@ public partial class MainAgentRunner
         var (compactionProvider, providerId) = await _compactionBuilder
             .BuildAsync(options.ModelId, ct).ConfigureAwait(false);
 
-            var contextProviders = await _mainContextBuilder
-                .BuildForMainAsync(new AgentContextProviderOptions
-                {
-                    WorkingDirectory = cwd,
-                    ChatClient = _chatClient,
-                    ConversationId = options.ConversationId,
-                }, options.WorkingMode, ct).ConfigureAwait(false);
+        var contextProviders = await _contextPipeline
+            .BuildForMainAsync(new AgentContextProviderOptions
+            {
+                WorkingDirectory = cwd,
+                ConversationId = options.ConversationId,
+            }, options.WorkingMode, ct).ConfigureAwait(false);
 
         var pipelineOptions = _pipelineAssembly.BuildMainOptions(
             options, transaction, cwd, options.ModelId, providerId);
@@ -41,7 +40,6 @@ public partial class MainAgentRunner
             ServiceProvider = _serviceProvider,
             ChatClientContextProviders = [compactionProvider],
             AgentContextProviders = contextProviders,
-            ToolMetadata = _toolMetadata,
             PipelineOptions = pipelineOptions,
         });
     }

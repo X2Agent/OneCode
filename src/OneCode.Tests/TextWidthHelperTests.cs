@@ -10,6 +10,21 @@ namespace OneCode.Tests;
 public sealed class TextWidthHelperTests
 {
     [Fact]
+    public void CollapseToSingleLine_RealNewlinesAndTabs_BecomeSingleSpaces()
+    {
+        // 折叠态工具行按单行绘制；参数里的真实换行必须先压平，
+        // 否则测量宽度（\n 记 1 列）与绘制行为不一致，整行错位。
+        TextWidthHelper.CollapseToSingleLine("git status\n\tgit log\r\n  git diff")
+            .Should().Be("git status git log git diff");
+    }
+
+    [Fact]
+    public void CollapseToSingleLine_SingleLineText_Unchanged()
+    {
+        TextWidthHelper.CollapseToSingleLine("src/Program.cs").Should().Be("src/Program.cs");
+    }
+
+    [Fact]
     public void ClipByWidth_TextExactlyAtWidth_KeepsEveryCharacter()
     {
         var text = new string('x', 20);

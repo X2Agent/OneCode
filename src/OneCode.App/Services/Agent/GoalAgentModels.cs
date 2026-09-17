@@ -141,19 +141,6 @@ public enum GoalStatus
     Skipped,
 }
 
-/// <summary>
-/// GOAL 模式执行结果。
-/// </summary>
-public sealed record GoalRunResult(
-    IReadOnlyList<GoalItem> Goals,
-    int CompletedCount,
-    int FailedCount,
-    string Summary,
-    long TotalInputTokens,
-    long TotalOutputTokens,
-    int TotalIterations,
-    SessionId? SessionId = null);
-
 /// <summary>单次工具执行的可审计证据。</summary>
 public sealed record GoalToolExecutionEvidence(
     string ToolName,

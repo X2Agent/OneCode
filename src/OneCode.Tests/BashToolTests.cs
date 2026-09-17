@@ -1,5 +1,6 @@
 using NSubstitute;
 using OneCode.App.Tools;
+using OneCode.App.Session;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
 using OneCode.Core.IO;
@@ -46,7 +47,16 @@ public sealed class BashToolTests : IDisposable
     }
 
     private static BashTool CreateTool(IWorkingDirectoryAccessor wd, IProcessRunner? runner = null)
-        => new(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, runner ?? Substitute.For<IProcessRunner>());
+    {
+        var processRunner = runner ?? Substitute.For<IProcessRunner>();
+        var shellExecutor = new OneCodeShellExecutor(
+            ssh: null!,
+            shellSessions: new ConversationShellExecutorManager(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationShellExecutorManager>.Instance),
+            sessions: Substitute.For<ISessionConversationAccess>(),
+            processRunner);
+        return new BashTool(wd, shellExecutor, Substitute.For<ISessionConversationAccess>());
+    }
 
     // Input validation
 

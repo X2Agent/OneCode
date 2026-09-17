@@ -31,9 +31,17 @@ namespace OneCode.App.Services.Memory;
 /// - created_at: 2024-07-15T10:00:00Z
 /// - updated_at: 2024-07-16T10:00:00Z
 /// - expires_at: 2024-10-14T10:00:00Z
+/// - hit_count: 3
+/// - last_hit_at: 2024-07-16T09:30:00Z
 ///
 /// Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 /// </code>
+///
+/// <para>
+/// <c>hit_count</c> / <c>last_hit_at</c> are usage feedback written by <see cref="RecordHitsAsync"/>
+/// and read by <see cref="PruneAsync"/>. They are omitted when the entry has never been recalled,
+/// and absent files parse as <c>0</c> / <see langword="null"/> (backward compatible).
+/// </para>
 ///
 /// <para>
 /// <b>Thread safety</b>: writes are guarded by a per-directory <see cref="SemaphoreSlim"/>.
@@ -51,6 +59,9 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     private const string FileName = "MEMORY.md";
     private const string FrontmatterStart = "---";
     private const string EntryHeaderPrefix = "## ";
+
+    /// <summary>Source value marking user-authored entries (never auto-evicted, see <see cref="PruneAsync"/>).</summary>
+    private const string ManualSource = "manual";
 
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> s_locks = new(StringComparer.OrdinalIgnoreCase);
 
@@ -172,6 +183,56 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     }
 
     /// <inheritdoc/>
+    public async Task RecordHitsAsync(MemoryScope scope, IReadOnlyList<string> keys, CancellationToken ct = default)
+    {
+        if (keys.Count == 0)
+            return;
+
+        var dir = ResolveDirectory(scope);
+        var gate = GetLock(dir);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var existing = await LoadAllAsync(scope, ct).ConfigureAwait(false);
+            if (existing.Count == 0)
+                return;
+
+            var hitKeys = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+            var now = DateTimeOffset.UtcNow;
+            var changed = false;
+
+            var updated = new List<MemoryEntry>(existing.Count);
+            foreach (var entry in existing)
+            {
+                if (!hitKeys.Contains(entry.Key))
+                {
+                    updated.Add(entry);
+                    continue;
+                }
+
+                // Usage feedback only: UpdatedAt stays put so the eviction tie-break keeps
+                // measuring content age, not recall recency.
+                updated.Add(entry with { HitCount = entry.HitCount + 1, LastHitAt = now });
+                changed = true;
+            }
+
+            if (!changed)
+                return;
+
+            await WriteEntriesAsync(dir, updated, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best-effort: a failed bookkeeping write must not fail the caller's search.
+            _logger?.LogWarning(ex, "Failed to record memory hits in {Dir}", dir);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<int> PruneAsync(MemoryScope scope, CancellationToken ct = default)
     {
         var dir = ResolveDirectory(scope);
@@ -187,13 +248,23 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
 
             var alive = existing.Where(e => !e.IsExpired).ToList();
 
-            // LRU eviction: if still over limit, drop oldest by UpdatedAt
+            // Usage-ranked eviction: manual entries are exempt, then least-recalled first,
+            // ties broken by oldest entry so never-recalled stale entries are removed first.
             if (alive.Count > MaxEntries)
             {
-                alive = alive
-                    .OrderByDescending(e => e.UpdatedAt)
-                    .Take(MaxEntries)
+                var exempt = alive.Where(e => IsEvictionExempt(e)).ToList();
+                var candidates = alive.Where(e => !IsEvictionExempt(e)).ToList();
+
+                var keepCount = Math.Max(0, MaxEntries - exempt.Count);
+                // Descending on both keys keeps the most-recalled, most-recent candidates; the
+                // ascending form would keep the least-recalled, oldest ones — the exact inverse.
+                var survivors = candidates
+                    .OrderByDescending(e => e.HitCount)
+                    .ThenByDescending(e => e.UpdatedAt)
+                    .Take(keepCount)
                     .ToList();
+
+                alive = [.. exempt, .. survivors];
             }
 
             var removed = before - alive.Count;
@@ -210,6 +281,14 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             gate.Release();
         }
     }
+
+    /// <summary>
+    /// Entries that eviction never removes automatically: user-authored (<c>manual</c>) entries
+    /// express explicit intent. They still consume capacity, so they can crowd the store — the
+    /// capacity check only counts what they leave over.
+    /// </summary>
+    private static bool IsEvictionExempt(MemoryEntry entry) =>
+        string.Equals(entry.Source, ManualSource, StringComparison.OrdinalIgnoreCase);
 
     // Scope → directory resolution
 
@@ -331,11 +410,14 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             value = string.Empty;
         }
 
-        var source = props.GetValueOrDefault("source") ?? "manual";
+        var source = props.GetValueOrDefault("source") ?? ManualSource;
         var category = props.GetValueOrDefault("category") ?? MemoryEntry.DeriveCategory(key);
         var createdAt = ParseDateTime(props.GetValueOrDefault("created_at")) ?? DateTimeOffset.UtcNow;
         var updatedAt = ParseDateTime(props.GetValueOrDefault("updated_at")) ?? createdAt;
         var expiresAt = ParseDateTime(props.GetValueOrDefault("expires_at"));
+        // Absent in files written before usage feedback existed — reads as never-recalled.
+        var hitCount = ParseInt(props.GetValueOrDefault("hit_count"));
+        var lastHitAt = ParseDateTime(props.GetValueOrDefault("last_hit_at"));
 
         if (string.IsNullOrWhiteSpace(value))
             return null;
@@ -349,8 +431,13 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             CreatedAt = createdAt,
             UpdatedAt = updatedAt,
             ExpiresAt = expiresAt,
+            HitCount = hitCount,
+            LastHitAt = lastHitAt,
         };
     }
+
+    private static int ParseInt(string? value) =>
+        int.TryParse(value, CultureInfo.InvariantCulture, out var parsed) && parsed > 0 ? parsed : 0;
 
     private static DateTimeOffset? ParseDateTime(string? value)
     {
@@ -370,7 +457,7 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
         CancellationToken ct)
     {
         var entryList = entries
-            .OrderByDescending(e => e.Source == "manual")  // manual first
+            .OrderByDescending(e => e.Source == ManualSource)  // manual first
             .ThenByDescending(e => e.UpdatedAt)
             .ToList();
 
@@ -409,6 +496,14 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
 
             if (entry.ExpiresAt.HasValue)
                 sb.AppendLine(CultureInfo.InvariantCulture, $"- expires_at: {entry.ExpiresAt.Value.ToString("O", CultureInfo.InvariantCulture)}");
+
+            // Omitted when never recalled, so untouched entries produce no diff noise.
+            if (entry.HitCount > 0)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"- hit_count: {entry.HitCount}");
+                if (entry.LastHitAt.HasValue)
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"- last_hit_at: {entry.LastHitAt.Value.ToString("O", CultureInfo.InvariantCulture)}");
+            }
 
             sb.AppendLine();
             sb.AppendLine(entry.Value.Trim());

@@ -38,7 +38,7 @@ public sealed partial class TeamOrchestrationService
             // 回答回显：用户在澄清向导中的回答写入会话记录，否则 TUI 上看不到用户答了什么。
             eventSink?.Invoke(new OrchestrationEvent.TeamUserResponse(
                 teamName, answer.Response ?? string.Empty));
-            var response = BuildClarificationResponse(
+            var response = TeamClarificationResponses.Build(
                 pending.PortId, pending.RequestId, answer.Response ?? string.Empty);
             clarification = await _clarificationWorkflowHost.RunAsync(
                 teamName, runId, config, modelId, clarificationInput,

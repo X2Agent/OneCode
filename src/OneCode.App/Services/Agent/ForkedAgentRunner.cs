@@ -6,6 +6,17 @@ using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
+/// <summary>
+/// Product sub-agent runner (<see cref="IAgentRunner"/>) for AgentTool / ParallelAgents / DAG / Worker.
+/// Builds a child HarnessAgent via <see cref="SubAgentPipelineFactory"/> with OneCode
+/// <see cref="PipelineProfile"/> (tool allowlists, Explore/Plan read-only, TaskService via Worker).
+/// </summary>
+/// <remarks>
+/// W6 (plan §16): MAF <c>BackgroundAgentsProvider</c> is a different control plane — it injects
+/// parent-LLM tools (StartTask/Wait/GetResults) over pre-registered named agents. It does <b>not</b>
+/// replace this runner. Do not mount BackgroundAgents on the default Full path alongside AgentTool
+/// (dual dispatch). Keep Harness BackgroundAgents unset.
+/// </remarks>
 public sealed class ForkedAgentRunner : IAgentRunner
 {
     private readonly ILogger<ForkedAgentRunner> _logger;
@@ -14,7 +25,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
     // IServiceProvider 仅用于传递给 MAF 的 ChatClientAgentBuildOptions.ServiceProvider
     // （MAF 框架要求），不得用于业务逻辑中的 GetService<T>() 调用。
     private readonly IServiceProvider _serviceProvider;
-    private readonly SharedContextProviderBuilder _sharedContextBuilder;
+    private readonly AgentContextPipeline _contextPipeline;
     private readonly SubAgentPipelineFactory _pipelineFactory;
     private readonly IModelManager _modelManager;
     private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor;
@@ -27,7 +38,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
         ILogger<ForkedAgentRunner> logger,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider,
-        SharedContextProviderBuilder sharedContextBuilder,
+        AgentContextPipeline contextPipeline,
         SubAgentPipelineFactory pipelineFactory,
         ForkedAgentRuntimeDependencies runtime,
         PromptComposer promptComposer)
@@ -35,7 +46,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
         _logger = logger;
         _loggerFactory = loggerFactory;
         _serviceProvider = serviceProvider;
-        _sharedContextBuilder = sharedContextBuilder;
+        _contextPipeline = contextPipeline;
         _pipelineFactory = pipelineFactory;
         _chatClient = runtime.ChatClient;
         _modelManager = runtime.ModelManager;
@@ -76,15 +87,13 @@ public sealed class ForkedAgentRunner : IAgentRunner
             var cwd = _workingDirectoryAccessor.WorkingDirectory;
             var profile = parameters.Profile;
 
-            var contextProviders = _sharedContextBuilder.BuildCommon(
-                SharedContextProviderBuilder.ApplyProfileDefaults(
-                    profile,
-                    new AgentContextProviderOptions
-                    {
-                        WorkingDirectory = cwd,
-                        ChatClient = _chatClient,
-                        ConversationId = parameters.ConversationId,
-                    }));
+            var contextProviders = _contextPipeline.BuildShared(
+                profile,
+                new AgentContextProviderOptions
+                {
+                    WorkingDirectory = cwd,
+                    ConversationId = parameters.ConversationId,
+                });
 
             _logger.LogInformation(
                 "Forked agent '{Label}' (profile={Profile}) armed with {Count} tools, cwd={Cwd}",
@@ -126,7 +135,6 @@ public sealed class ForkedAgentRunner : IAgentRunner
                         linkedToken).ConfigureAwait(false)
                 ],
                 AgentContextProviders = contextProviders,
-                ToolMetadata = _toolMetadata,
                 PipelineOptions = pipelineOptions,
             });
 

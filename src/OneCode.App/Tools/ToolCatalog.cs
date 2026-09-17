@@ -1,6 +1,5 @@
 using OneCode.Core.Mcp;
 using Microsoft.Extensions.AI;
-using System.Reflection;
 
 namespace OneCode.App.Tools;
 
@@ -37,11 +36,7 @@ public sealed class ToolCatalog : IToolCatalog
         _mcpConnectionManager = mcpConnectionManager;
     }
 
-    /// <summary>
-    /// Test/composition helper: builds a catalog that resolves tools from registrations
-    /// via <paramref name="services"/> on first <see cref="Tools"/> access.
-    /// </summary>
-    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
+    /// <summary>Test/composition helper: builds a catalog that resolves tools from registrations.</summary>
     public static ToolCatalog FromRegistrations(
         IServiceProvider services,
         ToolMetadataRegistry metadata,
@@ -52,7 +47,7 @@ public sealed class ToolCatalog : IToolCatalog
         // Lazy owns the IServiceProvider capture — composition root / test boundary only.
         var staticTools = new Lazy<List<AIFunction>>(
             () => BuildStaticTools(services, regs, metadata),
-            LazyThreadSafetyMode.ExecutionAndPublication);
+            LazyThreadSafetyMode.PublicationOnly);
         return new ToolCatalog(staticTools, metadata, mcpConnectionManager);
     }
 
@@ -141,10 +136,7 @@ public sealed class ToolCatalog : IToolCatalog
 
     private const int MaxDescriptionKeywords = 8;
 
-    /// <summary>
-    /// Builds AIFunctions from registrations. Called only from composition-root Lazy factories
-    /// or tests — never from business construction paths that still need an unresolved ChatService.
-    /// </summary>
+    /// <summary>Builds AIFunctions from registrations.</summary>
     internal static List<AIFunction> BuildStaticTools(
         IServiceProvider services,
         IReadOnlyList<ToolRegistration> registrations,
@@ -159,8 +151,6 @@ public sealed class ToolCatalog : IToolCatalog
                 throw new InvalidOperationException($"Duplicate tool registration: {reg.Name}");
 
             var function = CreateFunction(services, reg);
-            if (function is null)
-                continue; // DI 中未注册的工具静默跳过（如平台条件工具）
 
             tools.Add(function);
             metadata.Register(new ToolMetadata
@@ -168,7 +158,8 @@ public sealed class ToolCatalog : IToolCatalog
                 Name = reg.Name,
                 Aliases = reg.Aliases ?? [],
                 Risk = reg.Risk,
-                ApprovalMode = reg.ApprovalMode ?? ToolPolicyDefaults.ForRisk(reg.Risk),
+                // ApprovalMode 已在注册入口解析为具体值（见 AddToolInstance），此处不再兜底推导。
+                ApprovalMode = reg.ApprovalMode,
                 IsConcurrencySafe = reg.Concurrency,
                 IsVisible = reg.Visible,
                 SearchHint = reg.SearchHint,
@@ -186,32 +177,6 @@ public sealed class ToolCatalog : IToolCatalog
         return tools;
     }
 
-    private static AIFunction? CreateFunction(IServiceProvider services, ToolRegistration reg)
-    {
-        // 1. 工厂模式（AddToolInstance 注册的特殊工具）
-        if (reg.FunctionFactory is { } factory)
-            return factory(services);
-
-        // 2. 反射模式（AddTool / AddToolStatic 注册的标准工具）
-        if (reg.ServiceType is { } type && reg.MethodName is { } methodName)
-        {
-            var bindingFlags = reg.IsStatic
-                ? BindingFlags.Public | BindingFlags.Static
-                : BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
-            var methodInfo = type.GetMethod(methodName, bindingFlags)
-                ?? throw new InvalidOperationException($"Tool method not found: {type.Name}.{methodName}");
-
-            object? target = null;
-            if (!reg.IsStatic)
-            {
-                target = reg.InstanceFactory?.Invoke(services);
-                if (target is null)
-                    return null; // DI 中未注册，静默跳过
-            }
-
-            return AIFunctionFactory.Create(methodInfo, name: reg.Name, target: target);
-        }
-
-        throw new InvalidOperationException($"Invalid ToolRegistration: {reg.Name} — neither FunctionFactory nor ServiceType/MethodName set");
-    }
+    private static AIFunction CreateFunction(IServiceProvider services, ToolRegistration reg) =>
+        reg.FunctionFactory(services);
 }

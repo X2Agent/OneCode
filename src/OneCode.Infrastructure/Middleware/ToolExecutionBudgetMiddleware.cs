@@ -8,11 +8,14 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public sealed class ToolExecutionBudgetMiddleware
 {
+    /// <summary>Default character budget for a single tool result.</summary>
+    public const int DefaultMaxResultChars = 150_000;
+
     private readonly int _maxResultChars;
     private readonly ILogger<ToolExecutionBudgetMiddleware>? _logger;
 
     public ToolExecutionBudgetMiddleware(
-        int maxResultChars = 150_000,
+        int maxResultChars = DefaultMaxResultChars,
         ILogger<ToolExecutionBudgetMiddleware>? logger = null)
     {
         _maxResultChars = maxResultChars;

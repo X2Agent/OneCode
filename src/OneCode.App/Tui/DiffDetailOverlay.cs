@@ -45,7 +45,7 @@ public sealed class DiffDetailOverlay : CenteredOverlay
             CanFocus = true,
             Visible = !hasDiff,
         };
-        _emptyHint.SetScheme(TuiTheme.MakeScheme(TuiPalette.FgMuted, TuiPalette.BgCard));
+        _emptyHint.SetScheme(TuiStyles.MakeScheme(TuiPalette.FgMuted, TuiPalette.BgCard));
 
         Add(_diffView, _emptyHint);
         if (hasDiff)

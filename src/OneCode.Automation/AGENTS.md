@@ -130,7 +130,7 @@ private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
 ### CronJobEntry 持久化
 
-- 文件命名：`{id}.json`，id 由 `CronCreateTool` 生成
+- 文件命名：`{id}.json`，id 由 `CronTool` 的 `create` 动作生成
 - 路径遍历防护：id 必须经过 sanitize（仅允许字母数字与 `-`）
 - 文件写入使用 `WriteAsync` + 临时文件 + 原子替换，避免半写入
 

@@ -1,23 +1,18 @@
 using System.ComponentModel;
 using Microsoft.Agents.AI.Tools.Shell;
+using OneCode.Core.Exec;
 using OneCode.App.Session;
 using OneCode.Core.IO;
-
-using OneCode.Infrastructure.Middleware.Invariants;
-using OneCode.Infrastructure.Remote;
 
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// Executes shell commands via MAF <see cref="ShellExecutor"/> (LocalShellExecutor or SshShellExecutor).
-/// Delegates execution to MAF; retains OneCode-specific pre-execution validation and soft warnings.
+/// Executes shell commands through the configured <see cref="IShellExecutor"/> Provider.
+/// Retains OneCode-specific pre-execution validation and soft warnings.
 /// 通过 shell 参数支持 bash（默认）与 powershell 两种方言，原独立 PowerShellTool 已并入本工具。
 /// </summary>
 /// <remarks>
-/// 可选依赖（保留可空，缺失时走 fallback 路径）：
-/// - <see cref="_ssh"/>：SSH 远程执行；仅在配置远程连接时非空
-/// - <see cref="_shellExecutorManager"/>：会话级持久 shell；缺失时 fallback 到 Stateless 模式（仅 bash 路径）
-/// - <see cref="_sessionManager"/>：会话隔离；缺失时 <c>_shellExecutorManager</c> 路径不启用
+/// 执行后端由 <see cref="IShellExecutor"/> 统一承接；会话范围通过请求传递给 Provider。
 /// </remarks>
 public sealed class BashTool
 {
@@ -32,36 +27,16 @@ public sealed class BashTool
         "d}"
     ];
 
-    /// <summary>
-    /// Combined deny patterns for the PowerShell path.
-    /// Includes Layer0 cross-shell patterns PLUS PowerShell-specific dangerous cmdlets.
-    /// </summary>
-    private static readonly IReadOnlyList<string> PowerShellDenyPatterns =
-        BashCommandInvariant.DenyPatternStrings
-            .Concat(new[]
-            {
-                @"\bSet-ExecutionPolicy\b",
-                @"\b(Format-Volume|Clear-Disk)\b",
-                @"\b(Restart-Computer|Stop-Computer)\b",
-                @"\bStart-Process\b[^|;&\n]*-(Verb|v)(:|\s+)RunAs\b",
-            })
-            .ToList()
-            .AsReadOnly();
-
     private readonly IWorkingDirectoryAccessor _wd;
-    private readonly SshRemoteService _ssh;
-    private readonly ConversationShellExecutorManager _shellExecutorManager;
+    private readonly IShellExecutor _shellExecutor;
     private readonly ISessionConversationAccess _sessionManager;
-    private readonly IProcessRunner _processRunner;
 
     public BashTool(
         IWorkingDirectoryAccessor wd,
-        SshRemoteService ssh,
-        ConversationShellExecutorManager shellExecutorManager,
-        ISessionConversationAccess sessionManager,
-        IProcessRunner processRunner)
-        => (_wd, _ssh, _shellExecutorManager, _sessionManager, _processRunner)
-            = (wd, ssh, shellExecutorManager, sessionManager, processRunner);
+        IShellExecutor shellExecutor,
+        ISessionConversationAccess sessionManager)
+        => (_wd, _shellExecutor, _sessionManager)
+            = (wd, shellExecutor, sessionManager);
 
     [Description("Execute a shell command. Dialect selection: shell=\"bash\" (default) runs bash on Unix and pwsh on Windows " +
                  "via the platform default; shell=\"powershell\" forces pwsh (PowerShell Core) or powershell.exe on Windows " +
@@ -88,9 +63,6 @@ public sealed class BashTool
         if (!isPowerShell && !(shell?.Equals("bash", StringComparison.OrdinalIgnoreCase) ?? true))
             return ToolResult.Error($"Error: unsupported shell '{shell}'. Use \"bash\" (default) or \"powershell\".");
 
-        if (SshToolHelper.IsActive(_ssh))
-            return await ShellExecutionHelper.ExecuteViaSshAsync(_ssh!, command, timeout, ct).ConfigureAwait(false);
-
         var workingDirectory = _wd.WorkingDirectory;
         if (!Directory.Exists(workingDirectory))
             return ToolResult.Error($"Error: working directory not found: {workingDirectory}");
@@ -110,22 +82,17 @@ public sealed class BashTool
             ? PowerShellCommandClassifier.GetDestructiveCommandWarning(command)
             : BashCommandClassifier.GetDestructiveCommandWarning(command);
 
-        // pwsh 探测（与原 PowerShellTool 一致）：Unix 缺 pwsh 直接报错，不进执行器
-        string? psShell = null;
-        if (isPowerShell)
-        {
-            var hasPwsh = await _processRunner.CommandExistsAsync("pwsh").ConfigureAwait(false);
-            if (!hasPwsh && !OperatingSystem.IsWindows())
-                return ToolResult.Error("Error: PowerShell (pwsh/powershell) not found. Please install PowerShell.");
-            psShell = hasPwsh ? "pwsh" : "powershell";
-        }
-
-        ShellResult shellResult;
         try
         {
-            shellResult = isPowerShell
-                ? await ExecutePowerShellAsync(workingDirectory, command, psShell!, timeout, ct).ConfigureAwait(false)
-                : await ExecuteShellAsync(workingDirectory, command, timeout, ct).ConfigureAwait(false);
+            var shellResult = await _shellExecutor.ExecuteAsync(
+                new ShellExecutionRequest(
+                    command,
+                    workingDirectory,
+                    isPowerShell ? "powershell" : "bash",
+                    timeout,
+                    _sessionManager.ForegroundConversation?.Id),
+                ct).ConfigureAwait(false);
+            return ShellExecutionHelper.ToToolResult(shellResult, command, warning);
         }
         catch (FileNotFoundException)
         {
@@ -141,50 +108,6 @@ public sealed class BashTool
                 $"[Timed out after {timeout}s]"));
         }
 
-        return ShellExecutionHelper.ToToolResult(shellResult, command, warning);
-    }
-
-    private async Task<ShellResult> ExecuteShellAsync(string workingDirectory, string command, int timeout, CancellationToken ct)
-    {
-        var timeoutMs = ShellExecutionHelper.ClampTimeoutMs(timeout);
-
-        if (_shellExecutorManager is not null
-            && _sessionManager?.ForegroundConversation is { } conversation)
-        {
-            return await _shellExecutorManager.ExecuteAsync(
-                conversation.Id, workingDirectory, command,
-                TimeSpan.FromMilliseconds(timeoutMs), ct).ConfigureAwait(false);
-        }
-
-        await using var executor = new LocalShellExecutor(new LocalShellExecutorOptions
-        {
-            Mode = ShellMode.Stateless,
-            WorkingDirectory = workingDirectory,
-            MaxOutputBytes = ShellExecutionHelper.MaxOutputChars,
-            Timeout = TimeSpan.FromMilliseconds(timeoutMs),
-            AcknowledgeUnsafe = true,
-            Policy = new ShellPolicy(denyList: BashCommandInvariant.DenyPatternStrings),
-        });
-        return await executor.RunAsync(command, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// PowerShell 路径：始终每次新建 Stateless 进程（无持久 shell）。
-    /// <paramref name="shell"/> 由调用方探测得出（pwsh 或 powershell）。
-    /// </summary>
-    private async Task<ShellResult> ExecutePowerShellAsync(string workingDirectory, string command, string shell, int timeout, CancellationToken ct)
-    {
-        await using var executor = new LocalShellExecutor(new LocalShellExecutorOptions
-        {
-            Mode = ShellMode.Stateless,
-            Shell = shell,
-            WorkingDirectory = workingDirectory,
-            MaxOutputBytes = ShellExecutionHelper.MaxOutputChars,
-            Timeout = TimeSpan.FromMilliseconds(ShellExecutionHelper.ClampTimeoutMs(timeout)),
-            AcknowledgeUnsafe = true,
-            Policy = new ShellPolicy(denyList: PowerShellDenyPatterns),
-        });
-        return await executor.RunAsync(command, ct).ConfigureAwait(false);
     }
 
     private static string? ValidateSedCommand(string command)
@@ -209,7 +132,6 @@ public sealed class BashTool
         return null;
     }
 
-    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
     public static bool IsSedDangerous(string command) =>
         command.Contains("sed", StringComparison.OrdinalIgnoreCase) &&
         ValidateSedCommand(command) != null;

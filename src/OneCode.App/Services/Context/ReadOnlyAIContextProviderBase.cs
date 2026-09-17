@@ -14,8 +14,8 @@ namespace OneCode.App.Services.Context;
 /// </para>
 ///
 /// <para>
-/// 双向 Provider（如 <c>SessionMemoryContextProvider</c>）应直接继承 <see cref="AIContextProvider"/>，
-/// 不要使用此基类。
+/// 双向 Provider（在 <c>ProvideAIContextAsync</c> 之外还需 override <c>StoreAIContextAsync</c>）
+/// 应直接继承 <see cref="AIContextProvider"/>，不要使用此基类。
 /// </para>
 /// </summary>
 public abstract class ReadOnlyAIContextProviderBase : AIContextProvider

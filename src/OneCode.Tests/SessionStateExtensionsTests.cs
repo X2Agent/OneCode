@@ -33,7 +33,6 @@ public class SessionStateExtensionsTests
         bag.IncrementConsecutiveFailures();
         bag.IncrementTotalToolCalls();
         bag.IncrementEditsSinceLastBuild();
-        bag.GetOrInitializeRecentToolCalls().Add(new ToolCallRecord("Bash", null, true, DateTimeOffset.UtcNow, TimeSpan.Zero));
         bag.GetOrInitializeModifiedFiles().Add("/test.cs");
         var execCtx = bag.GetOrInitializeToolExecutionContext();
         execCtx.IsError = true;
@@ -43,7 +42,6 @@ public class SessionStateExtensionsTests
         bag.GetConsecutiveFailures().Should().Be(1);
         bag.GetTotalToolCalls().Should().Be(1);
         bag.GetEditsSinceLastBuild().Should().Be(1);
-        bag.GetOrInitializeRecentToolCalls().Count.Should().Be(1);
         bag.GetOrInitializeModifiedFiles().Count.Should().Be(1);
         var execCtx2 = bag.GetOrInitializeToolExecutionContext();
         execCtx2.IsError.Should().BeTrue();

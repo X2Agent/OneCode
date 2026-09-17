@@ -40,4 +40,28 @@ public sealed class TuiKeyAdapterTests
 
         adapter.ResolveAction(resolver, contexts).Should().Be(KeybindingDefaults.ActionChatPaste);
     }
+
+    [Theory]
+    [InlineData(false, KeybindingDefaults.ActionChatPageUp)]
+    [InlineData(true, KeybindingDefaults.ActionChatPageDown)]
+    public void ResolveAction_PageKeys_MapToConversationPaging(bool pageDown, string expectedAction)
+    {
+        var resolver = new KeybindingResolver();
+        resolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+        var contexts = new HashSet<string> { KeybindingDefaults.ContextChat };
+        var key = pageDown ? Key.PageDown : Key.PageUp;
+
+        new TuiKeyAdapter(key).ResolveAction(resolver, contexts).Should().Be(expectedAction);
+    }
+
+    [Fact]
+    public void ResolveAction_CtrlU_IsNotConversationPaging()
+    {
+        var resolver = new KeybindingResolver();
+        resolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+        var contexts = new HashSet<string> { KeybindingDefaults.ContextChat };
+
+        new TuiKeyAdapter(Key.U.WithCtrl).ResolveAction(resolver, contexts)
+            .Should().NotBe(KeybindingDefaults.ActionChatPageUp);
+    }
 }

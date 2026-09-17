@@ -6,16 +6,11 @@ public interface ISessionStore
 
     Task SaveAsync(Conversation conversation, CancellationToken ct = default);
 
-    /// <summary>
-    /// List persisted sessions by reading only each file's header line —
-    /// messages are not loaded, so <see cref="ConversationSummary.MessageCount"/>
-    /// comes from the header's persisted count.
-    /// </summary>
     Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default);
 
     Task<SessionResume?> LoadForResumeAsync(SessionId sessionId, CancellationToken ct = default);
 
-    void Delete(SessionId sessionId);
+    Task DeleteAsync(SessionId sessionId, CancellationToken ct = default);
 }
 
 /// <summary>

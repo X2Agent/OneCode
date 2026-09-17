@@ -11,13 +11,14 @@ using Microsoft.Extensions.AI;
 namespace OneCode.Infrastructure.Middleware;
 
 /// <summary>
-/// 状态机中间件：跟踪工具调用、管理错误恢复流程、注入 3-strike 修复指导。
+/// 状态机中间件：管理错误恢复流程、注入 3-strike 修复指导。
 ///
 /// 职责边界：
-/// - 状态机负责错误恢复（Active → Recovering → Blocked）和工具调用追踪。
+/// - 状态机负责错误恢复（Active → Recovering → Blocked）。
 /// - 当 enableStrikeGuidance=true 时，在失败后注入递进式修复指导
 ///   （Strike 1→重试提示, Strike 2→聚焦修复, Strike 3→Blocked）。
 /// - Plan 模式的只读约束由权限层（PlanModePermissionStrategy）负责，不在此重复。
+/// - 工具调用时序观测不在此重复实现：Harness 默认启用 OpenTelemetry。
 /// </summary>
 public static class StateMachineMiddleware
 {
@@ -57,9 +58,7 @@ public static class StateMachineMiddleware
             // state-machine guidance asks the model to use.
             stateBag.ResetToolExecutionContext();
 
-            var sw = Stopwatch.StartNew();
             var result = await next(ctx, ct).ConfigureAwait(false);
-            sw.Stop();
 
             var execCtx = stateBag.GetOrInitializeToolExecutionContext();
             var isFailure = result switch
@@ -73,19 +72,12 @@ public static class StateMachineMiddleware
 
             StateMachine.Transition(stateBag, toolName, isSuccess, isVerificationFailure);
 
-            stateBag.GetOrInitializeRecentToolCalls().Add(new ToolCallRecord(
-                toolName,
-                ToolArgumentExtractor.ExtractFilePath(ctx.Arguments),
-                isSuccess,
-                DateTimeOffset.UtcNow,
-                sw.Elapsed));
-
             if (toolName is "Bash")
                 stateBag.ResetEditsSinceLastBuild();
 
             // 3-strike guidance injection (Main path only).
             // Skip for verification failures: the verification error itself is appended
-            // to the tool result by VerificationMiddleware, providing specific repair
+            // to the tool result by EditGuardMiddleware, providing specific repair
             // guidance. Adding strike noise on top is redundant. The IsVerificationFailure
             // flag already triggered Active→Recovering via StateMachine.Transition.
             if (enableStrikeGuidance && !isSuccess && !isVerificationFailure)
@@ -157,7 +149,7 @@ public static class StateMachine
     /// <param name="isSuccess">Whether the tool execution succeeded.</param>
     /// <param name="isVerificationFailure">
     /// 验证失败（编译/类型检查）立即转 Recovering，不等 3-strike。
-    /// 由 VerificationMiddleware 写入 ToolExecutionContext.IsVerificationFailure=true 触发。
+    /// 由 EditGuardMiddleware 写入 ToolExecutionContext.IsVerificationFailure=true 触发。
     /// </param>
     public static void Transition(AgentSessionStateBag stateBag, string toolName, bool isSuccess,
         bool isVerificationFailure = false)

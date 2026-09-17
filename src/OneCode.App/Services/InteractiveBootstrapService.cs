@@ -14,8 +14,7 @@ public sealed class InteractiveBootstrapService(
     McpStartupPreconnector mcpPreconnector,
     InteractiveSessionStack session,
     InteractiveDiscoveryDependencies discovery,
-    WorkingModeController modeController,
-    ILogger<InteractiveBootstrapService> logger)
+    WorkingModeController modeController)
 {
     /// <summary>
     /// Runs the bootstrap. Returns null if workspace trust was not granted.
@@ -30,13 +29,12 @@ public sealed class InteractiveBootstrapService(
         }
 
         // MCP 预连接后台并发执行（Plan B）：不再阻塞系统提示词构建与 TUI 首屏渲染。
-        // 连接完成后重建技能提供者，把预连接期间缺席的 MCP skills 原子补挂。
-        mcpPreconnector.StartBackground(
-            onCompleted: () => promptConfigBuilder.RebuildSkillProviderAsync(ct),
-            ct: ct);
+        // 无需在完成后补挂技能：skills provider 每次 agent run 构建，
+        // 预连接期间缺席的 MCP skills 会在其连上后自动出现。
+        mcpPreconnector.StartBackground(onCompleted: null, ct: ct);
 
         var systemPrompt = await promptConfigBuilder.BuildSystemPromptAsync(
-            memoryQuery: null, ct).ConfigureAwait(false);
+            ct).ConfigureAwait(false);
 
         var model = discovery.ConfigManager.Current.Effective.Model ?? string.Empty;
 

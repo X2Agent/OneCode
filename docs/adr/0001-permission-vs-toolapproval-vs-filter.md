@@ -31,7 +31,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 ```
 工具调用请求
   → SafetyInvariantMiddleware（安全不变量校验，fail-closed）
-  → ContractMiddleware（契约校验，fail-closed）
+  → EditGuardMiddleware（FileEdit 契约前置校验 + 编辑后验证，契约失败 fail-closed）
   → Permission Middleware（Allow/Deny 决策）
       ├─ Allow  → 放行到 next
       ├─ Deny   → 返回 ToolResult.Error
@@ -72,3 +72,29 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 4. 审批路由：Ask → MAF `ToolApprovalAgent` 或 inline `ApprovalBroker`（`IApprovalBroker` 抽象，见「M4 完全事件驱动审批」现状注记）
 
 观测性中间件（`RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking）仍为无决策权的 `.Use()` 拦截器，与本 ADR 约束一致。
+
+## 现状补充（2026-09-14，P-Perm B1-det）
+
+MAF AutoApprovalRules 与 Permission **不再**用 PermissionProfile.AutoApprove* 平行旗标编码同一意图。
+
+- **确定性单一源**：AutoApprovalRulesFactory 调用 PermissionProfiles.Check；仅当结果为 Allow 时自动批准。
+- **不含 YOLO**：IPermissionChecker / YOLO 仍只在 PermissionAndLimitMiddleware 路径；避免审批层双跑。
+- **产品定义**：MAF 自动批集合 = 确定性 Permission Allow 集合（含 Default/Plan 下只读工具）。
+- **仍保留**：Permission 为唯一 Allow/Deny 安全门；Ask 继续交给 ToolApproval / ApprovalBroker；EnableVerification 仍在 PermissionProfile。
+
+## 现状补充（2026-09-15，W2-B 编辑守卫合并）
+
+上图中的 `ContractMiddleware` 已不存在：编辑生命周期中间件合并为**一道** `EditGuardMiddleware`
+（`OneCode.Infrastructure/Middleware/EditGuardMiddleware.cs`），其内部分两段：
+
+1. **Pre**：`FileEditContract` 前置契约校验（Edit 目标文件必须存在），失败 fail-closed 返回 `ToolResult.Error` + 恢复指导；
+2. **Post**：可选的编辑后验证（`IVerificationProvider`，按 `VerificationOptions.Threshold` 防抖触发编译/类型检查），
+   失败时把错误回注工具结果，由 `StateMachineMiddleware` 统一做状态转移。
+
+随之删除：`ContractMiddleware`、`VerificationMiddleware`（类）与 `FileEditContract.ValidatePostConditionsAsync`
+（弱后置「文件仍存在」已在 W2-B 明确 drop，避免与强校验重复）。`VerificationOptions` 保留，迁至
+`Middleware/VerificationOptions.cs`。
+
+本 ADR 的归属约束不受影响：EditGuard 只做「编辑契约 + 编辑后质量」，**安全决策仍唯一属于 Permission 层**，
+路径 scope 检查仍由 `PermissionCheckHelpers.ValidatePath` 负责。
+

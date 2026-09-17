@@ -2,7 +2,7 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// <see cref="ChatInputView"/> 的视图构建与绘制几何：子控件创建、事件接线、
-/// 以及随内容行数自适应的动态高度布局。
+/// 以及固定高度（<see cref="ChatInputView.FixedHeight"/>）的布局。
 /// </summary>
 public sealed partial class ChatInputView
 {
@@ -10,8 +10,8 @@ public sealed partial class ChatInputView
     {
         X = 0;
         Width = Dim.Fill();
-        Height = MinHeight;
-        SetScheme(TuiTheme.ChatInput);
+        Height = FixedHeight;
+        SetScheme(TuiStyles.ChatInput);
         // Focus belongs exclusively to ChatTextEditor.Editor; the wrapper only
         // keeps the ancestor focus path valid and must not become a tab target.
         CanFocus = true;
@@ -33,11 +33,17 @@ public sealed partial class ChatInputView
             X = 1,
             Y = 1,
             Width = Dim.Fill(1),
-            Height = Dim.Fill() - 1,
+            // 固定 3 行编辑区（不含分隔线），不依赖 Dim.Fill 的布局解析时机。
+            Height = EditorLines,
             CanFocus = true,
         };
         _input.KeyDownEvent += OnInputKeyPress;
         _input.ContentsChanged += OnInputTextChanged;
+        _input.HasFocusChanged += (_, _) =>
+        {
+            _separatorLabel.SetNeedsDraw();
+            SetNeedsDraw();
+        };
 
         CycleModeRequested += () => _modeController.CycleMode();
 
@@ -100,30 +106,23 @@ public sealed partial class ChatInputView
         if (width <= 0)
             return false;
 
-        var screenHeight = _app.Screen.Height > 0 ? _app.Screen.Height : 24;
-        var dynamicMax = TuiSpacing.GetInputMaxTotalHeight(screenHeight);
-        var inputLines = Math.Clamp(_input.LineCount, MinVisibleLines, dynamicMax - 1);
-        var totalHeight = 1 + inputLines;
-        if (_lastHeight != totalHeight || _lastBottomOffset != BottomOffset)
+        Move(0, 0);
+        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+        for (var row = 0; row < Viewport.Height; row++)
         {
-            var oldHeight = _lastHeight;
-            _lastHeight = totalHeight;
-            _lastBottomOffset = BottomOffset;
-            Height = totalHeight;
-            Y = Pos.AnchorEnd(totalHeight + BottomOffset);
-            SetNeedsLayout();
-            if (oldHeight != totalHeight)
-            {
-                InputHeightChanged?.Invoke(totalHeight);
-            }
+            Move(0, row);
+            AddStr(new string(' ', width));
         }
 
         _separatorLabel.Width = width;
+        _separatorLabel.SetScheme(TuiStyles.MakeScheme(
+            HasInputFocus ? TuiPalette.Accent : TuiPalette.FgMuted,
+            TuiPalette.BgSurface));
         var editorWidth = Math.Max(1, width - 2);
         _input.X = 1;
         _input.Y = 1;
         _input.Width = editorWidth;
-        _input.Height = inputLines;
+        _input.Height = EditorLines;
         _placeholderLabel.X = 1;
         _placeholderLabel.Y = 1;
         _placeholderLabel.Width = editorWidth;

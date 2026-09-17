@@ -23,7 +23,7 @@ public sealed class SessionEndReasonTests : IDisposable
         Directory.CreateDirectory(_tempDir);
         _hooks = Substitute.For<IHookExecutionService>();
         _manager = new SessionManager(
-            new SessionStore(basePath: _tempDir, NullLogger<SessionStore>.Instance),
+            new EventSourcedSessionStore(new FileSessionEventStore(_tempDir)),
             NullLogger<SessionManager>.Instance,
             _tempDir,
             hookExecutionService: _hooks,

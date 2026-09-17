@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Net;
 using System.Text;
 using AngleSharp.Html.Parser;
+using Microsoft.Extensions.Caching.Memory;
 using OneCode.Infrastructure.Config;
 
 namespace OneCode.App.Tools;
@@ -37,12 +38,12 @@ public sealed class WebFetchTool
 
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly WebFetchCache _cache;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<WebFetchTool> _logger;
 
     public WebFetchTool(
         IHttpClientFactory httpClientFactory,
-        WebFetchCache cache,
+        IMemoryCache cache,
         ILogger<WebFetchTool> logger)
     {
         _httpClientFactory = httpClientFactory;
@@ -80,9 +81,9 @@ public sealed class WebFetchTool
             return ToolResult.Error($"Invalid URL: {url}");
         }
 
-        if (_cache.TryGet(url, out var cachedContent))
+        if (_cache.TryGetValue(url, out string? cachedContent))
         {
-            return ApplyPromptAndReturn(cachedContent, prompt, start);
+            return ApplyPromptAndReturn(cachedContent!, prompt, start);
         }
 
         var dnsBlock = await FetchSafetyPolicy.CheckDnsRebindingAsync(url, _logger, ct).ConfigureAwait(false);
@@ -91,9 +92,10 @@ public sealed class WebFetchTool
             return ToolResult.Error(dnsBlock);
         }
 
+        string? upgradedUrl = null;
         try
         {
-            var upgradedUrl = url;
+            upgradedUrl = url;
             if (Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl) && parsedUrl.Scheme == "http")
             {
                 var builder = new UriBuilder(parsedUrl) { Scheme = "https" };
@@ -141,13 +143,19 @@ public sealed class WebFetchTool
                 _logger.LogWarning(
                     "WebFetch {Url} returned an empty body (HTTP {StatusCode}, content-type {ContentType})",
                     upgradedUrl, fetchResult.StatusCode, fetchResult.ContentType);
+                return ApplyPromptAndReturn(markdownContent, prompt, start);
             }
 
-            _cache.Set(url, markdownContent, TimeSpan.FromMilliseconds(CacheTtlMs));
+            _cache.Set(
+                url,
+                markdownContent,
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMilliseconds(CacheTtlMs),
+                    Size = Encoding.UTF8.GetByteCount(markdownContent),
+                });
 
-            // 降级决策权归模型：JS-only 页面不在工具内部代为调用浏览器渲染，
-            // 仅回传事实与替代路径提示（见 Description 与 JsRenderingHint）。
-            if (NeedsJsRendering(markdownContent))
+            if (NeedsJsRendering(markdownContent) && !markdownContent.Contains("BrowserFetch", StringComparison.Ordinal))
             {
                 markdownContent += JsRenderingHint;
             }
@@ -156,12 +164,12 @@ public sealed class WebFetchTool
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("WebFetch {Url} was cancelled", url);
+            _logger.LogDebug("WebFetch {Url} was cancelled", upgradedUrl ?? url);
             return ToolResult.Error("Request was cancelled");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "WebFetch failed for {Url}", url);
+            _logger.LogWarning(ex, "WebFetch failed for {Url}", upgradedUrl ?? url);
             return ToolResult.Error($"{ex.Message}{DegradationHint}");
         }
     }

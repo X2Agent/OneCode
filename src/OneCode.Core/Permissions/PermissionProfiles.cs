@@ -3,30 +3,14 @@ using OneCode.Core.Tools;
 namespace OneCode.Core.Permissions;
 
 /// <summary>
-/// Declarative description of a permission mode's behavior along orthogonal dimensions.
-///
-/// MAF auto-approval flags (AutoApproveAllTools, AutoApproveFileWrites, etc.) drive
-/// Infrastructure AutoApprovalRulesFactory. Check-flow fields drive <see cref="PermissionChecker"/>.
-///
-/// Mutual exclusivity: AutoApproveAllTools implies AutoApproveFileWrites.
-/// DenyAllNonReadOnly is incompatible with AutoApproveAllTools/AutoApproveFileWrites.
+/// Product knobs that are not part of the Allow/Deny/Ask check flow.
+/// MAF auto-approval is derived from <see cref="PermissionProfiles.Check"/> (Allow ⇒ auto-approve),
+/// not from parallel flags on this type.
 /// </summary>
 public sealed record PermissionProfile
 {
-    /// <summary>All tools auto-approved at MAF layer (GoalAuto, BypassPermissions).</summary>
-    public bool AutoApproveAllTools { get; init; }
-
-    /// <summary>File write tools (Write/Edit) auto-approved at MAF layer (AcceptEdits/BUILD mode).</summary>
-    public bool AutoApproveFileWrites { get; init; }
-
-    /// <summary>Read-only shell commands auto-approved (most modes except DontAsk).</summary>
-    public bool AutoApproveReadOnlyShell { get; init; } = true;
-
     /// <summary>Post-edit verification (build/type-check) enabled for this mode.</summary>
     public bool EnableVerification { get; init; }
-
-    /// <summary>Strict mode — deny all non-read-only tools at MAF layer (Plan, DontAsk).</summary>
-    public bool DenyAllNonReadOnly { get; init; }
 }
 
 /// <summary>High-level CheckAsync flow for a permission mode.</summary>
@@ -87,18 +71,18 @@ public static class PermissionProfiles
 {
     /// <summary>
     /// Tools allowed in Plan mode beyond read-only tools.
-    /// 元数据驱动——从 ToolNames.PlanAllowedTools 获取，工具在注册时声明 ToolCategory.PlanAllowed。
+    /// Sourced from <see cref="ToolNames.PlanAllowedTools"/>.
     /// </summary>
     private static IReadOnlySet<string> PlanModeAllowedTools => ToolNames.PlanAllowedTools;
 
     private static readonly IReadOnlyDictionary<PermissionMode, PermissionModeConfig> Definitions =
         BuildDefinitions();
 
-    /// <summary>Retrieve the MAF-layer profile for a mode. Unknown modes fall back to Default.</summary>
+    /// <summary>Retrieve the product profile for a mode (e.g. verification). Unknown modes fall back to Default.</summary>
     public static PermissionProfile GetProfile(PermissionMode mode) =>
         GetConfig(mode).Profile;
 
-    /// <summary>Execute CheckAsync logic for the given mode.</summary>
+    /// <summary>Execute CheckAsync logic for the given mode (deterministic; no YOLO).</summary>
     public static PermissionCheckResult Check(
         PermissionMode mode,
         string toolName,
@@ -205,95 +189,58 @@ public static class PermissionProfiles
 
     private static IReadOnlyDictionary<PermissionMode, PermissionModeConfig> BuildDefinitions()
     {
-        var readOnlyEvaluateProfile = new PermissionProfile
-        {
-            AutoApproveReadOnlyShell = true,
-            EnableVerification = false,
-        };
+        var noVerification = new PermissionProfile { EnableVerification = false };
+        var withVerification = new PermissionProfile { EnableVerification = true };
 
         return new Dictionary<PermissionMode, PermissionModeConfig>
         {
             [PermissionMode.Default] = new()
             {
-                Profile = readOnlyEvaluateProfile,
+                Profile = noVerification,
                 Flow = PermissionCheckFlow.ReadOnlyAndEvaluate,
                 AskPolicy = AskDecisionPolicy.Standard,
             },
             [PermissionMode.DontAsk] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveReadOnlyShell = false,
-                    DenyAllNonReadOnly = true,
-                    EnableVerification = false,
-                },
+                Profile = noVerification,
                 Flow = PermissionCheckFlow.ReadOnlyAndEvaluate,
                 AskPolicy = AskDecisionPolicy.DenyAsk,
                 CheckReadOnlyAndPath = false,
             },
             [PermissionMode.Auto] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveReadOnlyShell = true,
-                    EnableVerification = true,
-                },
+                Profile = withVerification,
                 Flow = PermissionCheckFlow.ReadOnlyAndEvaluate,
                 AskPolicy = AskDecisionPolicy.Standard,
             },
             [PermissionMode.BypassPermissions] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveAllTools = true,
-                    AutoApproveFileWrites = true,
-                    EnableVerification = false,
-                },
+                Profile = noVerification,
                 Flow = PermissionCheckFlow.AlwaysAllow,
             },
             [PermissionMode.Plan] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveReadOnlyShell = true,
-                    DenyAllNonReadOnly = true,
-                    EnableVerification = false,
-                },
+                Profile = noVerification,
                 Flow = PermissionCheckFlow.PlanWhitelist,
                 ExtraAllowedTools = PlanModeAllowedTools,
             },
             [PermissionMode.AcceptEdits] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveFileWrites = true,
-                    AutoApproveReadOnlyShell = true,
-                    EnableVerification = true,
-                },
+                Profile = withVerification,
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.EvaluateRules,
                 UnknownTools = UnknownToolPolicy.EvaluateRules,
             },
             [PermissionMode.GoalAuto] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveAllTools = true,
-                    AutoApproveFileWrites = true,
-                    EnableVerification = true,
-                },
+                Profile = withVerification,
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.Deny,
                 UnknownTools = UnknownToolPolicy.AllowWithPathValidation,
             },
             [PermissionMode.Team] = new()
             {
-                Profile = new PermissionProfile
-                {
-                    AutoApproveFileWrites = true,
-                    AutoApproveReadOnlyShell = true,
-                    EnableVerification = false,
-                },
+                Profile = noVerification,
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.Ask,
                 UnknownTools = UnknownToolPolicy.EvaluateRules,

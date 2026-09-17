@@ -53,6 +53,16 @@ public static partial class Constants
         public const string Prompts = "prompts";
         public const string Commands = "commands";
         public const string Cache = "cache";
+
+        /// <summary>
+        /// 会话事件 JSONL 目录（<c>~/.onecode/events/</c>）。
+        /// 单一真相源：<c>FileSessionEventStore</c>（写入）与 <c>AutoDreamSessionScanner</c> /
+        /// <c>InsightsCommand</c>（读取）必须共用本常量，避免目录名漂移导致读不到会话。
+        /// </summary>
+        public const string Events = "events";
+
+        /// <summary>记忆目录（<c>~/.onecode/memory/</c> 与 <c>{cwd}/.onecode/memory/</c>）。</summary>
+        public const string Memory = "memory";
     }
 
     public static class Timeouts

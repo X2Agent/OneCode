@@ -29,6 +29,7 @@
     <!-- AI SDK 下沉：Anthropic / MAF / Hyperlight 包引用从 App 层迁移至 Infrastructure -->
     <PackageReference Include="Anthropic" />
     <PackageReference Include="Microsoft.Agents.AI" />
+    <PackageReference Include="Microsoft.Agents.AI.Harness" />
     <PackageReference Include="Microsoft.Agents.AI.Tools.Shell" />
     <PackageReference Include="Microsoft.Agents.AI.Mcp" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" />

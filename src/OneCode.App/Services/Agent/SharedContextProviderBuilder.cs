@@ -3,94 +3,105 @@ using Microsoft.Agents.AI.Tools.Shell;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Memory;
 using OneCode.App.Services.Skills;
-using OneCode.Core.Models;
+using OneCode.Core.Agent;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
 /// <summary>Builds shared <see cref="AIContextProvider"/> lists for all agent profiles.</summary>
-public sealed class SharedContextProviderBuilder(
-    ILoggerFactory loggerFactory,
-    SkillProviderHolder skillProviderHolder,
-    AgentMemoryDependencies memory,
-    AgentRuntimeContextDependencies runtime,
-    IModelManager modelManager)
+/// <remarks>
+/// <para>
+/// Providers are declared in <see cref="Registry"/> keyed by <see cref="AgentCapability"/>, and
+/// <see cref="BuildCommon"/> simply walks the profile's capability set in declaration order. Adding a
+/// provider is therefore a two-line change in one file (enum member + registry entry) instead of edits
+/// across this builder, a profile-to-bool switch, and an options record.
+/// </para>
+/// <para>
+/// Order follows <see cref="AgentCapability"/> declaration order, which is deliberate: the same
+/// profile always yields the same provider order, so injection order stays predictable.
+/// </para>
+/// </remarks>
+public sealed class SharedContextProviderBuilder
 {
-    /// <summary>Applies profile-specific defaults before building shared providers.</summary>
-    public static AgentContextProviderOptions ApplyProfileDefaults(
-        PipelineProfile profile,
-        AgentContextProviderOptions options) => profile switch
-        {
-            PipelineProfile.Full => options,
-            PipelineProfile.Worker or PipelineProfile.Explore or PipelineProfile.Plan => options with
-            {
-                IncludeLspDiagnostics = false,
-                IncludeShellEnvironment = false,
-            },
-            PipelineProfile.TeamMember => options with
-            {
-                IncludeSessionMemory = false,
-                IncludeCodeAct = false,
-            },
-            _ => options,
-        };
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly SkillProviderFactory _skillProviderFactory;
+    private readonly AgentMemoryDependencies _memory;
+    private readonly AgentRuntimeContextDependencies _runtime;
 
-    /// <summary>Builds the shared ContextProvider list controlled by <paramref name="options"/> flags.</summary>
-    public List<AIContextProvider> BuildCommon(AgentContextProviderOptions options)
+    public SharedContextProviderBuilder(
+        ILoggerFactory loggerFactory,
+        SkillProviderFactory skillProviderFactory,
+        AgentMemoryDependencies memory,
+        AgentRuntimeContextDependencies runtime)
     {
+        _loggerFactory = loggerFactory;
+        _skillProviderFactory = skillProviderFactory;
+        _memory = memory;
+        _runtime = runtime;
+    }
+
+    /// <summary>Builds the shared ContextProvider list for <paramref name="profile"/>.</summary>
+    /// <remarks>
+    /// Each entry is a factory evaluated only when the profile holds that capability, so providers
+    /// whose construction is expensive or stateful (skill discovery, shell lookup, CodeAct probing)
+    /// are never built for profiles that do not use them.
+    /// </remarks>
+    public List<AIContextProvider> BuildCommon(
+        PipelineProfile profile,
+        AgentContextProviderOptions options)
+    {
+        var behavior = PipelineProfileBehavior.For(profile);
         var providers = new List<AIContextProvider>();
         var cwd = options.WorkingDirectory;
 
-        var currentSkillsProvider = skillProviderHolder.Current;
-        if (currentSkillsProvider is not null)
-            providers.Add(currentSkillsProvider);
-
-        providers.Add(new MemoryFileContextProvider(
-            memory.MemoryService,
-            loggerFactory.CreateLogger<MemoryFileContextProvider>(),
-            cwd));
-
-        if (options.IncludeSessionMemory)
+        foreach (var capability in Enum.GetValues<AgentCapability>())
         {
-            providers.Add(new SessionMemoryContextProvider(
-                memory.SessionMemoryService,
-                loggerFactory.CreateLogger<SessionMemoryContextProvider>(),
-                memory.SessionManager,
-                options.ChatClient!,
-                modelManager,
-                conversationId: options.ConversationId));
-        }
+            if (!behavior.Has(capability) || !Registry.TryGetValue(capability, out var factory))
+                continue;
 
-        providers.Add(new DesignContextProvider(
-            memory.SessionManager,
-            loggerFactory.CreateLogger<DesignContextProvider>(),
-            cwd,
-            options.ConversationId));
-
-        if (options.IncludeLspDiagnostics)
-        {
-            providers.Add(new LspDiagnosticContextProvider(
-                runtime.LspDiagnosticRegistry,
-                loggerFactory.CreateLogger<LspDiagnosticContextProvider>(),
-                cwd));
-        }
-
-        providers.Add(runtime.TaskContextProvider);
-
-        if (options.IncludeShellEnvironment
-            && memory.SessionManager.ForegroundConversation is { } shellConversation
-            && runtime.ShellExecutorManager.TryGet(shellConversation.Id) is { } shellExecutor)
-        {
-            providers.Add(new ShellEnvironmentProvider(shellExecutor));
-        }
-
-        if (options.IncludeCodeAct)
-        {
-            var codeActProvider = runtime.CodeActService.TryCreateProvider(cwd);
-            if (codeActProvider is not null)
-                providers.Add(codeActProvider);
+            if (factory(this, options, cwd) is { } provider)
+                providers.Add(provider);
         }
 
         return providers;
     }
+
+    /// <summary>
+    /// Capability-to-provider registry. Enumeration order defines injection order.
+    /// A factory returning <see langword="null"/> means "capability enabled but not applicable right
+    /// now" (e.g. no foreground shell executor) — the provider is skipped without failing the build.
+    /// </summary>
+    private static readonly Dictionary<AgentCapability, Func<SharedContextProviderBuilder, AgentContextProviderOptions, string, AIContextProvider?>> Registry =
+        new()
+        {
+            // Built per run so skills discovered since the previous run (MCP servers that connected in
+            // the background) take effect immediately. Within a run MAF's provider-level cache avoids
+            // re-discovery on every turn.
+            [AgentCapability.Skills] = (b, _, _) => b._skillProviderFactory.Create(),
+
+            [AgentCapability.MemorySearch] = (b, _, _) => MemorySearchProviderFactory.Create(
+                b._memory.MemoryService,
+                b._loggerFactory),
+
+            [AgentCapability.DesignContext] = (b, o, cwd) => new DesignContextProvider(
+                b._memory.SessionManager,
+                b._loggerFactory.CreateLogger<DesignContextProvider>(),
+                cwd,
+                o.ConversationId),
+
+            [AgentCapability.LspDiagnostics] = (b, _, cwd) => new LspDiagnosticContextProvider(
+                b._runtime.LspDiagnosticRegistry,
+                b._loggerFactory.CreateLogger<LspDiagnosticContextProvider>(),
+                cwd),
+
+            [AgentCapability.TaskContext] = (b, _, _) => b._runtime.TaskContextProvider,
+
+            [AgentCapability.ShellEnvironment] = (b, _, _) =>
+                b._memory.SessionManager.ForegroundConversation is { } shellConversation
+                && b._runtime.ShellExecutorManager.TryGet(shellConversation.Id) is { } shellExecutor
+                    ? new ShellEnvironmentProvider(shellExecutor)
+                    : null,
+
+            [AgentCapability.CodeAct] = (b, _, cwd) => b._runtime.CodeActService.TryCreateProvider(cwd),
+        };
 }

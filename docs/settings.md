@@ -90,7 +90,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 >
 > 两者职责不同，不应合并。若合并会导致 `/add-dir` 添加的目录被当作“已信任目录”，从而在直接启动该目录时跳过信任确认，绕过安全门禁。
 
-**`permissionMode` 可选值：**
+**`permissionMode` 可选值**（`PermissionMode` 枚举，可写全部 8 个成员）：
 
 | 值 | 说明 |
 |---|---|
@@ -99,6 +99,13 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `plan` | 计划模式，只读分析，不执行任何写操作 |
 | `auto` | YOLO 自动分类模式，启用 LLM 安全分类器自动判断 |
 | `acceptEdits` | 文件写入 + 常规 Shell 自动放行 |
+| `dontAsk` | 不询问，直接拒绝危险操作 |
+| `goalAuto` | 供 GOAL 模式使用：自主执行不中断，危险 Shell 直接 Deny |
+| `team` | 供 TEAM 模式使用：多 Agent 协作，危险命令走事件审批 |
+
+> `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述 8 个成员均可手写；
+> 未识别的值会回落为 `default`。`goalAuto` / `team` 通常由 GOAL、TEAM 模式在运行期自动派生（`/permissions` 命令的别名表只列出前 6 个，
+> 因为后两个属于模式内派生值），但手动写入同样生效。
 
 ### 会话约束（Conversation）
 
@@ -323,4 +330,4 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `autodream.*` | —（点路径） | `AutoDreamService` |
 | `goal.*` | —（点路径） | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService` 调用） |
 
-> **配置元数据真相源**：`src/OneCode.Infrastructure/Config/ConfigModels.cs` 中的 `SettingDescriptors`。新增配置项时必须同时声明生效模式、密钥属性和项目作用域权限，并更新本文档。
+> **配置元数据真相源**：`src/OneCode.Core/Config/ConfigModels.cs` 中的 `SettingDescriptors`。新增配置项时必须同时声明生效模式、密钥属性和项目作用域权限，并更新本文档。

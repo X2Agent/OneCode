@@ -1,10 +1,21 @@
+using OneCode.Core.Session;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 using System.Text;
-using CoreConstants = OneCode.Core.Constants;
 namespace OneCode.App.Commands;
 
-public sealed class InsightsCommand(ILogger<InsightsCommand>? logger = null) : Command
+/// <summary>
+/// 汇总 <c>~/.onecode/events/*.jsonl</c> 中的会话事件，输出用量统计。
+/// </summary>
+/// <param name="logger">可选日志。</param>
+/// <param name="userHomeOverride">
+/// 仅单元测试使用的用户主目录接缝；null 时取 <see cref="PathsHelper.UserHome"/>。
+/// 读取端必须与 <c>FileSessionEventStore</c> 的写入端（同样以用户主目录为基准）保持一致，
+/// 该参数使测试能用真实事件存储写出数据后验证解析契约。
+/// </param>
+public sealed class InsightsCommand(
+    ILogger<InsightsCommand>? logger = null,
+    string? userHomeOverride = null) : Command
 {
     public override string Name => "insights";
     public override string Description => "Analyze usage patterns across saved sessions";
@@ -13,8 +24,8 @@ public sealed class InsightsCommand(ILogger<InsightsCommand>? logger = null) : C
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
-        var home = PathsHelper.UserHome;
-        var sessionsDir = Path.Combine(home, Constants.App.ConfigDirName, "sessions");
+        var home = userHomeOverride ?? PathsHelper.UserHome;
+        var sessionsDir = Path.Combine(home, Constants.App.ConfigDirName, Constants.Subdirs.Events);
 
         string[] files = [];
         if (Directory.Exists(sessionsDir))
@@ -39,7 +50,13 @@ public sealed class InsightsCommand(ILogger<InsightsCommand>? logger = null) : C
             try
             {
                 var lines = await File.ReadAllLinesAsync(file, ct).ConfigureAwait(false);
-                bool usedHeaderTokens = false;
+
+                // 同一会话文件可含多个 SessionStarted / SessionSnapshot（快照变更时追加），
+                // Conversation.TotalUsage 是累计值——取序号最大的一条，避免逐条累加导致重复计数。
+                long latestSnapshotSequence = -1;
+                long snapshotInputTokens = 0, snapshotOutputTokens = 0;
+                string? snapshotModel = null;
+                var fileHasSnapshot = false;
 
                 foreach (var line in lines)
                 {
@@ -49,39 +66,57 @@ public sealed class InsightsCommand(ILogger<InsightsCommand>? logger = null) : C
                         using var doc = JsonDocument.Parse(line);
                         var root = doc.RootElement;
 
-                        // First line is always session_header: extract aggregate totals + model.
-                        if (root.TryGetProperty("type", out var typeProp) &&
-                            typeProp.GetString() == "session_header")
+                        if (!root.TryGetProperty("type", out var typeProp) ||
+                            typeProp.GetString() is not { } eventType)
                         {
-                            if (root.TryGetProperty("total_usage", out var usage))
-                            {
-                                if (usage.TryGetProperty("input_tokens", out var it))
-                                    totalInputTokens += it.GetInt64();
-                                if (usage.TryGetProperty("output_tokens", out var ot))
-                                    totalOutputTokens += ot.GetInt64();
-                                usedHeaderTokens = true;
-                            }
-                            if (root.TryGetProperty("model", out var m) && m.GetString() is { } model && !string.IsNullOrEmpty(model))
-                                modelCounts[model] = modelCounts.GetValueOrDefault(model) + 1;
                             continue;
                         }
 
-                        // Count only actual conversation turns (user/assistant messages).
-                        if (root.TryGetProperty("role", out var role))
+                        // 会话元数据事件：session_started / session_snapshot
+                        if (eventType is SessionEventTypes.Started or SessionEventTypes.Snapshot)
                         {
-                            var roleStr = role.GetString();
-                            if (roleStr is CoreConstants.MessageTypes.User or CoreConstants.MessageTypes.Assistant)
+                            if (!root.TryGetProperty("payload", out var payload) ||
+                                payload.ValueKind != JsonValueKind.Object)
                             {
-                                totalMessages++;
-
-                                // Accumulate per-message token usage if header didn't have totals.
-                                if (!usedHeaderTokens && root.TryGetProperty("token_usage", out var tu))
-                                {
-                                    if (tu.TryGetProperty("input_tokens", out var it2)) totalInputTokens += it2.GetInt64();
-                                    if (tu.TryGetProperty("output_tokens", out var ot2)) totalOutputTokens += ot2.GetInt64();
-                                }
+                                continue;
                             }
+
+                            var sequence = root.TryGetProperty("sequence", out var seqProp) &&
+                                           seqProp.TryGetInt64(out var seq)
+                                ? seq
+                                : 0L;
+
+                            if (sequence < latestSnapshotSequence)
+                                continue;
+
+                            latestSnapshotSequence = sequence;
+                            fileHasSnapshot = true;
+
+                            snapshotInputTokens = 0;
+                            snapshotOutputTokens = 0;
+                            snapshotModel = null;
+
+                            if (payload.TryGetProperty("total_usage", out var usage) &&
+                                usage.ValueKind == JsonValueKind.Object)
+                            {
+                                if (usage.TryGetProperty("input_tokens", out var it) && it.TryGetInt64(out var iv))
+                                    snapshotInputTokens = iv;
+                                if (usage.TryGetProperty("output_tokens", out var ot) && ot.TryGetInt64(out var ov))
+                                    snapshotOutputTokens = ov;
+                            }
+
+                            if (payload.TryGetProperty("model", out var m) &&
+                                m.ValueKind == JsonValueKind.String)
+                            {
+                                snapshotModel = m.GetString();
+                            }
+
+                            continue;
                         }
+
+                        // 只统计真实对话轮次（用户/助手消息事件）
+                        if (eventType is SessionEventTypes.UserMessage or SessionEventTypes.AssistantMessage)
+                            totalMessages++;
                     }
                     catch (JsonException ex)
                     {
@@ -90,6 +125,12 @@ public sealed class InsightsCommand(ILogger<InsightsCommand>? logger = null) : C
                         logger?.LogDebug(ex, "Skipping malformed session line in {File}", file);
                     }
                 }
+
+                totalInputTokens += snapshotInputTokens;
+                totalOutputTokens += snapshotOutputTokens;
+
+                if (fileHasSnapshot && !string.IsNullOrEmpty(snapshotModel))
+                    modelCounts[snapshotModel] = modelCounts.GetValueOrDefault(snapshotModel) + 1;
             }
             catch (IOException ex)
             {

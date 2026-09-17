@@ -1,11 +1,14 @@
 using OneCode.App.Services.Runtime;
 using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Coordinator;
 
+/// <summary>
+/// TeamRun lifecycle facade (W3-A): clarification/approval/cancel + fencing entry points.
+/// Execution finalization lives in <see cref="TeamRunFinalizer"/>; task progress in <see cref="TeamTaskProgress"/>.
+/// </summary>
 public sealed class TeamRunApplicationService(
     ITeamRunStore store,
     TeamRunStateMachine stateMachine,
@@ -13,6 +16,10 @@ public sealed class TeamRunApplicationService(
     DeliveryReportBuilder deliveryReportBuilder,
     IWorkspaceFingerprintProvider? fingerprintProvider = null)
 {
+    private readonly TeamRunFinalizer _finalizer = new(
+        store, stateMachine, qualityGateRunner, deliveryReportBuilder);
+    private readonly TeamTaskProgress _progress = new(store, fingerprintProvider);
+
     public async Task<TeamRun> BeginClarificationAsync(
         TeamRunId runId,
         string teamName,
@@ -200,16 +207,11 @@ public sealed class TeamRunApplicationService(
         return run;
     }
 
-    
-    public async Task<TeamRun> StartTaskAsync(
-        TeamRun run,
-        string taskId,
-        CancellationToken ct)
-        => await StartTaskAsync(run, taskId, null, ct).ConfigureAwait(false);
+    public Task<TeamRun> StartTaskAsync(TeamRun run, string taskId, CancellationToken ct)
+        => _progress.StartTaskAsync(run, taskId, ct);
 
     /// <summary>
-    /// 按 ID 重载并启动任务（DAG 并行执行器入口）。
-    /// 必须携带当前 Workflow FencingToken；与磁盘不一致时 fail-closed。
+    /// Load by id then start task (DAG execution entry). Caller must present current FencingToken.
     /// </summary>
     public async Task<TeamRun> StartTaskAsync(
         TeamRunId runId,
@@ -218,43 +220,24 @@ public sealed class TeamRunApplicationService(
         CancellationToken ct)
     {
         var run = await RequireRunAsync(runId, fencingToken, ct).ConfigureAwait(false);
-        return await StartTaskAsync(run, taskId, fencingToken, ct).ConfigureAwait(false);
+        return await _progress.StartTaskAsync(run, taskId, fencingToken, ct).ConfigureAwait(false);
     }
 
-    public async Task<TeamRun> StartTaskAsync(
+    public Task<TeamRun> StartTaskAsync(
         TeamRun run,
         string taskId,
         long? fencingToken,
         CancellationToken ct)
-    {
-        TeamRunGuards.RequireFence(run, fencingToken);
-        // Task ordering and write-conflict guards are enforced by MAF DAG topology
-        // (fan-out/fan-in/barrier edges) in TeamTaskWorkflowCompiler; this method only
-        // records the business fact that a new attempt has begun. Status remains null
-        // until CompleteTaskAsync sets the terminal outcome.
-        var tasks = run.TaskGraph!.Tasks
-            .Select(task => task.Definition.Id == taskId
-                ? task with { Attempt = task.Attempt + 1 }
-                : task)
-            .ToList();
-        var updated = run with
-        {
-            TaskGraph = new TeamTaskGraph(tasks),
-            Version = checked(run.Version + 1),
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
-        return updated;
-    }
+        => _progress.StartTaskAsync(run, taskId, fencingToken, ct);
 
-    public async Task<TeamRun> CompleteTaskAsync(
+    public Task<TeamRun> CompleteTaskAsync(
         TeamRun run,
         string taskId,
         TeamRunResult execution,
         CancellationToken ct)
-        => await CompleteTaskAsync(run, taskId, execution, null, ct).ConfigureAwait(false);
+        => _progress.CompleteTaskAsync(run, taskId, execution, ct);
 
-    /// <summary>按 ID 重载并完成任务（DAG 并行执行器入口），必须携带当前 FencingToken。</summary>
+    /// <summary>Load by id then complete task; caller must present current FencingToken.</summary>
     public async Task<TeamRun> CompleteTaskAsync(
         TeamRunId runId,
         string taskId,
@@ -263,110 +246,53 @@ public sealed class TeamRunApplicationService(
         CancellationToken ct)
     {
         var run = await RequireRunAsync(runId, fencingToken, ct).ConfigureAwait(false);
-        return await CompleteTaskAsync(run, taskId, execution, fencingToken, ct).ConfigureAwait(false);
+        return await _progress.CompleteTaskAsync(run, taskId, execution, fencingToken, ct).ConfigureAwait(false);
     }
 
-    public async Task<TeamRun> CompleteTaskAsync(
+    public Task<TeamRun> CompleteTaskAsync(
         TeamRun run,
         string taskId,
         TeamRunResult execution,
         long? fencingToken,
         CancellationToken ct)
-    {
-        TeamRunGuards.RequireFence(run, fencingToken);
-        var currentTask = run.TaskGraph!.Tasks.SingleOrDefault(task => task.Definition.Id == taskId)
-            ?? throw new InvalidOperationException($"Team task '{taskId}' was not found.");
-        if (currentTask.Status is not null)
-            throw new InvalidOperationException($"Team task '{taskId}' already reached terminal status {currentTask.Status}.");
+        => _progress.CompleteTaskAsync(run, taskId, execution, fencingToken, ct);
 
-        var failure = TeamRunGuards.ResolveExecutionFailure(execution);
-        var taskStatus = failure is not null
-            ? TeamTaskStatus.Failed
-            : TeamTaskStatus.Succeeded;
-        var errorFingerprint = failure is not null
-            ? TeamRunGuards.ComputeErrorFingerprint(failure.Detail ?? failure.Title)
-            : null;
-        var tasks = run.TaskGraph!.Tasks
-            .Select(task => task.Definition.Id == taskId
-                ? task with
-                {
-                    Status = taskStatus,
-                    Summary = execution.Output,
-                    Failure = failure,
-                    ErrorFingerprint = errorFingerprint,
-                }
-                : task)
-            .ToList();
-        // C2: Succeeded 任务落库时记录工作区指纹，恢复世代用它与当前指纹比对，
-        // 检测已完成任务的文件改动是否已被回滚/篡改。工作区不可读时保守跳过（保持原值）。
-        var lastTaskFingerprint = run.LastTaskFingerprint;
-        if (taskStatus == TeamTaskStatus.Succeeded && fingerprintProvider is not null)
-        {
-            try
-            {
-                lastTaskFingerprint = await fingerprintProvider.ComputeAsync(run.WorkingDirectory, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or DirectoryNotFoundException or UnauthorizedAccessException)
-            {
-            }
-        }
-        var updated = run with
-        {
-            TaskGraph = new TeamTaskGraph(tasks),
-            Failure = taskStatus == TeamTaskStatus.Failed ? failure : run.Failure,
-            LastTaskFingerprint = lastTaskFingerprint,
-            Version = checked(run.Version + 1),
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
-        return updated;
+    public Task<TeamRun> ReconcileSucceededTasksAsync(TeamRun run, CancellationToken ct = default)
+        => _progress.ReconcileSucceededTasksAsync(run, ct);
+
+    public Task<TeamRun> CompleteExecutionAsync(
+        TeamRun run,
+        TeamRunResult execution,
+        EditTransaction transaction,
+        IReadOnlyList<FileChange> fileChanges,
+        CancellationToken ct)
+        => _finalizer.CompleteExecutionAsync(run, execution, transaction, fileChanges, null, ct);
+
+    /// <summary>Load by id then complete execution; caller must present current FencingToken.</summary>
+    public async Task<TeamRun> CompleteExecutionAsync(
+        TeamRunId runId,
+        TeamRunResult execution,
+        EditTransaction transaction,
+        IReadOnlyList<FileChange> fileChanges,
+        long fencingToken,
+        CancellationToken ct)
+    {
+        var run = await RequireRunAsync(runId, fencingToken, ct).ConfigureAwait(false);
+        return await _finalizer.CompleteExecutionAsync(
+            run, execution, transaction, fileChanges, fencingToken, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 恢复前的已完成任务对账（C2）：调用方须先执行 ledger reconcile（回滚上一世代未提交的
-    /// 文件副作用），再调用本方法比对指纹。不一致说明 Succeeded 任务的改动已不在盘，
-    /// 将其降级为待执行（Status=null）以便新世代重跑，防止"聚合记 Succeeded、文件已回滚"的静默丢失。
-    /// </summary>
-    public async Task<TeamRun> ReconcileSucceededTasksAsync(TeamRun run, CancellationToken ct = default)
-    {
-        if (fingerprintProvider is null
-            || run.TaskGraph is null
-            || run.LastTaskFingerprint is not { } expectedFingerprint)
-        {
-            return run;
-        }
-        if (!run.TaskGraph.Tasks.Any(task => task.Status == TeamTaskStatus.Succeeded))
-            return run;
-
-        string currentFingerprint;
-        try
-        {
-            currentFingerprint = await fingerprintProvider.ComputeAsync(run.WorkingDirectory, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or DirectoryNotFoundException or UnauthorizedAccessException)
-        {
-            // 工作区不可读：保守跳过校验，维持既有恢复语义。
-            return run;
-        }
-
-        if (string.Equals(currentFingerprint, expectedFingerprint, StringComparison.Ordinal))
-            return run;
-
-        var tasks = run.TaskGraph.Tasks
-            .Select(task => task.Status == TeamTaskStatus.Succeeded
-                ? task with { Status = null }
-                : task)
-            .ToList();
-        var updated = run with
-        {
-            TaskGraph = new TeamTaskGraph(tasks),
-            LastTaskFingerprint = null,
-            Version = checked(run.Version + 1),
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-        await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
-        return updated;
-    }
+    public Task<TeamRun> CompleteExecutionAsync(
+        TeamRun run,
+        TeamRunResult execution,
+        EditTransaction transaction,
+        IReadOnlyList<FileChange> fileChanges,
+        long? fencingToken,
+        CancellationToken ct,
+        OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
+        string? operationId = null)
+        => _finalizer.CompleteExecutionAsync(
+            run, execution, transaction, fileChanges, fencingToken, ct, operationLedger, operationId);
 
     /// <summary>
     /// 用户取消（H1）：把运行中的 TeamRun 落为 Cancelled 终态。非终态任务标记 Cancelled；
@@ -405,164 +331,6 @@ public sealed class TeamRunApplicationService(
         return updated;
     }
 
-    public async Task<TeamRun> CompleteExecutionAsync(
-        TeamRun run,
-        TeamRunResult execution,
-        EditTransaction transaction,
-        IReadOnlyList<FileChange> fileChanges,
-        CancellationToken ct)
-        => await CompleteExecutionAsync(run, execution, transaction, fileChanges, null, ct).ConfigureAwait(false);
-
-    /// <summary>按 ID 重载并完成整个执行（DAG 完成阶段入口），必须携带当前 FencingToken。</summary>
-    public async Task<TeamRun> CompleteExecutionAsync(
-        TeamRunId runId,
-        TeamRunResult execution,
-        EditTransaction transaction,
-        IReadOnlyList<FileChange> fileChanges,
-        long fencingToken,
-        CancellationToken ct)
-    {
-        var run = await RequireRunAsync(runId, fencingToken, ct).ConfigureAwait(false);
-        return await CompleteExecutionAsync(run, execution, transaction, fileChanges, fencingToken, ct).ConfigureAwait(false);
-    }
-
-    public async Task<TeamRun> CompleteExecutionAsync(
-        TeamRun run,
-        TeamRunResult execution,
-        EditTransaction transaction,
-        IReadOnlyList<FileChange> fileChanges,
-        long? fencingToken,
-        CancellationToken ct,
-        OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
-        string? operationId = null)
-    {
-        TeamRunGuards.RequireFence(run, fencingToken);
-        var taskStatus = TeamRunGuards.ResolveExecutionFailure(execution) is not null
-            || run.TaskGraph?.RequiredTasks.Any(task => task.Status != TeamTaskStatus.Succeeded) != false
-            ? TeamTaskStatus.Failed
-            : TeamTaskStatus.Succeeded;
-        var updated = run with
-        {
-            Changes = new ChangeSetSummary(
-                fileChanges,
-                fileChanges.Sum(f => f.AddedLines.Count),
-                fileChanges.Sum(f => f.RemovedLines.Count)),
-            Failure = TeamRunGuards.ResolveExecutionFailure(execution),
-        };
-
-        if (taskStatus != TeamTaskStatus.Succeeded)
-        {
-            updated = updated with
-            {
-                Failure = updated.Failure ?? AgentProblemDetails.ToolExecutionFailed(
-                    "One or more required Team tasks did not succeed.",
-                    toolName: "TeamTaskExecution"),
-            };
-            return await RollBackAsync(
-                updated,
-                transaction,
-                run.Version,
-                "Team execution failed; file changes were rolled back.",
-                ct).ConfigureAwait(false);
-        }
-
-        updated = stateMachine.Transition(
-            updated,
-            TeamRunPhase.Verification,
-            TeamRunStatus.Running,
-            DateTimeOffset.UtcNow);
-        await SaveOrThrowAsync(updated, run.Version, ct).ConfigureAwait(false);
-
-        var gateResults = await qualityGateRunner.RunAsync(
-            updated.Plan!.RequiredGates,
-            updated.WorkingDirectory,
-            transaction,
-            updated,
-            ct).ConfigureAwait(false);
-        var requiredGatesPassed = gateResults.Where(g => g.Required)
-            .All(g => g.Status == QualityGateStatus.Passed);
-        updated = updated with { GateResults = gateResults };
-
-        if (!requiredGatesPassed)
-        {
-            return await RollBackAsync(
-                updated,
-                transaction,
-                updated.Version,
-                "Required Team quality gates failed; file changes were rolled back.",
-                ct).ConfigureAwait(false);
-        }
-
-        updated = stateMachine.Transition(
-            updated,
-            TeamRunPhase.Delivery,
-            TeamRunStatus.Running,
-            DateTimeOffset.UtcNow);
-        await SaveOrThrowAsync(updated, updated.Version - 1, ct).ConfigureAwait(false);
-
-        if (!stateMachine.CanCommit(updated))
-        {
-            return await RollBackAsync(
-                updated,
-                transaction,
-                updated.Version,
-                "TeamRun CanCommit invariant rejected delivery.",
-                ct).ConfigureAwait(false);
-        }
-
-        var delivery = deliveryReportBuilder.Build(updated, committed: true, execution.Output);
-        updated = updated with
-        {
-            Delivery = delivery,
-            TransactionCommitted = true,
-        };
-        updated = stateMachine.Transition(
-            updated,
-            TeamRunPhase.Completed,
-            TeamRunStatus.Succeeded,
-            DateTimeOffset.UtcNow);
-
-        // Persist the deterministic commit decision before releasing transaction snapshots.
-        // If persistence fails, the caller's using scope still disposes the uncommitted
-        // transaction and restores files. EditTransaction.Commit performs no external I/O.
-        await SaveOrThrowAsync(updated, updated.Version - 1, ct).ConfigureAwait(false);
-
-        // S-04: 先持久化提交（ledger receipt）再内存提交——防止"内存已提交、ledger 未提交"崩溃后误回滚。
-        if (operationLedger is not null && operationId is not null && fencingToken is { } fence)
-        {
-            await operationLedger.CommitTransactionAsync(
-                operationId,
-                fence,
-                $"team-execution-committed:{run.Id}",
-                ct).ConfigureAwait(false);
-        }
-
-        transaction.Commit();
-        return updated;
-    }
-
-    private async Task<TeamRun> RollBackAsync(
-        TeamRun run,
-        EditTransaction transaction,
-        long expectedVersion,
-        string summary,
-        CancellationToken ct,
-        long? fencingToken = null)
-    {
-        transaction.Rollback();
-        var delivery = run.TaskGraph is null
-            ? null
-            : deliveryReportBuilder.Build(run, committed: false, summary);
-        var rolledBack = run with { Delivery = delivery };
-        rolledBack = stateMachine.Transition(
-            rolledBack,
-            TeamRunPhase.Completed,
-            TeamRunStatus.RolledBack,
-            DateTimeOffset.UtcNow);
-        await SaveOrThrowAsync(rolledBack, expectedVersion, ct).ConfigureAwait(false);
-        return rolledBack;
-    }
-
     private async Task<TeamRun> RequireRunAsync(
         TeamRunId runId,
         long fencingToken,
@@ -579,7 +347,6 @@ public sealed class TeamRunApplicationService(
         }
         return run;
     }
-
 
     private async Task SaveOrThrowAsync(TeamRun run, long expectedVersion, CancellationToken ct)
     {

@@ -7,9 +7,8 @@ using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Middleware;
-using OneCode.Infrastructure.Middleware.Invariants;
 using System.Threading.Channels;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.AutoDream;
 
@@ -52,6 +51,12 @@ public sealed class AutoDreamService : BackgroundService
     /// <summary>AutoDream 允许使用的工具白名单（仅只读工具，用于扫描会话目录）。</summary>
     private static readonly string[] AllowedTools = ["Read", "Glob", "Grep"];
 
+    /// <summary>用户手写条目的来源标记；这些条目是用户显式意图，AutoDream 不得删除或改写。</summary>
+    private static readonly string ManualSource = "manual";
+
+    /// <summary>用户手写条目的 key 前缀；AutoDream 也不得以该前缀创建条目（否则分类语义混乱）。</summary>
+    private const string ManualKeyPrefix = "manual:";
+
     // 依赖
 
     private readonly ILogger<AutoDreamService> _logger;
@@ -76,7 +81,7 @@ public sealed class AutoDreamService : BackgroundService
     private volatile bool _isRunning;
 
     private readonly string _globalConfigDir;
-    
+
     private readonly AutoDreamSessionScanner _sessionScanner;
     private readonly AutoDreamStateStore _stateStore;
 
@@ -249,7 +254,7 @@ public sealed class AutoDreamService : BackgroundService
     // Agent 执行
 
     /// <summary>
-    /// 使用轻量 ChatClientAgent 执行记忆整合。
+    /// 使用 MAF HarnessAgent 执行记忆整合。
     /// 模型：fastModel → 主 model（无需单独配置）。
     /// 工具：仅 Read/Glob/Grep（只读，扫描会话目录）。
     /// 输出：增量变更 JSON 数组，由 <see cref="ApplyConsolidationChangesAsync"/> 解析后合并写入 MEMORY.md。
@@ -267,7 +272,7 @@ public sealed class AutoDreamService : BackgroundService
             .Cast<AITool>()
             .ToList();
 
-        var agentOptions = new ChatClientAgentOptions
+        var agentOptions = new HarnessAgentOptions
         {
             Name = "autodream",
             ChatOptions = new ChatOptions
@@ -277,40 +282,18 @@ public sealed class AutoDreamService : BackgroundService
                 Tools = tools.Count > 0 ? tools : null,
                 ToolMode = tools.Count > 0 ? ChatToolMode.Auto : null,
             },
+            MaximumIterationsPerRequest = MaxToolCalls,
         };
+        OneCodeHarnessDefaults.ApplyProductOptOuts(agentOptions);
 
-        var agent = new ChatClientAgent(_chatClient, agentOptions, _loggerFactory);
+        var agent = new HarnessAgent(_chatClient, agentOptions, _loggerFactory);
 
-        // 轻量中间件管道：SafetyInvariant（Layer 0 安全不变量）→ ToolResultBudget
-        // SafetyInvariant 必须在最外层：即使 AutoDream 只使用 Read/Glob/Grep（只读工具），
-        // Read 仍需受 SensitiveReadPathSequences 保护（id_rsa/.env/.aws/credentials 等），
-        // 防止 LLM 读取敏感文件并将内容写入 MEMORY.md 造成凭证泄露。
+        // Product policy middleware (safety invariants + tool-result budget), mounted through the
+        // shared helper so the install order cannot drift from the main agent path.
         var workingDir = GetCurrentProjectRoot() ?? Environment.CurrentDirectory;
-        var invariants = new ISafetyInvariant[]
-        {
-            new FileSystemInvariant(workingDir),
-            new BashCommandInvariant(),
-            new ResourceInvariant(),
-        };
-        var builder = agent.AsBuilder();
-        builder = builder.Use(SafetyInvariantMiddleware.Create(
-            invariants, _loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
-        // MaxToolCalls safety net — prevents infinite tool loops if the LLM doesn't converge
-        var toolCallCount = 0;
-        builder = builder.Use((_, ctx, next, ct) =>
-        {
-            if (Interlocked.Increment(ref toolCallCount) > MaxToolCalls)
-            {
-                ctx.Terminate = true;
-                _logger.LogWarning("AutoDream: MaxToolCalls limit ({Limit}) reached, terminating", MaxToolCalls);
-                return new ValueTask<object?>(
-                    (object?)ToolResult.Error($"AutoDream: Maximum tool call limit ({MaxToolCalls}) reached."));
-            }
-            return next(ctx, ct);
-        });
-        builder = builder.Use(new ToolExecutionBudgetMiddleware(
-            logger: _loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
-        var pipelinedAgent = builder.Build();
+        var pipelinedAgent = OneCodeToolMiddleware
+            .Apply(agent.AsBuilder(), workingDir, _loggerFactory)
+            .Build();
 
         var messages = new List<ChatMessage> { new(ChatRole.User, prompt) };
 
@@ -376,6 +359,16 @@ public sealed class AutoDreamService : BackgroundService
         var now = DateTimeOffset.UtcNow;
         var projectRoot = GetCurrentProjectRoot();
 
+        // 载入现有条目（key → 条目），用于删除/覆盖前校验，保护用户手写记忆。
+        // PruneAsync 已对 manual 做淘汰豁免，此处是同一原则在写入路径上的落实。
+        // 用 LoadAllAsync（含过期）：过期的手写条目也须受保护，不能被 Agent 顺手清掉。
+        var userExisting = (await _entryStore.LoadAllAsync(MemoryScope.User, ct).ConfigureAwait(false))
+            .ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
+        var projectExisting = string.IsNullOrWhiteSpace(projectRoot)
+            ? new Dictionary<string, MemoryEntry>(StringComparer.OrdinalIgnoreCase)
+            : (await _entryStore.LoadAllAsync(MemoryScope.Project, ct).ConfigureAwait(false))
+                .ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
+
         // Group by scope to batch-write each MEMORY.md
         var userEntries = new List<MemoryEntry>();
         var projectEntries = new List<MemoryEntry>();
@@ -394,6 +387,17 @@ public sealed class AutoDreamService : BackgroundService
                 continue;
             }
 
+            // 安全闸：禁止使用 manual: 前缀。manual 是用户手写记忆的保留分类，
+            // AutoDream 写入的条目 Source 恒为 "autodream"，混用会让分类与 /memory 展示错乱。
+            if (key.StartsWith(ManualKeyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "AutoDream: change with key '{Key}' uses the reserved '{Prefix}' prefix, skipping",
+                    key, ManualKeyPrefix);
+                skipped++;
+                continue;
+            }
+
             // 显式 scope 校验：仅接受 "user"/"project"，其他值跳过。
             if (!string.Equals(change.Scope, "user", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(change.Scope, "project", StringComparison.OrdinalIgnoreCase))
@@ -407,9 +411,30 @@ public sealed class AutoDreamService : BackgroundService
             var scope = string.Equals(change.Scope, "user", StringComparison.OrdinalIgnoreCase)
                 ? MemoryScope.User
                 : MemoryScope.Project;
+            var existing = scope == MemoryScope.User ? userExisting : projectExisting;
 
             if (string.Equals(change.Action, "delete", StringComparison.OrdinalIgnoreCase))
             {
+                // 安全闸：只允许删除 AutoDream 自己写入的条目。用户手写的 manual 条目是显式意图，
+                // 与 PruneAsync 的淘汰豁免一致——否则 Agent 幻觉一条 delete 就能抹掉用户记忆。
+                if (!existing.TryGetValue(key, out var deleteTarget))
+                {
+                    _logger.LogWarning(
+                        "AutoDream: delete target '{Key}' not found in {Scope} scope, skipping",
+                        key, change.Scope);
+                    skipped++;
+                    continue;
+                }
+
+                if (string.Equals(deleteTarget.Source, ManualSource, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning(
+                        "AutoDream: refusing to delete user-authored entry '{Key}' (source={Source})",
+                        key, deleteTarget.Source);
+                    skipped++;
+                    continue;
+                }
+
                 if (scope == MemoryScope.User)
                     userDeleteKeys.Add(key);
                 else
@@ -432,6 +457,18 @@ public sealed class AutoDreamService : BackgroundService
             var value = AutoDreamOutputSanitizer.SanitizeValue(change.Value);
             if (string.IsNullOrEmpty(value))
             {
+                skipped++;
+                continue;
+            }
+
+            // 安全闸：不得覆盖用户手写条目。manual 前缀已在上面拒绝，
+            // 但用户也可能直接编辑 MEMORY.md 写入其他 key——按 Source 兜底。
+            if (existing.TryGetValue(key, out var current)
+                && string.Equals(current.Source, ManualSource, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "AutoDream: refusing to overwrite user-authored entry '{Key}' (source={Source})",
+                    key, current.Source);
                 skipped++;
                 continue;
             }

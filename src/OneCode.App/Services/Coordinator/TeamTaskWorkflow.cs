@@ -106,7 +106,11 @@ internal sealed class TeamTaskWorkflowCompiler
             .Where(task => effectiveDependencies[task.Id].Count == 0)
             .Select(task => taskExecutors[task.Id])
             .ToArray();
-        builder.AddFanOutEdge(dispatcher, roots, "dispatch-roots");
+        // W3-D: single-root / single-task graphs skip FanOut — plain edge keeps durable IDs stable.
+        if (roots.Length == 1)
+            builder.AddEdge(dispatcher, roots[0], "dispatch-single", false);
+        else
+            builder.AddFanOutEdge(dispatcher, roots, "dispatch-roots");
 
         foreach (var task in orderedTasks.Where(task => effectiveDependencies[task.Id].Count > 0))
         {

@@ -22,6 +22,20 @@ internal sealed class TeamRegistry(ILogger logger)
     public bool TryGet(string teamName, out TeamConfig config) =>
         _teams.TryGetValue(teamName, out config!);
 
+    /// <summary>
+    /// Returns member infos (AgentId + Role + IsOrchestrator) for a registered team; null if missing.
+    /// </summary>
+    public IReadOnlyList<OneCode.Core.Coordinator.TeamMemberInfo>? GetMemberInfos(string teamName) =>
+        TryGet(teamName, out var config)
+            ? config.Members
+                .Select(m => new OneCode.Core.Coordinator.TeamMemberInfo(
+                    m.AgentId,
+                    m.Role,
+                    m.Role is "orchestrator" or "lead"))
+                .ToList()
+                .AsReadOnly()
+            : null;
+
     public void Put(string teamName, TeamConfig config) => _teams[teamName] = config;
 
     public bool Remove(string teamName) => _teams.TryRemove(teamName, out _);

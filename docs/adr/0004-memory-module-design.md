@@ -1,8 +1,9 @@
 # 记忆模块架构设计
 
 **状态**: Accepted
-**日期**: 2026-07-17（§8 决策补充于 2026-08-15）
-**关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)
+**日期**: 2026-07-17（§8 决策补充于 2026-08-15；§11 治理与演进补充于 2026-09-16）
+**关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)、
+[MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)
 
 ## 语境
 
@@ -35,8 +36,9 @@ public interface IMemoryEntryStore
     Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(MemoryScope scope, CancellationToken ct = default);   // 含过期（管理命令用）
     Task UpsertAsync(MemoryScope scope, IEnumerable<MemoryEntry> entries, CancellationToken ct = default);
     Task<bool> RemoveAsync(MemoryScope scope, string key, CancellationToken ct = default);
+    Task RecordHitsAsync(MemoryScope scope, IReadOnlyList<string> keys, CancellationToken ct = default); // 使用反馈（仅写 HitCount/LastHitAt）
     Task ClearAsync(MemoryScope scope, CancellationToken ct = default);
-    Task<int> PruneAsync(MemoryScope scope, CancellationToken ct = default);   // 清理过期 + LRU 淘汰
+    Task<int> PruneAsync(MemoryScope scope, CancellationToken ct = default);   // 清理过期 + 按价值淘汰
 }
 ```
 
@@ -54,8 +56,10 @@ public sealed record MemoryEntry
     public required string Source { get; init; }       // "manual" | "autodream"
     public required string Category { get; init; }     // manual/fact/convention/lesson/correction
     public DateTimeOffset CreatedAt { get; init; }
-    public DateTimeOffset UpdatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }     // 仅内容变更时更新，使用反馈不会改它
     public DateTimeOffset? ExpiresAt { get; init; }    // null = 永不过期
+    public int HitCount { get; init; }                 // 被 search_memories 命中的次数（缺席旧文件读作 0）
+    public DateTimeOffset? LastHitAt { get; init; }    // 最近一次命中时刻
     public bool IsExpired => ExpiresAt.HasValue && DateTimeOffset.UtcNow > ExpiresAt.Value;
 
     public static string DeriveCategory(string key);   // 从 key 前缀推导
@@ -79,6 +83,8 @@ entry_count: 2
 - created_at: 2024-07-15T10:00:00Z
 - updated_at: 2024-07-16T10:00:00Z
 - expires_at: 2024-10-14T10:00:00Z
+- hit_count: 3
+- last_hit_at: 2024-07-16T09:30:00Z
 
 Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
@@ -94,6 +100,9 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 **序列化顺序**：`Source == "manual"` 优先，然后按 `UpdatedAt` 降序。手动记忆排在文件顶部，便于人工查阅。
 
+**使用反馈字段**：`hit_count` / `last_hit_at` 由 `RecordHitsAsync` 写入、由 `PruneAsync` 读取。
+从未命中时省略；旧文件缺失这两个字段时解析为 `0` / `null`（向后兼容）。
+
 **解析容错**：缺失 frontmatter 或部分条目损坏时跳过并继续解析剩余条目。条目通过 `^##\s+(.+)$` 正则识别 header 边界。
 
 ### 3. 文件实现特性
@@ -104,12 +113,13 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 | 并发控制 | 每个目录一把 `SemaphoreSlim`（`ConcurrentDictionary<string, SemaphoreSlim>` 缓存），写操作串行化；读操作无锁 |
 | 原子写入 | 写入 `.tmp` 临时文件 → `File.Replace`（已存在）或 `File.Move`（新建），读者永远不会看到半写状态 |
 | 过期处理 | 惰性清理：`LoadAsync` 过滤 `IsExpired`；`PruneAsync` 物理删除 |
-| 容量治理 | `MaxEntries = 200`，超出时按 `UpdatedAt` 升序 LRU 淘汰 |
+| 容量治理 | `MaxEntries = 200`；超出时按**使用价值**淘汰：`manual` 豁免 → `HitCount` 升序 → 同次数 `UpdatedAt` 最旧优先 |
+| 使用反馈 | `search_memories` 命中时经 `RecordHitsAsync` 递增 `HitCount` / 记 `LastHitAt`（**不改 `UpdatedAt`**，否则高频条目会显得“新”而躲过时间 tie-break） |
 | 摘要上限 | `MaxAutoRecalledInSummary = 8`，prompt 中 auto 条目摘要最多展示 8 条 |
 
 ### 4. 相关性检索评分算法
 
-`MemoryService.FindRelevantMemoriesAsync` 供 `search_memories` 工具与 prompt 注入共用。
+`MemoryService.FindRelevantMemoriesAsync` 供 `search_memories` 工具使用。
 
 **Query 分词**：正则 `[\p{L}\p{N}_-]{2,}` 提取 token（≥ 2 字符），过滤中英文停用词（`the`/`and`/`继续`/`实现`/`需要` 等）。
 
@@ -128,12 +138,11 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 ### 5. System Prompt 注入策略
 
-`MemoryService.LoadMemoryPromptAsync(cwd, query)` 构建注入段落，由 `PromptConfigBuilder` 填入 `{{memory_section}}` 占位符。
+`MemoryService.LoadMemoryPromptAsync(cwd)` 构建注入段落，由 `PromptConfigBuilder` 填入 `{{memory_section}}` 占位符。
 
 | 注入方式 | 触发时机 | 内容 |
 |---------|---------|------|
 | 摘要索引常驻 | 每次构建 system prompt | 全部 manual 条目 + auto 条目前 8 条，每条 Key + Value 首行（截断 80 字符） |
-| Query 相关性注入 | `query` 非空时 | 评分 Top 6 条目，Value 截断 500 字符，附作用域标签 |
 | 按需检索 | LLM 调用 `search_memories` 工具 | 评分 Top 6 条目，返回完整 Value |
 
 段落结构：
@@ -159,42 +168,45 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 **设计决策**：
 - 摘要索引常驻保证 LLM 知道"有什么记忆可用"，无需为获取目录额外调用工具
-- 构建 prompt 时若已知 query，直接拼入 Top 6 相关条目（截断 500 字符），避免 LLM 为基础上下文反复调用 `search_memories`
-- `search_memories` 作为 LLM 主动深入检索的补充渠道，返回完整 Value
+- `search_memories` 返回完整 Value（Top 6），作为 LLM 主动深入检索的渠道
 
-### 6. 会话记忆双向 Provider
+> 早期设计曾在构建 prompt 时按已知 `query` 拼入 Top 6 相关条目（`LoadMemoryPromptAsync` 的 `memoryQuery` 参数）。
+> 实测两个调用点（`InteractiveBootstrapService` / `CronJobExecutor`）均传 `null`，该分支从未生效。
+> 已移除（2026-09-15）。
 
-`SessionMemoryContextProvider` 继承 MAF `AIContextProvider`，实现 Provide（注入）+ Store（提取）双向交互。
+### 5.1 用户手写条目（`manual`）的保护边界
 
-#### 6.1 注入（Provide）
+`manual` 条目表达**用户显式意图**，因此有两条不可跨越的边界：
 
-每次 LLM 调用前：按 `Importance` 降序 → `UpdatedAt` 降序取 Top 5 条（`MaxInjectedMemories`），拼接为 `## Session memories` 系统消息。
+| 路径 | 保护方式 | 位置 |
+|---|---|---|
+| 容量淘汰 | `PruneAsync` 对 `Source == "manual"` **豁免**，永不被自动淘汰 | `MemoryEntryStore.PruneAsync` |
+| AutoDream 写入 | 拒绝 delete / upsert 用户手写条目；拒绝创建 `manual:` 前缀的 key | `AutoDreamService.ApplyConsolidationChangesAsync` |
 
-#### 6.2 提取（Store）四重节流
+**为何写入路径也必须守**：AutoDream 的输出是**不可信内容**（LLM 生成）。在补上这三道闸之前，
+一条幻觉的 `{"action":"delete","key":"manual:xxx"}` 就能抹掉用户手写记忆——与淘汰豁免的原则直接冲突。
 
-| 节流条件 | 阈值常量 | 说明 |
-|---------|---------|------|
-| 最小消息数 | `MinMessagesForExtraction = 4` | 会话过短不提取 |
-| 消息数增量 | ≥ 2 条（自上次提取后） | 无新消息则跳过；首次提取自动放行 |
-| 轮次间隔 | `MinTurnsBetweenExtractions = 5` | 避免每轮都提取 |
-| Token 增量 | `MinTokensBeforeExtraction = 2000` | 内容无明显增长则跳过 |
+**为何按 `Source` 而非仅按 key 前缀判定**：用户可以**直接编辑 `MEMORY.md`** 写入任意 key
+（不限于 `manual:` 前缀），故前缀检查只是第一道闸，`Source` 检查是兜底。
+两者分工：前缀闸防止 AutoDream **创建**保留分类；`Source` 闸防止它**删改**用户已有的条目。
 
-节流计数器通过 `ProviderSessionState<SessionMemoryState>` 持久化：`LastExtractedMessageCount` / `LastExtractedTurnCount` / `TotalTokenEstimate`。
+**为何禁止 AutoDream 写 `manual:` 前缀**：`Category` 由 key 前缀推导
+（`MemoryEntry.DeriveCategory`），而 AutoDream 写入的条目 `Source` 恒为 `"autodream"`。
+若允许它创建 `manual:` 前缀，会出现 `Category=manual` 但 `Source=autodream` 的矛盾条目，
+使分类语义与 `/memory` 展示错乱。
 
-#### 6.3 提取流程
+### 6. 会话记忆（已移除）
 
-1. 节流通过 → 构建最近 16 条消息 transcript（`TakeLast(16)`）
-2. 调用 fast model（`MaxOutputTokens=384`）生成摘要，最多取 6 条
-3. LLM 失败或返回空时回退到 `ExtractKeyFacts` 启发式
-4. 归一化 → 去重 → 合并写入（`MergeExtractedMemoriesAsync`）
+早期版本包含 `SessionMemoryContextProvider`（Provide + Store 双向 Provider）与 `SessionMemoryService`
+（会话事实提取）。**该子系统已删除**，原因：
 
-#### 6.4 启发式提取（兜底）
+1. 语义与 `MEMORY.md` 结构化条目重叠（区别仅在生命周期）
+2. 职责与压缩子系统（`App/Services/Compact/`）重叠（两者都从会话中提炼信息）
+3. 实现不完整：`SessionMemoryEntry.Importance` / `ExpiresAt` 无写入者（排序为 no-op）；
+   `MinTurnsBetweenExtractions` 严格支配「消息增量 ≥ 2」，后者不可达
+4. 其"从会话中提炼信息"的能力由 AutoDream 承担
 
-`ExtractKeyFacts` 扫描最近 24 条消息（`TakeLast(24)`），按句子切分（中英文标点 `.!?。！？；;` + 换行），保留满足以下任一条件的句子：
-- 含偏好信号词：`prefer`/`always`/`never`/`remember`/`important`/`deadline`/`must`/`should`/`use`/`don't`/`do not`/`avoid`/`priority`/`偏好`/`记住`/`不要`/`必须`/`优先`/`截止`
-- 用户消息且长度 ≥ 24 字符
-
-约束：长度 12~220 字符，过滤以 `/` 开头的命令。
+完整评估与理由见本节（§6）。
 
 ### 7. AutoDream 写入链路
 
@@ -205,7 +217,7 @@ _Use the `search_memories` tool to retrieve full memory content._
          →  SanitizeKey / SanitizeValue 清洗（防 MEMORY.md 结构注入）
          →  IMemoryEntryStore.UpsertAsync(scope, entries)
          →  MemoryEntryStore 写入对应 MEMORY.md（temp + 原子替换）
-         →  PruneAsync(scope) 清理过期 + LRU 淘汰（上限 200）
+         →  PruneAsync(scope) 清理过期 + 按价值淘汰（上限 200）
 ```
 
 | 维度 | 实现 |
@@ -226,7 +238,7 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 **决策**（2026-08-15 确立）：不为 Team 模式的多 Agent 团队引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不再实施）。Team 共享记忆需求由现有机制覆盖：
 
-- **共享知识库 = project 级 `MEMORY.md`**。Team 成员经 `SharedContextProviderBuilder.BuildCommon` 无条件获得 `MemoryFileContextProvider`（`search_memories` 工具），可检索 project + user 级条目——`PipelineProfile.TeamMember` 关闭的仅是 `SessionMemory`（主会话私有事实）与 `CodeAct`，MEMORY.md 检索通道始终开放。
+- **共享知识库 = project 级 `MEMORY.md`**。Team 成员经 `SharedContextProviderBuilder.BuildCommon` 无条件获得 `MemorySearchProviderFactory` 创建的 `search_memories` 工具，可检索 project + user 级条目——`PipelineProfile.TeamMember` 关闭的仅是 `CodeAct`，MEMORY.md 检索通道始终开放。
 - **写入统一收口**：AutoDream / `/memory` 命令 / `IMemoryEntryStore`，成员 Agent 不直接写（防结构注入安全边界，见「影响」节）。
 - **会话内成员协作**（如 reviewer 结论传递给 implementer）由编排机制承担（GroupChat 共享对话流 / Magentic 经 orchestrator 中转），不属于记忆职责。
 
@@ -241,51 +253,268 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 ### 9. DI 注册
 
-`ServiceCollectionExtensions.Memory.cs`（`RegisterMemoryServices`）：
+`src/OneCode.App/Services/Memory/MemoryServiceCollectionExtensions.cs`（`AddMemoryServices`）：
 
 ```csharp
 services.AddSingleton<IMemoryEntryStore>(sp => new MemoryEntryStore(
     sp.GetRequiredService<IWorkingDirectoryAccessor>(),
     sp.GetRequiredService<ILogger<MemoryEntryStore>>()));
+
 services.AddSingleton<MemoryService>();
 services.AddSingleton<IMemoryService>(sp => sp.GetRequiredService<MemoryService>());
-services.AddSingleton<SessionMemoryService>();
-services.AddSingleton<ISessionMemoryService>(sp => sp.GetRequiredService<SessionMemoryService>());
-
-// 同一方法内还注册了压缩子系统服务（CompactSessionDependencies / CompactService /
-// AutoCompactService / ReviewCacheService / CompactPromptBuilder / CompactApplier），
-// 见 compact-thresholds.md
 ```
 
-`ServiceCollectionExtensions.Advanced.cs`：
+AutoDream 服务在 `src/OneCode.App/Services/AutoDream/AutoDreamServiceCollectionExtensions.cs`（`AddAutoDreamServices`）：
 
 ```csharp
+services.AddSingleton<AutoDreamAgentDependencies>();
+services.AddSingleton<AutoDreamStorageDependencies>();
 services.AddSingleton<AutoDreamService>();
 services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 ```
 
-MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建（依赖每次调用的 workingDirectory / conversation）。
+> 压缩子系统（`CompactService` / `AutoCompactService` / `CompactPromptBuilder` 等）在独立的
+> `Services/Compact/CompactServiceCollectionExtensions.cs`（`AddCompactServices`），**不**在 `AddMemoryServices` 内，
+> 见 [compact-thresholds.md](../../docs/compact-thresholds.md)。
+> 按启动批次分桶的 `ServiceCollectionExtensions.*.cs` partial 类均已解散，由
+> `src/OneCode.Tests/RegistrationOwnershipTests.cs` 守卫禁止复活。
+
+> MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建（依赖每次调用的 workingDirectory / conversation）。
 
 ### 10. ContextProvider 装配
 
-`SharedContextProviderBuilder.ApplyProfileDefaults` 按 `PipelineProfile` 应用默认开关（`Worker`/`Explore`/`Plan` 关闭 LSP 诊断与 Shell 环境；`TeamMember` 关闭会话记忆与 CodeAct），随后 `BuildCommon(options)` 按以下顺序构建所有 Agent 共享的 ContextProvider：
+共享 ContextProvider 由 `SharedContextProviderBuilder.BuildCommon(profile, options)` 构建：该方法遍历
+`AgentCapability` 枚举，按 `PipelineProfileBehavior.For(profile)` 的能力集合逐项调用注册表工厂。
+**哪些 provider 属于哪个 profile 只由能力集合决定**（不再有"profile → bool 开关"的中间层）。
 
-| 顺序 | Provider | 开关 |
+| 顺序 | Provider | 能力（`AgentCapability`） |
 |------|---------|------|
-| 1 | MAF `AgentSkillsProvider` | `skillProviderHolder.Current != null` |
-| 2 | `MemoryFileContextProvider` | 始终添加 |
-| 3 | `SessionMemoryContextProvider` | `IncludeSessionMemory` |
-| 4 | `DesignContextProvider` | 始终添加 |
-| 5 | `LspDiagnosticContextProvider` | `IncludeLspDiagnostics` |
-| 6 | `TaskContextProvider`（运行时注入） | 始终添加 |
-| 7 | `ShellEnvironmentProvider` | `IncludeShellEnvironment` 且前台会话存在 shell executor |
-| 8 | `CodeActProvider` | `IncludeCodeAct` |
+| 1 | MAF `AgentSkillsProvider`（`SkillProviderFactory` 构建） | `Skills` |
+| 2 | `search_memories`（`MemorySearchProviderFactory` → MAF `TextSearchProvider`） | `MemorySearch` |
+| 3 | `DesignContextProvider` | `DesignContext` |
+| 4 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
+| 5 | `TaskContextProvider`（运行时注入） | `TaskContext` |
+| 6 | `ShellEnvironmentProvider` | `ShellEnvironment`（且前台会话存在 shell executor） |
+| 7 | `CodeActProvider` | `CodeAct` |
 
+> 注入顺序 = `AgentCapability` 枚举声明顺序，保证同一 profile 的 provider 顺序恒定。
+> 各 profile 的能力差异见 `PipelineProfileBehavior.For`（以「全集减去若干能力」形式表达）。
 > Team 子 Agent 专用 Provider（如 `TeamSystemPromptProvider`）由 `TeamAgentFactory` 在装配时追加。MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建。
+
+### 11. 记忆治理与演进方向
+
+> 本节补充于 2026-09-16。§1–§10 回答「记忆模块**长什么样**」（结构），本节回答「记忆模块**如何变好**」（治理）。
+
+结构正确不等于模块会变好。记忆模块的核心风险是随时间**膨胀、矛盾、不准确**——这是结构无法解决的，
+需要**治理**。2026-09-15 至 09-16 的一轮重构中确认了两个问题：
+
+1. **AutoDream 从未真正运行**（扫描目录写错，已修复）—— 最有价值的自动化机制此前一直空转
+2. **淘汰只看时间** —— 按 `UpdatedAt` 做 LRU 等价于「旧的先死」，与「用得多的应该留下」无关联
+
+#### 11.1 Recall 与 Retention 的职责划分（设计基线）
+
+记忆的两个根本问题必须由**不同主体**回答：
+
+| 问题 | 由谁决定 | 理由 |
+|---|---|---|
+| **Recall**（想起什么、何时想起） | ✅ **LLM** | 只有 LLM 知道当前任务需要什么。`search_memories` 工具为此存在 |
+| **Retention**（留下什么、留多久、何时删） | ❌ **不能给 LLM** | LLM 无全局视野，看不到记忆总量；无记账能力；倾向“多记”；无法自我否定 |
+
+**LLM 只做它擅长的语义判断**：
+
+- “这条新信息与那条旧记忆**是同一条**吗？”（→ 合并，复用 Key）
+- “这条新信息**推翻**了那条旧记忆吗？”（→ 取代，旧条目标记 superseded）
+- “这条信息**值得**留下吗？”（→ 过滤噪声）
+
+**LLM 不该做的**（宿主负责）：分配 Key、决定配额、决定 TTL、决定淘汰。
+
+> 现状已部分踩在这条线上——`autodream-consolidation.prompt` 让 LLM 输出 `key/scope/ttlHours`，
+> 再由 `AutoDreamService.ApplyConsolidationChangesAsync` 做校验、清洗、截断、配额。
+> 缺口在于缺少**冲突消解**这一环（§11.3）。
+
+#### 11.2 使用反馈驱动的淘汰（✅ 已实施 2026-09-16）
+
+**决策**：淘汰按**使用价值**而非时间，顺序为：
+
+1. `manual` 条目**豁免**——用户显式意图，永不自动淘汰
+2. 其余按 `HitCount` **升序**——从未被检索到的先走
+3. 同次数按 `UpdatedAt` **升序**——最旧的先走
+
+**数据基础**：`MemoryEntry.HitCount` / `LastHitAt`，由 `search_memories` 命中时经
+`IMemoryEntryStore.RecordHitsAsync` 回写。
+
+**两条关键约束**（违反任一条会使排序退化）：
+
+- **`RecordHitsAsync` 不得改动 `UpdatedAt`**。使用反馈不是内容变更；若 bump 时间戳，
+  高频命中条目会因“显得新”而躲过步骤 3 的 tie-break，排序失真。
+- **只统计显式检索，不统计 prompt 被动注入**。摘要索引每轮都注入所有条目，计入会让每条目每轮 +1，
+  信号被淹没。按需检索才是“模型认为这条有用”的证据。
+**`manual` 豁免的对称性**：淘汰路径豁免 `manual`（上表步骤 1），写入路径（AutoDream）也必须拒绝
+删改 `manual` 条目——否则"永不淘汰"可被一条 Agent 幻觉输出绕过。保护边界详见 §5.1。
+**为何不采用类别权重**：`correction`/`lesson` 权重高于 `fact` 看似合理，但引入调参维度且难以解释，
+而“从未被检索 = 低价值”已覆盖绝大多数场景。若后续发现高价值类别被误淘汰，再评估。
+
+代码：`src/OneCode.Core/Memory/MemoryEntry.cs`、`IMemoryEntryStore.cs`（`RecordHitsAsync` 契约）、
+`src/OneCode.App/Services/Memory/MemoryEntryStore.cs`（`PruneAsync` 淘汰排序）、
+`MemorySearchProviderFactory.cs`（命中回写）。
+
+#### 11.3 AutoDream 从“提取器”升级为“治理器”（⛔ 未实施）
+
+**方向**：AutoDream 当前只做**提取**（产出候选记忆）。这不够——记忆膨胀、矛盾、不准确
+**不是提取能解决的**：
+
+| 问题 | 当前实现 | 应有机制 |
+|---|---|---|
+| 记忆膨胀 | ~~LRU 200 条~~ → 已改按 `HitCount`（§11.2） | ✅ 已改善 |
+| 记忆矛盾 | prompt 提示 Agent“用 upsert 覆盖同 Key” | ⛔ **主动冲突检测**：与现有条目比对，显式合并/取代 |
+| 记忆不准 | 无验证 | ✅ 使用反馈闭环（§11.2） |
+
+**目标闭环**：
+
+```text
+会话历史
+   │
+   ▼
+[1] 提取 ─ 产出候选记忆（AutoDream 批量 或 StoreAIContextAsync 即时）
+   │
+   ▼
+[2] 冲突消解 ─ 与现有条目比对：重复→合并；矛盾→supersede；新增→入库   ⛔ 未实施
+   │
+   ▼
+[3] 价值评分 ─ value = f(命中次数, 手动标记, 新鲜度)                  ✅ 部分（§11.2）
+   │
+   ▼
+[4] 淘汰 ─ manual 永不淘汰；其余按价值                                 ✅ 已实施（§11.2）
+   │
+   ▼
+注入 LLM（命中时回写 HitCount / LastHitAt）→ 回到 [3]
+```
+
+- **冲突消解靠 LLM**：把“新候选 + 现有同类条目”一起给 LLM，输出 `merge / supersede / skip`。
+
+**两个前置缺口（必须先补，否则 [2] 无从发生）**：
+
+1. **LLM 现在看不到任何已有记忆**。`autodream-consolidation.prompt` 要求输出 "incremental changes"、
+   `"upsert" (add or update)`、`"delete" (remove an outdated entry)`，但全文未让 LLM 读到 `MEMORY.md`；
+   且工具集为 `Read/Glob/Grep`，而工具中间件挂 `FileSystemInvariant(workingDirectory)`，
+   **user 级 `~/.onecode/memory/MEMORY.md` 在项目根之外，LLM 读不到**。
+   → 当前"upsert 覆盖同 Key"实为**碰运气**：key 撞对了才更新，撞不对就新增一条平行记忆。
+   这解释了为何"异 key 但内容矛盾"无法被自动解决。
+2. **已有记忆索引的注入方式必须是 `AIContextProvider`，而非拼进 prompt 模板**。
+   `HarnessAgentOptions.AIContextProviders` 是 MAF 的既有扩展点（ADR 0007 §4），
+   而 `AutoDreamService.RunConsolidationAgentAsync` 是**唯一没设它**的 agent 构建点。
+   MAF 自身 `FileMemoryProvider` 注入记忆索引走的正是这条路径。任务指令留在 prompt 文件，
+   运行期数据走 provider —— 两者不应混在同一个模板里。
+
+**`Supersedes` 的归位**：它应作为 **LLM 输出 JSON 的字段**（指令：告诉宿主"我取代了谁"），
+**不应加到 `MemoryEntry` 上**。理由：宿主执行时会**硬删**被替代的旧条目，若同时往新条目写
+`Supersedes` 指向旧 key，该字段立刻成为**悬空引用**，且无任何读取方 —— 正是本项目已清理多轮的
+死字段。取代关系记日志即可。
+
+#### 11.4 即时捕获路径（⛔ 未实施，可选）
+
+MAF `AIContextProvider.StoreAIContextAsync` 在 exchange 结束时被调用，能拿到本轮完整对话
+（`InvokedContext` 携带 request + response）。可用它在每轮对话结束时即时捕获“用户纠正”和“失败教训”。
+
+| | AutoDream 批量扫描 | `StoreAIContextAsync` 即时捕获 |
+|---|---|---|
+| 触发 | 6 小时 + 3 会话门控 | 对话结束时 |
+| 数据源 | 扫 `~/.onecode/events/*.jsonl` | 内存中本轮对话 |
+| 记忆新鲜度 | 滞后数小时到数天 | 即时 |
+| 成本 | 全盘扫描 + 大 prompt | 轻量判断 |
+| 记忆过期问题 | 只能靠 TTL 猜 | **新信息立即覆盖旧信息** |
+
+**分工**：即时捕获负责“纠正/教训”这类高价值、时效性强的记忆；AutoDream 保留负责“跨会话归纳”
+（如“构建命令”这类需多次观察才稳定的知识）。两者写入同一 `MEMORY.md`，共用 §11.3 的治理闭环。
+
+**为何未做**：即时捕获会引入**每轮一次 LLM 调用**，与 `search_memories` 的免费回写不同量级。
+需先确认成本可接受，且 §11.3 的冲突消解先行——否则只是用更快的方式写入矛盾。
+
+#### 11.5 检索抽象与 SQLite（⛔ 未实施）
+
+当前 `MemoryService.Score` 是内存内联评分（全量加载 + 逐个打分）。**应把这一步抽成 `IMemoryIndex`**：
+文件后端用现状逻辑（200 条上限下性能无问题）；未来 SQLite 后端用 FTS5 下推为 SQL 查询。
+这样更换后端时 `MemoryService` / `AutoDreamService` / `MemoryCommand` **零修改**。
+
+**SQLite 结论：本期不引入。**
+
+| 维度 | 判断 |
+|---|---|
+| 收益 | 查询性能、FTS5 全文检索、并发写、事务一致性 |
+| 成本 | 新 NuGet 依赖（当前项目**无任何 SQLite 包**）+ 迁移逻辑 + 并发/锁模型重写 + 测试改造 |
+| 当前规模 | 单用户 CLI，200 条上限，单文件读写 |
+| 判定 | **收益不成立，成本成立** |
+
+**触发上 SQLite 的条件**（任一条满足即可立项）：
+
+1. 条目数稳定超过 ~1000 条
+2. 需要跨项目聚合检索
+3. 需要多进程并发写同一记忆库
+4. 需要向量检索 / 语义检索
+
+**预留方式**：先做 `IMemoryIndex` 抽取，不引入任何新依赖。
+
+#### 11.6 不引入 MAF `FileMemoryProvider`（重申 §1 决策并补论证）
+
+MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**语义不匹配**：
+
+| 维度 | `FileMemoryProvider` | OneCode 需求 |
+|---|---|---|
+| 写入者 | **LLM 自主调工具写** | LLM **禁止**直写（防结构注入，§1） |
+| 组织形态 | 一记忆一文件 + 索引 | 单文件结构化条目 |
+| 检索 | 正则 grep | token 打分 + Top-N 自动注入 |
+| 生命周期 | **无 TTL / 无淘汰** | TTL + 容量上限 |
+| 注入内容 | 仅索引（名 + 描述） | 摘要索引 + 全量 manual + Top-8 auto |
+| 自动整合 | **无** | AutoDream |
+
+**最关键的一点**：它是“让 LLM 自己决定记什么”，而 OneCode 的安全模型是“LLM 不能直接写记忆”。
+这不仅是实现差异，是**架构冲突**。
+
+**结构性约束**：`FileMemoryProvider` 为 `sealed`，**不能派生**，只能组合/包装；其
+`WorkingFolder` 策略硬编码在 `HarnessAgent` 内，外部无法覆盖；`FileSystemAgentFileStore`
+仍标记 `[Experimental(MAAI001)]`。
+
+**可借鉴的模式**（非实现）：
+
+1. `FileMemoryProviderOptions.Instructions` 可配置化——`AIContextProvider` 的注入文案应外移到
+   prompt 文件，而非硬编码字符串
+2. `ProviderSessionState<T>`——OneCode 已在用
+3. `AgentFileStore` 的解耦力度——`IMemoryEntryStore` 已是同类（按 scope 而非按路径）
+
+**不该借鉴**：LLM 持有写工具、一记忆一文件、无生命周期管理。
+
+#### 11.7 验证状态与已知覆盖缺口
+
+> 本节补充于 2026-09-16，记录 §11.2 落地后的**验证边界**——哪些结论已被守卫测试保护、哪些仍是缺口。
+> 过程证据（缺陷复现、逐阶段清单、实测数字）原属 `docs/plan/memory-module-refactor-plan.md`，
+> 该文档已按 [ADR 0007](./0007-maf-integration-boundaries.md) 处理计划文档的先例删除（结论入 ADR，引用已迁移）。
+
+| # | 项 | 状态 | 守卫手段 |
+|---|---|---|---|
+| 1 | 使用反馈驱动的淘汰（§11.2） | ✅ 已覆盖 | `MemoryEntryStoreTests` 三个淘汰测试；已反证（写反排序即失败） |
+| 2 | 命中回写不改 `UpdatedAt`（§11.2 约束 1） | ✅ 已覆盖 | `MemoryEntryStoreTests.RecordHitsAsync_DoesNotBumpUpdatedAt` |
+| 3 | 只统计显式检索（§11.2 约束 2） | ✅ 已覆盖 | `MemoryServiceTests.LoadMemoryPromptAsync_DoesNotRecordHits`（被动注入）+ `MemorySearchProviderFactoryTests`（显式检索按 scope 回写） |
+| 4 | `manual` 写入路径三道闸（§5.1） | ✅ 已覆盖 | `MemoryEntryStoreTests` 5 条守卫测试；三闸分别反证 |
+| 5 | AutoDream 扫描目录契约 | ✅ 已覆盖 | `AutoDreamProjectAwarenessTests`（走真实 `FileSessionEventStore` 写出） |
+| 6 | `/insights` 事件格式契约 | ✅ 已覆盖 | `InsightsCommandTests`（真实事件写出 → 断言统计数字） |
+| 7 | **AutoDream 端到端**（真实门控 + LLM 产出条目） | ⚠️ **未验证** | 仅单元测试覆盖门控分支；真实链路（4 层门控 → Agent → `MEMORY.md` 落盘）无自动化 |
+| 8 | 会话记忆删除后的行为回归（§6） | ✅ 结构上不可能 | 子系统已物理删除，无调用方可回归 |
+
+**项 7 的人工验证步骤**（需真实环境与模型调用，不适合单元测试）：
+
+1. 在目标项目目录用 CLI 正常产生 **≥ 3 个会话**（会话文件落在 `~/.onecode/events/*.jsonl`，
+   且首行 `payload.working_directory` 等于该项目根）
+2. 删除 `{cwd}/.onecode/memory/last_consolidated_at`（重置时间门控；该文件存在时 6 小时内不再触发）
+3. 执行 `/memory autodream trigger`，随后 `/memory autodream status` 观察 `Last consolidated` 是否推进
+4. 断言 `MEMORY.md` 实际新增条目；或查日志 `AutoDream completed: {In}+{Out} tokens, {N} memory entries written`
+
+> **为何 4 层门控使端到端难以自动化**：启用检查 → 时间门控（≥ 6h）→ 扫描节流（10min，持久化）→
+> 会话门控（≥ 3）。`Trigger()` 只发送信号，**不绕过任何门控**（`AutoDreamService.TryConsolidateAsync`）。
+> 门控分支本身已由单元测试直接调用 `TryConsolidateAsync` 覆盖，故缺口仅在"真实 LLM 产出 → 落盘"这一段。
 
 ## 影响
 
-- **存储模型简化**：消除 `memory-store/` 目录与 `IMemoryStore` 抽象，结构化记忆统一到 `MEMORY.md`——子系统收敛为 2 个（结构化条目记忆 + 会话记忆）；团队共享记忆不设独立子系统，由 project 级 `MEMORY.md` 覆盖（§8）
+- **存储模型简化**：消除 `memory-store/` 目录与 `IMemoryStore` 抽象，结构化记忆统一到 `MEMORY.md`——子系统收敛为 1 个（结构化条目记忆）；会话记忆子系统已删除；团队共享记忆不设独立子系统，由 project 级 `MEMORY.md` 覆盖（§8）
 - **后端可替换**：`IMemoryEntryStore` 基于 `MemoryScope` 操作，未来可无缝替换为 SQLite 等后端，无需修改 `MemoryService` / `AutoDreamService` / `MemoryCommand`
 - **自动积累闭环**：AutoDream 直接写入 `MEMORY.md`，用户知识库可持续自动丰富，无需手动迁移
 - **安全边界明确**：Agent 不通过工具直接写 `MEMORY.md`，所有程序化写入经 `IMemoryEntryStore` 或 AutoDream 清洗管线，防止结构注入
@@ -295,7 +524,7 @@ MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建
 
 ### 新增存储后端
 
-实现 `IMemoryEntryStore`，在 `ServiceCollectionExtensions.Memory.cs` 替换注册即可，调用方零修改。
+实现 `IMemoryEntryStore`，在 `src/OneCode.App/Services/Memory/MemoryServiceCollectionExtensions.cs` 的 `AddMemoryServices` 替换注册即可，调用方零修改。
 
 ### 新增记忆类别
 

@@ -79,8 +79,7 @@ public sealed class CronJobExecutor : ICronJobExecutor
             // shutdown still surfaces promptly.
             await _preconnector.EnsureConnectedAsync(ct).ConfigureAwait(false);
             _cachedSystemPrompt ??= await _promptConfigBuilder.BuildSystemPromptAsync(
-                memoryQuery: null,
-                ct: ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false);
 
             // Ensure a foreground conversation exists before submitting.
             await _sessionManager.EnsureActiveSessionAsync(

@@ -125,7 +125,7 @@ public sealed partial class ChatInputView
 
         // Route remaining text (non-image) through HandlePastedText for folding.
         // NOTE: Do NOT filter empty lines — filtering reduces line count and
-        // breaks the >MaxVisibleLines folding threshold detection.
+        // breaks the >LargePasteLineThreshold folding threshold detection.
         var remaining = string.Join("\n", otherContent);
         if (!string.IsNullOrEmpty(remaining))
             HandlePastedText(remaining, isFullText: false);
@@ -134,7 +134,7 @@ public sealed partial class ChatInputView
     }
 
     /// <summary>
-    /// Handles pasted text: if the content exceeds <see cref="ChatTextEditor.MaxVisibleLines"/>
+    /// Handles pasted text: if the content exceeds <see cref="ChatTextEditor.LargePasteLineThreshold"/>
     /// lines, collapse it into a one-line summary and store the real content for submission.
     /// </summary>
     /// <param name="text">The pasted text. When <paramref name="isFullText"/> is true,
@@ -148,7 +148,7 @@ public sealed partial class ChatInputView
         foreach (var c in normalized)
             if (c == '\n') lineCount++;
 
-        if (lineCount > ChatTextEditor.MaxVisibleLines)
+        if (lineCount > ChatTextEditor.LargePasteLineThreshold)
         {
             var id = _attachmentRegistry.RegisterTextFold(normalized, lineCount);
             var token = PendingAttachmentRegistry.TextFoldTag(id, lineCount);

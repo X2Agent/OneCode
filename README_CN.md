@@ -1,6 +1,6 @@
 # OneCode .NET — 生产级 CLI AI 编程助手
 
-> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.19 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
+> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.21.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
 
 > **免责声明**: 本仓库内容仅用于技术研究和科研爱好者交流学习参考，**严禁任何个人、机构及组织将其用于商业用途、盈利性活动、非法用途及其他未经授权的场景。** 若内容涉及侵犯您的合法权益、知识产权或存在其他侵权问题，请及时联系我们，我们将第一时间核实并予以删除处理。
 
@@ -37,7 +37,7 @@
 | 异步模型 | Task + async/await |
 | 包管理 | NuGet（Central Package Management，版本统一由 `src/Directory.Packages.props` 固定） |
 | 测试框架 | xUnit v3 + NSubstitute + FluentAssertions |
-| Agent 框架 | MAF 1.19 (ChatClientAgent + 中间件管道) |
+| Agent 框架 | MAF 1.21.0 (HarnessAgent + 中间件管道) |
 | 发布方式 | .NET 自包含单文件 |
 
 > **已知限制**：
@@ -56,30 +56,31 @@ src/
 │   ├── CliModeDetector.cs      #   快速路径检测
 │   └── FastPathDispatcher.cs   #   特殊模式快速分发
 │
-├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（431 文件）
-│   ├── Tools/                  #   30+ 个工具（通过 AddTool<T> 注册）
+├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（472 文件）
+│   ├── Tools/                  #   31 个工具（通过 AddToolInstance<T> 注册）
 │   ├── Commands/               #   44 斜杠命令
-│   ├── Middleware/              #   MAF 中间件管道
-│   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 18 子模块）
+│   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 22 子模块，各带 XxxServiceCollectionExtensions）
+│   ├── Query/                  #   查询编排（ChatService / QueryStreamEngine / StreamingSession）
 │   ├── Tui/                    #   Terminal.Gui v2 全屏界面
-│   └── ServiceCollectionExtensions*.cs  #   DI 注册
+│   └── Session/                #   会话上下文与事件溯源存储
 │
-├── OneCode.Core/                # 纯接口与领域模型（156 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
-│   ├── Permissions/            #   权限系统（9 种策略 + Bash 分类器）
-│   ├── Hooks/                  #   10 种钩子事件 + 3 种执行器
+├── OneCode.Core/                # 纯接口与领域模型（167 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
+│   ├── Permissions/            #   权限系统（8 种模式 + Bash/PowerShell 分类器）
+│   ├── Hooks/                  #   11 种钩子事件 + 3 种执行器
 │   ├── Keybindings/            #   按键绑定系统
 │   ├── Commands/               #   命令抽象
 │   └── Domain/                 #   领域模型
 │
-├── OneCode.Infrastructure/      # 外部系统适配（97 文件）
+├── OneCode.Infrastructure/      # 外部系统适配（103 文件）
 │   ├── Mcp/                    #   MCP 协议（5 种传输）
-│   ├── Agent/                  #   MAF 管道构建 + 中间件实现
-│   ├── Memory/                 #   文件系统记忆存储
-│   └── Config/                 #   YAML 配置管理 + 常量定义
+│   ├── Agent/                  #   MAF 管道构建 + Harness opt-out
+│   ├── Middleware/             #   MAF 函数级中间件 + Invariants + Contracts
+│   ├── Ai/                     #   ChatClient 工厂与装饰器
+│   └── Config/                 #   settings.json 配置管理 + 常量定义
 │
 ├── OneCode.Automation/          # 后台调度服务（Cron / ModelCatalog 刷新 / YOLO 规则加载，9 文件）
 │
-└── OneCode.Tests/               # xUnit v3 测试套件（222 文件，1685+ Fact，129+ Theory）
+└── OneCode.Tests/               # xUnit v3 测试套件（262 文件，1942 Fact + 150 Theory）
     └── AGENTS.md               #   测试规范约束
 ```
 
@@ -94,17 +95,17 @@ src/
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
-│  OneCode.App  (431 文件)                                        │
-│  工具实现 · 命令 · TUI · 服务组合 · MAF 集成中枢                  │
-│  30+ Tools · 44 Commands · MAF 中间件 · ServiceCollectionExtensions │
+│  OneCode.App  (472 文件)                                        │
+│  工具实现 · 命令 · TUI · 服务组合 · MAF 集成中枢                 │
+│  31 Tools · 44 Commands · Query 编排 · 领域自有 DI 注册类       │
 └───────────┬─────────────────────────────────┬───────────────────┘
             │                                 │
 ┌───────────▼──────────┐          ┌───────────▼───────────────────┐
-│  OneCode.Core    │◄─────────│  OneCode.Infrastructure        │
-│  (156 文件)          │          │  (97 文件)                     │
+│  OneCode.Core        │◄─────────│  OneCode.Infrastructure        │
+│  (167 文件)          │          │  (103 文件)                    │
 │  纯接口与领域模型     │          │  外部系统适配                  │
-│  Permissions/Hooks/  │          │  MCP · Memory · Config ·     │
-│  Tasks/Tools/Domain  │          │  Agent/MAF · LSP · CodeIndex │
+│  Permissions/Hooks/  │          │  MCP · Ai · Config ·         │
+│  Tasks/Tools/Domain  │          │  Agent/MAF · Middleware · LSP │
 └──────────────────────┘          └──────────────┬────────────────┘
                                                  │
                                     ┌────────────▼────────────────┐
@@ -112,7 +113,7 @@ src/
                                     │  后台调度：Cron / 刷新 / YOLO │
                                     └─────────────────────────────┘
 
-            OneCode.Tests (222 文件) → 测试以上所有层
+            OneCode.Tests (262 文件) → 测试以上所有层
 ```
 
 **依赖方向**：Cli → App → Infrastructure → Core（单向；App 另引用 Automation）。`Automation` 仅依赖 Core + Infrastructure，通过 DI 反向注入 App 实现的接口（如 `ICronJobExecutor`）。Core 层保持纯抽象，不引入外部实现依赖。
@@ -126,7 +127,7 @@ src/
 | 1 | Plan Mode 规划优先模式 | 95% | `PlanModeService` + `SubmitPlan`/`UpdatePlanStep` 工具 |
 | 2 | Subagents 并行子 Agent | 97% | `AgentTool` + `ParallelAgentsTool` + `ForkedAgentRunner` |
 | 3 | Skills 斜杠命令工作流 | 92% | `BundledSkills`（9 个内置）+ 文件/MCP 技能 |
-| 4 | Hooks 生命周期扩展 | 95% | 10 事件 × 3 执行器（Command / Notification / Http） |
+| 4 | Hooks 生命周期扩展 | 95% | 11 事件 × 3 执行器（Command / Notification / Http） |
 | 5 | MCP Servers 外部服务集成 | 90% | `McpConnectionManager`（5 种传输协议） |
 | 6 | AGENTS.md 目录级约束 | 88% | 8 个 AGENTS.md 约束文档（仓库 / src / 各项目） |
 | 7 | Memory 跨会话记忆 | 95% | `MemoryService` + `AutoDreamService` |
@@ -134,12 +135,12 @@ src/
 | 9 | Multi-file Edits 跨文件编辑 | 88% | `EditTool`（精确匹配）+ `WriteTool` + `ApplyWorkspaceEditTool` |
 | 10 | Git Integration | 92% | 6 个 Git 命令（branch / commit / diff / rebase / review / stash） |
 | 11 | Deep Reasoning 深度思考 | 88% | `EffortThinking`（4 级强度） |
-| 12 | Web Search 网络搜索 | 87% | `WebSearchTool`（Brave + DuckDuckGo 双引擎） |
+| 12 | Web Search 网络搜索 | 87% | `WebSearchTool`（Tavily + DuckDuckGo 故障转移） |
 | 13 | Terminal Execution | 92% | `BashTool`（含 powershell 方言）+ `BackgroundRunTool` |
 | 14 | Headless Mode CI/CD 模式 | 90% | 无 TTY 自动进入无交互路径；权限由 `permissionMode` 配置 |
 | 15 | Code Review 代码审查 | 85% | `/review` 斜杠命令（--staged / LSP / blame / 增量） |
 | 16 | Sandboxed Execution 沙箱 | 85% | `HyperlightCodeActService`（默认启用，工作目录只读暴露为 `/input`） |
-| 17 | Background Tasks 后台任务 | 92% | `TaskTool` + `CronCreate/CronList/CronDelete/CronPause/CronResume` |
+| 17 | Background Tasks 后台任务 | 92% | `TaskTool` + `Cron` 工具（create/list/delete/pause/resume） |
 
 **综合完成度：17/17 FULL · 平均 91%**
 
@@ -219,7 +220,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 
 ## 工具系统
 
-工具通过 `AddTool<T>` 扩展方法在 DI 注册时统一登记（`ServiceCollectionExtensions.Tools.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 在运行时反射解析为 `AIFunction`，共 31 个工具。
+工具通过 `AddToolInstance<T>` 扩展方法在 DI 注册时统一登记（`src/OneCode.App/Tools/ToolServiceCollectionExtensions.cs` + `OneCode.Automation` 的 Cron 工具），由 `ToolCatalog` 消费**显式 AIFunction 工厂**构建工具列表（无反射），共 31 个工具。
 
 ### Shell 与后台执行
 
@@ -254,7 +255,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 | 工具 | 功能 |
 |------|------|
 | WebFetch | 抓取网页（HTTP→Markdown；SPA/JS 页面返回降级提示，由模型决定是否用 BrowserFetch 渲染） |
-| WebSearch | 网络搜索（Brave + DuckDuckGo） |
+| WebSearch | 网络搜索（Tavily + DuckDuckGo 故障转移） |
 | BrowserFetch | 真实无头浏览器抓取（按需连接内置 playwright MCP，一次调用完成渲染，返回 ARIA 快照） |
 
 ### Agent / 子代理
@@ -270,7 +271,7 @@ ONECODE_MODEL=deepseek-v4-flash-free
 | 工具 | 功能 |
 |------|------|
 | Task | 后台任务管理 |
-| CronCreate / CronList / CronDelete / CronPause / CronResume | 跨会话定时任务 |
+| Cron | 跨会话定时任务（`action` = create / list / delete / pause / resume，单工具 action 路由） |
 
 ### Plan Mode
 
@@ -305,9 +306,9 @@ ONECODE_MODEL=deepseek-v4-flash-free
 ### MAF Agent 管道
 
 ```
-IChatClient → .AsBuilder() → 注入 8 种 AIContextProvider
+IChatClient → .AsBuilder() → 注入共享 7 种 AIContextProvider（+ Main 模式专属）
     ↓
-ChatClientAgent
+HarnessAgent
     ↓
 [Run 级中间件 — 包裹整个 Agent Run]
 .Use(BudgetGuardRunMiddleware)        ← 预算熔断（pre-execution 检查，token 超限短路）
@@ -321,28 +322,30 @@ ChatClientAgent
 .Use(PermissionAndLimitMiddleware)    ← 权限校验 + 工具调用上限
 .Use(StateMachineMiddleware)          ← 状态机管理
 .Use(EditTransactionMiddleware)       ← 编辑事务（可回滚的原子操作）
-.Use(VerificationMiddleware)          ← 编辑后验证（编译/测试）
-.Use(ToolExecutionBudgetMiddleware)   ← 工具执行预算（防止无限循环）
+.Use(EditGuardMiddleware)             ← 编辑契约前置校验 + 编辑后验证（编译/测试）
+.Use(ToolExecutionBudgetMiddleware)   ← 工具执行结果预算（防止无限循环）
 .Use(ToolResultUnwrapMiddleware)      ← ToolResult 解包
-.Use(ContractMiddleware)              ← 行为契约验证
-    ↓
-.UseOpenTelemetry()                   ← 审计日志（通过 ActivitySource 转发到 ILogger）
+.UseToolApproval(...)                 ← MAF 工具审批（Harness 未接管时）
     ↓
 .Build() → AIAgent
 ```
 
-**8 种 AIContextProvider**：
+> 工具调用时序观测由 Harness 默认启用的 OpenTelemetry 提供（`DisableOpenTelemetry` 保持 false），OneCode 不再重复挂一层。
 
-| Provider | 用途 |
+**共享 AIContextProvider（7 种，由 `SharedContextProviderBuilder.BuildCommon` 按能力枚举装配）**：
+
+| Provider | 能力（`AgentCapability`） |
 |----------|------|
-| `MemoryFileContextProvider` | 按需记忆检索（`search_memories` 工具触发） |
-| `SessionMemoryContextProvider` | 会话级事实记忆自动提取与注入 |
-| `PlanModeAttachmentProvider` | Plan 模式指令注入 |
-| `AgentSkillsProvider` | Skills 热替换（文件变更自动重载） |
-| `AgentModeProvider` | 工作模式感知（Build / Plan / Team / Goal） |
-| `ShellEnvironmentProvider` | Shell 执行环境上下文 |
-| `HyperlightCodeActProvider` | Hyperlight 沙箱执行上下文 |
-| `CompactionProvider` | 上下文压缩（超出 token 预算时自动触发） |
+| `SkillProviderFactory` → MAF `AgentSkillsProvider` | `Skills` |
+| `MemorySearchProviderFactory` → MAF `TextSearchProvider`（`search_memories`） | `MemorySearch` |
+| `DesignContextProvider` | `DesignContext` |
+| `LspDiagnosticContextProvider` | `LspDiagnostics` |
+| `TaskContextProvider` | `TaskContext` |
+| `ShellEnvironmentProvider` | `ShellEnvironment` |
+| `CodeActProvider`（Hyperlight 沙箱，MAF `HyperlightCodeActProvider`） | `CodeAct` |
+
+> Main 路径另追加 `ModeInstructionProvider`（取代 MAF `AgentModeProvider`，仅注入指令不给 `mode_set` 工具）与模式专属 Provider（Plan/Build/Goal）。
+> `CompactionProvider` **不在此列表**——它经 ChatClient builder 层注入（`.AsBuilder().UseAIContextProviders(...)`），见 [compact-thresholds.md](docs/compact-thresholds.md)。
 
 ### 四种工作模式
 
@@ -358,7 +361,7 @@ ChatClientAgent
 
 ### 权限与安全系统
 
-9 种 `PermissionMode`：
+8 种 `PermissionMode`：
 
 | 模式 | 行为 |
 |------|------|
@@ -368,9 +371,8 @@ ChatClientAgent
 | AcceptEdits | 自动批准文件编辑 |
 | BypassPermissions | 跳过所有权限检查 |
 | DontAsk | 不询问，直接拒绝危险操作 |
-| Bubble | 气泡式权限提示 |
-| GoalAuto | GOAL 模式专用：自主执行不中断，但有安全边界 |
-| Team | TEAM 模式专用：多 Agent 协作，危险命令走事件审批 |
+| GoalAuto | GOAL 模式自动派生：自主执行不中断，危险 Shell 直接 Deny |
+| Team | TEAM 模式自动派生：多 Agent 协作，危险命令走事件审批 |
 
 **12 层渐进式安全带机制**：核心循环 → 工具调度 → 计划 → 子代理 → 按需知识 → 上下文压缩 → 持久化任务 → 后台任务 → 代理团队 → 团队协议 → 自主代理 → 工作树隔离。
 
@@ -395,11 +397,11 @@ ChatClientAgent
 
 ### 记忆系统
 
-三级作用域：User（全局永久 `~/.onecode/memory/`）/ Session（当前会话）/ Repo（仓库本地 `.onecode/memory/`）。`AutoDreamService` 后台自动整合记忆（四重门控 + 跨进程文件锁，配置走 `settings.json` 的 `autodream.*` 键）。
+两级作用域：User（全局永久 `~/.onecode/memory/MEMORY.md`）/ Project（仓库本地 `{cwd}/.onecode/memory/MEMORY.md`）。`AutoDreamService` 后台自动整合记忆（四重门控 + 跨进程文件锁，配置走 `settings.json` 的 `autodream.*` 键）。
 
 ### Hook 系统
 
-10 个钩子事件覆盖全生命周期（PreToolUse / PostToolUse / Notification / UserPromptSubmit / SessionStart / Stop / StopFailure / PreCompact / PostCompact / SessionEnd），3 种执行器（Command / Notification / Http）。退出码 `2` 可阻断工具调用。
+11 种钩子事件覆盖全生命周期（PreToolUse / PostToolUse / Notification / UserPromptSubmit / SessionStart / Stop / StopFailure / PreCompact / PostCompact / SessionEnd / GoalStageInvoke），3 种执行器（Command / Notification / Http）。退出码 `2` 可阻断工具调用。
 
 ### MCP 集成
 
@@ -505,7 +507,7 @@ ChatClientAgent
 | **Agent 间消息路由** | `TeamOrchestrationService` 多 Agent 协作编排，Channel<T> 消息传递 |
 | **AutoDream 记忆整合** | 后台自动提取关键信息写入记忆文件 |
 | **Git Worktree 管理** | `EnterWorktreeTool` / `ExitWorktreeTool`，任务级隔离 |
-| **Cron 定时任务** | `CronCreate` / `CronList` / `CronDelete` / `CronPause` / `CronResume`，跨会话持续运行 |
+| **Cron 定时任务** | 单 `Cron` 工具（`action` = create/list/delete/pause/resume），跨会话持续运行 |
 | **自包含单文件发布** | .NET 10 self-contained + single-file |
 | **多级上下文压缩** | MAF 自动压缩 + 手动 `/compact`（全文/部分）|
 | **Token 精确估算** | `TokenBreakdownEstimator` 多模型 token 精确计算 |

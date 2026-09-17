@@ -186,11 +186,11 @@ public sealed class JsonWorkflowRunRegistry : IWorkflowRunRegistry
                 return record;
             }
             return record with
-                {
-                    PendingRequest = request,
-                    Version = record.Version + 1,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                };
+            {
+                PendingRequest = request,
+                Version = record.Version + 1,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
         }, ct).ConfigureAwait(false);
     }
 

@@ -1,14 +1,9 @@
-using Microsoft.Agents.AI.Tools.Shell;
+using OneCode.Core.Exec;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Remote;
 
 namespace OneCode.App.Tools;
 
-/// <summary>
-/// Shared helper for shell-based tool execution (Bash, PowerShell).
-/// Provides path validation, SSH execution, and output formatting utilities.
-/// </summary>
+/// <summary>Shared helper for shell-based tool execution (Bash, PowerShell).</summary>
 public static class ShellExecutionHelper
 {
     public const int DefaultTimeoutMs = 120_000;
@@ -52,43 +47,12 @@ public static class ShellExecutionHelper
     public static string FormatResult(string command, int exitCode, string output) =>
         $"Command: {command}\nExit code: {exitCode}\nOutput:\n{output.TrimEnd()}";
 
-    /// <summary>
-    /// Converts a <see cref="ShellResult"/> + optional warning into a <see cref="ToolResult"/>.
-    /// Shared by BashTool (both dialects) for local and SSH execution paths.
-    /// </summary>
-    public static ToolResult ToToolResult(ShellResult shellResult, string command, string? warning = null)
+    /// <summary>Converts a shell execution result + optional warning into a <see cref="ToolResult"/>.</summary>
+    public static ToolResult ToToolResult(ShellExecutionResult shellResult, string command, string? warning = null)
     {
         var output = BuildOutput(shellResult.Stdout, shellResult.Stderr);
         if (!string.IsNullOrWhiteSpace(warning))
             output = $"[warning] {warning}\n{output}";
-        if (shellResult.Truncated)
-            output += "\n[Output truncated using head/tail strategy]";
-
-        var formatted = FormatResult(command, shellResult.ExitCode, output);
-        return shellResult.ExitCode == 0
-            ? ToolResult.Success(formatted)
-            : ToolResult.Error(formatted, "Fix the command and retry.");
-    }
-
-    /// <summary>
-    /// Executes a shell command via SSH using <see cref="SshShellExecutor"/>.
-    /// Shared by the shell tool — eliminates the duplicated
-    /// <c>ExecuteViaSshAsync</c> private method from both tools.
-    /// </summary>
-    public static async Task<ToolResult> ExecuteViaSshAsync(
-        SshRemoteService ssh, string command, int timeoutSeconds, CancellationToken ct)
-    {
-        var timeoutMs = ClampTimeoutMs(timeoutSeconds);
-        await using var executor = new SshShellExecutor(ssh, new SshShellExecutorOptions
-        {
-            Timeout = TimeSpan.FromMilliseconds(timeoutMs),
-            MaxOutputBytes = MaxOutputChars,
-        });
-        var shellResult = await executor.RunAsync(command, ct).ConfigureAwait(false);
-
-        var output = BuildOutput(shellResult.Stdout, shellResult.Stderr);
-        if (string.IsNullOrWhiteSpace(output))
-            output = $"[ssh] Command exited with code {shellResult.ExitCode}";
         if (shellResult.Truncated)
             output += "\n[Output truncated using head/tail strategy]";
 

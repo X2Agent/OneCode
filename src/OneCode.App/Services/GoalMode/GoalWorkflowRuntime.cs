@@ -139,7 +139,7 @@ internal sealed class GoalWorkflowRuntime(
 
         var step = state.Plan[state.CurrentIndex];
         // Fix-7/N-01：守卫不依赖游标位置——resume 到 index 0 时同样受剩余尝试额度约束。
-        if (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalSubGoalExecutor.MaxAttemptsPerSubGoal)
+        if (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalLoopDefaults.MaxAttemptsPerSubGoal)
         {
             var skippedEvidence = new GoalStepExecutionEvidence(
                 step.Id,

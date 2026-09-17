@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
-using OneCode.Core.Collections;
 using OneCode.Core.Domain;
 
 namespace OneCode.Infrastructure.Agent;
@@ -109,26 +108,6 @@ public static class SessionStateExtensions
         => stateBag.SetEditsSinceLastBuild(0);
 
     // 集合类型（直接用泛型 API，T : class 满足）
-
-    /// <summary>
-    /// 获取或初始化最近工具调用记录缓冲区。
-    /// 未设置时创建容量为 <paramref name="capacity"/> 的 <see cref="FixedSizeRingBuffer{T}"/>。
-    /// 原子 check-then-act。
-    /// </summary>
-    public static FixedSizeRingBuffer<ToolCallRecord> GetOrInitializeRecentToolCalls(
-        this AgentSessionStateBag stateBag, int capacity = 50)
-    {
-        lock (GetLock(stateBag))
-        {
-            var buf = stateBag.GetValue<FixedSizeRingBuffer<ToolCallRecord>>(SessionStateKeys.RecentToolCalls);
-            if (buf is not null)
-                return buf;
-
-            buf = new FixedSizeRingBuffer<ToolCallRecord>(capacity);
-            stateBag.SetValue(SessionStateKeys.RecentToolCalls, buf);
-            return buf;
-        }
-    }
 
     /// <summary>
     /// 获取或初始化已修改文件路径集合。

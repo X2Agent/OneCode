@@ -884,9 +884,12 @@ Hook 仅在**受信任工作区**中触发。`HookPolicyService.IsCurrentWorkspa
 
 ## 11. 扩展指南
 
+> **DI 注册类真相源**：`src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices()`。
+> 按下述步骤增改代码即可，无需修改其他文件（组合根 `OneCodeApp.Create` 已调用 `AddHookServices`）。
+
 ### 11.1 新增执行器类型
 
-如需支持新的执行器类型（如 `Webhook` / `Lambda` / `Redis`）：
+如需支持新的执行器类型（如 `Webhook` / `Redis`）：
 
 1. **扩展 `HookType` 枚举**（`OneCode.Core/Hooks/HookTypes.cs`）：
 
@@ -896,7 +899,7 @@ public enum HookType
     Command,
     Notification,
     Http,
-    Lambda,  // 新增
+    Webhook,  // 新增
 }
 ```
 
@@ -908,32 +911,35 @@ public static HookType Parse(string? type) => type?.ToLowerInvariant() switch
     "command" => HookType.Command,
     "notification" => HookType.Notification,
     "http" => HookType.Http,
-    "lambda" => HookType.Lambda,  // 新增
+    "webhook" => HookType.Webhook,  // 新增
     _ => HookType.Command,
 };
 ```
 
-3. **实现 `IHookExecutor`**（`OneCode.App/Services/Hooks/LambdaHookExecutor.cs`）：
+3. **实现 `IHookExecutor`**（新文件放 `OneCode.App/Services/Hooks/`）——参照已有的 `CommandHookExecutor`：
 
 ```csharp
-public sealed class LambdaHookExecutor : IHookExecutor
+public sealed class WebhookHookExecutor : IHookExecutor
 {
-    public HookType Type => HookType.Lambda;
+    public HookType Type => HookType.Webhook;
 
     public async Task<HookResult?> ExecuteAsync(
         HookPayload payload, HookConfig config, CancellationToken ct)
     {
-        // 实现调用逻辑
+        // 实现调用逻辑；null 表示无结果
         return null;
     }
 }
 ```
 
-4. **DI 注册**（`ServiceCollectionExtensions.Business.cs`）：
+4. **DI 注册**（`src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices`）：
 
 ```csharp
-services.AddSingleton<IHookExecutor, LambdaHookExecutor>();
+services.AddSingleton<IHookExecutor, WebhookHookExecutor>();
 ```
+
+> **分发机制**：`HookExecutionService` 经 `IEnumerable<IHookExecutor>` 注入，按每个执行器的 `Type` 属性分发——
+> **不是** Keyed Services。新增执行器只需追加一行 `AddSingleton<IHookExecutor, X>()`。
 
 ### 11.2 新增通知渠道
 
@@ -950,7 +956,7 @@ public sealed class SlackNotificationProvider(HttpClient httpClient, ILogger<Sla
 }
 ```
 
-2. **DI 注册**（`ServiceCollectionExtensions.Business.cs`）：
+2. **DI 注册**（`src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices`）：
 
 ```csharp
 services.AddSingleton<INotificationProvider, SlackNotificationProvider>();

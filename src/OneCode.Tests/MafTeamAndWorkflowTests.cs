@@ -98,7 +98,8 @@ public sealed class MafTeamOrchestrationTests
             taskWorkflowHost,
             clarificationHost,
             new OneCode.App.Services.Runtime.RequestPortGate(approvalHost, clarification),
-            teamRunStore);
+            teamRunStore,
+            new TeamRegistry(NullLogger.Instance));
     }
 
     [Fact]

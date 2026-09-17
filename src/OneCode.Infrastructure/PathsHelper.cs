@@ -1,7 +1,6 @@
 
 using OneCode.Core.Results;
 using OneCode.Infrastructure.Config;
-using CoreConstants = OneCode.Core.Constants;
 
 using OneCode.Core.IO;
 namespace OneCode.Infrastructure;
@@ -21,8 +20,8 @@ public static class PathsHelper
     public const long MaxFileReadSize = 10 * 1024 * 1024;
 
     /// <summary>
-    /// 用户主目录（~）。优先级：HOME → USERPROFILE → Environment.SpecialFolder.UserProfile → CurrentDirectory。
-    /// 缓存为 Lazy 以避免重复 P/Invoke。
+    /// 用户主目录（~），由 .NET 的 UserProfile 特殊目录提供。
+    /// 缓存为 Lazy 以避免重复调用系统目录 API。
     /// </summary>
     public static string UserHome => s_userHome.Value;
 
@@ -33,10 +32,8 @@ public static class PathsHelper
 
     private static string ResolveUserHome()
     {
-        return Environment.GetEnvironmentVariable(CoreConstants.EnvVars.Home)
-            ?? Environment.GetEnvironmentVariable(CoreConstants.EnvVars.UserHomeWindows)
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            ?? Environment.CurrentDirectory;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return string.IsNullOrWhiteSpace(home) ? Environment.CurrentDirectory : home;
     }
 
     /// <summary>

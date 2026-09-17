@@ -22,7 +22,6 @@ public static class PlatformServiceCollectionExtensions
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<LocalAgentFileStore>();
         services.AddSingleton<IFileSystem>(sp => sp.GetRequiredService<LocalAgentFileStore>());
-        services.AddSingleton<AgentFileStore>(sp => sp.GetRequiredService<LocalAgentFileStore>());
         services.AddSingleton<OneCode.Core.IO.IClipboardService, ClipboardService>();
         services.AddSingleton<OneCode.Core.ITokenEstimator, OneCode.Infrastructure.TokenEstimator>();
 

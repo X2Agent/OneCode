@@ -149,11 +149,12 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.App/Services/AutoDream/AutoDreamService.cs](../src/OneCode.App/Services/AutoDream/AutoDreamService.cs) |
 | 类型 | `BackgroundService`（Singleton + HostedService 双注册） |
 | 执行时机 | 定时轮询（每小时 1 次，硬编码安全网）+ 外部 `Trigger()` 信号（如 `/memory autodream trigger` 命令） |
-| 职责 | 四重门控后启动轻量 Agent 整理会话记忆，增量变更 JSON 合并写入 `MEMORY.md` |
+| 职责 | 四重门控后启动轻量 Agent 整理**会话历史**，增量变更 JSON 合并写入 `MEMORY.md` |
 | 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor` |
 
 双注册模式说明：`AddSingleton<AutoDreamService>()` + `AddHostedService(sp => sp.GetRequiredService<AutoDreamService>())`，
 确保既可通过 DI 获取实例调用 `Trigger()`，又让 `BackgroundService.ExecuteAsync` 随宿主自动启停。
+注册位置：`src/OneCode.App/Services/AutoDream/AutoDreamServiceCollectionExtensions.cs` 的 `AddAutoDreamServices()`。
 
 详见 [AutoDream 记忆整合](#5-autodream-记忆整合)。
 
@@ -162,7 +163,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 属性 | 值 |
 |------|-----|
 | 文件 | [OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs](../src/OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs) |
-| 类型 | `BackgroundService`（注册于 `ServiceCollectionExtensions.Business.cs`） |
+| 类型 | `BackgroundService`（注册于 `src/OneCode.App/Services/PlanMode/PlanWorkflowServiceCollectionExtensions.cs`） |
 | 执行时机 | `PeriodicTimer` 每 **5 秒**扫描 + `AttachSession` 时立即触发一次 |
 | 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing`/`Verifying` 状态与持久化 BuildRun 对账后由幂等派发器续跑；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
 | 依赖 | `IPlanAggregateStore`、`IPlanWorkflowApplicationService`、`IBuildRunStore`、`IPlanAgentRunDispatcher` |
@@ -219,15 +220,15 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 
 ### 4.2 Cron 工具
 
-通过 AI 工具暴露 5 个操作：
+通过单个 `Cron` AI 工具的 `action` 参数暴露 5 个操作（旧版 5 个独立工具已合并）：
 
-| 工具 | 风险等级 | 说明 |
+| `action` | 风险等级 | 说明 |
 |------|---------|------|
-| `CronCreate` | Safe | 创建定时任务，支持标准 5 字段 cron 表达式 |
-| `CronList` | ReadOnly | 列出所有定时任务 |
-| `CronDelete` | Destructive | 按 ID 删除定时任务 |
-| `CronPause` | Safe | 暂停任务（保留历史，不删除） |
-| `CronResume` | Safe | 恢复暂停的任务（重算 NextRunAt，不补执行错过的） |
+| `create` | Safe | 创建定时任务，支持标准 5 字段 cron 表达式 |
+| `list` | ReadOnly | 列出所有定时任务 |
+| `delete` | Destructive | 按 ID 删除定时任务 |
+| `pause` | Safe | 暂停任务（保留历史，不删除） |
+| `resume` | Safe | 恢复暂停的任务（重算 NextRunAt，不补执行错过的） |
 
 ### 4.3 CronJobEntry 字段
 
@@ -301,12 +302,12 @@ AutoDream **默认开启**，无需任何配置。两个自然门控（时间 + 
 
 1. 门控检查（四重，任一不通过即退出）
 2. 获取跨进程文件锁（`FileStream` + `FileShare.None`，原子获取）——锁文件在 `{cwd}/.onecode/memory/autodream.lock`
-3. 扫描 `~/.onecode/sessions/*.jsonl` 统计**当前项目**的新会话（按 session 文件首行的 `working_directory` 字段过滤）
+3. 扫描 `~/.onecode/events/*.jsonl` 统计**当前项目**的新会话（按事件信封的 `payload.working_directory` 字段过滤）
 4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`session_count` 变量）
 5. 启动轻量 `ChatClientAgent`（仅 Read/Glob/Grep 只读工具）
 6. Agent 输出结构化 JSON 数组
 7. 解析增量变更 JSON 数组后，按 `scope` 写入 `IMemoryEntryStore`：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md`（Agent 输出经 `SanitizeKey`/`SanitizeValue` 清洗，防 MEMORY.md 结构注入）
-8. 清理过期/超容量记忆条目（`IMemoryEntryStore.PruneAsync`，按 `MemoryScope.User`/`Project` 分别调用，移除过期条目 + LRU 驱逐超容量条目）
+8. 清理过期/超容量记忆条目（`IMemoryEntryStore.PruneAsync`，按 `MemoryScope.User`/`Project` 分别调用，移除过期条目 + 按使用价值驱逐超容量条目）
 9. 更新 `last_consolidated_at` 时间戳（仅成功时更新，存入 `{cwd}/.onecode/memory/`）
 
 ### 5.5 写入位置与项目隔离
@@ -416,7 +417,11 @@ services.AddModelCatalogRefresh();
 services.AddYoloRuleStoreLoader();
 ```
 
-**App 层**：直接在 `ServiceCollectionExtensions.*.cs` 中通过 `AddHostedService<T>` 注册。
+**App 层**：在每个领域目录的 `XxxServiceCollectionExtensions.cs` 中通过 `AddHostedService<T>` 注册（如
+`Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices`、
+`Services/AutoDream/AutoDreamServiceCollectionExtensions.cs` 的 `AddAutoDreamServices`）。
+组合根 `OneCodeApp.Create` 保留显式有序的 `AddXxx()` 调用列表，调用顺序即 HostedService 启动顺序
+（由 `ServiceCollectionSnapshotTests.HostedServices_ResolveInRegistrationOrder` 锁定）。
 
 ---
 

@@ -95,10 +95,9 @@ internal sealed class TeamAgentFactory(
         if (!string.IsNullOrWhiteSpace(systemPrompt))
             contextProviders.Add(new TeamSystemPromptProvider(systemPrompt));
 
-        contextProviders.AddRange(pipelineDeps.SharedContextBuilder.BuildCommon(
-            SharedContextProviderBuilder.ApplyProfileDefaults(
-                PipelineProfile.TeamMember,
-                new AgentContextProviderOptions { WorkingDirectory = cwd })));
+        contextProviders.AddRange(pipelineDeps.ContextPipeline.BuildShared(
+            PipelineProfile.TeamMember,
+            new AgentContextProviderOptions { WorkingDirectory = cwd }));
 
         var pipelineOptions = pipelineDeps.PipelineFactory.BuildOptions(new SubAgentPipelineRequest
         {
@@ -133,7 +132,6 @@ internal sealed class TeamAgentFactory(
             ServiceProvider = serviceProvider,
             ChatClientContextProviders = [compactionProvider],
             AgentContextProviders = contextProviders,
-            ToolMetadata = toolSources.ToolCatalog?.Metadata,
             PipelineOptions = pipelineOptions,
         }).Agent;
     }

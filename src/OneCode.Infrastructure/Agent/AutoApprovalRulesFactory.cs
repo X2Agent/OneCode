@@ -1,68 +1,69 @@
 using Microsoft.Agents.AI;
 using OneCode.Core.Permissions;
-using OneCode.Core.Tools;
 
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
-/// 基于 <see cref="PermissionProfile"/> 生成 MAF ToolApprovalAgent 的 AutoApprovalRules（单一来源）。
+/// Builds MAF <see cref="ToolApprovalAgent"/> <c>AutoApprovalRules</c> from the same
+/// deterministic source as Layer-1 permission: <see cref="PermissionProfiles.Check"/>.
+/// Auto-approve only when the check returns <see cref="PermissionDecision.Allow"/>.
+/// Does not invoke <see cref="IPermissionChecker"/> / YOLO (those stay on the permission middleware path).
 /// </summary>
 public static class AutoApprovalRulesFactory
 {
-    /// <summary>创建基于 Profile 的自动审批规则列表。</summary>
-    public static List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> Create(
-        PermissionProfile profile)
-    {
-        return
-        [
-            // MAF skills 只读工具（load_skill / read_skill_resource）自动放行；
-            // 走 AIContextProvider，不经过 OneCode PermissionChecker。
-            AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule,
-
-            // Profile 驱动的自动审批
-            (ToolAutoApprovalRuleContext ctx) =>
-            {
-                var fc = ctx.FunctionCallContent;
-                if (profile.AutoApproveAllTools)
-                    return new ValueTask<bool>(true);
-
-                if (profile.DenyAllNonReadOnly)
-                {
-                    if (fc.Name is "Bash" && profile.AutoApproveReadOnlyShell)
-                    {
-                        var input = fc.Arguments is not null
-                            ? JsonSerializer.SerializeToElement(fc.Arguments)
-                            : JsonSerializer.SerializeToElement(new { });
-                        return new ValueTask<bool>(
-                            PermissionCheckHelpers.IsReadOnlyShell(fc.Name, input));
-                    }
-                    return new ValueTask<bool>(false);
-                }
-
-                if (profile.AutoApproveFileWrites && ToolNames.FileWriteTools.Contains(fc.Name))
-                    return new ValueTask<bool>(true);
-
-                if (fc.Name is "Bash" && profile.AutoApproveReadOnlyShell)
-                {
-                    var input = fc.Arguments is not null
-                            ? JsonSerializer.SerializeToElement(fc.Arguments)
-                            : JsonSerializer.SerializeToElement(new { });
-                    return new ValueTask<bool>(
-                        PermissionCheckHelpers.IsReadOnlyShell(fc.Name, input));
-                }
-
-                return new ValueTask<bool>(false);
-            }
-        ];
-    }
-
     /// <summary>
-    /// 从 PermissionMode 获取 Profile 并生成规则。
+    /// Create rules for <paramref name="mode"/> using an empty path/rules context
+    /// (working directory = <see cref="Environment.CurrentDirectory"/>). Prefer the
+    /// overload that passes pipeline security fields when building a real agent.
     /// </summary>
     public static List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> Create(
         PermissionMode mode)
+        => Create(
+            mode,
+            Environment.CurrentDirectory,
+            rulesBySource: null,
+            additionalWorkingDirectories: null,
+            sessionAllowlist: null);
+
+    /// <summary>Create rules bound to the same security snapshot as Permission middleware.</summary>
+    public static List<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>> Create(
+        PermissionMode mode,
+        string workingDirectory,
+        IReadOnlyDictionary<string, PermissionRuleGroup>? rulesBySource,
+        IReadOnlyDictionary<string, AdditionalWorkingDirectory>? additionalWorkingDirectories,
+        HashSet<string>? sessionAllowlist)
     {
-        var profile = PermissionProfiles.GetProfile(mode);
-        return Create(profile);
+        var permContext = new ToolPermissionContext
+        {
+            Mode = mode,
+            WorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory)
+                ? Environment.CurrentDirectory
+                : workingDirectory,
+            RulesBySource = rulesBySource
+                ?? new Dictionary<string, PermissionRuleGroup>(),
+            AdditionalWorkingDirectories = additionalWorkingDirectories
+                ?? new Dictionary<string, AdditionalWorkingDirectory>(),
+            SessionAllowlist = sessionAllowlist
+                ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+        };
+
+        return
+        [
+            // MAF skills read-only tools (load_skill / read_skill_resource) auto-approve;
+            // they are an AIContextProvider path, not OneCode PermissionChecker.
+            AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule,
+
+            (ToolAutoApprovalRuleContext ctx) =>
+            {
+                var fc = ctx.FunctionCallContent;
+                var input = fc.Arguments is not null
+                    ? JsonSerializer.SerializeToElement(fc.Arguments)
+                    : JsonSerializer.SerializeToElement(new { });
+
+                var result = PermissionProfiles.Check(mode, fc.Name, input, permContext);
+                return new ValueTask<bool>(result.Decision == PermissionDecision.Allow);
+            }
+        ];
     }
 }
+

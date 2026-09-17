@@ -1,7 +1,5 @@
 using OneCode.Core.Config;
-using Microsoft.Agents.AI;
 using OneCode.App.Services.Context;
-using OneCode.App.Services.Skills;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using System.Text;
@@ -9,11 +7,9 @@ using System.Text;
 namespace OneCode.App.Services;
 
 public sealed class PromptConfigBuilder(
-    ILogger<PromptConfigBuilder> logger,
     IConfigManager configManager,
     IMemoryService memoryService,
     ContextBuilder contextBuilder,
-    PromptRuntimeDependencies runtimeDeps,
     PromptComposer promptComposer,
     ToolMetadataRegistry toolMetadataRegistry)
 {
@@ -37,17 +33,15 @@ public sealed class PromptConfigBuilder(
     /// this builder no longer returns a conversation runner (breaks the PromptConfigBuilder ↔ ChatService cycle).
     /// </summary>
     /// <remarks>
-    /// Memory strategy: <paramref name="memoryQuery"/> should remain null to avoid token duplication.
-    /// System prompt only includes entrypoint index (MEMORY.md) so the LLM knows what's available.
-    /// Detailed topic retrieval is handled on-demand by <c>MemoryFileContextProvider.search_memories</c> tool.
+    /// Memory strategy: the system prompt only includes the MEMORY.md entrypoint index so the LLM
+    /// knows what's available. Detailed topic retrieval is handled on-demand by the
+    /// <c>search_memories</c> tool (MAF TextSearchProvider).
     /// Memory and user context are injected once via default.prompt placeholders — do not append again.
     /// </remarks>
-    public async Task<string> BuildSystemPromptAsync(
-        string? memoryQuery,
-        CancellationToken ct)
+    public async Task<string> BuildSystemPromptAsync(CancellationToken ct)
     {
         var memorySection = await memoryService
-            .LoadMemoryPromptAsync(Environment.CurrentDirectory, memoryQuery, ct).ConfigureAwait(false);
+            .LoadMemoryPromptAsync(ct).ConfigureAwait(false);
 
         var systemContext = await contextBuilder.BuildSystemContextAsync(
             Environment.CurrentDirectory, ct).ConfigureAwait(false);
@@ -56,8 +50,8 @@ public sealed class PromptConfigBuilder(
             Environment.CurrentDirectory, additionalDirs, ct).ConfigureAwait(false);
 
         // MCP 预连接已移出本链路（启动不再被握手阻塞）：由 McpStartupPreconnector 在
-        // trust 通过后后台执行；本方法只负责构建提示词 + 首次技能提供者组装，
-        // 已连接 MCP 服务器的 skill:// 技能源在其完成后由 RebuildSkillProviderAsync 原子补挂。
+        // trust 通过后后台执行。技能源在每次 agent run 时解析，因此预连接期间缺席的
+        // MCP skills 会在其连上后自动出现，无需重建 provider。
 
         var provider = configManager.Current.Effective.Provider?.ToLowerInvariant();
         var contextWindow = configManager.Current.Effective.OllamaContextWindow;
@@ -67,30 +61,7 @@ public sealed class PromptConfigBuilder(
         var systemPrompt = await BuildDefaultPromptContentAsync(
             systemContext, userContext, memorySection, availableTools, ct).ConfigureAwait(false);
 
-        await RebuildSkillProviderAsync(ct).ConfigureAwait(false);
-
         return systemPrompt;
-    }
-
-    /// <summary>
-    /// 重建技能提供者（文件/内置技能 + 已连接 MCP 服务器的 skill:// 技能源）并原子替换。
-    /// 系统提示词构建时调用一次；MCP 预连接完成后由 <c>McpStartupPreconnector</c>
-    /// 再次调用，把预连接期间缺席的 MCP skills 补挂进 <see cref="SkillProviderHolder"/>。
-    /// </summary>
-    public async Task RebuildSkillProviderAsync(CancellationToken ct)
-    {
-        try
-        {
-            var builder = new AgentSkillsProviderBuilder();
-            AgentSkillsProviderFactory.ConfigureFileAndBundledSkills(
-                builder, runtimeDeps.SkillCatalog);
-            await runtimeDeps.McpSkillsIntegrator.ApplyAsync(builder, ct).ConfigureAwait(false);
-            runtimeDeps.SkillProviderHolder.Replace(builder.Build());
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to rebuild AgentSkillsProvider with MCP skills");
-        }
     }
 
     /// <summary>

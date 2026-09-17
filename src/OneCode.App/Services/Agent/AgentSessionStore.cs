@@ -13,6 +13,9 @@ namespace OneCode.App.Services.Agent;
 /// </summary>
 public sealed class AgentSessionStore
 {
+    // W5-B: Interactive multi-turn LLM history = Session transcript → Messages.
+    // mafSession persists StateBag / provider state; InMemory history is cleared when Messages are supplied (W5-A).
+
     private const string MafSessionMetadataKey = "mafSession";
 
     private readonly ISessionConversationAccess _sessionManager;
@@ -125,6 +128,25 @@ public sealed class AgentSessionStore
     }
 
     /// <summary>读取 mafSession 持久化时的 epoch 快照（未记录时返回 0）。</summary>
+
+    /// <summary>
+    /// W5-A: when the interactive path already injects Session transcript as
+    /// <c>MainAgentRunOptions.Messages</c>, clear InMemory chat history so MAF does not
+    /// double-feed prior turns. Other <see cref="AgentSession.StateBag"/> entries remain.
+    /// </summary>
+    /// <remarks>
+    /// Product multi-turn history source of truth is the Session event transcript
+    /// (<c>GetChatHistory</c>). <see cref="InMemoryChatHistoryProvider"/> stays for the
+    /// current run / StateBag; <c>mafSession</c> still persists non-history provider state.
+    /// </remarks>
+    public void ClearInMemoryChatHistoryWhenTranscriptOwnsHistory(AgentSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        AgentSessionExtensions.SetInMemoryChatHistory(session, []);
+        _logger.LogDebug(
+            "Cleared InMemory chat history after session restore; Session transcript owns multi-turn LLM history (W5-A).");
+    }
+
     private static int GetMafSessionEpoch(Conversation conversation)
     {
         if (conversation.Metadata.TryGetValue(MafSessionInvalidator.MafSessionEpochKey, out var raw))

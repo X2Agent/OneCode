@@ -600,10 +600,19 @@ public sealed class AgentPipelineBuilderTests
             ctx,
             new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker"));
 
+        full.EnableStateMachine.Should().BeTrue();
         full.EnableTaskRecovery.Should().BeTrue();
         full.EnableBehaviorContracts.Should().BeTrue();
+        worker.EnableStateMachine.Should().BeFalse();
         worker.EnableTaskRecovery.Should().BeFalse();
         worker.EnableBehaviorContracts.Should().BeTrue();
+
+        var team = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.TeamMember,
+            ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "team"));
+        team.EnableStateMachine.Should().BeFalse();
+        team.EnableTaskRecovery.Should().BeFalse();
     }
 
     [Fact]
@@ -617,6 +626,8 @@ public sealed class AgentPipelineBuilderTests
 
         explore.EnableVerification.Should().BeFalse();
         explore.EnableBehaviorContracts.Should().BeFalse();
+        explore.EnableStateMachine.Should().BeFalse();
+        explore.EnableTaskRecovery.Should().BeFalse();
         explore.BehaviorContracts.Should().BeNull();
     }
 }

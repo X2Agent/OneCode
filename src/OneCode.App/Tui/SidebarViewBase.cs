@@ -59,7 +59,7 @@ internal abstract class SidebarViewBase : View
         CurrentWidth = Math.Clamp(DefaultWidth, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
         Width = CurrentWidth;
         Height = Dim.Fill();
-        SetScheme(TuiTheme.ConversationArea);
+        SetScheme(TuiStyles.ConversationArea);
 
         // 内容区从标题行下方开始；左侧留 1 列边距与对话区分隔。
         _content.X = 1;

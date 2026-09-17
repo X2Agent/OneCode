@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -59,14 +58,14 @@ public sealed class MainAgentRunnerTests : IDisposable
         var promptManager = new PromptManager();
         var sessionManager = Substitute.For<ISessionManager>();
 
-        var (_, mainContextBuilder) = TestSupport.TestAgentContextProviderAssembly.Create(
+        var (sharedBuilder, mainContextBuilder) = TestSupport.TestAgentContextProviderAssembly.Create(
             sessionManager,
             modelManager,
             _modeProvider,
             promptManager,
             planWorkflowService: Substitute.For<IPlanWorkflowApplicationService>());
         _runner = new MainAgentRunner(
-            mainContextBuilder,
+            new AgentContextPipeline(sharedBuilder, mainContextBuilder),
             _pipelineAssembly,
             new CompactionProviderBuilder(chatClient, NullLoggerFactory.Instance, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
             new AgentSessionStore(null, NullLogger<AgentSessionStore>.Instance),
@@ -210,14 +209,17 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task AutoApprovalRulesFactory_AcceptEditsMode_DeniesNonReadOnlyShellCommands()
+    public async Task AutoApprovalRulesFactory_AcceptEditsMode_ApprovesNonDestructiveShell()
     {
         _modeProvider.SetCurrentMode(PermissionMode.AcceptEdits);
         var rules = InvokeAutoApprovalRules();
 
-        // Destructive shell commands NOT auto-approved
+        // AcceptEdits: non-destructive shell ⇒ Check Allow ⇒ auto-approve (B1-det).
+        (await EvaluateAsync(rules, MakeCall("Bash", "sudo apt-get install foo"))).Should().BeTrue();
+        (await EvaluateAsync(rules, MakeCall("Bash", "npm install"))).Should().BeTrue();
+
+        // Destructive shell falls through to EvaluateRules ⇒ Ask ⇒ not auto-approved.
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf /tmp/x"))).Should().BeFalse();
-        (await EvaluateAsync(rules, MakeCall("Bash", "sudo apt-get install foo"))).Should().BeFalse();
     }
 
     [Fact]
@@ -232,54 +234,46 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task AutoApprovalRulesFactory_PlanMode_ApprovesReadOnlyShellOnly()
+    public async Task AutoApprovalRulesFactory_PlanMode_ApprovesWhenPermissionCheckAllows()
     {
         _modeProvider.SetCurrentMode(PermissionMode.Plan);
         var rules = InvokeAutoApprovalRules();
 
-        // 只读工具（Read/Grep）在 Layer 1 PermissionChecker 已 Allow，不进入 MAF 规则层。
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
-        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeFalse();
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
+        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeTrue();
 
-        // Read-only shell approved (aligns with PlanModePermissionStrategy)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "ls"))).Should().BeTrue();
 
-        // Non-read-only shell and write tools denied (PermissionChecker layer decides)
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf /"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Edit"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("ApplyWorkspaceEdit"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("CustomTool"))).Should().BeFalse();
     }
-
     [Fact]
-    public async Task AutoApprovalRulesFactory_DefaultMode_ApprovesReadOnlyShellOnly()
+    public async Task AutoApprovalRulesFactory_DefaultMode_ApprovesWhenPermissionCheckAllows()
     {
         _modeProvider.SetCurrentMode(PermissionMode.Default);
         var rules = InvokeAutoApprovalRules();
 
-        // 只读工具（Read/Grep/WebFetch）在 Layer 1 PermissionChecker 已 Allow，不进入 MAF 规则层。
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
-        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeFalse();
-        (await EvaluateAsync(rules, MakeCall("WebFetch"))).Should().BeFalse();
+        // B1-det: Allow from PermissionProfiles.Check ⇒ MAF auto-approve.
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
+        (await EvaluateAsync(rules, MakeCall("Grep"))).Should().BeTrue();
+        (await EvaluateAsync(rules, MakeCall("WebFetch"))).Should().BeTrue();
 
-        // Read-only shell approved (auto-approved via IsReadOnlyShell)
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "ls -la"))).Should().BeTrue();
-        // PowerShellTool 已并入 BashTool；powershell 方言经由 shell 参数识别
         (await EvaluateAsync(rules, MakeCall("Bash", "Get-ChildItem", shell: "powershell"))).Should().BeTrue();
 
-        // File writes / destructive shell / unknown tools denied
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Edit"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("ApplyWorkspaceEdit"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf /tmp/x"))).Should().BeFalse();
         (await EvaluateAsync(rules, MakeCall("CustomTool"))).Should().BeFalse();
     }
-
     [Fact]
-    public async Task AutoApprovalRulesFactory_DontAskMode_DeniesAllToolsExceptLayer1ReadOnly()
+    public async Task AutoApprovalRulesFactory_DontAskMode_DeniesUnlessRulesAllow()
     {
         _modeProvider.SetCurrentMode(PermissionMode.DontAsk);
         var rules = InvokeAutoApprovalRules();
@@ -293,55 +287,16 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task AutoApprovalRulesFactory_AutoMode_ApprovesReadOnlyShellOnly()
+    public async Task AutoApprovalRulesFactory_AutoMode_ApprovesWhenPermissionCheckAllows()
     {
-        // PermissionMode.Auto behaves like Default in this rule table
-        // (the YOLO classifier lives in PermissionChecker, not here).
+        // Deterministic Check only — YOLO stays in PermissionChecker, not Factory.
         _modeProvider.SetCurrentMode(PermissionMode.Auto);
         var rules = InvokeAutoApprovalRules();
 
-        // 只读工具在 Layer 1 已 Allow；MAF 规则层不单独放行。
-        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeFalse();
+        (await EvaluateAsync(rules, MakeCall("Read"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Write"))).Should().BeFalse();
-        // Auto mode falls through to the Default branch — read-only shell approved
         (await EvaluateAsync(rules, MakeCall("Bash", "git status"))).Should().BeTrue();
         (await EvaluateAsync(rules, MakeCall("Bash", "rm -rf x"))).Should().BeFalse();
     }
 
-    // WrapApprovalRequiredTools — verify ToolMetadataRegistry-driven wrapping
-
-    [Fact]
-    public void WrapApprovalRequiredTools_UsesToolMetadataRegistry()
-    {
-        var wrapMethod = typeof(OneCode.Infrastructure.Agent.AgentPipelineBuilder).GetMethod(
-            "WrapApprovalRequiredTools",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        wrapMethod.Should().NotBeNull();
-
-        var metadata = new OneCode.Core.Tools.ToolMetadataRegistry();
-        metadata.Register(new OneCode.Core.Tools.ToolMetadata
-        {
-            Name = "Write",
-            Risk = OneCode.Core.Tools.ToolRisk.Destructive,
-            ApprovalMode = OneCode.Core.Tools.ToolApprovalMode.Always,
-        });
-        metadata.Register(new OneCode.Core.Tools.ToolMetadata
-        {
-            Name = "Read",
-            Risk = OneCode.Core.Tools.ToolRisk.ReadOnly,
-            ApprovalMode = OneCode.Core.Tools.ToolApprovalMode.Never,
-        });
-
-        var writeFn = AIFunctionFactory.Create(
-            (string _) => "ok", "Write", "Write a file");
-        var readFn = AIFunctionFactory.Create(
-            (string _) => "ok", "Read", "Read a file");
-        var tools = new List<AITool> { writeFn, readFn };
-
-        var result = (IList<AITool>)wrapMethod!.Invoke(null, [tools, metadata])!;
-
-        result.Count.Should().Be(2);
-        result.Should().Contain(readFn, "Read has ApprovalMode.Never and should not be wrapped");
-        result.Should().NotContain(writeFn, "Write has ApprovalMode.Always and should be wrapped");
-    }
 }

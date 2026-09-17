@@ -90,6 +90,17 @@ public sealed class SidebarKeyboardResizeTests
     }
 
     [Theory]
+    [InlineData(93, 28, true)]
+    [InlineData(94, 28, false)]
+    [InlineData(100, 30, false)]
+    [InlineData(100, 35, true)]
+    public void ShouldHideSidebarForWidth_PreservesMinimumChatWidth(
+        int screenWidth, int sidebarWidth, bool expected)
+    {
+        ReplShell.ShouldHideSidebarForWidth(screenWidth, sidebarWidth).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(140)]
     [InlineData(100)]
     [InlineData(80)]

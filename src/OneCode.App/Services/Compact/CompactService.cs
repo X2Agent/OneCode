@@ -51,8 +51,7 @@ public sealed class CompactService(
         int? fromMessageIndex = null,
         int? upToMessageIndex = null,
         string trigger = HookTriggers.Auto,
-        CancellationToken ct = default,
-        IProgress<CompactProgress>? progress = null)
+        CancellationToken ct = default)
     {
         session ??= sessionAccess.ForegroundConversation;
         if (session == null)
@@ -61,10 +60,7 @@ public sealed class CompactService(
             return null;
         }
 
-        progress?.Report(new CompactProgress("Inspecting conversation", 10));
-
         // PreCompact hooks (TS: executePreCompactHooks)
-        progress?.Report(new CompactProgress("Running PreCompact hooks", 12));
         await FirePreCompactAsync(session, trigger, ct).ConfigureAwait(false);
 
         var messages = session.Messages;
@@ -76,7 +72,6 @@ public sealed class CompactService(
         if (significantMessages.Count < CompactConstants.MinSignificantMessagesForCompact)
         {
             logger.LogInformation("Not enough messages to compact ({Count})", significantMessages.Count);
-            progress?.Report(new CompactProgress("Not enough messages to compact", 100));
             return null;
         }
 
@@ -87,7 +82,6 @@ public sealed class CompactService(
             session.Name, messages.Count, isPartial);
 
         var systemPrompt = await promptBuilder.BuildSystemPromptAsync(customInstructions, ct).ConfigureAwait(false);
-        progress?.Report(new CompactProgress("Preparing summary request", 25));
 
         IReadOnlyList<Message> messagesToCompact;
         if (isPartial)
@@ -106,7 +100,6 @@ public sealed class CompactService(
         ChatResponse response;
         try
         {
-            progress?.Report(new CompactProgress("Requesting summary from model", 55));
             response = await chatClient.GetResponseAsync(chatRequest.ChatMessages, chatRequest.Options, ct);
         }
         catch (Exception ex)
@@ -124,7 +117,6 @@ public sealed class CompactService(
         }
 
         var formattedSummary = CompactPromptBuilder.FormatSummary(rawSummary);
-        progress?.Report(new CompactProgress("Applying compacted summary", 80));
 
         if (isPartial)
         {
@@ -139,15 +131,12 @@ public sealed class CompactService(
         session.Metadata["lastCompactedMessageCount"] = session.Messages.Count;
 
         await sessionManager.SaveAsync(ct);
-        progress?.Report(new CompactProgress("Saving compacted conversation", 95));
 
         await FirePostCompactAsync(session, formattedSummary, trigger, ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "Compact complete: {Before} messages → {After} messages",
             messages.Count, session.Messages.Count);
-
-        progress?.Report(new CompactProgress("Compaction complete", 100));
 
         return formattedSummary;
     }
@@ -181,5 +170,3 @@ public sealed class CompactService(
         }, actualMatcherValue: trigger, ct: ct).ConfigureAwait(false);
     }
 }
-
-public sealed record CompactProgress(string Message, double Percent);

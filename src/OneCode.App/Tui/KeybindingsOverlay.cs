@@ -33,7 +33,7 @@ public sealed class KeybindingsOverlay : CenteredOverlay
             Height = Dim.Fill() - 2,
             CanFocus = true,
         };
-        _listView.SetScheme(TuiTheme.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
+        _listView.SetScheme(TuiStyles.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
         _listView.SetSource(new ObservableCollection<string>(rows));
 
         // 高度自适应：行数 + 标题/边框/底边距，clamp 到 60（OverlayHost 还会按视口二次收缩）。

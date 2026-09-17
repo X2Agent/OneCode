@@ -107,7 +107,6 @@ public static class PermissionAndLimitMiddleware
 
         // Ask 处理（单通道）：
         // - EnableToolApproval: true → 放行到 MAF ToolApprovalAgent（Main/Worker/Explore/Plan）。
-        //   工具经 WrapApprovalRequiredTools 包装为 ApprovalRequiredAIFunction，
         //   由 ToolApprovalAgent 依据 AutoApprovalRules 决定自动放行或产出 ToolApprovalRequestContent。
         // - EnableToolApproval: false → inline ApprovalBroker（Team 路径，因 MAF workflow
         //   manager 无法处理 ToolApprovalRequestContent）。

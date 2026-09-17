@@ -17,13 +17,10 @@ public static class SessionStateKeys
     /// <summary>累计工具调用次数。</summary>
     public const string TotalToolCalls = "state_machine.total_tool_calls";
 
-    /// <summary>最近工具调用记录（FixedSizeRingBuffer，容量 50）。</summary>
-    public const string RecentToolCalls = "state_machine.recent_tool_calls";
-
     /// <summary>已修改文件路径集合（HashSet，OrdinalIgnoreCase）。</summary>
     public const string ModifiedFiles = "state_machine.modified_files";
 
-    /// <summary>自上次 build 以来的编辑次数（由 VerificationMiddleware 独占递增）。</summary>
+    /// <summary>自上次 build 以来的编辑次数（由 EditGuardMiddleware 的编辑后校验阶段独占递增）。</summary>
     public const string EditsSinceLastBuild = "verification.edits_since_last_build";
 
     /// <summary>

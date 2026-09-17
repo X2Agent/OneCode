@@ -46,6 +46,41 @@ public sealed class MessageRendererTests
     }
 
     [Fact]
+    public void BuildToolDetailLines_ArgsWithEscapedNewline_RendersAsSeparateLines()
+    {
+        // 用户可见行为：多行 Bash 命令在展开详情里逐行显示，而不是挤在一行显示 "\n"。
+        var tag = new ToolLineTag(
+            "Bash",
+            """{"command":"git status --short\ngit log --oneline -5"}""",
+            null,
+            IsExpanded: true);
+
+        var texts = MessageRenderer.BuildToolDetailLines(tag, viewportWidth: 80)
+            .Select(line => line.Text)
+            .ToArray();
+
+        texts.Should().Contain(line => line.Contains("git status --short", StringComparison.Ordinal));
+        texts.Should().Contain(line => line.Contains("git log --oneline -5", StringComparison.Ordinal));
+        texts.Should().NotContain(line => line.Contains("\\n", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildToolDetailLines_ResultWithAnsiEscapes_RendersPlainText()
+    {
+        var tag = new ToolLineTag(
+            "Bash",
+            null,
+            """{"output":"\u001b[31merror: build failed\u001b[0m"}""",
+            IsExpanded: true);
+
+        var text = string.Join("\n", MessageRenderer.BuildToolDetailLines(tag, 80).Select(line => line.Text));
+
+        text.Should().Contain("error: build failed");
+        text.Should().NotContain("\u001b");
+        text.Should().NotContain("\\u001b");
+    }
+
+    [Fact]
     public void BuildToolDetailLines_WiderViewport_UsesFewerLinesWithoutLosingContent()
     {
         var content = string.Join("", Enumerable.Repeat("工具结果中文", 40));

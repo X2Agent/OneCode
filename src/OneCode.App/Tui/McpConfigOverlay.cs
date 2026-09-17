@@ -92,7 +92,7 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
             Width = Dim.Fill(TuiSpacing.OverlayContentX + TuiSpacing.Md),
             CanFocus = false,
         };
-        _hintLabel.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        _hintLabel.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         var serverFrame = new FrameView
         {
@@ -114,10 +114,14 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         }, serverFrame);
         _serverList = new ListView
         {
-            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true,
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            CanFocus = true,
         };
         _serverList.SetSource(_serverItems);
-        _serverList.SetScheme(TuiTheme.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
+        _serverList.SetScheme(TuiStyles.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
         _serverList.ValueChanged += (_, _) =>
         {
             var index = _serverList.SelectedItem;
@@ -160,10 +164,14 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
         }, toolFrame);
         _toolList = new ListView
         {
-            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), CanFocus = true,
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            CanFocus = true,
         };
         _toolList.SetSource(_toolItems);
-        _toolList.SetScheme(TuiTheme.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
+        _toolList.SetScheme(TuiStyles.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
         _toolList.KeyDown += (_, key) =>
         {
             if (HandleListKey(_toolList, key))
@@ -180,7 +188,7 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
             Height = 1,
             CanFocus = false,
         };
-        _statusLabel.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        _statusLabel.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         // 经 AddCustomRow 推进行游标，AddActionBar 才能落在内容底部（而非顶部）。
         AddCustomRow(1, _hintLabel);

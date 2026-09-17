@@ -16,6 +16,6 @@ public sealed record TuiOverlayDependencies(
     IPlanAggregateStore PlanAggregateStore,
     IPlanAgentRunDispatcher PlanRunDispatcher,
     PlanExecutionRecoveryService PlanExecutionRecovery,
-    SkillChangeWatcher SkillChangeWatcher,
+    SkillFilesWatcher SkillFilesWatcher,
     BuildModeAttachmentProvider BuildModeAttachmentProvider,
     PlanExecutionContextProvider PlanExecutionContextProvider);

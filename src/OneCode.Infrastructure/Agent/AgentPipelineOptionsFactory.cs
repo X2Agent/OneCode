@@ -68,7 +68,12 @@ public static class AgentPipelineOptionsFactory
         var behavior = PipelineProfileBehavior.For(profile);
 
         var autoApprovalRules = overrides.AutoApprovalRules
-            ?? AutoApprovalRulesFactory.Create(ctx.PermissionMode);
+            ?? AutoApprovalRulesFactory.Create(
+                ctx.PermissionMode,
+                ctx.WorkingDirectory,
+                ctx.RulesBySource,
+                ctx.AdditionalWorkingDirectories,
+                ctx.SessionAllowlist);
 
         var enableVerification = ctx.EnableVerification;
         if (ctx.VerificationProvider is not null)
@@ -154,3 +159,4 @@ public static class AgentPipelineOptionsFactory
             IsToolAllowed: isToolAllowed));
     }
 }
+

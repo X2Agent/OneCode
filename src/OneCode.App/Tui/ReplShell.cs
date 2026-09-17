@@ -39,6 +39,7 @@ public sealed partial class ReplShell : View
     private readonly PlanSidebarView _planSidebar;
     private readonly TeamSidebarView _teamSidebar;
     private readonly FrameView _completionOverlay;
+    private SidebarViewBase? _sidebarHiddenForWidth;
     private bool _completionVisible;
 
     private int _lastShellWidth = -1;
@@ -86,10 +87,11 @@ public sealed partial class ReplShell : View
 
         CanFocus = true;
         TabStop = TabBehavior.NoStop;
-        SetScheme(TuiTheme.Base);
+        SetScheme(TuiStyles.Base);
 
         _chatInput.BottomOffset = TuiSpacing.SessionContextBarHeight + TuiSpacing.ChatInputContextGap;
-        _chatInput.Y = Pos.AnchorEnd(ChatInputView.MinHeight + _chatInput.BottomOffset);
+        _chatInput.Height = ChatInputView.FixedHeight;
+        _chatInput.Y = Pos.AnchorEnd(ChatInputView.FixedHeight + _chatInput.BottomOffset);
 
         // Forward global shortcuts from ChatInputView.
         // Editor consumes all keys when prompt is focused, so ReplShell.OnKeyDown
@@ -99,25 +101,6 @@ public sealed partial class ReplShell : View
         // ChatInputView 把挂起态/提问态的按键转发给会话（见 IInteractionSession），
         // 替代旧的松散转发事件。
         _chatInput.InteractionSession = this;
-
-        // 输入框高度动态自适应通知：当输入多行或清空提交时，更新主区预留高度，防抖锚定
-        _chatInput.InputHeightChanged += newHeight =>
-        {
-            var reservedBottom = TuiSpacing.SessionContextBarHeight
-                + TuiSpacing.StatusBarHeight
-                + TuiSpacing.StatusBarTopGap
-                + TuiSpacing.ChatInputContextGap
-                + newHeight;
-
-            _app.Invoke(() =>
-            {
-                _contentZone.Height = Dim.Fill(reservedBottom);
-                _contentZone.SetNeedsLayout();
-                _transcript.SetNeedsLayout();
-                SetNeedsLayout();
-                SetNeedsDraw();
-            });
-        };
 
         // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
         _chatInput.ScrollUpRequested += () => _transcript.MessageView.ScrollUp();
@@ -164,7 +147,7 @@ public sealed partial class ReplShell : View
             Width = Dim.Fill(),
             Height = Dim.Fill(TuiSpacing.ContentZoneReservedBottom),
         };
-        _contentZone.SetScheme(TuiTheme.Base);
+        _contentZone.SetScheme(TuiStyles.Base);
         _contentZone.Add(_transcript);
 
         _transcript.X = 1; _transcript.Y = 0;
@@ -326,11 +309,20 @@ public sealed partial class ReplShell : View
     /// </summary>
     private void ApplySidebarLayout()
     {
+        RestoreSidebarWhenWidthAllows();
+
         var sidebarWidth = 0;
         if (_planSidebar.Visible)
             sidebarWidth = _planSidebar.CurrentWidth;
         else if (_teamSidebar.Visible)
             sidebarWidth = _teamSidebar.CurrentWidth;
+
+        if (sidebarWidth > 0 && ShouldHideSidebarForWidth(Viewport.Width, sidebarWidth))
+        {
+            _sidebarHiddenForWidth = _planSidebar.Visible ? _planSidebar : _teamSidebar;
+            _sidebarHiddenForWidth.Visible = false;
+            sidebarWidth = 0;
+        }
 
         _transcript.Width = sidebarWidth > 0
             ? Dim.Fill() - sidebarWidth - 1
@@ -339,6 +331,26 @@ public sealed partial class ReplShell : View
         _transcript.NotifyLayoutChanged();
         SetNeedsLayout();
         SetNeedsDraw();
+    }
+
+    /// <summary>
+    /// Determines whether the sidebar must yield its space to the conversation
+    /// column. A hidden sidebar is restored by <see cref="ApplySidebarLayout"/>
+    /// once the terminal is wide enough again.
+    /// </summary>
+    internal static bool ShouldHideSidebarForWidth(int screenWidth, int sidebarWidth)
+        => screenWidth > 0
+            && sidebarWidth > 0
+            && screenWidth < TuiSpacing.ChatColumnMinWidth + sidebarWidth + 1;
+
+    private void RestoreSidebarWhenWidthAllows()
+    {
+        if (_sidebarHiddenForWidth is not { } sidebar
+            || ShouldHideSidebarForWidth(Viewport.Width, sidebar.CurrentWidth))
+            return;
+
+        sidebar.Visible = true;
+        _sidebarHiddenForWidth = null;
     }
 
     /// <summary>
@@ -394,6 +406,7 @@ public sealed partial class ReplShell : View
         _chatInput.SetNeedsLayout();
         _agentStatusBar.SetNeedsLayout();
         _sessionContextBar.SetNeedsLayout();
+        ApplySidebarLayout();
 
         // ChatTranscriptView detects resize on draw; nudge so welcome re-wraps to the new width.
         _transcript.NotifyLayoutChanged();

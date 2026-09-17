@@ -30,7 +30,7 @@ public sealed class TrustOverlay : ResultOverlay<bool>
             TextAlignment = Alignment.Center,
             CanFocus = false,
         };
-        dirLabel.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        dirLabel.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         var warningText = new Label
         {
@@ -45,7 +45,7 @@ public sealed class TrustOverlay : ResultOverlay<bool>
             TextAlignment = Alignment.Center,
             CanFocus = false,
         };
-        warningText.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        warningText.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         var accessNote = new Label
         {
@@ -58,7 +58,7 @@ public sealed class TrustOverlay : ResultOverlay<bool>
             TextAlignment = Alignment.Center,
             CanFocus = false,
         };
-        accessNote.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        accessNote.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         var noButton = CreateButton($"{TuiGlyphs.Failed} _否，退出", Pos.AnchorEnd(14));
         noButton.Accepting += (_, _) => RequestClose(OverlayCloseReason.Cancelled);
@@ -77,7 +77,7 @@ public sealed class TrustOverlay : ResultOverlay<bool>
             X = x,
             Y = Pos.AnchorEnd(TuiSpacing.Sm),
         };
-        button.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
+        button.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         return button;
     }
 }

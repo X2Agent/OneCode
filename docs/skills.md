@@ -20,6 +20,11 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 同名技能**后加载者覆盖先加载者**：`BundledSkills`（硬编码）→ 打包技能目录 → 用户技能 → 项目技能（`SkillCatalog.LoadUserInvocableSkills` 按字典后写覆盖）。因此实际生效优先级为**项目 > 用户 > 内置**——项目级同名技能最后写入，会覆盖用户级/内置的同名技能。
 
+> **架构决策**：技能 provider 由 `SkillProviderFactory` 通过 MAF `AgentSkillsProviderBuilder` 自建
+> （文件技能 + 内置技能 + MCP 技能 + 自定义 script runner），而非使用 Harness 默认 `AgentSkillsProvider`
+> ——当前由官方 builder 统一管理 source 聚合、缓存、去重及所有权。Harness 的 `AgentSkillsSource` 同样可携带 runner，
+> 并非技术上无法迁移；是否改用该入口须验证生命周期与总体维护收益。理由与边界见 [ADR 0007 §1](./adr/0007-maf-integration-boundaries.md)。
+
 ---
 
 ## 参数占位符

@@ -30,10 +30,22 @@ public sealed class SubprocessScriptRunnerTests : IDisposable
 
     private static AgentFileSkillScript CreateScript(string fullPath)
     {
-        // AgentFileSkillScript's constructor is internal — use reflection
-        var ctor = typeof(AgentFileSkillScript).GetConstructors(
-            BindingFlags.NonPublic | BindingFlags.Instance)[0];
-        return (AgentFileSkillScript)ctor.Invoke(["test", fullPath, NoopRunner]);
+        var root = Path.GetDirectoryName(fullPath)!;
+        // MAF 1.21: AgentFileSkillPathScope ctor became public (was NonPublic in 1.19).
+        // Match both access levels so future accessibility flips do not break this lookup.
+        var ctorFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var scopeType = typeof(AgentFileSkillScript)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .SelectMany(constructor => constructor.GetParameters())
+            .Select(parameter => parameter.ParameterType)
+            .First(parameterType => parameterType.Name == "AgentFileSkillPathScope");
+        var scope = scopeType.GetConstructors(ctorFlags)
+            .Single(constructor => constructor.GetParameters().Length == 2)
+            .Invoke([root, root]);
+        var scriptConstructor = typeof(AgentFileSkillScript)
+            .GetConstructors(ctorFlags)
+            .Single(constructor => constructor.GetParameters().Length == 4);
+        return (AgentFileSkillScript)scriptConstructor.Invoke(["test", fullPath, scope, NoopRunner]);
     }
 
     private AgentFileSkillScript CreateScript(string extension, string content)

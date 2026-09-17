@@ -1,22 +1,24 @@
-using Microsoft.Agents.AI;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 using OneCode.Core.IO;
 using OneCode.Core.Tools;
 
-
 namespace OneCode.Infrastructure;
 
 /// <summary>
-/// Local filesystem implementation of MAF <see cref="AgentFileStore"/> and <see cref="IFileSystem"/>.
+/// Local filesystem implementation of <see cref="IFileSystem"/>.
 ///
 /// <para>
-/// Bridges MAF's file-store abstraction (relative-path-based, multi-backend) with the local
-/// filesystem. Paths are resolved against the working directory from <see cref="IWorkingDirectoryAccessor"/>
+/// Paths are resolved against the working directory from <see cref="IWorkingDirectoryAccessor"/>
 /// and validated against the working directory and any additional directories.
 /// </para>
+/// <para>
+/// This type deliberately does <b>not</b> implement MAF's <c>AgentFileStore</c>: the product
+/// disables the Harness file-memory and file-access providers, so no MAF component consumes that
+/// abstraction (see the MAF overlap plan).
+/// </para>
 /// </summary>
-public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
+public sealed class LocalAgentFileStore : IFileSystem
 {
     private readonly string _workingDirectory;
     private readonly IReadOnlyList<string>? _additionalDirectories;
@@ -31,14 +33,14 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
         _logger = logger;
     }
 
-    // AgentFileStore abstract methods
+    // IFileSystem methods
 
-    public override async Task<string?> ReadAsync(string path, CancellationToken cancellationToken = default)
+    async Task<string?> IFileSystem.ReadTextFileAsync(string path, CancellationToken ct)
     {
         var resolved = ResolvePath(path);
         try
         {
-            return await File.ReadAllTextAsync(resolved, cancellationToken).ConfigureAwait(false);
+            return await File.ReadAllTextAsync(resolved, ct).ConfigureAwait(false);
         }
         catch (FileNotFoundException)
         {
@@ -50,168 +52,13 @@ public sealed class LocalAgentFileStore : AgentFileStore, IFileSystem
         }
     }
 
-    public override async Task WriteAsync(string path, string content, CancellationToken cancellationToken = default)
+    async Task IFileSystem.WriteTextFileAsync(string path, string content, CancellationToken ct)
     {
         var resolved = ResolvePath(path);
         var dir = Path.GetDirectoryName(resolved);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(resolved, content, cancellationToken).ConfigureAwait(false);
-    }
-
-    public override Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
-    {
-        var resolved = ResolvePath(path);
-        if (File.Exists(resolved))
-        {
-            File.Delete(resolved);
-            return Task.FromResult(true);
-        }
-        return Task.FromResult(false);
-    }
-
-    public override Task<bool> FileExistsAsync(string path, CancellationToken cancellationToken = default)
-    {
-        var resolved = ResolvePath(path);
-        return Task.FromResult(File.Exists(resolved));
-    }
-
-    public override Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
-    {
-        var resolved = ResolvePath(path);
-        if (!Directory.Exists(resolved))
-            Directory.CreateDirectory(resolved);
-        return Task.CompletedTask;
-    }
-
-    public override Task<IReadOnlyList<FileStoreEntry>> ListChildrenAsync(
-        string directory,
-        CancellationToken cancellationToken = default)
-    {
-        var resolved = ResolvePath(directory);
-        if (!Directory.Exists(resolved))
-            return Task.FromResult<IReadOnlyList<FileStoreEntry>>([]);
-
-        try
-        {
-            var entries = new List<FileStoreEntry>();
-
-            // Subdirectories first (MAF convention)
-            foreach (var dir in Directory.GetDirectories(resolved))
-            {
-                entries.Add(new FileStoreEntry(Path.GetFileName(dir), FileStoreEntry.Directory));
-            }
-
-            foreach (var file in Directory.GetFiles(resolved))
-            {
-                entries.Add(new FileStoreEntry(Path.GetFileName(file), FileStoreEntry.File));
-            }
-
-            return Task.FromResult<IReadOnlyList<FileStoreEntry>>(entries);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Task.FromResult<IReadOnlyList<FileStoreEntry>>([]);
-        }
-    }
-
-    public override async Task<IReadOnlyList<FileSearchResult>> SearchAsync(
-        string directory,
-        string regexPattern,
-        string? globPattern = null,
-        bool recursive = false,
-        CancellationToken cancellationToken = default)
-    {
-        var resolved = ResolvePath(directory);
-        if (!Directory.Exists(resolved))
-            return [];
-
-        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-
-        // Determine which files to search
-        IEnumerable<string> files;
-        if (!string.IsNullOrWhiteSpace(globPattern))
-        {
-            var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-            matcher.AddInclude(globPattern.Replace('\\', '/'));
-            var dirInfo = new DirectoryInfoWrapper(new DirectoryInfo(resolved));
-            var result = matcher.Execute(dirInfo);
-            files = result.Files.Select(f => Path.GetFullPath(Path.Combine(resolved, f.Path)));
-        }
-        else
-        {
-            try
-            {
-                files = Directory.GetFiles(resolved, "*", searchOption);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return [];
-            }
-        }
-
-        var regex = new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        var results = new List<FileSearchResult>();
-
-        foreach (var file in files)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            string[] lines;
-            try
-            {
-                lines = await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-
-            var matchingLines = new List<FileSearchMatch>();
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (regex.IsMatch(lines[i]))
-                {
-                    matchingLines.Add(new FileSearchMatch
-                    {
-                        LineNumber = i + 1,
-                        Line = lines[i],
-                    });
-                }
-            }
-
-            if (matchingLines.Count > 0)
-            {
-                var snippet = matchingLines.First().Line;
-                if (snippet.Length > 200)
-                    snippet = snippet[..200] + "...";
-
-                results.Add(new FileSearchResult
-                {
-                    FileName = Path.GetFileName(file),
-                    Snippet = snippet,
-                    MatchingLines = matchingLines,
-                });
-            }
-        }
-
-        return results;
-    }
-
-    // IFileSystem methods
-
-    async Task<string?> IFileSystem.ReadTextFileAsync(string path, CancellationToken ct)
-    {
-        return await ReadAsync(path, ct).ConfigureAwait(false);
-    }
-
-    async Task IFileSystem.WriteTextFileAsync(string path, string content, CancellationToken ct)
-    {
-        await WriteAsync(path, content, ct).ConfigureAwait(false);
+        await File.WriteAllTextAsync(resolved, content, ct).ConfigureAwait(false);
     }
 
     IReadOnlyList<string> IFileSystem.FindFiles(

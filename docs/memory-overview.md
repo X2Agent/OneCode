@@ -20,14 +20,19 @@
 
 OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用知识**，而非每次交互从零开始。
 
-模块按"记忆生命周期 + 作用域"两个维度划分为 2 个子系统：
+模块按"记忆生命周期 + 作用域"两个维度组织：
 
 | 子系统 | 生命周期 | 作用域 | 存储形式 | 写入者 |
 |--------|---------|--------|---------|--------|
-| 结构化条目记忆 | 永久（含 TTL / LRU 淘汰） | 用户级 / 项目级 | `MEMORY.md` 结构化条目 | 用户手动 + AutoDream 自动 |
-| 会话记忆 | 会话内 + 跨会话持久 | 单会话 | JSON Lines + 元数据 | LLM 自动提取 + 用户手动 |
+| 结构化条目记忆 | 永久（含 TTL / 按命中次数淘汰） | 用户级 / 项目级 | `MEMORY.md` 结构化条目 | 用户手动 + AutoDream 自动 |
 
-> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [记忆模块架构设计](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemoryFileContextProvider`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
+> **记忆治理与演进方向**（淘汰策略、冲突消解、SQLite 触发条件、为何不引入 MAF `FileMemoryProvider`）见 [记忆模块架构设计 §11](./adr/0004-memory-module-design.md#11-记忆治理与演进方向)。
+
+> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [记忆模块架构设计](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。
+>
+> **会话记忆子系统已移除**（`SessionMemoryService` / `SessionMemoryContextProvider`）：它与结构化条目记忆语义重叠，且与压缩子系统（`App/Services/Compact/`）职责重复。其“从会话中提炼信息”的能力由 AutoDream 承担。理由见 [记忆模块架构设计 §6](./adr/0004-memory-module-design.md#6-会话记忆已移除)。
+>
+> Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemorySearchProviderFactory`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
 
 ---
 
@@ -36,18 +41,15 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 ### 2.1 核心原则
 
 1. **存储与业务解耦**：`IMemoryEntryStore` 抽象物理存储（当前 `MEMORY.md`，未来可换 SQLite），业务层不感知文件路径
-2. **按需注入**：记忆不无脑全量塞入 system prompt，而是"摘要索引常驻 + 相关条目按需检索"，控制 token 消耗
+2. **按需注入**：记忆不无脑全量塞入 system prompt，而是"摘要索引常驻 + `search_memories` 按需检索"，控制 token 消耗
 3. **作用域隔离**：用户级与项目级记忆物理隔离，`/cd` 切换项目时自动重路由
 4. **自动积累**：通过 AutoDream 后台服务自动整合会话历史，用户无需手动维护
-5. **容错降级**：LLM 提取失败时回退到启发式规则；文件损坏时跳过并记录日志
+5. **容错降级**：提取失败时跳过并记录日志，不阻断主流程
 
 ### 2.2 记忆的生命周期
 
 ```
 用户对话
-  │
-  ├─ 即时约束 ──▶ 会话记忆（Session Memory）
-  │  "记住用 DPAPI 加密"         注入当前会话 + 跨重启持久
   │
   └─ 持久事实 ──▶ 结构化条目记忆（MEMORY.md）
      /memory add 或 AutoDream    跨会话复用，摘要常驻 prompt
@@ -59,10 +61,10 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 
 | 路径 | 机制 | 说明 |
 |------|------|------|
-| **System Prompt 注入** | `PromptConfigBuilder` 调用 `MemoryService.LoadMemoryPromptAsync` | 摘要索引常驻；构建 prompt 时若已知 query，附加 Top 相关条目 |
-| **工具按需检索** | `MemoryFileContextProvider` 暴露 `search_memories` 工具 | LLM 主动检索完整记忆内容 |
+| **System Prompt 注入** | `PromptConfigBuilder` 调用 `MemoryService.LoadMemoryPromptAsync` | 摘要索引常驻 |
+| **工具按需检索** | `MemorySearchProviderFactory` 暴露 `search_memories` 工具（MAF `TextSearchProvider`） | LLM 主动检索完整记忆内容 |
 
-会话记忆通过对应的 `AIContextProvider`（`SessionMemoryContextProvider`）在 Agent 调用前注入。
+> Team 成员与 Explore/Plan fork 子代理经 `PromptComposer.ComposeWithRoleAsync` 在 role prompt 末尾追加一行 `search_memories` 引导，无需架构变更。
 
 ---
 
@@ -72,25 +74,25 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
                          ┌─────────────────────────────────────────────┐
                          │              System Prompt                  │
    PromptConfigBuilder ──▶  {{memory_section}} ← MemoryService         │
-                         │  (条目摘要索引 + 相关条目)                   │
+                         │  (条目摘要索引)                             │
                          └─────────────────────────────────────────────┘
                                           ▲
                 ┌─────────────────────────┴─────────────────────────┐
                 │                                                   │
-  MemoryFileContextProvider                             SessionMemoryContextProvider
-  (search_memories 工具)                                 (Provide + Store 双向)
+  MemorySearchProviderFactory                          PromptComposer
+  (search_memories 工具)                               (子代理引导行)
                 │                                                   │
                 ▼                                                   ▼
-  ┌─────────────────────┐                          ┌──────────────────────┐
-  │  MemoryService      │                          │ SessionMemoryService │
-  │ (条目加载/检索)     │                          │ (会话事实 CRUD)      │
-  └────────┬────────────┘                          └──────────┬───────────┘
-           │                                                  │
-           ▼                                                  ▼
-  ┌─────────────────────┐                          ┌──────────────────────┐
-  │ IMemoryEntryStore   │                          │ Conversation.Metadata│
-  │ (MemoryEntryStore)  │                          │ + Metadata 键      │
-  └────────┬────────────┘                          └──────────────────────┘
+  ┌─────────────────────┐
+  │  MemoryService      │
+  │ (条目加载/检索)     │
+  └────────┬────────────┘
+           │
+           ▼
+  ┌─────────────────────┐
+  │ IMemoryEntryStore   │
+  │ (MemoryEntryStore)  │
+  └────────┬────────────┘
            │
            ▼
   ~/.onecode/memory/MEMORY.md
@@ -109,29 +111,19 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 **核心特性**：
 - 双作用域：用户级（`~/.onecode/memory/MEMORY.md`）与项目级（`{cwd}/.onecode/memory/MEMORY.md`）
 - Key 格式 `{category}:{short-id}`，如 `fact:build-command`、`manual:oauth-dpapi`
-- 支持 TTL 过期与 LRU 容量淘汰（上限 200 条/作用域）
+- 支持 TTL 过期与使用价值容量淘汰（上限 200 条/作用域）：`manual` 豁免 → 命中次数升序 → 同次数最旧优先
 - 相关性检索基于 token 匹配评分，Top 6 注入 prompt
 
 **谁会写入**：
 - 用户通过 `/memory add` 手动添加（`source=manual`，永不过期）
 - AutoDream 后台服务自动提取（`source=autodream`，可有 TTL）
 
-### 3.2 会话记忆
-
-**定位**：会话范围内的事实/偏好记忆。记录用户在对话中表达的"记住……"、"不要……"、"优先……"等约束。
-
-**核心特性**：
-- 存储于 `Conversation.Metadata`（`sessionMemories` 键），随会话文件 `~/.onecode/sessions/{sessionId}.jsonl` 持久化
-- 双向 ContextProvider：注入 Top 5 条（按重要性排序）+ 响应后节流提取
-- 四重节流防止过度提取：最小消息数、消息增量、轮次间隔、Token 增量
-- LLM 摘要提取失败时回退到启发式规则（偏好信号词过滤）
-
-### 3.3 AutoDream 自动整合
+### 3.2 AutoDream 自动整合
 
 **定位**："睡眠式记忆整合"后台服务。当用户积累了足够多的新会话后，自动启动轻量 Agent 回顾会话，提取关键信息写入 `MEMORY.md`。
 
 **核心特性**：
-- 默认开启，双门控防止频繁触发（≥ 6 小时 + ≥ 3 个新会话）
+- 默认开启，四重门控防止频繁触发（启用检查 ≥ 时间门控 ≥ 6 小时 ≥ 扫描节流 10 分钟 ≥ 新会话数 ≥ 3）
 - 增量变更 JSON 格式（`upsert` / `delete`），单次最多 50 条
 - 输出经 `SanitizeKey` / `SanitizeValue` 清洗，防 `MEMORY.md` 结构注入
 - 跨进程锁保护（`autodream.lock`），僵尸锁 2 小时可抢占
@@ -144,11 +136,11 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 
 ### 4.1 `/memory` 命令
 
-管理可检索记忆（会话事实 + `MEMORY.md`）。**不要**用它写项目编码规范——规范请用 [`/remember`](./skills.md#remember) 更新 `AGENTS.md`。
+管理可检索记忆（`MEMORY.md` 条目）。**不要**用它写项目编码规范——规范请用 [`/remember`](./skills.md#remember) 更新 `AGENTS.md`。
 
 | 子命令 | 语法 | 说明 |
 |--------|------|------|
-| `list` | `/memory` 或 `/memory list` | 列出会话记忆 + 持久化条目（含过期标记） |
+| `list` | `/memory` 或 `/memory list` | 列出持久化条目（含过期标记） |
 | `add` | `/memory add [--user] <text>` | 添加 MEMORY.md 条目；默认项目级，`--user` 写入用户级 |
 | `remove` | `/memory remove <n>`（别名 `delete`） | 删除第 n 条持久化条目 |
 | `clear` | `/memory clear [--all]` | 清空项目级条目；`--all` 同时清空用户级 |
@@ -158,11 +150,9 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 `/memory list` 输出示例：
 
 ```text
-Session memories:
-  1. [manual] 优先使用 DPAPI 加密 OAuth 凭据
-  2. [auto] 项目使用 dotnet build，耗时约 45 秒
+Searchable memory (not AGENTS.md — use /remember for project rules):
 
-Persistent memory entries:
+Persistent entries (MEMORY.md):
   1. [global/manual] manual:oauth-dpapi
        本项目所有 OAuth 凭据必须使用 DPAPI 加密存储。
   2. [project/autodream] fact:build-command [EXPIRED]
@@ -182,7 +172,7 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 1. 回顾自上次整合以来的新会话
 2. 提取事实/约定/教训/纠正等可复用知识
 3. 以增量变更写入 `MEMORY.md`（用户级或项目级）
-4. 清理过期条目 + LRU 淘汰
+4. 清理过期条目 + 按价值淘汰
 
 用户可通过 `/memory autodream trigger` 手动触发，`/memory autodream status` 查看状态。
 
@@ -203,8 +193,8 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 |--------|--------|---------|
 | 结构化条目记忆 | 用户级（全局） | `~/.onecode/memory/MEMORY.md` |
 | 结构化条目记忆 | 项目级 | `{cwd}/.onecode/memory/MEMORY.md` |
-| 会话记忆 | 会话级 | `~/.onecode/sessions/{sessionId}.jsonl`（`sessionMemories` 元数据键） |
 | AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（lock、时间戳文件） |
+| 会话事件（AutoDream 数据源） | 用户级 | `~/.onecode/events/{sessionId}.jsonl` |
 
 > **已移除**：旧版本的 `~/.onecode/memory-store/` 与 `{cwd}/.onecode/memory-store/`（KV Store）目录不再使用。
 

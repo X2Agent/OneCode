@@ -13,14 +13,6 @@ public static class Constants
         public const string TavilyApiKey = "TAVILY_API_KEY";
         /// <summary>WebSearch 主提供方（tavily | duckduckgo）。</summary>
         public const string OneCodeWebSearchProvider = "ONECODE_WEB_SEARCH_PROVIDER";
-        public const string Home = "HOME";
-        public const string UserHomeWindows = "USERPROFILE";
-        public const string NoProxy = "NO_PROXY";
-        public const string NoProxyLower = "no_proxy";
-        public const string HttpProxy = "HTTP_PROXY";
-        public const string HttpProxyLower = "http_proxy";
-        public const string HttpsProxy = "HTTPS_PROXY";
-        public const string HttpsProxyLower = "https_proxy";
         /// <summary>
         /// 调试日志级别（单开关）：off | debug | trace。
         /// 空/未设置 → 按构建默认（DEBUG 构建开、Release 关）；显式 off/0/false 可关闭（含 DEBUG 构建）；

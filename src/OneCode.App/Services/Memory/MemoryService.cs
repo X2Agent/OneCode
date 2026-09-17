@@ -16,7 +16,7 @@ namespace OneCode.App.Services.Memory;
 /// <b>System prompt injection strategy</b>:
 /// <list type="bullet">
 /// <item>The full index summary (key + value first line) is injected so the LLM knows what's available.</item>
-/// <item><see cref="MemoryFileContextProvider"/> exposes a <c>search_memories</c> tool for on-demand
+/// <item><see cref="MemorySearchProviderFactory"/> exposes a <c>search_memories</c> tool for on-demand
 /// full-content retrieval.</item>
 /// </list>
 /// </para>
@@ -25,7 +25,6 @@ public sealed partial class MemoryService : IMemoryService
 {
     private const int MaxSummaryValueChars = 80;
     private const int MaxRelevantMemories = 6;
-    private const int MaxRelevantValueChars = 500;
 
     [GeneratedRegex(@"[\p{L}\p{N}_-]{2,}")]
     private static partial Regex QueryTokenRegex();
@@ -50,10 +49,7 @@ public sealed partial class MemoryService : IMemoryService
     /// Loads memory entries from both user-level and project-level scopes and builds a
     /// prompt section with a summary index.
     /// </summary>
-    public async Task<string?> LoadMemoryPromptAsync(
-        string workingDirectory,
-        string? query = null,
-        CancellationToken ct = default)
+    public async Task<string?> LoadMemoryPromptAsync(CancellationToken ct = default)
     {
         var entries = await LoadAllScopedEntriesAsync(ct).ConfigureAwait(false);
 
@@ -97,23 +93,6 @@ public sealed partial class MemoryService : IMemoryService
             sections.Add("");
         }
 
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            var relevant = FindRelevantEntries(entries, query);
-            if (relevant.Count > 0)
-            {
-                sections.Add("### Relevant memories for this request");
-                sections.Add("");
-                foreach (var entry in relevant)
-                {
-                    var scopeLabel = entry.Scope == MemoryScope.User ? "global" : "project";
-                    sections.Add($"#### {entry.Entry.Key} ({scopeLabel})");
-                    sections.Add(TruncateValue(entry.Entry.Value, MaxRelevantValueChars));
-                    sections.Add("");
-                }
-            }
-        }
-
         sections.Add("_Use the `search_memories` tool to retrieve full memory content._");
 
         return string.Join('\n', sections).TrimEnd();
@@ -124,7 +103,6 @@ public sealed partial class MemoryService : IMemoryService
     /// Used by the <c>search_memories</c> tool.
     /// </summary>
     public async Task<IReadOnlyList<MemoryEntryMatch>> FindRelevantMemoriesAsync(
-        string workingDirectory,
         string query,
         CancellationToken ct = default)
     {
@@ -137,9 +115,7 @@ public sealed partial class MemoryService : IMemoryService
     /// <summary>
     /// Lists all memory entries (including expired) for management commands.
     /// </summary>
-    public async Task<IReadOnlyList<MemoryEntryInfo>> ListMemoryEntriesAsync(
-        string workingDirectory,
-        CancellationToken ct = default)
+    public async Task<IReadOnlyList<MemoryEntryInfo>> ListMemoryEntriesAsync(CancellationToken ct = default)
     {
         var userEntries = await _store.LoadAllAsync(MemoryScope.User, ct).ConfigureAwait(false);
         var projectEntries = await _store.LoadAllAsync(MemoryScope.Project, ct).ConfigureAwait(false);
@@ -158,6 +134,15 @@ public sealed partial class MemoryService : IMemoryService
         }
 
         return results;
+    }
+
+    /// <inheritdoc/>
+    public Task RecordHitsAsync(MemoryScope scope, IReadOnlyList<string> keys, CancellationToken ct = default)
+    {
+        if (keys.Count == 0)
+            return Task.CompletedTask;
+
+        return _store.RecordHitsAsync(scope, keys, ct);
     }
 
     // Internal helpers
@@ -219,6 +204,9 @@ public sealed partial class MemoryService : IMemoryService
                 score += Math.Min(occurrences, 5) * 3;
         }
 
+        if (score == 0)
+            return 0;
+
         score += scopedEntry.Scope == MemoryScope.Project ? 2 : 1;
         score += entry.Source == "manual" ? 2 : 0;
 
@@ -247,13 +235,6 @@ public sealed partial class MemoryService : IMemoryService
         if (firstLine.Length <= MaxSummaryValueChars)
             return firstLine;
         return firstLine[..MaxSummaryValueChars] + "...";
-    }
-
-    private static string TruncateValue(string value, int maxChars)
-    {
-        if (value.Length <= maxChars)
-            return value.Trim();
-        return value[..maxChars].Trim() + "...";
     }
 
     // Nested records

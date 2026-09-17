@@ -121,7 +121,7 @@ public sealed class AgentStatusBar : View
         if (w <= 0) return false;
 
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
         AddStr(new string(' ', w));
 
         // Measure right-side Mode Tag first to establish strict boundary
@@ -252,7 +252,7 @@ public sealed class AgentStatusBar : View
                 if (!string.IsNullOrEmpty(truncated))
                 {
                     Move(col, 0);
-                    SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
+                    SetAttribute(new Attribute(fg, TuiPalette.BgSurface));
                     AddStr(truncated);
                     col += TextWidthHelper.GetDisplayWidth(truncated);
                 }
@@ -261,7 +261,7 @@ public sealed class AgentStatusBar : View
         }
 
         Move(col, 0);
-        SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
+        SetAttribute(new Attribute(fg, TuiPalette.BgSurface));
         AddStr(text);
         col += width;
         return true;
@@ -295,18 +295,18 @@ public sealed class AgentStatusBar : View
             _ => TuiPalette.FgSecondary,
         };
         SetAttribute(_modeFlash
-            ? new Attribute(modeColor, TuiPalette.BgPrimary)
-            : new Attribute(TuiPalette.BgPrimary, modeColor));
+            ? new Attribute(modeColor, TuiPalette.BgSurface)
+            : new Attribute(TuiPalette.BgSurface, modeColor));
         AddStr(modeTag);
 
         if (strategyLabel.Length > 0)
         {
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
             AddStr(strategyLabel);
         }
         if (teamLabel.Length > 0)
         {
-            SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+            SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
             AddStr(teamLabel);
         }
     }

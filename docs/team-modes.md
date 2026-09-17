@@ -20,6 +20,10 @@
 误用提示：视角独立型团队（instructions 含"只从 X 视角/不要评价…"）配置为 groupchat 时，
 注册日志会输出 advisory 建议改用 parallel-dag（见 `TeamConfigLoader.BuildAdvisories`）。
 
+> **实现说明**：ParallelDag 的"静态扇出/扇入"是**产品语义描述**，实现为按 `AssigneeRole` 选**单成员** +
+> MAF `SequentialWorkflowBuilder`，**不是** MAF Concurrent 真并行扇出。请勿将两者视为等价替换。
+> 决策见 [ADR 0007 §2](./adr/0007-maf-integration-boundaries.md)。
+
 **模式不可运行期覆盖**：编排模式是团队定义的固定属性（`TeamRun.EffectiveMode` 持久化
 与 TUI 策略切换键已随运行期覆盖一起移除）。改变执行方式的唯一途径是切换团队
 （`Shift+Tab` / `/team <name>`）或修改 team.yaml。

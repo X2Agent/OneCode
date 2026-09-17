@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
@@ -8,12 +7,12 @@ using OneCode.App.Services.Context;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
-using OneCode.App.Services.Memory;
 
 using OneCode.App.Services.Skills;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Memory;
+using OneCode.Core.Mcp;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
@@ -39,12 +38,16 @@ public static class TestAgentContextProviderAssembly
         modelManager ??= new ModelManager(TestConfigManager.Create(), new ModelCatalogStore());
         modeProvider ??= new PermissionModeProvider(TestConfigManager.Create());
         promptManager ??= new PromptManager();
+        if (promptManager is PromptManager concretePrompts)
+        {
+            foreach (var name in new[] { "system/build", "system/plan", "system/team", "system/goal" })
+                concretePrompts.RegisterTemplate(new PromptTemplate(name, $"[TEST MODE PROMPT: {name}]"));
+        }
         planModeService ??= Substitute.For<IPlanModeService>();
         planWorkflowService ??= Substitute.For<IPlanWorkflowApplicationService>();
 
         var memory = new AgentMemoryDependencies(
             Substitute.For<IMemoryService>(),
-            new SessionMemoryService(NullLogger<SessionMemoryService>.Instance),
             sessionManager);
         var runtime = new AgentRuntimeContextDependencies(
             new ConversationShellExecutorManager(NullLogger<ConversationShellExecutorManager>.Instance),
@@ -56,10 +59,12 @@ public static class TestAgentContextProviderAssembly
 
         var shared = new SharedContextProviderBuilder(
             NullLoggerFactory.Instance,
-            new SkillProviderHolder(new AgentSkillsProviderBuilder().Build()),
+            new SkillProviderFactory(
+                new SkillCatalog(Path.GetTempPath()),
+                Substitute.For<IMcpConnectionManager>(),
+                NullLoggerFactory.Instance),
             memory,
-            runtime,
-            modelManager);
+            runtime);
 
         var main = new MainModeContextProviderBuilder(
             shared,

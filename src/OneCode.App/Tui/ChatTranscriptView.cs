@@ -61,7 +61,7 @@ public sealed partial class ChatTranscriptView : View
 
         Width = Dim.Fill();
         Height = Dim.Fill();
-        SetScheme(TuiTheme.ConversationArea);
+        SetScheme(TuiStyles.ConversationArea);
 
         Add(_messageView);
 

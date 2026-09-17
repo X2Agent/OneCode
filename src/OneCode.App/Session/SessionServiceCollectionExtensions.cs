@@ -2,11 +2,13 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Tools;
+using OneCode.Core.Session;
+using OneCode.Infrastructure;
 
 namespace OneCode.App.Session;
 
 /// <summary>
-/// Session 领域 DI 注册——与会话实现（<see cref="SessionManager"/> / <see cref="SessionStore"/>）
+/// Session 领域 DI 注册——与会话实现（<see cref="SessionManager"/> / <see cref="EventSourcedSessionStore"/>）
 /// 同目录维护。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
 /// </summary>
 public static class SessionServiceCollectionExtensions
@@ -20,7 +22,11 @@ public static class SessionServiceCollectionExtensions
     {
         services.Configure<SessionOptions>(o => o.InitialWorkingDirectory = workingDir);
 
-        services.AddSingleton<ISessionStore, SessionStore>();
+        services.AddSingleton<ISessionEventStore>(sp =>
+            new FileSessionEventStore(PathsHelper.UserHome));
+        services.AddSingleton<ISessionStore>(sp =>
+            new EventSourcedSessionStore(
+                sp.GetRequiredService<ISessionEventStore>()));
         services.AddSingleton<SessionIdHolder>();
         services.AddSingleton<ISessionIdProvider>(sp => sp.GetRequiredService<SessionIdHolder>());
         services.AddSingleton<IWorkingDirectoryAccessor, SessionWorkingDirectoryAccessor>();

@@ -5,7 +5,7 @@ Project root: {{project_root}}
 Since the last consolidation at {{since}}, there have been {{session_count}} new sessions for this project.
 
 Your task:
-1. Review the recent sessions for **this project** in the global session directory (~/.onecode/sessions/*.jsonl). Each session file's first line is a JSON header containing a `working_directory` field — only review sessions whose `working_directory` matches `{{project_root}}` (use Grep to filter). Use Read/Glob/Grep tools.
+1. Review the recent sessions for **this project** in the global session directory (~/.onecode/events/*.jsonl). Each file is JSONL: one session event per line. The session metadata event (`"type": "session_started"` or `"type": "session_snapshot"`) carries the project path at `payload.working_directory` — only review sessions whose value matches `{{project_root}}` (use Grep to filter). User turns are `"type": "user_message"`, assistant turns are `"type": "assistant_message"`. Use Read/Glob/Grep tools.
 2. Extract durable knowledge that will make future sessions smarter — especially **lessons from failures** and **user corrections**, which are the highest-value memories.
 3. Output **incremental changes** as a JSON array. Each change is either an "upsert" (add or update) or a "delete" (remove an outdated entry).
 

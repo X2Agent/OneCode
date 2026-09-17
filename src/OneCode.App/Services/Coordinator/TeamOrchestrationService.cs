@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI.Workflows;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Errors;
 using OneCode.Infrastructure.Agent;
@@ -53,6 +52,7 @@ public sealed partial class TeamOrchestrationService
         TeamClarificationWorkflowHost clarificationWorkflowHost,
         RequestPortGate approvalGate,
         ITeamRunStore teamRunStore,
+        TeamRegistry registry,
         OneCode.Core.Workflows.IOperationLedger? operationLedger = null)
     {
         _workflowRunner = workflowRunner;
@@ -70,7 +70,7 @@ public sealed partial class TeamOrchestrationService
         _operationLedger = operationLedger;
         // 职责收敛：注册表（注册/发现/活跃团队）与结果聚合分别由 TeamRegistry / TeamResultAggregator 承担，
         // 本服务退化为用例门面（运行/恢复/审批/澄清编排）。
-        _registry = new TeamRegistry(logger);
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     }
 
     public IReadOnlyList<string> RegisteredTeams => _registry.RegisteredTeams;
@@ -93,15 +93,7 @@ public sealed partial class TeamOrchestrationService
     /// 用于 TUI 启动横幅显示成员构成，让用户知道这个团队有哪些角色。
     /// </summary>
     public IReadOnlyList<TeamMemberInfo>? GetTeamMembers(string teamName) =>
-        _registry.TryGet(teamName, out var config)
-            ? config.Members
-                .Select(m => new TeamMemberInfo(
-                    m.AgentId,
-                    m.Role,
-                    m.Role is "orchestrator" or "lead"))
-                .ToList()
-                .AsReadOnly()
-            : null;
+        _registry.GetMemberInfos(teamName);
 
     public async Task RegisterTeamAsync(
         string teamName,
@@ -154,7 +146,7 @@ public sealed partial class TeamOrchestrationService
         var (found, config) = await TryResolveTeamAsync(teamName, eventSink, ct).ConfigureAwait(false);
         if (!found || config is null)
         {
-            return TeamError(teamName, $"Team '{teamName}' not found.", eventSink);
+            return TeamRunErrors.Fail(teamName, $"Team '{teamName}' not found.", eventSink);
         }
 
         // 编排模式由团队 YAML 的 template 字段固定声明，运行期不可覆盖。
@@ -169,7 +161,7 @@ public sealed partial class TeamOrchestrationService
 
         var cwd = _workingDirectoryAccessor.WorkingDirectory;
         _logger.LogDebug("Team '{TeamName}' using working directory {WorkingDirectory}", teamName, cwd);
-        var (fileChanges, observedSink) = CreateObservedSink(eventSink);
+        var (fileChanges, observedSink) = TeamFileChangeObserver.CreateObservedSink(eventSink);
         var modelId = _workflowRunner.AgentFactory.MainModelId ?? "team-model";
 
         var runId = TeamRunId.NewId();
@@ -181,7 +173,7 @@ public sealed partial class TeamOrchestrationService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return TeamError(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+            return TeamRunErrors.Fail(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
         }
         var clarificationRunCreated = false;
         if (!analysis.CanProceedWithoutClarification)
@@ -198,7 +190,7 @@ public sealed partial class TeamOrchestrationService
                 teamName, runId, config, modelId, questions, goal, eventSink, ct).ConfigureAwait(false);
             if (clarification.Answer is null)
             {
-                return TeamError(
+                return TeamRunErrors.Fail(
                     teamName,
                     "Team request was cancelled during clarification; no workflow or write transaction was started.",
                     eventSink);
@@ -211,11 +203,11 @@ public sealed partial class TeamOrchestrationService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                return TeamError(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+                return TeamRunErrors.Fail(teamName, $"需求澄清生成失败：{ex.Message}", eventSink);
             }
             if (!analysis.CanProceedWithoutClarification)
             {
-                return TeamError(
+                return TeamRunErrors.Fail(
                     teamName,
                     "Team request is still ambiguous after clarification; no workflow or write transaction was started.",
                     eventSink);
@@ -242,7 +234,7 @@ public sealed partial class TeamOrchestrationService
             teamName, runId, config, modelId, plan, eventSink, ct).ConfigureAwait(false);
         if (approval.ApprovalGranted != true)
         {
-            return TeamError(
+            return TeamRunErrors.Fail(
                 teamName,
                 "Team plan was not approved; no write transaction was created.",
                 eventSink);
@@ -282,7 +274,7 @@ public sealed partial class TeamOrchestrationService
         if (teamRun is null || teamRun.Status is not (
                 TeamRunStatus.Running or TeamRunStatus.Blocked or TeamRunStatus.WaitingForUser))
         {
-            return TeamError(sessionId,
+            return TeamRunErrors.Fail(sessionId,
                 $"No resumable TeamRun exists for session '{sessionId}'.",
                 eventSink);
         }
@@ -290,7 +282,7 @@ public sealed partial class TeamOrchestrationService
         var (found, config) = await TryResolveTeamAsync(teamRun.TeamName, eventSink, ct).ConfigureAwait(false);
         if (!found || config is null)
         {
-            return TeamError(teamRun.TeamName, $"Team '{teamRun.TeamName}' not found.", eventSink);
+            return TeamRunErrors.Fail(teamRun.TeamName, $"Team '{teamRun.TeamName}' not found.", eventSink);
         }
 
         // 编排模式由团队 YAML 固定声明，恢复直接使用当前注册的配置——
@@ -306,7 +298,7 @@ public sealed partial class TeamOrchestrationService
                     teamRun.TeamName, teamRun.Id, config, modelId, questions,
                     teamRun.OriginalRequest, eventSink, ct).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(clarification.Answer))
-                    return TeamError(teamRun.TeamName, "Team clarification was cancelled.", eventSink);
+                    return TeamRunErrors.Fail(teamRun.TeamName, "Team clarification was cancelled.", eventSink);
                 var clarifiedGoal = $"{teamRun.OriginalRequest}\nClarification response:\n{clarification.Answer}";
                 RequirementAnalysisResult analysis;
                 try
@@ -315,10 +307,10 @@ public sealed partial class TeamOrchestrationService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    return TeamError(teamRun.TeamName, $"需求澄清生成失败：{ex.Message}", eventSink);
+                    return TeamRunErrors.Fail(teamRun.TeamName, $"需求澄清生成失败：{ex.Message}", eventSink);
                 }
                 if (!analysis.CanProceedWithoutClarification)
-                    return TeamError(teamRun.TeamName, "Team request remains ambiguous.", eventSink);
+                    return TeamRunErrors.Fail(teamRun.TeamName, "Team request remains ambiguous.", eventSink);
                 var clarifiedPlan = _requirementService.CreateImplementationPlan(analysis, config);
                 teamRun = await _teamRunService.PromoteClarificationToApprovalAsync(
                     teamRun.Id, clarifiedGoal, clarifiedPlan, ct).ConfigureAwait(false);
@@ -329,7 +321,7 @@ public sealed partial class TeamOrchestrationService
             var approval = await RunApprovalGateAsync(
                 teamRun.TeamName, teamRun.Id, config, modelId, plan, eventSink, ct).ConfigureAwait(false);
             if (approval.ApprovalGranted != true)
-                return TeamError(teamRun.TeamName, "Team plan was not approved.", eventSink);
+                return TeamRunErrors.Fail(teamRun.TeamName, "Team plan was not approved.", eventSink);
 
             teamRun = await _teamRunService.BeginApprovedExecutionAsync(
                 teamRun.Id, teamRun.TeamName, teamRun.OriginalRequest,
@@ -350,7 +342,7 @@ public sealed partial class TeamOrchestrationService
         }
         teamRun = await _teamRunService.ReconcileSucceededTasksAsync(teamRun, ct).ConfigureAwait(false);
 
-        var (fileChanges, observedSink) = CreateObservedSink(eventSink);
+        var (fileChanges, observedSink) = TeamFileChangeObserver.CreateObservedSink(eventSink);
 
         try
         {
@@ -380,61 +372,6 @@ public sealed partial class TeamOrchestrationService
     // --- 共享私有方法（RunTeamStreamingAsync 与 ResumeTeamStreamingAsync 复用） ---
 
     /// <summary>
-    /// 创建一个包装 eventSink 的观察器，捕获 FileChanged 事件并累积到返回的 fileChanges 列表。
-    /// 同一文件被多次（可能由不同成员）修改时按文件合并 diff，并在 Contributors 中
-    /// 记录全部执行者——TEAM 交付报告据此展示归属。两个流式入口共用此逻辑。
-    /// </summary>
-    private static (List<OneCode.Core.Domain.FileChange> FileChanges, Action<OrchestrationEvent>? ObservedSink)
-        CreateObservedSink(Action<OrchestrationEvent>? eventSink)
-    {
-        var fileChanges = new List<OneCode.Core.Domain.FileChange>();
-        var fileIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        Action<OrchestrationEvent>? observedSink = evt =>
-        {
-            if (evt is OrchestrationEvent.FileChanged changed)
-            {
-                if (fileIndex.TryGetValue(changed.FileName, out var idx))
-                {
-                    var existing = fileChanges[idx];
-                    var contributors = existing.Contributors is { Count: > 0 } c && !c.Contains(changed.AgentName)
-                        ? [.. c, changed.AgentName]
-                        : existing.Contributors ?? (changed.AgentName is null ? null : [changed.AgentName]);
-                    fileChanges[idx] = new OneCode.Core.Domain.FileChange(
-                        changed.FileName,
-                        [.. existing.AddedLines, .. changed.AddedLines],
-                        [.. existing.RemovedLines, .. changed.RemovedLines],
-                        contributors);
-                }
-                else
-                {
-                    fileIndex[changed.FileName] = fileChanges.Count;
-                    fileChanges.Add(new OneCode.Core.Domain.FileChange(
-                        changed.FileName,
-                        changed.AddedLines,
-                        changed.RemovedLines,
-                        changed.AgentName is null ? null : [changed.AgentName]));
-                }
-            }
-            eventSink?.Invoke(evt);
-        };
-        return (fileChanges, observedSink);
-    }
-
-    /// <summary>
-    /// 构造 MAF ExternalResponse 以恢复 Team 澄清工作流（RequestPort 回答投递）。
-    /// </summary>
-    private static ExternalResponse BuildClarificationResponse(
-        string portId, string requestId, string answerText) =>
-        new(
-            new Microsoft.Agents.AI.Workflows.Checkpointing.RequestPortInfo(
-                new Microsoft.Agents.AI.Workflows.Checkpointing.TypeId(typeof(TeamClarificationInput)),
-                new Microsoft.Agents.AI.Workflows.Checkpointing.TypeId(typeof(TeamClarificationResponse)),
-                portId),
-            requestId,
-            new Microsoft.Agents.AI.Workflows.PortableValue(
-                new TeamClarificationResponse(answerText)));
-
-    /// <summary>
     /// 执行 Team 任务工作流的核心逻辑：构造 runtime、运行任务 DAG、聚合结果、完成业务事务。
     /// catch 块由调用方保留（Run 与 Resume 的错误文案不同）。
     /// </summary>
@@ -462,7 +399,7 @@ public sealed partial class TeamOrchestrationService
             var workflowResult = await _taskWorkflowHost.RunNextAsync(
                 teamRun, config, modelId, runtime,
                 new JsonSerializerOptions(), ct: ct).ConfigureAwait(false);
-            var result = BuildTeamResult(teamRun.TeamName, workflowResult.Outcomes);
+            var result = TeamResultAggregator.Build(teamRun.TeamName, workflowResult.Outcomes);
             var bound = runtime.BoundRun;
             teamRun = await _teamRunService.CompleteExecutionAsync(
                 bound, result, runtime.Transaction, fileChanges,
@@ -519,15 +456,6 @@ public sealed partial class TeamOrchestrationService
         }
     }
 
-    /// <summary>
-    /// 将 MAF Team DAG 各任务的结构化结果聚合为业务 TeamRunResult。
-    /// 逻辑已收敛到 <see cref="TeamResultAggregator"/>，此处保留薄委托以稳定调用点。
-    /// </summary>
-    private static TeamRunResult BuildTeamResult(
-        string teamName,
-        IReadOnlyList<TeamTaskOutcome> outcomes)
-        => TeamResultAggregator.Build(teamName, outcomes);
-
     private async Task<(bool Found, TeamConfig? Config)> TryResolveTeamAsync(
         string teamName,
         Action<OrchestrationEvent>? eventSink,
@@ -555,11 +483,4 @@ public sealed partial class TeamOrchestrationService
         return (false, null);
     }
 
-    private static TeamRunResult TeamError(
-        string teamName, string detail, Action<OrchestrationEvent>? eventSink = null)
-    {
-        var problem = AgentProblemDetails.ToolExecutionFailed(detail, toolName: "TeamOrchestration");
-        eventSink?.Invoke(new OrchestrationEvent.Error(problem.Detail, problem));
-        return new TeamRunResult(teamName, problem.Detail, 0, false, Error: problem);
-    }
 }

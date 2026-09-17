@@ -641,7 +641,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /memory
 
-管理**可检索记忆子系统**（会话事实 + `MEMORY.md` 结构化条目）。  
+管理**可检索记忆子系统**（`MEMORY.md` 结构化条目）。  
 项目编码规范请用 `/remember` 写入 `AGENTS.md`，不要用本命令。
 
 **用法**：
@@ -654,7 +654,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` | 列出会话记忆 + `MEMORY.md` 持久化条目 |
+| 无参数 / `list` | 列出 `MEMORY.md` 持久化条目 |
 | `add [--user] <text>` | 写入 `MEMORY.md` 事实/偏好（默认可检索项目级；`--user` 为用户级） |
 | `remove` / `delete <n>` | 删除第 N 条持久化条目 |
 | `clear [--all]` | 清空项目级条目；`--all` 同时清空用户级 |

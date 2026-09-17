@@ -4,7 +4,7 @@ using OneCode.App.Session;
 namespace OneCode.App.Services.Coordinator;
 
 public sealed record TeamAgentPipelineDependencies(
-    SharedContextProviderBuilder SharedContextBuilder,
+    AgentContextPipeline ContextPipeline,
     SubAgentPipelineFactory PipelineFactory,
     CompactionProviderBuilder CompactionBuilder,
     ISessionConversationAccess SessionAccess);

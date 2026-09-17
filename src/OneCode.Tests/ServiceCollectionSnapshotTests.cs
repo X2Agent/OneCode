@@ -85,7 +85,7 @@ public sealed class ServiceCollectionSnapshotTests
             .ToList();
 
         hostedTypeNames.Should().Equal(
-            "SkillChangeWatcher",            // RegisterSkillServices：技能目录热重载
+            "SkillFilesWatcher",             // RegisterSkillServices：技能目录变更通知（UI 刷新）
             "SessionEndHookService",         // Hook 子系统：宿主停止时兜底补发 SessionEnd
             "YoloRuleStoreLoader",           // Permission 子系统：Yolo 规则加载
             "CronSchedulerService",          // Cron：定时任务调度

@@ -7,12 +7,11 @@ namespace OneCode.Infrastructure.Middleware.Contracts;
 /// 文件编辑行为契约（仅做结构/存在性校验，路径 scope 检查由 PermissionChecker 层的
 /// <c>PermissionCheckHelpers.ValidatePath</c> 统一负责）：
 /// - Edit Pre: 目标文件必须存在且可写
-/// - Post: 编辑后文件仍然存在（不被意外删除）
 ///
 /// 注意：scope 检查下沉到 ValidatePath 是为了正确处理 AdditionalWorkingDirectories
 /// （用户通过 /add-dir 添加的额外工作目录），避免本契约因只持 workingDirectory 而误拒。
 /// 语言特定的后置验证（如 .cs → dotnet build）应由 Agent 通过 Bash 工具主动执行，
-/// 或通过 VerificationMiddleware 的编辑后验证机制触发，而非在契约中硬编码。
+/// 或通过 EditGuardMiddleware 的编辑后验证阶段触发，而非在契约中硬编码。
 ///
 /// 设计要点：
 /// - ExtractPath 委托给 ToolArgumentExtractor.ExtractFilePath，覆盖所有路径 key 约定
@@ -51,35 +50,6 @@ public sealed class FileEditContract(string workingDirectory)
         if (IsEdit(toolName) && !File.Exists(fullPath))
             return new(ContractResult.Failed(
                 "Target file does not exist.",
-                $"Path: {fullPath}"));
-
-        return new(ContractResult.Passed);
-    }
-
-    public ValueTask<ContractResult> ValidatePostConditionsAsync(
-        string toolName,
-        IReadOnlyDictionary<string, object?> parameters,
-        object? executionResult,
-        CancellationToken ct)
-    {
-        var path = ExtractPath(parameters);
-        if (path is null)
-            return new(ContractResult.Skipped("No path parameter."));
-
-        string fullPath;
-        try
-        {
-            fullPath = Path.GetFullPath(path, workingDirectory);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return new(ContractResult.Skipped("Invalid path."));
-        }
-
-        // 后置检查：编辑后文件应存在
-        if (!File.Exists(fullPath))
-            return new(ContractResult.Failed(
-                "File does not exist after edit.",
                 $"Path: {fullPath}"));
 
         return new(ContractResult.Passed);

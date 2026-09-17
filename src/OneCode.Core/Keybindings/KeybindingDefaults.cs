@@ -223,14 +223,12 @@ public static class KeybindingDefaults
             ["ctrl+v"] = ActionChatPaste,
 
             // 对话区键盘滚动（不干扰输入）。
-            // ctrl+u 保留给 chat:pageUp（跨终端兼容的翻页键）；
             // ctrl+d 不在此绑定——它是 Global 保留退出键（app:exit），
             // 且 Chat 块声明在 Global 之后，「后匹配生效」会永久遮蔽退出键。
             ["shift+up"] = ActionChatScrollUp,
             ["shift+down"] = ActionChatScrollDown,
             ["ctrl+pgup"] = ActionChatScrollUp,
             ["ctrl+pgdn"] = ActionChatScrollDown,
-            ["ctrl+u"] = ActionChatPageUp,
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
 

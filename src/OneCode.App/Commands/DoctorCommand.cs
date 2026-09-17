@@ -243,9 +243,8 @@ public sealed class DoctorCommand(
 
     private static CommandResult ShowEnv()
     {
-        // Only OneCode-relevant env vars (was: generic HOME/PATH/OS/USER/SHELL which
-        // carry no diagnostic value). Proxy vars included because they frequently break
-        // API connectivity in corporate environments.
+        // Only OneCode-relevant env vars; standard system and proxy variables are
+        // consumed by the operating system or .NET networking stack.
         var relevantVars = new (string Name, string? Description)[]
         {
             (CoreConstants.EnvVars.OneCodeApiKey, "API key (overrides settings.json)"),
@@ -253,9 +252,6 @@ public sealed class DoctorCommand(
             (CoreConstants.EnvVars.OneCodeModel, "Default model override"),
             (CoreConstants.EnvVars.OneCodeWebSearchProvider, "Web search provider"),
             (CoreConstants.EnvVars.TavilyApiKey, "Tavily search API key"),
-            (CoreConstants.EnvVars.HttpProxy, "HTTP proxy"),
-            (CoreConstants.EnvVars.HttpsProxy, "HTTPS proxy"),
-            (CoreConstants.EnvVars.NoProxy, "No-proxy bypass list"),
             (CoreConstants.EnvVars.Vcr, "VCR record/replay mode"),
         };
 

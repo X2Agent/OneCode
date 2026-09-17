@@ -572,7 +572,8 @@ public sealed class PathTraversalTests
         var projectDir = Path.Combine(_tempDir, "project");
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
+        var executor = Substitute.For<OneCode.Core.Exec.IShellExecutor>();
+        var tool = new BashTool(wd, executor, sessionManager: Substitute.For<OneCode.App.Session.ISessionConversationAccess>());
         try
         {
             var result = await tool.ExecuteAsync(command, ct: TestContext.Current.CancellationToken);
@@ -598,7 +599,8 @@ public sealed class PathTraversalTests
 
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new BashTool(wd, ssh: null!, shellExecutorManager: null!, sessionManager: null!, processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
+        var executor = Substitute.For<OneCode.Core.Exec.IShellExecutor>();
+        var tool = new BashTool(wd, executor, sessionManager: Substitute.For<OneCode.App.Session.ISessionConversationAccess>());
         try
         {
             var result = await tool.ExecuteAsync($"cat {outsideFile}", ct: TestContext.Current.CancellationToken);

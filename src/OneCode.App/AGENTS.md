@@ -12,8 +12,8 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | 子目录 | 职责 |
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
-| `Tools/` | AI 工具实现：Agent 调用的 30 个工具（`sealed class` + `[Description]` + `AddTool<T>` 注册） |
-| `Services/` | 应用层服务：Memory、Agent、Swarm、Lsp、MCP 等 |
+| `Tools/` | AI 工具实现：Agent 调用的 31 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
+| `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Coordinator、Hooks、Lsp、Mcp 等 |
 | `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
 | `Session/` | 会话上下文和生命周期管理 |
@@ -79,8 +79,8 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 
 | 类型 | 位置 | 保留原因 |
 |------|------|---------|
-| `MainAgentRunner` / `ForkedAgentRunner` | `App.Services.Agent` | 业务编排器，依赖 13+ 个 App 服务（MemoryService、SessionMemoryService、SessionManager、LspDiagnosticRegistry、PermissionModeProvider、SkillProviderHolder、ConversationShellExecutorManager 等），属于 Application 层"组合"职责，不属于 Infrastructure "外部系统适配"职责。下沉需提取 10+ 个 Core 接口，会让 Core 沦为接口垃圾场。 |
-| `DesignContextProvider` / `LspDiagnosticContextProvider` / `MemoryFileContextProvider` / `SessionMemoryContextProvider` / `PlanModeAttachmentProvider` / `BuildModeAttachmentProvider` / `GoalContextProvider` / `ShellEnvironmentProvider` / `AgentModeProvider` | `App.Services.Context` 等 | MAF `AIContextProvider` 子类，但本质是"将 App 层业务状态注入 LLM 上下文"的胶水代码，依赖 App 层服务（GoalContextState、PermissionModeProvider、SessionManager 等）。下沉不会减少 App↔Infrastructure 的耦合面。 |
+| `MainAgentRunner` / `ForkedAgentRunner` | `App.Services.Agent` | 业务编排器，依赖 13+ 个 App 服务（MemoryService、SessionManager、LspDiagnosticRegistry、PermissionModeProvider、SkillProviderHolder、ConversationShellExecutorManager 等），属于 Application 层"组合"职责，不属于 Infrastructure "外部系统适配"职责。下沉需提取 10+ 个 Core 接口，会让 Core 沦为接口垃圾场。 |
+| `DesignContextProvider` / `LspDiagnosticContextProvider` / `PlanModeAttachmentProvider` / `BuildModeAttachmentProvider` / `GoalContextProvider` / `ShellEnvironmentProvider` / `ModeInstructionProvider` | `App.Services.Context` 等 | MAF `AIContextProvider` 子类，但本质是"将 App 层业务状态注入 LLM 上下文"的胶水代码，依赖 App 层服务（GoalContextState、PermissionModeProvider、SessionManager 等）。下沉不会减少 App↔Infrastructure 的耦合面。 |
 
 **判断准则**：
 - **下沉到 Infrastructure**：纯 SDK 适配代码（无状态、仅依赖 Core 抽象）→ Infrastructure。例：`ChatClientFactory`、MAF 中间件。
@@ -103,7 +103,7 @@ App 层通过 `OneCode.Automation.ServiceCollectionExtensions` 的 `AddCronSched
 
 ## 工具开发规范（Tools/）
 
-所有 AI 工具均为普通 `sealed class`，通过 `[Description]` 特性描述方法与参数，由 `ToolCatalog` 在运行时反射解析为 `AIFunction`。新增工具在 `Tools/ToolServiceCollectionExtensions.cs` 的 `AddToolServices` 注册流中通过 `AddTool<T>` 扩展方法注册，一次性完成 DI 注册与 `ToolMetadataRegistry` 元数据登记。
+所有 AI 工具均为普通 `sealed class`，通过 `[Description]` 特性描述方法与参数，由 `ToolCatalog` 消费显式 AIFunction 工厂构建工具列表（**无反射**）。新增工具在 `Tools/ToolServiceCollectionExtensions.cs` 的 `AddToolServices` 注册流中通过 `AddToolInstance<T>` 扩展方法注册，一次性完成 DI 注册与 `ToolMetadataRegistry` 元数据登记。
 
 ### 工具类实现
 
@@ -126,12 +126,19 @@ public sealed class MyTool
 }
 ```
 
-### 工具注册
+### 工具注册（唯一入口）
+
+`AddToolInstance<T>(name, Func<T, AIFunction>, risk, ...)`（`OneCode.Core.Tools.ToolRegistrationExtensions`）是工具注册的**唯一入口**，一次调用同时完成：
+
+1. **DI 注册**：`TryAddSingleton<T>()` 解析工具类实例（幂等，可安全重复调用）
+2. **元数据登记**：追加 `ToolRegistration`，其 `IEnumerable` 注入顺序 = `AddToolServices` 中的调用顺序（**重排会改变工具目录装配结果**）
+
+`AIFunction` 由**显式工厂委托**创建（`sp => functionFactory(sp.GetRequiredService<T>())`）——无 `nameof` 方法名绑定、无运行时方法反射。
 
 在 `Tools/ToolServiceCollectionExtensions.cs` 的 `AddToolServices` 注册流中追加：
 
 ```csharp
-services.AddTool<MyTool>("MyTool", nameof(MyTool.ExecuteAsync), ToolRisk.Destructive,
+services.AddToolInstance<MyTool>("MyTool", tool => AIFunctionFactory.Create(tool.ExecuteAsync, name: "MyTool"), ToolRisk.Destructive,
     aliases: ["mt"],            // optional aliases
     concurrency: false,        // not concurrency-safe (default false)
     searchHint: "describe tool purpose");  // for ToolSearchTool retrieval
@@ -145,12 +152,6 @@ services.AddTool<MyTool>("MyTool", nameof(MyTool.ExecuteAsync), ToolRisk.Destruc
 | `Safe` | 修改但可回滚/可并发 | `TaskTool` |
 | `Destructive` | 不可逆修改，禁止并发 | `WriteTool`, `EditTool`, `BashTool` |
 | `Dynamic` | 风险取决于运行时输入 | `BashTool`（powershell 方言）、`WebFetchTool` |
-
-### 三种注册模式
-
-1. **标准工具**（推荐）：`AddTool<T>(name, methodName, risk, ...)` — DI 解析实例 + 反射调用方法
-2. **静态方法工具**：`AddToolStatic(name, type, methodName, risk, ...)` — 无需 DI 实例，调用静态方法
-3. **工厂工具**：`AddToolInstance(name, factory, risk, ...)` — 运行时通过 `Func<IServiceProvider, AIFunction>` 创建 AIFunction（用于需要访问 `ToolMetadataRegistry` 等运行时状态的特殊工具）
 
 ### 错误处理
 
@@ -282,7 +283,7 @@ var harness = await promptManager.GetPromptAsync(HarnessPromptName, ct).Configur
 
 ## TUI 组件规范（Tui/）
 
-- **颜色**：所有颜色通过 `TuiTheme` 取值，**禁止硬编码**颜色值
+- **颜色**：所有颜色通过 `TuiPalette` 语义 token 取值，Terminal.Gui `Scheme` 通过 `TuiStyles` 组合，**禁止硬编码**颜色值
 - **状态指示器**：新增全局状态（如沙箱模式 🔒、Plan 模式 📋）须在 `AgentStatusBar` 中注册
 - **Terminal.Gui 限制**：不支持字体大小/行间距配置，不支持鼠标精确位置，不支持透明背景
 - **文件体量与拆分原则**：~300 行是**参考信号而非硬上限**，内聚优先于行数。超限时的拆分优先级：① 提取**真实类型**（协作者类 / 静态工具类，如 `ChatCompletionController`、`CompletionTextMetrics`、`IInteractionSession`）；② 仅当成员被框架绑定（View 的 `OnDrawingContent` / 按键处理）或强耦合共享私有状态时才用 partial（如 `ChatInputView.Keys.cs`、`MessageListView.Rendering.cs`）；③ **禁止**为凑行数把无状态方法组或互不相关的功能捆进新 partial 文件。partial 文件名与类名对齐（`OneCodeToplevel*.cs`），头注释标明自身职责

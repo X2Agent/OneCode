@@ -300,6 +300,7 @@ public sealed class SessionToolSetTests
             Name: name,
             Risk: ToolRisk.Safe,
             FunctionFactory: _ => CreateStubFunction(name),
+            ApprovalMode: ToolPolicyDefaults.ForRisk(ToolRisk.Safe),
             LoadPolicy: loadPolicy,
             Keywords: keywords);
     }

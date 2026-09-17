@@ -79,17 +79,6 @@ public sealed class WebFetchToolSsrfTests
     }
 
     [Theory]
-    [InlineData("http://127.0.0.1:10808", "https://github.com/", null, true)]
-    [InlineData(null, "https://github.com/", null, false)]
-    [InlineData("http://127.0.0.1:10808", "https://github.com/", "*", false)]
-    [InlineData("http://127.0.0.1:10808", "https://github.com/", ".github.com", false)]
-    [InlineData("http://127.0.0.1:10808", "https://api.example.com/", ".example.com", false)]
-    public void ResolvesViaProxy_DecidesFromProxyAndNoProxy(string? proxyUrl, string url, string? noProxyList, bool expected)
-    {
-        FetchSafetyPolicy.ResolvesViaProxy(proxyUrl, url, noProxyList).Should().Be(expected);
-    }
-
-    [Theory]
     [InlineData("http://10.0.0.1/")]
     [InlineData("http://172.16.0.1/")]
     [InlineData("http://172.31.255.255/")]

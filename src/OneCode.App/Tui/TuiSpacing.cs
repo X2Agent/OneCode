@@ -54,14 +54,6 @@ internal static class TuiSpacing
     public const int DefaultContentWidth = 80;
 
     /// <summary>
-    /// 输入框总高度动态上限：Math.Clamp(屏幕高度 / 6, 2, <see cref="ChatInputView.MaxHeight"/>)。
-    /// 24 行终端上限 4 行（1 分隔线 + 3 编辑行），40+ 行终端可优雅展开至 6 行，
-    /// 兑现「输入框高度不超过屏幕约 1/6」的小屏承诺。
-    /// </summary>
-    public static int GetInputMaxTotalHeight(int screenHeight)
-        => Math.Clamp(screenHeight / 6, 2, ChatInputView.MaxHeight);
-
-    /// <summary>
     /// Width used when wrapping / rendering chat lines for a given viewport.
     /// Tracks the viewport 1:1 so maximized terminals fill available space
     /// instead of leaving large empty side gutters.
@@ -100,10 +92,9 @@ internal static class TuiSpacing
     public const int ChatInputContextGap = 0;
 
     /// <summary>
-    /// ContentZone 底部预留高度基线（单行输入时的紧凑高度）：
-    /// 会话上下文栏 1 + Agent 状态栏 1 + 两处间距各 0 + 单行聊天输入区高度 2 = 4。
-    /// 当输入框输入多行时，动态根据实际高度调整（上限见 <see cref="ChatInputView.MaxHeight"/>，即 6 行）。
+    /// ContentZone 底部预留高度基线（固定输入区高度）：
+    /// 会话上下文栏 1 + Agent 状态栏 1 + 两处间距各 0 + 固定聊天输入区高度 4（1 分隔线 + 3 编辑行）= 6。
     /// </summary>
     public const int ContentZoneReservedBottom =
-        SessionContextBarHeight + StatusBarHeight + StatusBarTopGap + ChatInputContextGap + ChatInputView.MinHeight;
+        SessionContextBarHeight + StatusBarHeight + StatusBarTopGap + ChatInputContextGap + ChatInputView.FixedHeight;
 }

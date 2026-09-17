@@ -5,8 +5,8 @@ A production-grade CLI AI coding assistant built on .NET 10, featuring a Termina
 ## Highlights
 
 - **Four working modes** — BUILD / PLAN / TEAM / GOAL, switchable with `Tab`
-- **44 slash commands · 30 built-in tools** — file ops, LSP, web, agents, cron, Git worktree, MCP
-- **Safety-first execution** — 9 permission modes, command classifiers, hooks, editable transactions
+- **44 slash commands · 31 built-in tools** — file ops, LSP, web, agents, cron, Git worktree, MCP
+- **Safety-first execution** — 8 permission modes, command classifiers, hooks, editable transactions
 - **Cross-platform** — self-contained single-file binaries for Windows / Linux / macOS (x64 + ARM64)
 
 ## Install

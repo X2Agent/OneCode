@@ -14,15 +14,11 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView : View
 {
-    public const int MinVisibleLines = 1;
-    public const int MinHeight = 1 + MinVisibleLines; // 2
-    public const int MaxHeight = 1 + ChatTextEditor.MaxVisibleLines; // 6
+    /// <summary>编辑区固定可见行数（不含分隔线）。</summary>
+    public const int EditorLines = 3;
 
-    /// <summary>
-    /// 输入框总高度变化通知（当物理行数增减导致总高度在 2~6 行间变化时触发）。
-    /// 参数为新的总行数（1 行分隔线 + N 行编辑器文本）。
-    /// </summary>
-    public event Action<int>? InputHeightChanged;
+    /// <summary>输入区固定总高度（1 行分隔线 + <see cref="EditorLines"/>）= 4。</summary>
+    public const int FixedHeight = 1 + EditorLines;
 
     private readonly IApplication _app;
     private readonly WorkingModeController _modeController;
@@ -31,8 +27,6 @@ public sealed partial class ChatInputView : View
     // 子控件在 BuildViews()（构造函数调用）中创建，见 ChatInputView.Layout.cs
     private Label _separatorLabel = null!;
     private ChatTextEditor _input = null!;
-    private int _lastHeight = MinHeight;
-    private int _lastBottomOffset;
     private ListView _completionList = null!;
     private FrameView _completionFrame = null!;
 
@@ -209,6 +203,9 @@ public sealed partial class ChatInputView : View
     /// <summary>当前输入框文本。</summary>
     public string CurrentText => _input.Text ?? string.Empty;
 
+    /// <summary>编辑器当前是否持有键盘焦点。</summary>
+    internal bool HasInputFocus => _input.HasEditorFocus;
+
     /// <summary>
     /// 设置输入框文本（用于恢复之前的输入）。
     /// </summary>
@@ -292,8 +289,6 @@ public sealed partial class ChatInputView : View
     /// True when the nested editor currently has keyboard focus.
     /// ReplShell uses this to skip interaction-key fallback and avoid double-handling.
     /// </summary>
-    internal bool HasInputFocus => _input.HasEditorFocus;
-
     /// <summary>
     /// Fires AFTER the Editor text has changed. Used to trigger command/file completion
     /// with the actual current text (unlike KeyDown which fires before text insertion).

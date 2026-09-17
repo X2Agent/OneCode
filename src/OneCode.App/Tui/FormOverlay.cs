@@ -28,12 +28,12 @@ public sealed class FormRow : View
             Height = 1,
             CanFocus = false,
         };
-        Label.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        Label.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         Field = field;
         Field.X = FieldOffset;
         Field.Y = 0;
-        Field.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgPrimary, TuiPalette.BgTerminalHeader));
+        Field.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgPrimary, TuiPalette.BgTerminalHeader));
 
         Add(Label, Field);
     }
@@ -118,7 +118,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             Height = 1,
             CanFocus = false,
         };
-        _errorLabel.SetScheme(TuiTheme.MakeScheme(TuiPalette.Error, TuiPalette.BgCard));
+        _errorLabel.SetScheme(TuiStyles.MakeScheme(TuiPalette.Error, TuiPalette.BgCard));
     }
 
     protected int NextRowY => _nextRowY;
@@ -217,7 +217,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             X = Pos.AnchorEnd(),
             Y = 0,
         };
-        secondary.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
+        secondary.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         secondary.Accepting += (_, _) => secondaryAction();
 
         var primary = new Button
@@ -226,7 +226,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             X = 0,
             Y = 0,
         };
-        primary.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
+        primary.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         primary.Accepting += (_, _) => primaryAction();
 
         var actions = new View
@@ -290,7 +290,7 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
                 return true;
             }
         }
-        else if (kb == Key.PageUp || kb == Key.U.WithCtrl)
+        else if (kb == Key.PageUp)
         {
             if (_formContent.ScrollVertical(-Math.Max(1, _formContent.Viewport.Height / 2)) == true)
             {

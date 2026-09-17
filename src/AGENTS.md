@@ -874,7 +874,7 @@ public PermissionCheckResult Check(...)
 
 权限模式行为由 <c>PermissionProfiles</c> 静态注册表定义（<c>GetProfile</c> / <c>Check</c>），
 <code>PermissionChecker</code> 在 Auto 模式下委托 <c>YoloClassifier</c>，其余模式直接查表。
-工具注册通过 <c>ToolRegistration</c> + <c>AddTool&lt;T&gt;</c> 扩展方法在 DI 注册时一并完成元数据登记（详见 [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md) 工具开发规范），由 <c>ToolCatalog</c> 在运行时通过反射解析为 <c>AIFunction</c>。新增工具时在 <c>src/OneCode.App/Tools/ToolServiceCollectionExtensions.cs</c> 的 <c>AddToolServices</c> 注册流中调用 <c>AddTool&lt;T&gt;</c> 即可，无需修改集中注册表。
+工具注册通过 <c>ToolRegistration</c> + <c>AddToolInstance&lt;T&gt;</c> 扩展方法在 DI 注册时一并完成元数据登记（详见 [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md) 工具开发规范），由 <c>ToolCatalog</c> 消费显式 AIFunction 工厂构建工具列表（无运行时方法反射）。新增工具时在 <c>src/OneCode.App/Tools/ToolServiceCollectionExtensions.cs</c> 的 <c>AddToolServices</c> 注册流中调用 <c>AddToolInstance&lt;T&gt;</c> 即可，无需修改集中注册表。
 
 ---
 
@@ -889,7 +889,7 @@ public PermissionCheckResult Check(...)
 - 组合根 `OneCodeApp.Create` 保留**显式有序**的 `AddXxx()` 调用列表；领域内部不得假设其他领域的注册时机——组合根的调用顺序即注册顺序。
 - **顺序敏感点（变更须人工审查并重新生成快照基线）**：
   1. HostedService 启动顺序 = `AddHostedService` 注册顺序（由 `ServiceCollectionSnapshotTests.HostedServices_ResolveInRegistrationOrder` 锁定）；
-  2. `IEnumerable<T>` 注入顺序（`AddTool` 注册流、`IHookExecutor`、`IWorkflowQualityGateValidator`、`INotificationProvider`、`IDynamicCommandSource`）。
+  2. `IEnumerable<T>` 注入顺序（`AddToolInstance` 注册流、`IHookExecutor`、`IWorkflowQualityGateValidator`、`INotificationProvider`、`IDynamicCommandSource`）。
 - 其余单实现/惰性工厂注册与位置无关，但跨领域搬移仍视为 DI 面变更。
 
 **快照护栏**：`src/OneCode.Tests/ServiceCollectionSnapshotTests.cs` 将完整注册面（类型+生命周期+实现+顺序）与 `ServiceRegistrationSnapshot.approved.txt` 基线比对。任何 DI 注册变更导致快照测试失败时：审查 diff 是否符合预期 → 设置环境变量 `ONECODE_UPDATE_SNAPSHOT=1` 运行该测试重新生成基线 → 人工确认 diff 后提交。

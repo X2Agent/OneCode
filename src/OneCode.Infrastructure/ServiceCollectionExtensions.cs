@@ -15,6 +15,13 @@ namespace OneCode.Infrastructure;
 /// </summary>
 public static class InfrastructureServiceCollectionExtensions
 {
+    private static HttpClientHandler CreateTransportHandler()
+    {
+        var handler = new HttpClientHandler();
+        MtlsHelper.ApplyToHandler(handler);
+        return handler;
+    }
+
     /// <summary>
     /// 注册 VCR（录像/回放）基础设施服务。
     ///
@@ -58,7 +65,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<OneCodeIdentityHandler>();
 
         services.AddHttpClient(Constants.HttpClientNames.Ollama)
-            .ConfigurePrimaryHttpMessageHandler(CreateProxyAwareHandler)
+            .ConfigurePrimaryHttpMessageHandler(CreateTransportHandler)
             .AddHttpMessageHandler<OneCodeIdentityHandler>()
             .ConfigureHttpClient(static client => client.Timeout = Timeout.InfiniteTimeSpan);
 
@@ -68,7 +75,7 @@ public static class InfrastructureServiceCollectionExtensions
         // OpenAI SDK 请求模型中（MEAI 转换即丢弃）；Sanitizing 必须在 SDK 反序列化之前
         // 修复退化响应。
         services.AddHttpClient(Constants.HttpClientNames.OpenAI)
-            .ConfigurePrimaryHttpMessageHandler(CreateProxyAwareHandler)
+            .ConfigurePrimaryHttpMessageHandler(CreateTransportHandler)
             .AddHttpMessageHandler<OpenAiResponseSanitizingHandler>()
             .AddHttpMessageHandler<OpenAiReasoningPassbackHandler>()
             .AddHttpMessageHandler<OneCodeIdentityHandler>()
@@ -89,11 +96,5 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IWebSearchProvider, TavilySearchProvider>();
         return services;
     }
-
-    private static HttpClientHandler CreateProxyAwareHandler()
-    {
-        var handler = new HttpClientHandler();
-        ProxyConfigService.ApplyToHandler(handler);
-        return handler;
-    }
 }
+

@@ -81,7 +81,7 @@ public abstract class CenteredOverlay : View
             Text = title,
             CanFocus = false,
         };
-        HeaderLabel.SetScheme(TuiTheme.MakeScheme(TuiPalette.Accent, TuiPalette.BgCard));
+        HeaderLabel.SetScheme(TuiStyles.MakeScheme(TuiPalette.Accent, TuiPalette.BgCard));
         Add(HeaderLabel);
         // 同时声明 Preferred*：Position/GetPreferredSize 以它们为准做钳制
         //（Width/Height 仅作为首次定位前的占位尺寸）。

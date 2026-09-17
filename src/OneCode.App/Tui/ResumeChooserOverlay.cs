@@ -26,7 +26,7 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
             Width = Dim.Fill(TuiSpacing.Md),
             CanFocus = false,
         };
-        label.SetScheme(TuiTheme.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        label.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         _listView = new ListView
         {
@@ -37,7 +37,7 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
             CanFocus = true,
         };
         _listView.SetSource(new ObservableCollection<string>(_entries.Select(e => e.DisplayText).ToList()));
-        _listView.SetScheme(TuiTheme.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
+        _listView.SetScheme(TuiStyles.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
         _listView.KeyDown += (_, key) =>
         {
             if (key == Key.Enter)
@@ -84,7 +84,7 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
             X = x,
             Y = Pos.AnchorEnd(TuiSpacing.Sm),
         };
-        button.SetScheme(TuiTheme.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
+        button.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
         return button;
     }
 }

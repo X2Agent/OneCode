@@ -1,10 +1,7 @@
-using OneCode.Core.Mcp;
-using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Context;
-using OneCode.App.Services.Skills;
 using OneCode.Core.Memory;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
@@ -45,11 +42,9 @@ public sealed class PromptConfigBuilderTests
 
         var composer = new PromptComposer(manager);
         var builder = new PromptConfigBuilder(
-            NullLogger<PromptConfigBuilder>.Instance,
             configManager: null!,
             memoryService: null!,
             contextBuilder: null!,
-            runtimeDeps: null!,
             promptComposer: composer,
             toolMetadataRegistry: new ToolMetadataRegistry());
 
@@ -68,7 +63,7 @@ public sealed class PromptConfigBuilderTests
     }
 
     [Fact]
-    public async Task BuildSystemPromptAsync_ComposesAllContextSections_AndRebuildsSkillProvider()
+    public async Task BuildSystemPromptAsync_ComposesAllContextSections()
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = new PromptManager();
@@ -93,30 +88,21 @@ public sealed class PromptConfigBuilderTests
 
         var configManager = TestConfigManager.Create();
         var memoryService = Substitute.For<IMemoryService>();
-        memoryService.LoadMemoryPromptAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        memoryService.LoadMemoryPromptAsync(Arg.Any<CancellationToken>())
             .Returns("MEMORY_SENTINEL");
 
         var processRunner = Substitute.For<IProcessRunner>();
         var gitInfo = new GitInfo(processRunner, NullLogger<GitInfo>.Instance);
         var contextBuilder = new ContextBuilder(gitInfo, processRunner, NullLogger<ContextBuilder>.Instance);
 
-        var mcpManager = Substitute.For<IMcpConnectionManager>();
-        var mcpSkillsIntegrator = new McpSkillsIntegrator(mcpManager, NullLogger<McpSkillsIntegrator>.Instance);
-        var skillProviderHolder = new SkillProviderHolder(new AgentSkillsProviderBuilder().Build());
-        var initialProvider = skillProviderHolder.Current;
-        var runtimeDeps = new PromptRuntimeDependencies(
-            mcpSkillsIntegrator, skillProviderHolder, new SkillCatalog(Path.GetTempPath()));
-
         var builder = new PromptConfigBuilder(
-            NullLogger<PromptConfigBuilder>.Instance,
             configManager,
             memoryService,
             contextBuilder,
-            runtimeDeps,
             composer,
             new ToolMetadataRegistry());
 
-        var result = await builder.BuildSystemPromptAsync(memoryQuery: null, ct);
+        var result = await builder.BuildSystemPromptAsync(ct);
 
         // Harness is prepended
         result.Should().Contain("Shared harness.");
@@ -125,9 +111,5 @@ public sealed class PromptConfigBuilderTests
         result.Should().Contain("MEMORY_SENTINEL");
         result.Split("MEMORY_SENTINEL", StringSplitOptions.None).Length.Should().Be(2,
             "memory section must appear exactly once (no duplication)");
-        // Skills provider was rebuilt (MCP preconnect moved out of this path — Plan B);
-        // the holder must have been atomically replaced with a fresh provider.
-        skillProviderHolder.Current.Should().NotBeSameAs(initialProvider,
-            "BuildSystemPromptAsync must rebuild and replace the skills provider");
     }
 }

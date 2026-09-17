@@ -19,6 +19,16 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class ForkedAgentRunnerTests
 {
+
+    private static AgentContextPipeline CreateContextPipeline(
+        IPermissionModeProvider modeProvider)
+    {
+        var (shared, main) = TestSupport.TestAgentContextProviderAssembly.Create(
+            modeProvider: modeProvider);
+        return new AgentContextPipeline(shared, main);
+    }
+
+
     private static ForkedAgentRunner CreateRunner()
     {
         var configManager = TestConfigManager.Create();
@@ -40,9 +50,7 @@ public sealed class ForkedAgentRunnerTests
             logger: NullLogger<ForkedAgentRunner>.Instance,
             loggerFactory: NullLoggerFactory.Instance,
             serviceProvider: Substitute.For<IServiceProvider>(),
-            sharedContextBuilder: TestSupport.TestAgentContextProviderAssembly.Create(
-                modelManager: new ModelManager(configManager, new ModelCatalogStore()),
-                modeProvider: modeProvider).Shared,
+            contextPipeline: CreateContextPipeline(modeProvider),
             pipelineFactory: new SubAgentPipelineFactory(
                 modeProvider,
                 Substitute.For<IHookExecutionService>(),

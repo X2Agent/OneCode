@@ -111,7 +111,7 @@ public sealed class TuiHostConfigurator(
                 }
             }
 
-            overlay.SkillChangeWatcher.SkillsChanged += OnSkillsChanged;
+            overlay.SkillFilesWatcher.SkillsChanged += OnSkillsChanged;
             mcpConnectionManager.ServersChanged += OnMcpServersChanged;
 
             overlay.PlanExecutionRecovery.AttachSession(session);

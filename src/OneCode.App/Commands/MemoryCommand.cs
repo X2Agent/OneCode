@@ -1,20 +1,18 @@
 using System.Text;
 using OneCode.App.Session;
 using OneCode.App.Services.AutoDream;
-using OneCode.App.Services.Memory;
 using OneCode.Core.Memory;
 
 namespace OneCode.App.Commands;
 
 /// <summary>
-/// /memory — manage the searchable memory subsystem (session facts + MEMORY.md entries).
+/// /memory — manage the searchable memory subsystem (MEMORY.md entries).
 /// Project coding rules belong in <c>AGENTS.md</c> via <c>/remember</c>, not here.
 /// </summary>
 public sealed class MemoryCommand(
     ISessionManager sessionManager,
     IMemoryService memoryService,
     IMemoryEntryStore entryStore,
-    ISessionMemoryService sessionMemoryService,
     AutoDreamService autoDreamService) : Command
 {
     public override string Name => "memory";
@@ -51,16 +49,9 @@ public sealed class MemoryCommand(
         sb.AppendLine("Searchable memory (not AGENTS.md — use /remember for project rules):");
         sb.AppendLine();
 
-        // Session memories (existing behavior)
-        var sessionMemories = sessionMemoryService.GetMemories(conv);
-        sb.AppendLine("Session memories (shown for reference; /memory remove targets persistent entries only):");
-        if (sessionMemories.Count == 0) sb.AppendLine("  (none)");
-        else foreach (var m in sessionMemories)
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  • [{m.Source}] {m.Content}");
-
         // Persistent memory entries from MEMORY.md
-        var entries = await memoryService.ListMemoryEntriesAsync(conv.WorkingDirectory, ct).ConfigureAwait(false);
-        sb.AppendLine("\nPersistent entries (MEMORY.md):");
+        var entries = await memoryService.ListMemoryEntriesAsync(ct).ConfigureAwait(false);
+        sb.AppendLine("Persistent entries (MEMORY.md):");
         if (entries.Count == 0)
         {
             sb.AppendLine("  (none)");
@@ -80,7 +71,7 @@ public sealed class MemoryCommand(
 
         sb.AppendLine("\nUsage:");
         sb.AppendLine("  /memory add [--user] <text>   Add a MEMORY.md fact/preference (searchable)");
-        sb.AppendLine("  /memory remove <n>           Remove persistent entry #n (session memories are not removable)");
+        sb.AppendLine("  /memory remove <n>           Remove persistent entry #n");
         sb.AppendLine("  /memory clear [--all]        Clear project (or --all for user+project)");
         sb.AppendLine("  /memory autodream trigger    Trigger AutoDream consolidation");
         sb.AppendLine("  /memory autodream status     Show AutoDream status");
@@ -134,7 +125,7 @@ public sealed class MemoryCommand(
             return CommandResult.Error("Usage: /memory remove <number>");
 
         var conv = sessionManager.ForegroundConversation!;
-        var entries = await memoryService.ListMemoryEntriesAsync(conv.WorkingDirectory, ct).ConfigureAwait(false);
+        var entries = await memoryService.ListMemoryEntriesAsync(ct).ConfigureAwait(false);
 
         var target = entries.FirstOrDefault(e => e.Index == idx);
         if (target is null)

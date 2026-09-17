@@ -16,6 +16,7 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<AgentRuntimeContextDependencies>();
         services.AddSingleton<SharedContextProviderBuilder>();
         services.AddSingleton<MainModeContextProviderBuilder>();
+        services.AddSingleton<AgentContextPipeline>();
         services.AddSingleton<AgentPipelineAssembly>();
         services.AddSingleton<SubAgentPipelineFactory>();
         services.AddSingleton<CompactionProviderBuilder>();

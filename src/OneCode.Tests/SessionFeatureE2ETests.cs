@@ -20,17 +20,15 @@ public sealed class SessionFeatureE2ETests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _sessionsDir;
-    private readonly SessionStore _store;
+    private readonly ISessionStore _store;
     private readonly SessionManager _sessionManager;
     private readonly ConversationShellExecutorManager _shellManager;
 
     public SessionFeatureE2ETests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionE2E_{Guid.NewGuid():N}");
-        _sessionsDir = Path.Combine(_tempDir, "sessions");
-        Directory.CreateDirectory(_sessionsDir);
-
-        _store = new SessionStore(basePath: _sessionsDir, NullLogger<SessionStore>.Instance);
+        _sessionsDir = Path.Combine(_tempDir, "events");
+        _store = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
         _shellManager = new ConversationShellExecutorManager(NullLogger<ConversationShellExecutorManager>.Instance);
         _sessionManager = new SessionManager(
             _store,
@@ -57,7 +55,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
         _sessionManager.ForegroundConversation!.Id.Should().Be(conv.Id);
 
         // Simulate new process: reload from disk
-        var store2 = new SessionStore(basePath: _sessionsDir, NullLogger<SessionStore>.Instance);
+        var store2 = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
         var manager2 = new SessionManager(store2, NullLogger<SessionManager>.Instance, _tempDir,
             hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
@@ -118,10 +116,12 @@ public sealed class SessionFeatureE2ETests : IDisposable
         wd.WorkingDirectory.Returns(_tempDir);
         var bash = new BashTool(
             wd,
-            ssh: null!,
-            shellExecutorManager: _shellManager,
-            sessionManager: _sessionManager,
-            processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>());
+            shellExecutor: new OneCodeShellExecutor(
+                ssh: null!,
+                shellSessions: _shellManager,
+                sessions: _sessionManager,
+                processRunner: Substitute.For<OneCode.Core.IO.IProcessRunner>()),
+            sessionManager: _sessionManager);
 
         var cdCommand = OperatingSystem.IsWindows()
             ? $"Set-Location -Path '{subDir.Replace("'", "''")}'"
@@ -138,7 +138,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
     }
 
     [Fact]
-    public async Task E2E_SessionStore_ListAndLoad_MatchesCliPsExpectations()
+    public async Task E2E_EventSessionStore_ListAndLoad_MatchesCliPsExpectations()
     {
         var ct = TestContext.Current.CancellationToken;
 

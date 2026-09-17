@@ -3,6 +3,7 @@ using OneCode.Core.Build;
 using OneCode.Core.Commands;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
+using OneCode.Infrastructure.Git;
 using OneCode.Infrastructure.Goals;
 
 namespace OneCode.Tests;
@@ -94,12 +95,74 @@ public sealed class GitGoalWorkspaceServiceTests
         var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
 
         result.WorkspaceId.Should().Be($"goal-{run.Id}");
-        result.WorktreeBranch.Should().Be($"onecode/goal/{run.Id}");
-        result.IsolatedPath.Replace('\\', '/').Should().EndWith($"/repo.worktree/{run.Id}");
+        // 目录名/分支名来自 Goal 描述的可读 slug，而非 32 位 run id。
+        var slug = WorktreeLayout.BuildGoalSlug(run.Goal);
+        slug.Should().Be("goal");
+        result.WorktreeBranch.Should().Be($"onecode/goal/{slug}");
+        result.IsolatedPath.Replace('\\', '/').Should().EndWith($"/repo.worktree/{slug}");
         await git.Received().RunAsync(
             Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
             "C:/repo",
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Prepare_ChineseOnlyGoal_FallsBackToShortIdSlug()
+    {
+        var git = Substitute.For<IGitHelper>();
+        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
+        var run = CreateRun() with { Goal = "帮我重构项目启动流程并优化性能" };
+        git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
+        git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(0);
+        git.RunAsync(Arg.Any<string[]>(), "C:/repo", Arg.Any<CancellationToken>())
+            .Returns(call => GitResult(call.ArgAt<string[]>(0)));
+        fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+        var service = new GitGoalWorkspaceService(git, fingerprints);
+
+        var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
+
+        var expected = $"goal-{run.Id.Value}";
+        result.WorktreeBranch.Should().Be($"onecode/goal/{expected}");
+        result.IsolatedPath.Replace('\\', '/').Should().EndWith($"/repo.worktree/{expected}");
+        await git.Received().RunAsync(
+            Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
+            "C:/repo",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Prepare_SlugCollision_AppendsRunShortId()
+    {
+        var git = Substitute.For<IGitHelper>();
+        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
+        var root = Path.Combine(Path.GetTempPath(), $"onecode-goal-slug-{Guid.NewGuid():N}", "repo");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var run = CreateRun() with { WorkingDirectory = root };
+            git.GetRepositoryRootAsync(root, Arg.Any<CancellationToken>()).Returns(root);
+            git.CountPorcelainChangesAsync(root, Arg.Any<CancellationToken>()).Returns(0);
+            git.RunAsync(Arg.Any<string[]>(), root, Arg.Any<CancellationToken>())
+                .Returns(call => GitResult(call.ArgAt<string[]>(0)));
+            fingerprints.ComputeAsync(root, Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+            var service = new GitGoalWorkspaceService(git, fingerprints);
+            // 更早 run 已占用同名 worktree 目录（slug 前缀相同）→ 触发短 id 消歧。
+            Directory.CreateDirectory(WorktreeLayout.GetWorktreePath(root, "goal"));
+
+            var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
+
+            var expected = $"goal-{run.Id.Value}";
+            result.WorktreeBranch.Should().Be($"onecode/goal/{expected}");
+            result.IsolatedPath.Should().Be(WorktreeLayout.GetWorktreePath(root, expected));
+            await git.Received().RunAsync(
+                Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
+                root,
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
     }
 
     [Fact]

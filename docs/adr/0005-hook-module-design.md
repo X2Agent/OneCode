@@ -22,9 +22,9 @@ OneCode 需要一个生命周期钩子（Hook）子系统，让用户在 Agent �
 
 ## 决策
 
-### 1. 事件收敛到 10 种真实有外部消费价值的事件
+### 1. 事件收敛到 11 种真实有外部消费价值的事件
 
-**决策**：`HookEvent` 枚举仅保留 10 种事件，每种事件都有明确的外部脚本消费场景。
+**决策**：`HookEvent` 枚举仅保留真实有外部脚本消费场景的事件（§1 初步收敛为 10 种，后补 `GoalStageInvoke`，当前 11 种）。
 
 ```csharp
 public enum HookEvent
@@ -501,21 +501,22 @@ internal partial class HookSerializerContext : JsonSerializerContext;
 
 ### 14. DI 注册
 
-`ServiceCollectionExtensions.Business.cs` 的 `RegisterHookSubsystem` 方法统一注册：
+`src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices` 方法统一注册：
 
 ```csharp
-private static void RegisterHookSubsystem(IServiceCollection services)
+public static IServiceCollection AddHookServices(this IServiceCollection services)
 {
     // 基础设施
     services.AddSingleton<GlobHookMatcher>();
+    services.AddSingleton<HookLoadDiagnostics>();
     services.AddSingleton<HookSettingsLoader>();
     services.AddSingleton<HookRegistry>();
     services.AddSingleton<HookPolicyService>();
 
-    // 执行器（按 HookType Keyed Services 分发）
-    services.AddKeyedSingleton<IHookExecutor, CommandHookExecutor>(HookType.Command);
-    services.AddKeyedSingleton<IHookExecutor, NotificationHookExecutor>(HookType.Notification);
-    services.AddKeyedSingleton<IHookExecutor, HttpHookExecutor>(HookType.Http);
+    // 执行器（经 IEnumerable<IHookExecutor> 注入，按每个执行器的 Type 属性分发——非 Keyed Services）
+    services.AddSingleton<IHookExecutor, CommandHookExecutor>();
+    services.AddSingleton<IHookExecutor, NotificationHookExecutor>();
+    services.AddSingleton<IHookExecutor, HttpHookExecutor>();
 
     // 通知渠道 Provider（新增渠道只需在此追加一行）
     services.AddSingleton<INotificationProvider, FeishuNotificationProvider>();
@@ -525,12 +526,27 @@ private static void RegisterHookSubsystem(IServiceCollection services)
     services.AddHttpClient<FeishuNotificationProvider>();
     services.AddHttpClient<WeChatWorkNotificationProvider>();
 
+    // 声明式通知渠道（notification-providers.json）：定义优先、编译型兜底
+    services.AddHttpClient(NotificationProviderRegistry.HttpClientName);
+    services.AddSingleton<NotificationProviderDefinitionLoader>();
+    services.AddSingleton<NotificationProviderRegistry>();
+
+    // 宿主停止时兜底补发 SessionEnd（reason=other）
+    services.AddHostedService<SessionEndHookService>();
+
     // 执行服务（接口 + 实现都注册，支持 Infrastructure 层通过接口注入）
     services.AddSingleton<HookExecutionService>();
     services.AddSingleton<IHookExecutionService>(sp => sp.GetRequiredService<HookExecutionService>());
     services.AddSingleton<HookConfigBootstrapper>();
+    services.AddSingleton<HookConfigHotReloader>();
+
+    return services;
 }
 ```
+
+> `AddHookServices` 由组合根 `OneCodeApp.Create` 显式调用。
+> 原 `ServiceCollectionExtensions.Business.cs`（`RegisterHookSubsystem`）已解散，内容迁至 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs`；
+> `RegistrationOwnershipTests` 守卫禁止复活旧桶。
 
 **`HttpClient` 注册模式**：
 - 通知 Provider 通过 `AddHttpClient<T>` 注册，享受 `IHttpClientFactory` 的连接池、超时、重试策略
@@ -538,13 +554,13 @@ private static void RegisterHookSubsystem(IServiceCollection services)
 
 ## 影响
 
-- **事件模型简化**：从 20+ 种事件收敛为 10 种，每种都有明确的外部消费场景，降低维护成本
+- **事件模型简化**：从 20+ 种事件收敛为 11 种（§1 决策时点为 10 种，后补 `GoalStageInvoke`），每种都有明确的外部消费场景，降低维护成本
 - **执行器模型简化**：从 6+ 种执行器收敛为 3 种（Command / Notification / Http），移除与工具调用语义重叠的 Prompt / Agent 类型
 - **异步 Hook 移除**：移除 `IAsyncHookRegistry` / `AsyncHookRegistryCleanupService` / `SessionHookStore`，所有 hook 统一为同步串行执行，简化系统模型
 - **配置分离**：Hook 定义独立到 `hooks.json`，便于审计与版本管理
 - **分层架构清晰**：`IHookExecutionService` 接口下沉到 Core 层，Infrastructure 层通过接口注入，避免反向依赖 App 层
 - **安全边界明确**：工作区信任 + Pre-hook fail-closed 双层防护，防止恶意仓库通过 hook 执行任意命令
-- **扩展点明确**：新增执行器类型只需实现 `IHookExecutor` + Keyed DI 注册；新增通知渠道只需实现 `INotificationProvider` + DI 注册；新增生命周期事件只需扩展枚举 + 业务模块触发
+- **扩展点明确**：新增执行器类型只需实现 `IHookExecutor` + 一行 `AddSingleton<IHookExecutor, X>()`；新增通知渠道只需实现 `INotificationProvider` + DI 注册；新增生命周期事件只需扩展枚举 + 业务模块触发
 
 ## 扩展指南
 
@@ -553,14 +569,14 @@ private static void RegisterHookSubsystem(IServiceCollection services)
 1. 扩展 `HookType` 枚举（`OneCode.Core/Hooks/HookTypes.cs`）
 2. 更新 `HookTypeParser.Parse` 支持新类型字符串
 3. 实现 `IHookExecutor`（`OneCode.App/Services/Hooks/`）
-4. 在 `ServiceCollectionExtensions.Business.cs` 的 `RegisterHookSubsystem` 追加 `services.AddKeyedSingleton<IHookExecutor, YourExecutor>(HookType.YourType)`
+4. 在 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices` 追加 `services.AddSingleton<IHookExecutor, YourExecutor>()`
 5. 若需要 HttpClient，通过 `services.AddHttpClient<YourExecutor>()` 注册
 
 ### 新增通知渠道
 
 1. 继承 `WebhookNotificationProviderBase`（推荐）或实现 `INotificationProvider`
 2. 重写 `Name` / `CodeFieldName` / `MsgFieldName` / `ProviderDisplayName` / `BuildPayload` / `ComputeSign`
-3. 在 `ServiceCollectionExtensions.Business.cs` 追加 `services.AddSingleton<INotificationProvider, YourProvider>()` 和 `services.AddHttpClient<YourProvider>()`
+3. 在 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices` 追加 `services.AddSingleton<INotificationProvider, YourProvider>()` 和 `services.AddHttpClient<YourProvider>()`
 4. 在 `hooks.json` 中通过 `"provider": "your_provider_name"` 使用
 
 ### 新增生命周期事件

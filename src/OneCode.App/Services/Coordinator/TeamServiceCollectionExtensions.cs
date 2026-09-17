@@ -53,6 +53,8 @@ public static class TeamServiceCollectionExtensions
         services.AddSingleton<TeamApprovalWorkflowHost>();
         services.AddSingleton<TeamClarificationWorkflowHost>();
         services.AddSingleton<RequestPortGate>();
+        services.AddSingleton(sp => new TeamRegistry(
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(TeamRegistry).FullName!)));
         // Factory: ctor is internal (takes internal TeamWorkflowRunner); DI cannot auto-bind it.
         services.AddSingleton(sp => new TeamOrchestrationService(
             sp.GetRequiredService<TeamWorkflowRunner>(),
@@ -66,6 +68,7 @@ public static class TeamServiceCollectionExtensions
             sp.GetRequiredService<TeamClarificationWorkflowHost>(),
             sp.GetRequiredService<RequestPortGate>(),
             sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
+            sp.GetRequiredService<TeamRegistry>(),
             sp.GetService<Core.Workflows.IOperationLedger>()));
         services.AddSingleton<Core.Coordinator.ITeamOrchestrationService>(sp =>
             sp.GetRequiredService<TeamOrchestrationService>());

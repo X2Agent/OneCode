@@ -161,7 +161,7 @@ public sealed class SessionContextBar : View
 
         // Clear line
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
         AddStr(new string(' ', w));
 
         var rightSegs = BuildRightSegments(w);
@@ -184,9 +184,9 @@ public sealed class SessionContextBar : View
         if (col + 3 + TextWidthHelper.GetDisplayWidth(displayWs) <= maxLeftCol || col == 1)
         {
             Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
             AddStr("\U0001f4c1 ");
-            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
             AddStr(displayWs);
             col += 2 + TextWidthHelper.GetDisplayWidth(displayWs);
         }
@@ -198,13 +198,13 @@ public sealed class SessionContextBar : View
             if (col + branchWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
                 AddStr("\U0001f33f ");
                 col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
                 AddStr(_branch);
                 col += TextWidthHelper.GetDisplayWidth(_branch);
             }
@@ -213,13 +213,13 @@ public sealed class SessionContextBar : View
                 var availBranch = maxLeftCol - col - 5;
                 var shortBranch = TextWidthHelper.TruncateByWidth(_branch, availBranch);
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
                 AddStr("\U0001f33f ");
                 col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
                 AddStr(shortBranch);
                 col += TextWidthHelper.GetDisplayWidth(shortBranch);
             }
@@ -232,13 +232,13 @@ public sealed class SessionContextBar : View
             if (col + wtWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgSurface));
                 AddStr("\U0001f4e6 ");
                 col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
                 AddStr(_worktree);
                 col += TextWidthHelper.GetDisplayWidth(_worktree);
             }
@@ -251,13 +251,13 @@ public sealed class SessionContextBar : View
             if (col + snWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgSurface));
                 AddStr("\U0001f4dd ");
                 col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
                 AddStr(_sessionName);
                 col += TextWidthHelper.GetDisplayWidth(_sessionName);
             }
@@ -269,7 +269,7 @@ public sealed class SessionContextBar : View
             Move(rightCol, 0);
             foreach (var (text, color) in rightSegs)
             {
-                SetAttribute(new Attribute(color, TuiPalette.BgPrimary));
+                SetAttribute(new Attribute(color, TuiPalette.BgSurface));
                 AddStr(text);
             }
         }

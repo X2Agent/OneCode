@@ -88,8 +88,9 @@ internal sealed class TeamWorkflowRunner(
     }
 
     /// <summary>
-    /// ParallelDag 模式：任务只由其 AssigneeRole 对应的单个成员独立执行。
-    /// 上下文隔离是此模式的核心价值——各分支互不可见，由聚合任务负责汇总。
+    /// ParallelDag mode: thin Sequential wrapper for exactly one assignee member.
+    /// W3-B: never Concurrent true-parallel — product semantics stay single-member Sequential.
+    /// Multi-member teams still plan branches separately; each branch run resolves one assignee.
     /// </summary>
     private async Task<TeamRunResult> RunParallelBranchAsync(
         TeamConfig config,
@@ -102,20 +103,42 @@ internal sealed class TeamWorkflowRunner(
         IReadOnlyList<string>? imagePaths,
         IReadOnlyList<string>? taskAllowedTools)
     {
-        var member = config.Members.FirstOrDefault(m =>
+        if (config.Members.Count == 0)
+            throw new InvalidOperationException($"Team '{config.TeamName}' ParallelDag has no members.");
+
+        var matches = config.Members
+            .Where(m =>
                 string.Equals(m.Role, task.AssigneeRole, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(m.AgentId, task.AssigneeRole, StringComparison.OrdinalIgnoreCase))
-            ?? config.Members[0];
+            .ToList();
+
+        TeamMember member;
+        if (matches.Count == 1)
+        {
+            member = matches[0];
+        }
+        else if (matches.Count == 0 && config.Members.Count == 1)
+        {
+            // Single-member team: AssigneeRole may be omitted; still Sequential, never Concurrent.
+            member = config.Members[0];
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"ParallelDag requires exactly one assignee for task '{task.Id}' " +
+                $"(AssigneeRole='{task.AssigneeRole}'); matched {matches.Count} of {config.Members.Count} members. " +
+                "Do not use Concurrent true-parallel for ParallelDag.");
+        }
 
         logger.LogInformation(
-            "Team '{Name}' ParallelDag branch: task={Task} member={Member}",
+            "Team '{Name}' ParallelDag branch (Sequential thin wrapper): task={Task} member={Member}",
             config.TeamName, task.Id, member.AgentId);
 
         var agent = await agentFactory.BuildAgentAsync(
                 member, transaction, cwd, eventSink, taskAllowedTools)
             .ConfigureAwait(false);
 
-        // 单成员顺序工作流：跑一次该成员即为本分支产出，无需群聊轮询或编排器。
+        // W3-B: SequentialWorkflowBuilder only — never ConcurrentWorkflowBuilder / true parallel.
         var workflow = new SequentialWorkflowBuilder([agent])
             .WithName(config.TeamName)
             .Build();
@@ -128,6 +151,44 @@ internal sealed class TeamWorkflowRunner(
         return new TeamRunResult(config.TeamName, result.FinalOutput, result.TurnsCompleted,
             result.MaxTurnsReached, result.InputTokens, result.OutputTokens,
             SessionId: sessionId, HadFailures: result.HadFailures);
+    }
+
+
+    /// <summary>
+    /// W3-C: TeamRun-level approval already covered Magentic plan review — auto-approve once here.
+    /// Do not add a second product plan-approval path.
+    /// </summary>
+    private async IAsyncEnumerable<WorkflowEvent> WatchWithMagenticPlanAutoApprovalAsync(
+        StreamingRun streamingRun,
+        string teamName,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var evt in streamingRun.WatchStreamAsync(ct).ConfigureAwait(false))
+        {
+            await TryAutoApproveMagenticPlanReviewAsync(streamingRun, evt, teamName).ConfigureAwait(false);
+            yield return evt;
+        }
+    }
+
+    private async Task TryAutoApproveMagenticPlanReviewAsync(
+        StreamingRun streamingRun,
+        WorkflowEvent evt,
+        string teamName)
+    {
+        if (evt is not RequestInfoEvent { Request: { } pending } ||
+            !pending.TryGetDataAs<MagenticPlanReviewRequest>(out var planReview) ||
+            planReview is null)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Auto-approving Magentic plan review for team '{Team}' (already approved at TeamRun level).",
+            teamName);
+        await streamingRun.SendResponseAsync(new ExternalResponse(
+            pending.PortInfo,
+            pending.RequestId,
+            new PortableValue(planReview.Approve()))).ConfigureAwait(false);
     }
 
     private static string BuildTaskGoal(TeamTaskDefinition task)
@@ -335,33 +396,9 @@ internal sealed class TeamWorkflowRunner(
         AgentWorkflowEventProcessor.ProcessResult result;
         try
         {
-            // 自动批准 Magentic 计划评审：Magentic orchestrator 在创建计划后会通过
-            // RequestPort 等待人工签核（MagenticPlanReviewRequest）。TEAM 模式的计划审批
-            // 已在 TeamRun 控制面（TeamApprovalWorkflow）由用户完成，这里无需二次签核，
-            // 收到请求即自动批准，避免工作流无限挂起。
-            async IAsyncEnumerable<WorkflowEvent> WatchWithAutoApprovalAsync()
-            {
-                await foreach (var evt in streamingRun.WatchStreamAsync(ct).ConfigureAwait(false))
-                {
-                    if (evt is RequestInfoEvent { Request: { } pending } &&
-                        pending.TryGetDataAs<MagenticPlanReviewRequest>(out var planReview) &&
-                        planReview is not null)
-                    {
-                        logger.LogInformation(
-                            "Auto-approving Magentic plan review for team '{Team}' (already approved at TeamRun level).",
-                            teamName);
-                        await streamingRun.SendResponseAsync(new ExternalResponse(
-                            pending.PortInfo,
-                            pending.RequestId,
-                            new PortableValue(planReview.Approve()))).ConfigureAwait(false);
-                    }
-
-                    yield return evt;
-                }
-            }
-
+            // W3-C: Magentic plan review auto-approve is a single helper (TeamRun already approved).
             result = await AgentWorkflowEventProcessor.ProcessStreamAsync(
-                WatchWithAutoApprovalAsync(),
+                WatchWithMagenticPlanAutoApprovalAsync(streamingRun, teamName, ct),
                 maxTurns,
                 "Team '{Name}' {Mode} member failed: {Error}",
                 [teamName, modeName],

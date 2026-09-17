@@ -12,14 +12,14 @@ namespace OneCode.Tests;
 public sealed class SessionManagerMultiSessionTests : IDisposable
 {
     private readonly string _tempDir;
-    private readonly SessionStore _store;
+    private readonly ISessionStore _store;
     private readonly SessionManager _manager;
 
     public SessionManagerMultiSessionTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionMgrTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _store = new SessionStore(basePath: _tempDir, NullLogger<SessionStore>.Instance);
+        _store = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
         _manager = new SessionManager(_store, NullLogger<SessionManager>.Instance, _tempDir,
             hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),

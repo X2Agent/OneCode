@@ -5,7 +5,7 @@ namespace OneCode.Core.Tools;
 /// </summary>
 /// <remarks>
 /// Harness Engineering: Post-tool 质量门禁（Layer 1）。
-/// 由 <c>VerificationMiddleware</c> 在 EditTransaction 之后调用，
+/// 由 <c>EditGuardMiddleware</c> 在 EditTransaction 之后调用，
 /// 验证失败时把错误回注 LLM 上下文，强制下一轮修复。
 /// 实现应通过 <see cref="VerificationProfile"/> 配置驱动，支持多语言。
 /// </remarks>

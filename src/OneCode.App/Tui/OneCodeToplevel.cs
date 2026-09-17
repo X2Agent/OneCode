@@ -64,7 +64,7 @@ public sealed partial class OneCodeToplevel : Window
         TabStop = TabBehavior.TabGroup;
 
         BorderStyle = LineStyle.None;
-        SetScheme(TuiTheme.Base);
+        SetScheme(TuiStyles.Base);
 
         // Resolve nullable TuiContext fields to defaults once, at the Toplevel level.
         // ReplShell/ChatInputView receive non-null references and skip their own fallback logic.

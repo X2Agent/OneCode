@@ -8,6 +8,57 @@ namespace OneCode.App.Tui;
 /// </summary>
 internal static class TuiPalette
 {
+    /// <summary>Design MD 使用的完整语义颜色 token 集合。</summary>
+    internal static IReadOnlyDictionary<string, string> DesignTokens { get; } = new Dictionary<string, string>
+    {
+        ["accent"] = "#14B8A6",
+        ["accent-dim"] = "#0E8A80",
+        ["success"] = "#22C55E",
+        ["error"] = "#EF4444",
+        ["warning"] = "#F59E0B",
+        ["info"] = "#58A6FF",
+        ["in-progress"] = "#14B8A6",
+        ["streaming"] = "#8B949E",
+        ["thinking"] = "#5BB8C8",
+        ["fg-primary"] = "#E6EDF3",
+        ["fg-secondary"] = "#8B949E",
+        ["fg-muted"] = "#6B7280",
+        ["bg-primary"] = "#0A0A0A",
+        ["bg-surface"] = "#161B22",
+        ["bg-input"] = "#0F1218",
+        ["bg-terminal"] = "#0D1117",
+        ["bg-terminal-header"] = "#161B22",
+        ["bg-card"] = "#111111",
+        ["bg-error"] = "#1A0A0A",
+        ["bg-success"] = "#0A160A",
+        ["border"] = "#21262D",
+        ["border-accent"] = "#14B8A6",
+        ["separator"] = "#21262D",
+        ["user-message"] = "#58A6FF",
+        ["assistant-message"] = "#E6EDF3",
+        ["tool-use"] = "#F59E0B",
+        ["tool-result"] = "#D29922",
+        ["system-message"] = "#BC8CFF",
+        ["diff-added"] = "#22C55E",
+        ["diff-removed"] = "#EF4444",
+        ["diff-hunk"] = "#14B8A6",
+        ["diff-context"] = "#8B949E",
+        ["mode-build"] = "#4CAF84",
+        ["mode-plan"] = "#5B8DEE",
+        ["mode-team"] = "#A386D8",
+        ["mode-goal"] = "#5BB8C8",
+        ["agent-orchestrator"] = "#A386D8",
+        ["agent-researcher"] = "#5B8DEE",
+        ["agent-planner"] = "#4CAF84",
+        ["agent-executor"] = "#E08B5C",
+        ["agent-reviewer"] = "#E5B14C",
+        ["agent-tester"] = "#E0556A",
+        ["agent-debugger"] = "#E07BA5",
+        ["agent-assistant"] = "#5BB8C8",
+        ["tool-detail"] = "#8B949E",
+        ["thought-timing"] = "#D29922",
+    };
+
     // 品牌主色
     /// <summary>
     /// 终端交互驱动色（Teal #14B8A6）。DESIGN.md 的终端渲染规则把设计 token
@@ -55,6 +106,12 @@ internal static class TuiPalette
     // 背景色
     /// <summary>主背景。#0A0A0A。</summary>
     public static readonly Color BgPrimary = new(0x0A, 0x0A, 0x0A);
+
+    /// <summary>固定状态栏与上下文栏背景。#161B22。</summary>
+    public static readonly Color BgSurface = new(0x16, 0x1B, 0x22);
+
+    /// <summary>输入区背景。#0F1218。</summary>
+    public static readonly Color BgInput = new(0x0F, 0x12, 0x18);
 
     /// <summary>终端背景。#0D1117。</summary>
     public static readonly Color BgTerminal = new(0x0D, 0x11, 0x17);

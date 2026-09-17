@@ -1,3 +1,5 @@
+using OneCode.Core.Agent;
+
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
@@ -37,14 +39,24 @@ public enum PipelineProfile
 }
 
 /// <summary>
-/// Profile-driven middleware and tool-filter defaults applied by <see cref="AgentPipelineOptionsFactory"/>.
+/// Profile-driven capability set applied by <see cref="AgentPipelineOptionsFactory"/> and
+/// <c>SharedContextProviderBuilder</c>.
 /// </summary>
-public sealed record PipelineProfileBehavior(
-    bool EnableStateMachine,
-    bool EnableTaskRecovery,
-    bool EnableBehaviorContracts,
-    bool EnableToolApproval,
-    IReadOnlyList<string>? ReadOnlyToolWhitelist = null)
+/// <remarks>
+/// <para>
+/// A profile is a <b>named set of <see cref="AgentCapability"/> values</b>. Reading a profile means
+/// reading the set — there is no second place where "does Worker include LSP diagnostics?" is
+/// answered. Previously the same decision lived in positional booleans here, in
+/// <c>ApplyProfileDefaults</c> (provider flags), and again in <c>BuildCommon</c> (an <c>if</c> per
+/// provider).
+/// </para>
+/// <para>
+/// The <c>Enable*</c> members below are read-only projections kept so existing call sites stay
+/// expressed as questions (<c>EnableToolApproval</c>) rather than set arithmetic. Add new
+/// capabilities to the enum and to <see cref="AllCapabilities"/>; profiles subtract.
+/// </para>
+/// </remarks>
+public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capabilities)
 {
     /// <summary>Read-only sub-agent tool whitelist (matches ToolCatalog registration names).</summary>
     public static IReadOnlyList<string> ReadOnlyAgentTools { get; } =
@@ -53,14 +65,83 @@ public sealed record PipelineProfileBehavior(
         "ToolSearch", "FindReferences", "SymbolSearch",
     ];
 
+    /// <summary>Every capability any profile can hold. Profiles are expressed as subtractions from this.</summary>
+    private static readonly IReadOnlySet<AgentCapability> AllCapabilities =
+        new HashSet<AgentCapability>(Enum.GetValues<AgentCapability>());
+
+    /// <summary>True when this profile includes the given capability.</summary>
+    public bool Has(AgentCapability capability) => Capabilities.Contains(capability);
+
+    // Middleware-axis projections (consumed by AgentPipelineOptionsFactory).
+
+    /// <summary>Failure-tracking state machine; only Full keeps it (W2-A).</summary>
+    public bool EnableStateMachine => Has(AgentCapability.StateMachine);
+
+    /// <summary>Three-strike recovery guidance emitted by the state machine.</summary>
+    public bool EnableTaskRecovery => Has(AgentCapability.TaskRecovery);
+
+    /// <summary>Post-edit behavior contracts (mandatory file-edit validation).</summary>
+    public bool EnableBehaviorContracts => Has(AgentCapability.BehaviorContracts);
+
+    /// <summary>MAF tool-approval flow.</summary>
+    public bool EnableToolApproval => Has(AgentCapability.ToolApproval);
+
+    /// <summary>Read-only tool whitelist, or <see langword="null"/> when the profile is unrestricted.</summary>
+    public IReadOnlyList<string>? ReadOnlyToolWhitelist =>
+        Has(AgentCapability.ReadOnlyTools) ? ReadOnlyAgentTools : null;
+
+    /// <summary>Resolves the capability set for a profile.</summary>
+    /// <remarks>
+    /// Profiles are written as subtractions from <see cref="AllCapabilities"/> so the baseline is
+    /// stated once: a capability added to the enum is on for every profile until a profile
+    /// explicitly drops it. That makes an accidental "capability leaked into Explore" visible here
+    /// rather than being silently absent.
+    /// </remarks>
     public static PipelineProfileBehavior For(PipelineProfile profile) => profile switch
     {
-        PipelineProfile.Full => new(true, true, true, true),
-        PipelineProfile.Worker => new(true, false, true, true),
-        PipelineProfile.TeamMember => new(true, false, true, false),
-        PipelineProfile.Explore or PipelineProfile.Plan => new(true, false, false, true, ReadOnlyAgentTools),
+        // Full is the baseline: everything except the read-only restriction.
+        PipelineProfile.Full => new(AllExcept(AgentCapability.ReadOnlyTools)),
+
+        // Worker: inherits parent permissions; no state machine / 3-strike, and no LSP or shell
+        // context (those are interactive-Main affordances).
+        PipelineProfile.Worker => new(AllExcept(
+            AgentCapability.StateMachine,
+            AgentCapability.TaskRecovery,
+            AgentCapability.LspDiagnostics,
+            AgentCapability.ShellEnvironment,
+            AgentCapability.ReadOnlyTools)),
+
+        // TeamMember: fixed Team permission, event-driven ApprovalBroker instead of MAF approval,
+        // no CodeAct sandbox and no post-edit verification. Keeps design/task/LSP/shell context.
+        PipelineProfile.TeamMember => new(AllExcept(
+            AgentCapability.StateMachine,
+            AgentCapability.TaskRecovery,
+            AgentCapability.CodeAct,
+            AgentCapability.ToolApproval,
+            AgentCapability.Verification,
+            AgentCapability.ReadOnlyTools)),
+
+        // Read-only agents: no post-edit verification, contracts or 3-strike recovery, plus the tool
+        // whitelist.
+        PipelineProfile.Explore or PipelineProfile.Plan => new(AllExcept(
+            AgentCapability.StateMachine,
+            AgentCapability.TaskRecovery,
+            AgentCapability.LspDiagnostics,
+            AgentCapability.ShellEnvironment,
+            AgentCapability.BehaviorContracts,
+            AgentCapability.Verification)),
+
         _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null),
     };
+
+    /// <summary>Returns the full capability set with the given capabilities removed.</summary>
+    private static IReadOnlySet<AgentCapability> AllExcept(params AgentCapability[] excluded)
+    {
+        var set = new HashSet<AgentCapability>(AllCapabilities);
+        foreach (var capability in excluded)
+            set.Remove(capability);
+        return set;
+    }
 
     /// <summary>Maps forked agent type strings to pipeline profiles.</summary>
     public static PipelineProfile FromAgentType(string? agentType) => agentType switch

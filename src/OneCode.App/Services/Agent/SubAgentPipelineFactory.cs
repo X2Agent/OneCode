@@ -1,3 +1,4 @@
+using OneCode.Core.Agent;
 using OneCode.Core.Config;
 using OneCode.Core.Coordinator;
 using OneCode.Infrastructure.Agent;
@@ -54,29 +55,26 @@ public sealed class SubAgentPipelineFactory(
         var permCtx = appStateAccessor.Current?.ToolPermissionContext;
         var cwd = request.WorkingDirectory;
 
-        var permissionMode = request.Profile switch
-        {
-            PipelineProfile.TeamMember => PermissionMode.Team,
-            _ => modeProvider.CurrentMode,
-        };
+        // One capability lookup drives every profile-dependent branch below. Previously this method
+        // switched on request.Profile four separate times, so the profile's policy had to be kept
+        // consistent by hand across all four.
+        var behavior = PipelineProfileBehavior.For(request.Profile);
 
-        var enableVerification = request.Profile switch
-        {
-            PipelineProfile.TeamMember or PipelineProfile.Explore or PipelineProfile.Plan => false,
-            _ => PermissionProfiles.GetProfile(permissionMode).EnableVerification,
-        };
+        var permissionMode = request.Profile == PipelineProfile.TeamMember
+            ? PermissionMode.Team
+            : modeProvider.CurrentMode;
 
-        var verificationProviderForProfile = request.Profile switch
-        {
-            PipelineProfile.TeamMember or PipelineProfile.Explore or PipelineProfile.Plan => null,
-            _ => verificationProvider,
-        };
+        // Capability decides whether verification applies at all; the permission profile then decides
+        // whether it is active. Both gates apply (permission profile alone would enable it for read-only
+        // profiles, capability alone would bypass the user's permission mode).
+        var useVerification = behavior.Has(AgentCapability.Verification);
+        var enableVerification = useVerification
+            && PermissionProfiles.GetProfile(permissionMode).EnableVerification;
 
-        var behaviorContracts = request.Profile switch
-        {
-            PipelineProfile.Explore or PipelineProfile.Plan => null,
-            _ => AgentPipelineAssembly.CreateDefaultBehaviorContracts(cwd),
-        };
+        var verificationProviderForProfile = useVerification ? verificationProvider : null;
+        var behaviorContracts = behavior.Has(AgentCapability.BehaviorContracts)
+            ? AgentPipelineAssembly.CreateDefaultBehaviorContracts(cwd)
+            : null;
 
         return PipelineSecurityContextBuilder.Create(
             workingDirectory: cwd,

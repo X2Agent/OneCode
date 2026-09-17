@@ -19,7 +19,7 @@ public partial class MainAgentRunner : IMainAgentRunner
     private readonly ILogger<MainAgentRunner> _logger;
     private readonly IChatClient _chatClient;
     private readonly Core.Tools.ToolMetadataRegistry _toolMetadata;
-    private readonly MainModeContextProviderBuilder _mainContextBuilder;
+    private readonly AgentContextPipeline _contextPipeline;
     private readonly AgentPipelineAssembly _pipelineAssembly;
     private readonly CompactionProviderBuilder _compactionBuilder;
     private readonly AgentSessionStore _sessionStore;
@@ -27,7 +27,7 @@ public partial class MainAgentRunner : IMainAgentRunner
     private readonly IVerificationProvider? _verificationProvider;
 
     public MainAgentRunner(
-        MainModeContextProviderBuilder mainContextBuilder,
+        AgentContextPipeline contextPipeline,
         AgentPipelineAssembly pipelineAssembly,
         CompactionProviderBuilder compactionBuilder,
         AgentSessionStore sessionStore,
@@ -38,7 +38,7 @@ public partial class MainAgentRunner : IMainAgentRunner
         IToolProtocolValidator? toolProtocolValidator = null,
         IVerificationProvider? verificationProvider = null)
     {
-        _mainContextBuilder = mainContextBuilder;
+        _contextPipeline = contextPipeline;
         _pipelineAssembly = pipelineAssembly;
         _compactionBuilder = compactionBuilder;
         _sessionStore = sessionStore;
@@ -93,7 +93,7 @@ public partial class MainAgentRunner : IMainAgentRunner
     }
 
     /// <summary>
-    /// Streams through MAF ChatClientAgent.RunStreamingAsync and forwards events to the caller.
+    /// Streams through the MAF HarnessAgent and forwards events to the caller.
     /// Each turn is written to the channel as it arrives.
     /// Returns a <see cref="MainAgentRunResult"/> with the real terminal reason and transaction state.
     /// </summary>
@@ -159,14 +159,17 @@ public partial class MainAgentRunner : IMainAgentRunner
                 builtAgent,
                 runOptions.ConversationId,
                 ct).ConfigureAwait(false);
+            // W5-A: Session transcript already supplied as options.Messages — do not also
+            // keep restored InMemory chat history (would double-feed multi-turn context).
+            if (runOptions.Messages is { Count: > 0 })
+            {
+                _sessionStore.ClearInMemoryChatHistoryWhenTranscriptOwnsHistory(session);
+            }
             _logger.LogDebug("MainAgentRunner session created, starting agent stream...");
 
-            // PERM-1.6~1.8: 流式审批循环
-            // 收集 updates 时检测 ToolApprovalRequestContent，推送 ApprovalRequestEvent 到 channel，
-            // TUI 消费后通过 ResponseSource 回传决策，构造 response 续跑。
+            // MAF owns approval binding and function-call state. The runner only bridges
+            // surfaced requests to the TUI and resumes the same session with the responses.
             var currentMessages = chatMessages;
-            const int maxApprovalRounds = 50;
-            int approvalRound = 0;
 
             while (true)
             {
@@ -188,20 +191,11 @@ public partial class MainAgentRunner : IMainAgentRunner
                     }
                 }
 
-                // 无审批请求或达到上限 → 结束循环
+                // MAF completed the run without surfacing another approval request.
                 if (approvalRequests.Count == 0)
                     break;
 
-                // 达到审批轮数上限：丢弃本轮审批请求前记录告警，避免静默丢失用户决策
-                if (++approvalRound > maxApprovalRounds)
-                {
-                    _logger.LogWarning(
-                        "Approval round limit reached ({MaxRounds}); discarding {PendingCount} pending approval request(s)",
-                        maxApprovalRounds, approvalRequests.Count);
-                    break;
-                }
-
-                // PERM-1.7: 推送 ApprovalRequestEvent 并构造续跑 input
+                // MAF binds these responses to the surfaced tool calls on the next request.
                 var approvalMessages = new List<ChatMessage>();
                 foreach (var req in approvalRequests)
                 {

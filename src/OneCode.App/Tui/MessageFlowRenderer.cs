@@ -354,7 +354,9 @@ public sealed class MessageFlowRenderer
 
         if (!string.IsNullOrWhiteSpace(args))
         {
-            var displayArgs = args;
+            // 折叠行按单行布局绘制：参数里的真实换行/制表符必须先压成空格，
+            // 否则测量宽度与实际绘制不一致，整行错位。展开详情保留真实换行。
+            var displayArgs = TextWidthHelper.CollapseToSingleLine(args);
             if (maxWidth > 0)
             {
                 var fixedWidth = segments.Sum(s => TextWidthHelper.GetDisplayWidth(s.Text))
@@ -363,8 +365,8 @@ public sealed class MessageFlowRenderer
                 // "-3" 为 " · " 分隔符；仅在超宽时截断（TruncateByWidth 为省略号
                 // 预留 1 列，恰宽文本传入会被误截）；空间不足时整段省略。
                 var argsAvailable = Math.Max(0, maxWidth - fixedWidth) - 3;
-                if (argsAvailable > 0 && TextWidthHelper.GetDisplayWidth(args) > argsAvailable)
-                    displayArgs = TextWidthHelper.TruncateByWidth(args, argsAvailable);
+                if (argsAvailable > 0 && TextWidthHelper.GetDisplayWidth(displayArgs) > argsAvailable)
+                    displayArgs = TextWidthHelper.TruncateByWidth(displayArgs, argsAvailable);
                 else if (argsAvailable <= 0)
                     displayArgs = string.Empty;
             }

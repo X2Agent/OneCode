@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Tools;
@@ -38,7 +39,7 @@ public sealed class WebFetchToolJsHintTests
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Constants.HttpClientNames.WebFetch).Returns(httpClient);
 
-        return new WebFetchTool(factory, new WebFetchCache(), NullLogger<WebFetchTool>.Instance);
+        return new WebFetchTool(factory, new MemoryCache(new MemoryCacheOptions()), NullLogger<WebFetchTool>.Instance);
     }
 
     private sealed class FixedHtmlHandler(string html) : HttpMessageHandler

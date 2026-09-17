@@ -847,7 +847,7 @@ public sealed class ChatServiceTests
         var sessionManager = Substitute.For<ISessionManager>();
         var modelManager = new ModelManager(configManager, new ModelCatalogStore());
 
-        var (_, mainContextBuilder) = TestSupport.TestAgentContextProviderAssembly.Create(
+        var (sharedBuilder, mainContextBuilder) = TestSupport.TestAgentContextProviderAssembly.Create(
             sessionManager: sessionManager,
             modelManager: modelManager,
             modeProvider: modeProvider,
@@ -855,7 +855,7 @@ public sealed class ChatServiceTests
             planModeService: Substitute.For<IPlanModeService>(),
             planWorkflowService: Substitute.For<IPlanWorkflowApplicationService>());
         var mainAgentRunner = new MainAgentRunner(
-            mainContextBuilder,
+            new AgentContextPipeline(sharedBuilder, mainContextBuilder),
             new AgentPipelineAssembly(
                 Substitute.For<IWorkingDirectoryAccessor>(),
                 Substitute.For<IHookExecutionService>(),

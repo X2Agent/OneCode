@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI;
 using NSubstitute;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;
@@ -8,8 +7,8 @@ using OneCode.Core.IO;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="LocalAgentFileStore"/> — verifies file CRUD operations,
-/// path traversal protection, and IFileSystem implementation.
+/// Unit tests for <see cref="LocalAgentFileStore"/> — verifies IFileSystem operations
+/// and path traversal protection.
 /// </summary>
 public sealed class LocalAgentFileStoreTests : IDisposable
 {
@@ -38,109 +37,6 @@ public sealed class LocalAgentFileStoreTests : IDisposable
         return wd;
     }
 
-    // AgentFileStore methods
-
-    [Fact]
-    public async Task ReadAsync_ExistingFile_ReturnsContent()
-    {
-        var path = Path.Combine(_projectDir, "test.txt");
-        File.WriteAllText(path, "hello world");
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var content = await store.ReadAsync("test.txt");
-
-        content.Should().Be("hello world");
-    }
-
-    [Fact]
-    public async Task ReadAsync_NonExistentFile_ReturnsNull()
-    {
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var content = await store.ReadAsync("nonexistent.txt");
-
-        content.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task WriteAsync_CreatesFileAndParentDirs()
-    {
-        var store = new LocalAgentFileStore(CreateWd());
-
-        await store.WriteAsync("sub/dir/file.txt", "content");
-
-        File.Exists(Path.Combine(_projectDir, "sub", "dir", "file.txt")).Should().BeTrue();
-        (await File.ReadAllTextAsync(Path.Combine(_projectDir, "sub", "dir", "file.txt")))
-            .Should().Be("content");
-    }
-
-    [Fact]
-    public async Task DeleteAsync_ExistingFile_ReturnsTrueAndDeletes()
-    {
-        var path = Path.Combine(_projectDir, "delete-me.txt");
-        File.WriteAllText(path, "data");
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var result = await store.DeleteAsync("delete-me.txt");
-
-        result.Should().BeTrue();
-        File.Exists(path).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task DeleteAsync_NonExistentFile_ReturnsFalse()
-    {
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var result = await store.DeleteAsync("nonexistent.txt");
-
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task FileExistsAsync_ExistingFile_ReturnsTrue()
-    {
-        File.WriteAllText(Path.Combine(_projectDir, "exists.txt"), "data");
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var result = await store.FileExistsAsync("exists.txt");
-
-        result.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task ListChildrenAsync_ReturnsDirectoriesFirst()
-    {
-        Directory.CreateDirectory(Path.Combine(_projectDir, "subdir"));
-        File.WriteAllText(Path.Combine(_projectDir, "file1.txt"), "a");
-        File.WriteAllText(Path.Combine(_projectDir, "file2.txt"), "b");
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var entries = await store.ListChildrenAsync("");
-
-        entries.Should().HaveCount(3);
-        entries[0].Type.Should().Be(FileStoreEntry.Directory);
-        entries[0].Name.Should().Be("subdir");
-        entries[1].Type.Should().Be(FileStoreEntry.File);
-        entries[2].Type.Should().Be(FileStoreEntry.File);
-    }
-
-    [Fact]
-    public async Task SearchAsync_FindsMatchingContent()
-    {
-        File.WriteAllText(Path.Combine(_projectDir, "a.txt"), "hello world\nerror here");
-        File.WriteAllText(Path.Combine(_projectDir, "b.txt"), "all good");
-        var store = new LocalAgentFileStore(CreateWd());
-
-        var results = await store.SearchAsync("", "error");
-
-        results.Should().HaveCount(1);
-        results[0].FileName.Should().Be("a.txt");
-        results[0].MatchingLines.Should().HaveCount(1);
-        results[0].MatchingLines[0].LineNumber.Should().Be(2);
-        results[0].MatchingLines[0].Line.Should().Contain("error");
-    }
-
     // IFileSystem methods
 
     [Fact]
@@ -159,9 +55,21 @@ public sealed class LocalAgentFileStoreTests : IDisposable
     {
         IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
-        await fs.WriteTextFileAsync("ifs-write.txt", "written");
+        await fs.WriteTextFileAsync("ifs-write.txt", "written", CancellationToken.None);
 
         File.Exists(Path.Combine(_projectDir, "ifs-write.txt")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IFileSystem_WriteTextFileAsync_CreatesParentDirectories()
+    {
+        IFileSystem fs = new LocalAgentFileStore(CreateWd());
+
+        await fs.WriteTextFileAsync("sub/dir/file.txt", "content", CancellationToken.None);
+
+        var path = Path.Combine(_projectDir, "sub", "dir", "file.txt");
+        File.Exists(path).Should().BeTrue();
+        (await File.ReadAllTextAsync(path)).Should().Be("content");
     }
 
     [Fact]
@@ -203,23 +111,23 @@ public sealed class LocalAgentFileStoreTests : IDisposable
     // Path traversal protection
 
     [Fact]
-    public async Task ReadAsync_OutsideWorkingDir_ThrowsUnauthorizedAccess()
+    public async Task ReadTextFileAsync_OutsideWorkingDir_ThrowsUnauthorizedAccess()
     {
         File.WriteAllText(Path.Combine(_outsideDir, "secret.txt"), "secret");
-        var store = new LocalAgentFileStore(CreateWd());
+        IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
         // Relative path that escapes via ..
-        var act = async () => await store.ReadAsync("../outside/secret.txt");
+        var act = async () => await fs.ReadTextFileAsync("../outside/secret.txt", CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
     }
 
     [Fact]
-    public async Task WriteAsync_OutsideWorkingDir_ThrowsUnauthorizedAccess()
+    public async Task WriteTextFileAsync_OutsideWorkingDir_ThrowsUnauthorizedAccess()
     {
-        var store = new LocalAgentFileStore(CreateWd());
+        IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
-        var act = async () => await store.WriteAsync("../outside/hack.txt", "hacked");
+        var act = async () => await fs.WriteTextFileAsync("../outside/hack.txt", "hacked", CancellationToken.None);
 
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
         File.Exists(Path.Combine(_outsideDir, "hack.txt")).Should().BeFalse();

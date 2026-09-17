@@ -42,9 +42,11 @@ internal static class ConversationRenderer
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
 
         // 使用 ToolResultSummarizer 格式化目标（文件路径、命令等）
-        var target = ToolResultSummarizer.FormatTarget(name, toolInput);
+        // 折叠行按单行布局绘制，目标/摘要含真实换行会令整行错位，先压成单行。
+        var target = TextWidthHelper.CollapseToSingleLine(
+            ToolResultSummarizer.FormatTarget(name, toolInput));
         var summary = !isError && !string.IsNullOrEmpty(result)
-            ? ToolResultSummarizer.Summarize(name, result, toolInput)
+            ? TextWidthHelper.CollapseToSingleLine(ToolResultSummarizer.Summarize(name, result, toolInput) ?? string.Empty)
             : string.Empty;
 
         if (maxWidth > 0)

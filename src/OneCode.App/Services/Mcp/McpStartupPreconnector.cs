@@ -6,7 +6,7 @@ namespace OneCode.App.Services.Mcp;
 /// MCP 启动预连接协调器（Plan B）：把 MCP 全量连接从系统提示词构建链移到后台，
 /// TUI 不再同步等待握手（此前阻塞首屏直至全部服务器连接完成或超时）。
 /// <list type="bullet">
-/// <item>交互路径：trust 通过后 <see cref="StartBackground"/> fire-and-forget，连接完成后重建技能提供者补挂 MCP skills；</item>
+/// <item>交互路径：trust 通过后 <see cref="StartBackground"/> fire-and-forget；</item>
 /// <item>首条消息：<see cref="WaitForFirstMessageAsync"/> 对进行中的握手做 ≤5s 有界收尾，超时放行（未就绪服务器的工具下一轮附挂）；</item>
 /// <item>cron 等非交互路径：<see cref="EnsureConnectedAsync"/> 显式等待连接完成后再构建提示词。</item>
 /// </list>

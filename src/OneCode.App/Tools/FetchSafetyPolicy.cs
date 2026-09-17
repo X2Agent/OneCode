@@ -91,15 +91,11 @@ internal static class FetchSafetyPolicy
 
     /// <summary>
     /// Resolves <paramref name="url"/> and rejects hosts that have any private/loopback
-    /// A/AAAA record. Done before HttpClient runs so DNS rebinding is caught without a
-    /// ConnectCallback (which would see the local HTTP proxy as the TCP target).
+    /// A/AAAA record. Done before HttpClient runs so DNS rebinding is caught.
     /// Literal IPs are skipped — <see cref="ValidateUrl"/> already classified them.
     ///
-    /// Boundary note: when the URL is routed through an HTTP(S) proxy, the proxy resolves
-    /// the hostname server-side, so this client-side lookup is defense-in-depth rather than
-    /// the connection path. That means a host reachable only via the proxy's own DNS cannot
-    /// be verified here — a known architectural limit; <see cref="ValidateUrl"/> name-based
-    /// blocks remain the primary net.
+    /// The HTTP client may use the platform default proxy, but the security decision remains
+    /// local and fail-closed so transport configuration cannot weaken SSRF protection.
     /// </summary>
     /// <returns>An error message to return to the model, or <c>null</c> when the host is safe.</returns>
     internal static async Task<string?> CheckDnsRebindingAsync(string url, ILogger logger, CancellationToken ct)
@@ -110,11 +106,6 @@ internal static class FetchSafetyPolicy
         if (IPAddress.TryParse(uri.Host, out _))
             return null;
 
-        // A proxied request's hostname is resolved by the proxy, not here, so a local
-        // DNS failure must not hard-block legitimate fetches. Only fail closed when the
-        // client would resolve and connect directly.
-        var viaProxy = ResolvesViaProxy(ProxyConfigService.GetProxyUrl(), url);
-
         IPAddress[] addresses;
         try
         {
@@ -122,17 +113,11 @@ internal static class FetchSafetyPolicy
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (!viaProxy)
-            {
-                logger.LogDebug(ex, "DNS lookup failed for WebFetch host {Host}", uri.Host);
-                return $"Could not resolve host '{uri.Host}'";
-            }
-
-            logger.LogDebug(ex, "DNS lookup failed for proxied WebFetch host {Host}; allowing (proxy resolves hostname)", uri.Host);
-            return null;
+            logger.LogDebug(ex, "DNS lookup failed for WebFetch host {Host}", uri.Host);
+            return $"Could not resolve host '{uri.Host}'";
         }
 
-        if (addresses.Length == 0 && !viaProxy)
+        if (addresses.Length == 0)
             return $"Could not resolve host '{uri.Host}'";
 
         var unsafeAddress = FindUnsafeResolvedAddress(addresses);
@@ -142,21 +127,9 @@ internal static class FetchSafetyPolicy
         return $"SSRF protection: host '{uri.Host}' resolved to private address {unsafeAddress}";
     }
 
-    /// <summary>
-    /// True when a request to <paramref name="url"/> will be forwarded through a proxy, in
-    /// which case the hostname is resolved proxy-side and a local DNS failure is non-fatal.
-    /// Pure function (proxy URL and NO_PROXY passed in) so the policy can be unit-tested
-    /// without mutating process-wide environment variables.
-    /// </summary>
-    internal static bool ResolvesViaProxy(string? proxyUrl, string url, string? noProxyList = null)
-        => !string.IsNullOrWhiteSpace(proxyUrl)
-           && !ProxyConfigService.ShouldBypassProxy(url, noProxyList);
-
-    /// <summary>
-    /// Returns the first private/loopback/link-local address in <paramref name="addresses"/>,
+    /// <summary>Returns the first private/loopback/link-local address in <paramref name="addresses"/>,
     /// or <c>null</c> when every record is public. Conservative: one private record is enough
-    /// to treat the hostname as unsafe (typical DNS-rebinding shape).
-    /// </summary>
+    /// to treat the hostname as unsafe (typical DNS-rebinding shape).</summary>
     internal static IPAddress? FindUnsafeResolvedAddress(IReadOnlyList<IPAddress> addresses)
     {
         foreach (var address in addresses)

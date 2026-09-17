@@ -25,14 +25,35 @@ public sealed class MainModeContextProviderBuilder(
         WorkingMode workingMode,
         CancellationToken ct)
     {
-        var contextProviders = sharedBuilder.BuildCommon(
-            SharedContextProviderBuilder.ApplyProfileDefaults(PipelineProfile.Full, baseOptions));
+        var contextProviders = sharedBuilder.BuildCommon(PipelineProfile.Full, baseOptions);
 
-        contextProviders.Add(new PlanModeAttachmentProvider(planModeService));
-        contextProviders.Add(buildModeAttachmentProvider);
-        contextProviders.Add(planExecutionContextProvider);
-        contextProviders.Add(new GoalContextProvider(modeProvider, goalContextState));
+        // Always inject the current mode system prompt (replaces MAF AgentModeProvider tools).
         contextProviders.Add(await CreateModeInstructionProviderAsync(workingMode, ct).ConfigureAwait(false));
+
+        // W1: register only providers for the active WorkingMode (no full hang + internal no-op).
+        switch (workingMode)
+        {
+            case WorkingMode.Plan:
+                contextProviders.Add(new PlanModeAttachmentProvider(planModeService));
+                // Approved-plan execution context (also used when leaving Plan into AcceptEdits).
+                contextProviders.Add(planExecutionContextProvider);
+                break;
+
+            case WorkingMode.Goal:
+                contextProviders.Add(new GoalContextProvider(modeProvider, goalContextState));
+                break;
+
+            case WorkingMode.Team:
+                // Team orchestration context comes from Team path; Main Team mode needs instructions only.
+                break;
+
+            case WorkingMode.Build:
+            default:
+                contextProviders.Add(buildModeAttachmentProvider);
+                // PlanExecution gates on AcceptEdits when an approved plan is running under Build.
+                contextProviders.Add(planExecutionContextProvider);
+                break;
+        }
 
         return contextProviders;
     }

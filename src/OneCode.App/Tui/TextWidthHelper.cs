@@ -122,6 +122,38 @@ public static class TextWidthHelper
     }
 
     /// <summary>
+    /// 把文本压成单行：真实换行/制表符替换为空格并折叠连续空白。
+    /// 折叠态工具行按单行布局绘制，宽度测量把 <c>\n</c> 计为 1 列，
+    /// 但绘制期会按换行处理，含换行的参数会令整行错位——故折叠路径必须先单行化。
+    /// 展开详情路径不受影响（那里需要真实换行）。
+    /// </summary>
+    public static string CollapseToSingleLine(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+        if (text.IndexOfAny(['\n', '\r', '\t']) < 0)
+            return text;
+
+        var builder = new StringBuilder(text.Length);
+        var lastWasSpace = false;
+        foreach (var ch in text)
+        {
+            var isBreak = ch is '\n' or '\r' or '\t';
+            if (isBreak || ch == ' ')
+            {
+                if (lastWasSpace)
+                    continue;
+                builder.Append(' ');
+                lastWasSpace = true;
+                continue;
+            }
+            builder.Append(ch);
+            lastWasSpace = false;
+        }
+        return builder.ToString().Trim();
+    }
+
+    /// <summary>
     /// Truncates text to fit within the given display width, appending an
     /// ellipsis if truncation occurs.
     /// </summary>

@@ -36,7 +36,7 @@ public sealed class ReviewOverlay : CenteredOverlay
             Text = _files.Count > 0 ? $"变更文件 ({_files.Count})" : "变更文件",
             CanFocus = false,
         };
-        header.SetScheme(TuiTheme.MakeScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
+        header.SetScheme(TuiStyles.MakeScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
         _listView = new ListView
         {
@@ -46,7 +46,7 @@ public sealed class ReviewOverlay : CenteredOverlay
             Height = Dim.Fill() - 3,
             CanFocus = true,
         };
-        _listView.SetScheme(TuiTheme.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
+        _listView.SetScheme(TuiStyles.MakeListScheme(TuiPalette.FgPrimary, TuiPalette.BgCard));
         _listView.SetSource(new ObservableCollection<string>(FormatEntries()));
 
         // Default select first item

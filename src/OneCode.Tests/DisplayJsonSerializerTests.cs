@@ -108,4 +108,44 @@ public sealed class DisplayJsonSerializerTests
 
         result.Should().Be("错误：\U0001F600\uFFFD 加载失败");
     }
+
+    [Fact]
+    public void NormalizeForDisplay_EscapedNewline_DecodesToRealLineBreak()
+    {
+        // 展开详情按真实换行拆分渲染；JSON 字符串值里的 \n 必须解码为真实换行，
+        // 否则 Bash 多行命令 / git diff 输出在展开时挤成一行乱码。
+        const string value = """{"command":"git status --short\n git log --oneline"}""";
+
+        var result = DisplayJsonSerializer.NormalizeForDisplay(value, writeIndented: false);
+
+        result.Should().Contain("git status --short\n git log --oneline");
+        result.Should().NotContain("\\n");
+    }
+
+    [Fact]
+    public void NormalizeForDisplay_AnsiColorEscapes_StrippedToPlainText()
+    {
+        // git 彩色 diff / 进度条等外部输出带 \u001B[…m 控制序列，展开时必须剥离，
+        // 否则渲染成 "\u001B[32m" 之类的乱码并干扰换行布局。
+        const string value = """{"output":"\u001b[32m+ added\u001b[0m\n\u001b[31m- removed\u001b[0m"}""";
+
+        var result = DisplayJsonSerializer.NormalizeForDisplay(value, writeIndented: false);
+
+        result.Should().Contain("+ added");
+        result.Should().Contain("- removed");
+        result.Should().NotContain("\u001b");
+    }
+
+    [Fact]
+    public void NormalizeForDisplay_EscapedBackslashBeforeLetterN_KeptAsLiteral()
+    {
+        // 只展开 JSON 解码出的真实换行；\\n（转义反斜杠 + 字母 n）必须保持字面量，
+        // 否则正则/代码片段里的 "\\n" 会被错误地改成换行。
+        const string value = """{"pattern":"a\\nb"}""";
+
+        var result = DisplayJsonSerializer.NormalizeForDisplay(value, writeIndented: false);
+
+        result.Should().Be("""{"pattern":"a\\nb"}""");
+        result.Should().NotContain("\n");
+    }
 }

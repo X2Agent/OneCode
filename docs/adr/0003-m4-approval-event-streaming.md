@@ -84,7 +84,7 @@ MAF workflow manager 无法处理 `ToolApprovalRequestContent`（与 Main 路径
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 `workingMode: WorkingMode.Plan` 实现只读策略 |
 | `ChatService.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数，新增 `ApprovalRequestEvent` 透传 |
-| `ServiceCollectionExtensions.Business.cs` / `ServiceCollectionExtensions.Advanced.cs` | 移除 `IApprovalUi` DI 注册与 Team 路径注入 |
+| 原 `ServiceCollectionExtensions.Business.cs`（已解散，现位于各领域注册类，如 `src/OneCode.App/Services/Coordinator/TeamServiceCollectionExtensions.cs`） | 移除 `IApprovalUi` DI 注册与 Team 路径注入 |
 | `PipelineSecurityContext` / `AgentPipelineOptionsFactory` | 移除 `ApprovalUi` 字段 |
 | `MainAgentRunner.Pipeline.cs` / `MainAgentContracts.cs` / `ForkedAgentRunner.cs` | 移除 `ApprovalUi` / `ApprovalHandler` 字段与传递 |
 | `GoalAgentModels.cs` / `GoalSubGoalExecutor.cs` / `OrchestrationStreamService.cs` | 移除 `ApprovalHandler` 传递 |

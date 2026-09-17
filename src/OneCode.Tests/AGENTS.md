@@ -112,6 +112,50 @@ public async Task ExecuteAsync_StopsApplication()
 ```
 验证了 Mock 对象的方法被调用，但没有验证任何真实的业务产出物。如果实现改为调用 `lifetime.StopApplication()` 两次，测试仍然通过，但业务已回归。
 
+### 8. 被前置闸门遮蔽的守卫测试（假绿）
+
+❌ **禁止：**
+```csharp
+[Fact]
+public async Task AutoDream_RefusesToDeleteManualEntry()
+{
+    // 写入一条 manual: 前缀的条目
+    await SeedAsync(key: "manual:user-pinned", source: "manual");
+
+    var written = await sut.ApplyChangesAsync(["""{"action":"delete","key":"manual:user-pinned"}"""]);
+
+    written.Should().Be(0, "manual entries must not be deletable");
+}
+```
+
+被测代码有**两道串联的守卫**：先判 key 前缀 `manual:`，再判 `Source == "manual"`。
+本用例的 key 恰好带 `manual:` 前缀，**被第一道闸先拦下**，第二道闸（`Source` 判定）
+无论是否被破坏，测试都会通过。
+
+也就是说：把这个测试当作 `Source` 守卫的证明是**假的**。删掉第二道闸，它依然全绿。
+
+✅ **正确：每条守卫都需要一个能绕过前面所有闸门的用例**
+```csharp
+[Fact]
+public async Task AutoDream_RefusesToDeleteManualEntry()
+{
+    // key 刻意不带 manual: 前缀（绕过前缀闸），仅靠 source=manual 触发 Source 守卫。
+    // 用户可直接编辑 MEMORY.md 写入任意 key，这条路径是真实可达的。
+    await SeedAsync(key: "fact:user-edited", source: "manual");
+
+    var written = await sut.ApplyChangesAsync(["""{"action":"delete","key":"fact:user-edited"}"""]);
+
+    written.Should().Be(0, "source=manual entries must not be deletable regardless of key prefix");
+}
+```
+
+**判定方法**：写出用例后问自己——「破坏我真正想验证的那道闸，这个测试会失败吗？」
+如果不确定，就去做一次反证（见下节）。
+
+> **历史实例（2026-09-16）**：记忆模块的 AutoDream 写入路径有三道安全闸（前缀闸 / delete 的
+> `Source` 闸 / upsert 的 `Source` 闸）。初版删除守卫测试正是用 `manual:` 前缀 key，被前缀闸遮蔽，
+> 属于**假绿**；改为非前缀 key 后，反证才真正失败。若不主动反证，该假绿测试会长期存在。
+
 ---
 
 ## 正确测试模式
@@ -155,6 +199,39 @@ update.CacheReadCost.Should().Be(1.50m);
 update.TotalCost.Should().Be(19.50m);
 update.CumulativeCost.Should().Be(update.TotalCost);
 ```
+
+### 反证法：故意改错，确认测试会失败
+
+守卫类逻辑（安全闸、排序、门控、过滤）写完测试后，**主动破坏被测逻辑一次**，确认测试确实失败，
+再恢复。这是唯一能证明测试不是假绿的手段。
+
+```csharp
+// 1. 正常状态下运行 → 全绿
+// 2. 临时把 PruneAsync 的 OrderByDescending 改成 OrderBy（即把淘汰顺序写反）
+// 3. 重跑 → 三个淘汰守卫测试必须失败
+// 4. 恢复 → 全绿 ⇒ 守卫真实有效
+```
+
+**适用范围**：多分支判定、排序/淘汰策略、门控条件、安全闸、格式解析契约。
+**成本**：一次临时改动 + 一次局部测试运行，几分钟量级。
+**回报**：本项目的三次重构中每次反证都有效，其中一次直接揭露了一处假绿测试（见上方第 8 类）。
+
+```bash
+# 反证时只跑相关测试即可，无需全量
+dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~MemoryEntryStoreTests"
+```
+
+### 契约测试：让写入路径与读取路径互相验证
+
+跨越「存储 ↔ 消费」边界的逻辑（写文件 / 读文件、序列化 / 反序列化、产生事件 / 消费事件），
+测试必须走**真实的一方**，不得手搓假数据。
+
+❌ **禁止：** 自建目录、手写 JSON header，然后断言读取端能解析——这只证明了「我手写的假数据是我手写的」。
+✅ **正确：** 用真实的写入端（如 `FileSessionEventStore`）产出数据，再让读取端消费。
+
+> **历史实例（2026-09-15）**：AutoDream 的会话扫描目录曾与真实事件目录不一致（扫 `sessions/`，
+> 实际写 `events/`），导致 AutoDream 从未真正运行。测试之所以一直通过，正是因为它们自建了
+> `sessions/` 目录并手写 header，**把 BUG 完全掩盖**。改为走真实存储后立刻暴露。
 
 ### 对比性测试：验证合理的大小关系
 
@@ -238,5 +315,7 @@ public void IsReadOnly_CorrectlyClassifies(string command, bool expectedReadOnly
 - [ ] 没有任何断言仅验证 Mock 对象的行为（`Received(1)`）而没有业务产出断言相伴？
 - [ ] 如果有 `[InlineData]`，覆盖了至少一个边界条件（空值、极端值、无效值）？
 - [ ] 测试名读起来像一个真实的业务场景，而不是一个方法调用描述？
+- [ ] **守卫类测试：破坏它声称要验证的那道逻辑，这个测试会失败吗？**（不确定就做一次反证）
+- [ ] **跨存储边界的测试：走的是真实写入端，还是我手搓的假数据？**
 
 **如果任何一条不满足，该测试不应该被提交。**

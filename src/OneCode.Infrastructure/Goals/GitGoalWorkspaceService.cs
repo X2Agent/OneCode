@@ -31,11 +31,20 @@ public sealed class GitGoalWorkspaceService(
             ["symbolic-ref", "--quiet", "--short", "HEAD"], repositoryRoot, ct).ConfigureAwait(false);
         var targetFingerprint = await fingerprintProvider.ComputeAsync(repositoryRoot, ct).ConfigureAwait(false);
         var workspaceId = $"goal-{run.Id}";
-        var branch = $"onecode/goal/{run.Id}";
-        var path = WorktreeLayout.GetWorktreePath(repositoryRoot, run.Id.Value);
+        // Goal 描述生成可读 slug；纯中文/无 ASCII token 时回退到短 id，保证跨平台安全。
+        // run.Id 真实为 32 位 GUID（GoalRunId.New()），此处按长度防御（测试/旧数据用短值）。
+        var runShortId = run.Id.Value.Length >= 8 ? run.Id.Value[..8] : run.Id.Value;
+        var slug = WorktreeLayout.BuildGoalSlug(run.Goal) ?? $"goal-{runShortId}";
+        // 跨 run 碰撞消歧：同名 worktree 目录已存在（属于更早的 run）时追加短 id。
+        if (Directory.Exists(WorktreeLayout.GetWorktreePath(repositoryRoot, slug)))
+            slug = $"{slug}-{runShortId}";
+
+        var branch = $"onecode/goal/{slug}";
+        var path = WorktreeLayout.GetWorktreePath(repositoryRoot, slug);
 
         if (Directory.Exists(path))
         {
+            // 恢复场景：worktree 已存在（本次 run 或同 slug 的历史 run），校验分支一致。
             var existingBranch = await ReadRequiredAsync(
                 ["symbolic-ref", "--quiet", "--short", "HEAD"], path, ct).ConfigureAwait(false);
             if (!string.Equals(existingBranch, branch, StringComparison.Ordinal))

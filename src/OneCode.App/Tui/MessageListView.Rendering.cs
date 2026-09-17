@@ -15,9 +15,18 @@ public sealed partial class MessageListView
 
         base.OnDrawingContent(context);
 
+        var viewport = Viewport;
+        if (viewport.Width <= 0 || viewport.Height <= 0) return false;
+
+        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+        for (var row = 0; row < viewport.Height; row++)
+        {
+            Move(0, row);
+            AddStr(new string(' ', viewport.Width));
+        }
+
         if (_lines.Count == 0) return false;
 
-        var viewport = Viewport;
         var showScrollbar = _lines.Count > viewport.Height;
         // Reserve the rightmost column for the scrollbar when needed; content
         // otherwise fills the available width (no artificial center column).

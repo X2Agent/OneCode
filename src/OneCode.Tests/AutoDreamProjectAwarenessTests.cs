@@ -1,4 +1,7 @@
+using OneCode.App.Session;
 using OneCode.Core.Config;
+using OneCode.Core.Domain;
+using OneCode.Core.Session;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -9,7 +12,6 @@ using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 using System.Diagnostics;
-using System.Text.Json;
 
 namespace OneCode.Tests;
 
@@ -17,29 +19,44 @@ namespace OneCode.Tests;
 /// Tests for AutoDream project-awareness: state file isolation and session scanning
 /// filtered by the current working directory.
 /// </summary>
+/// <remarks>
+/// 会话文件通过真实 <see cref="FileSessionEventStore"/> 写出（而非手搓 JSON），
+/// 以保证测试覆盖「存储写入路径 ↔ 扫描读取路径」的目录与格式契约。
+/// 历史教训：旧测试自建 <c>sessions/</c> 目录并手写 header，
+/// 掩盖了「扫描目录与真实事件目录不一致」的 BUG（规则见
+/// <c>src/OneCode.Tests/AGENTS.md</c>「契约测试：让写入路径与读取路径互相验证」）。
+/// </remarks>
 public sealed class AutoDreamProjectAwarenessTests : IDisposable
 {
     private readonly string _tempDir;
+    private readonly string _userHome;
     private readonly string _globalConfigDir;
-    private readonly string _sessionsDir;
+    private readonly string _eventsDir;
     private readonly string _projectA;
     private readonly string _projectB;
     private readonly IWorkingDirectoryAccessor _wdAccessor;
     private readonly AutoDreamService _service;
+    private readonly FileSessionEventStore _eventStore;
 
     public AutoDreamProjectAwarenessTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"AutoDream_{Guid.NewGuid():N}");
-        _globalConfigDir = Path.Combine(_tempDir, "global");
-        _sessionsDir = Path.Combine(_globalConfigDir, "sessions");
+        // _userHome 模拟用户主目录（~），_globalConfigDir 模拟配置文件目录（~/.onecode）。
+        // 生产环境：FileSessionEventStore 接收 ~，内部拼 .onecode/events；
+        // AutoDreamService 接收 ~/.onecode，扫描器拼 events。两者殊途同归。
+        _userHome = Path.Combine(_tempDir, "home");
+        _globalConfigDir = Path.Combine(_userHome, ".onecode");
+        _eventsDir = Path.Combine(_globalConfigDir, "events");
         _projectA = Path.Combine(_tempDir, "projectA");
         _projectB = Path.Combine(_tempDir, "projectB");
-        Directory.CreateDirectory(_sessionsDir);
         Directory.CreateDirectory(_projectA);
         Directory.CreateDirectory(_projectB);
 
         _wdAccessor = Substitute.For<IWorkingDirectoryAccessor>();
         _wdAccessor.WorkingDirectory.Returns(_projectA);
+
+        // 真实事件存储：basePath = 用户主目录（生产为 PathsHelper.UserHome）。
+        _eventStore = new FileSessionEventStore(_userHome);
 
         _service = new AutoDreamService(
             NullLogger<AutoDreamService>.Instance,
@@ -153,8 +170,8 @@ public sealed class AutoDreamProjectAwarenessTests : IDisposable
         await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
 
         // Also create a .json file (wrong extension, should be ignored)
-        var jsonFile = Path.Combine(_sessionsDir, $"{Guid.NewGuid()}.json");
-        await File.WriteAllTextAsync(jsonFile, "{\"working_directory\":\"" + _projectA + "\"}");
+        var jsonFile = Path.Combine(_eventsDir, $"{Guid.NewGuid()}.json");
+        await File.WriteAllTextAsync(jsonFile, "{}");
 
         _wdAccessor.WorkingDirectory.Returns(_projectA);
         var count = _service.CountNewSessionsSince(since);
@@ -228,29 +245,28 @@ public sealed class AutoDreamProjectAwarenessTests : IDisposable
     // Helpers
 
     /// <summary>
-    /// Creates a session .jsonl file with a header containing the given working directory,
-    /// matching the SessionStore format (snake_case JSON header on the first line).
+    /// 通过真实 <see cref="FileSessionEventStore"/> 写入一个会话的 <c>SessionStarted</c> 事件，
+    /// 返回落盘的事件文件路径。
     /// </summary>
+    /// <remarks>
+    /// 使用生产写入路径而非手写 JSON，使测试同时约束「目录名」与「事件信封格式
+    /// （<c>payload.working_directory</c>）」两项契约。
+    /// </remarks>
     private async Task<string> CreateSessionFileAsync(Guid sessionId, string workingDirectory)
     {
-        var file = Path.Combine(_sessionsDir, $"{sessionId}.jsonl");
-        var header = new
+        var conversation = new Conversation
         {
-            id = sessionId,
-            name = $"test-{sessionId:N}",
-            working_directory = workingDirectory,
-            model = "test-model",
-            status = "active",
-            total_usage = new { input_tokens = 0, output_tokens = 0 },
-            created_at = DateTimeOffset.UtcNow,
-            last_activity_at = DateTimeOffset.UtcNow,
-            branch = (string?)null,
-            message_count = 1,
-            metadata = (Dictionary<string, object>?)null,
-            type = "session_header",
+            Id = new SessionId(sessionId.ToString()),
+            Name = $"test-{sessionId:N}",
+            WorkingDirectory = workingDirectory,
+            Model = "test-model",
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastActivityAt = DateTimeOffset.UtcNow,
         };
-        var headerJson = JsonSerializer.Serialize(header);
-        await File.WriteAllTextAsync(file, headerJson + "\n");
-        return file;
+
+        var events = ConversationEventMapper.ToEvents(conversation);
+        await _eventStore.AppendAsync(events);
+
+        return Path.Combine(_eventsDir, $"{sessionId}.jsonl");
     }
 }

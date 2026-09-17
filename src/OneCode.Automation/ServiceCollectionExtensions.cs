@@ -2,9 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.Automation.Cron;
 using OneCode.Automation.ModelCatalog;
 using OneCode.Automation.Yolo;
-using OneCode.Core.Cron;
-using OneCode.Core.Models;
-using OneCode.Core.Permissions.Yolo;
 using OneCode.Core.Tools;
 
 namespace OneCode.Automation;
@@ -31,22 +28,16 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Register the unified cron tool POCO with a custom DI factory AND Catalog metadata
-    /// (via <see cref="ToolServiceCollectionExtensions.AddTool{T}"/>).
+    /// Register the unified cron tool POCO and Catalog metadata
+    /// (via the explicit tool registration API).
     /// One call completes both DI registration and Catalog metadata registration.
     /// </summary>
     public static IServiceCollection AddCronTools(this IServiceCollection services)
     {
-        // 自定义 DI 工厂（CronTool 依赖 ICronParser + CronSchedulerService）
-        // GetRequiredService: AddCronTools 必须与 AddCronScheduler 配合使用，
-        // 未注册调度器时 fail-fast 而非静默返回 null。
-        services.AddSingleton<CronTool>(sp => new CronTool(
-            sp.GetRequiredService<ICronParser>(),
-            sp.GetRequiredService<CronSchedulerService>()));
-
-        // Catalog 元数据注册（TryAddSingleton 不会覆盖上面的自定义工厂）
         // Deferred 层：cron 工具低频但高风险，不自动加载，仅通过 ToolSearch 显式激活
-        services.AddTool<CronTool>("Cron", nameof(CronTool.ExecuteAsync), ToolRisk.Safe,
+        services.AddToolInstance("Cron", (CronTool tool) =>
+                Microsoft.Extensions.AI.AIFunctionFactory.Create(tool.ExecuteAsync, name: "Cron"),
+            ToolRisk.Safe,
             searchHint: "manage scheduled cron jobs (create/list/delete/pause/resume)",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
         return services;
@@ -54,7 +45,7 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Register <see cref="ModelCatalogRefreshService"/> as a singleton + hosted service.
-    /// Depends only on <see cref="IModelCatalogCache"/> (Core).
+    /// Depends only on <see cref="OneCode.Core.Models.IModelCatalogCache"/> (Core).
     /// </summary>
     public static IServiceCollection AddModelCatalogRefresh(this IServiceCollection services)
     {
@@ -65,7 +56,8 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Register <see cref="YoloRuleStoreLoader"/> as a hosted service.
-    /// Requires <see cref="YoloRuleStore"/> and <see cref="IYoloRuleFileStore"/> registered by the App composition root.
+    /// Requires <see cref="OneCode.Core.Permissions.Yolo.YoloRuleStore"/> and
+    /// <see cref="OneCode.Core.Permissions.Yolo.IYoloRuleFileStore"/> registered by the App composition root.
     /// </summary>
     public static IServiceCollection AddYoloRuleStoreLoader(this IServiceCollection services)
     {

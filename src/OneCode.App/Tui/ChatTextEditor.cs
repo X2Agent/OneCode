@@ -6,15 +6,16 @@ using Terminal.Gui.Input;
 
 /// <summary>
 /// Multi-line text input built on Terminal.Gui.Editor's <see cref="Editor"/>.
-/// Supports up to <see cref="MaxVisibleLines"/> visible rows; scrolls beyond that.
+/// Shows a fixed number of rows (decided by <see cref="ChatInputView.EditorLines"/>);
+/// content beyond that scrolls inside the editor.
 /// Exposes a linear InsertionPoint (character offset into the full text).
 /// </summary>
 internal sealed class ChatTextEditor : View
 {
-    public const int MaxVisibleLines = 5;
+    /// <summary>Paste-folding threshold: pastes exceeding this line count collapse into a token.</summary>
+    public const int LargePasteLineThreshold = 5;
 
     private readonly Editor _editor;
-    private int _currentHeight = 1;
     private bool _suppressEvents;
     private bool _insertingText;
     private int _previousLineCount = 1;
@@ -40,7 +41,7 @@ internal sealed class ChatTextEditor : View
 
     /// <summary>
     /// Raised when a large text paste is detected — i.e. the line count jumps
-    /// by more than 1 in a single change and exceeds <see cref="MaxVisibleLines"/>.
+    /// by more than 1 in a single change and exceeds <see cref="LargePasteLineThreshold"/>.
     /// Subscribers should collapse the text into a one-line summary.
     /// </summary>
     public event Action<string>? LargeTextPasted;
@@ -65,6 +66,10 @@ internal sealed class ChatTextEditor : View
             CanFocus = true,
             TabStop = TabBehavior.TabStop,
         };
+        // 内部 Editor 必须显式取 ChatInput Scheme：TG 默认 Scheme 是黑底，
+        // 会盖掉外层 ChatInputView 的 BgSurface 背景（底部配色割裂的根因）。
+        _editor.SetScheme(TuiStyles.ChatInput);
+        SetScheme(TuiStyles.ChatInput);
 
         // Shift+Enter and Ctrl+V must NOT be bound to Editor commands — both
         // need to fall through to KeyDown, where ChatInputView.OnInputKeyPress
@@ -173,7 +178,7 @@ internal sealed class ChatTextEditor : View
         var lineJump = currentLineCount - _previousLineCount;
         var lengthJump = currentTextLength - _previousTextLength;
         if (!_suppressEvents && !_insertingText &&
-            currentLineCount > MaxVisibleLines &&
+            currentLineCount > LargePasteLineThreshold &&
             (lineJump > 1 || lengthJump > 1) &&
             LargeTextPasted is not null)
         {
@@ -192,7 +197,6 @@ internal sealed class ChatTextEditor : View
 
         _previousLineCount = currentLineCount;
         _previousTextLength = currentTextLength;
-        AdjustHeight();
         if (!_suppressEvents && !_insertingText)
             ContentsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -223,7 +227,6 @@ internal sealed class ChatTextEditor : View
                 // doesn't mistake the programmatic reset for a paste.
                 _previousLineCount = LineCount;
                 _previousTextLength = _editor.Document.TextLength;
-                AdjustHeight();
             }
             finally
             {
@@ -252,7 +255,7 @@ internal sealed class ChatTextEditor : View
             _insertingText = false;
         }
         // Document.Insert synchronously fires TextChanged → OnDocumentChanged,
-        // which already updates _previousLineCount and calls AdjustHeight().
+        // which already updates _previousLineCount.
         // Only ContentsChanged dispatch is skipped (because _insertingText was
         // true during the nested event), so we manually fire it here.
         ContentsChanged?.Invoke(this, EventArgs.Empty);
@@ -561,16 +564,5 @@ internal sealed class ChatTextEditor : View
         // Bare Enter — may be Shift+Enter on some terminals; check physical state
         if (e.NoShift.NoCtrl.NoAlt == Key.Enter) return KeyboardState.IsShiftPressed();
         return false;
-    }
-
-    private void AdjustHeight()
-    {
-        var lines = Math.Clamp(LineCount, 1, MaxVisibleLines);
-        if (_currentHeight != lines)
-        {
-            _currentHeight = lines;
-            SuperView?.SetNeedsDraw();
-            SetNeedsDraw();
-        }
     }
 }

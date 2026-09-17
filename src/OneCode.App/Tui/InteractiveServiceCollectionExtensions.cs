@@ -15,7 +15,6 @@ public static class InteractiveServiceCollectionExtensions
     public static IServiceCollection AddInteractiveServices(this IServiceCollection services)
     {
         services.AddSingleton<PromptConfigBuilder>();
-        services.AddSingleton<PromptRuntimeDependencies>();
         services.AddSingleton<ThinkingParamsResolver>();
         services.AddSingleton<TuiOverlayDependencies>();
         services.AddSingleton<TuiCommandSurfaceDependencies>();
