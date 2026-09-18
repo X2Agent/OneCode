@@ -1,6 +1,6 @@
 # Harness 默认能力替换审计与重构验收清单
 
-> **状态**：2026-09-17 静态复核修订（含版本基线、Todo、Memory、HarnessInstructions、Skills 与 Compaction 专项计划）。§4.2 已统一为「启用 Harness 内置 FileMemory 管理会话工作记忆 → OneCode 整理长期知识」，补充现状/目标、风险分级与 M1–M5 施工验收；§4.5 保留压缩专项及 L0 规则复算。上述重构均尚未实施，不是「七项全部收口」；此次只更新文档，没有新增构建或 C# 测试通过记录。
+> **状态**：2026-09-17 静态复核修订（含版本基线、Todo、Memory、HarnessInstructions、Skills、Compaction、搜索与审批专项计划）。§4.2 已统一为「启用 Harness 内置 FileMemory 管理会话工作记忆 → OneCode 整理长期知识」，补充现状/目标、风险分级与 M1–M5 施工验收；§4.5 保留压缩专项及 L0 规则复算。上述重构均尚未实施，不是「七项全部收口」；此次只更新文档，没有新增构建或 C# 测试通过记录。
 > **用途**：作为后续重构的临时施工清单；完成 §8 的验收与决策迁移后再删除。
 > **关联**：[ADR 0007](../adr/0007-maf-integration-boundaries.md)、[记忆设计 ADR 0004](../adr/0004-memory-module-design.md)、[技能系统](../skills.md)。
 
@@ -9,6 +9,7 @@
 **OneCode 使用 MAF 的总体分工合理，但原文否决若干重构方向的理由不成立，不能据此认定已符合最佳实践。**
 
 - 保留 MAF 的 agent 执行、工具调用循环、上下文协议、审批协议、历史处理与遥测；普通 Agent TODO 改用 MAF `TodoProvider`（待实施，见 §4.1）。OneCode 管理产品模式、宿主执行任务、长期记忆、搜索后端和权限政策。
+- **本轮新增（待实施）**：工具审批核心流程全面回归 MAF，OneCode 只保留政策定义、交互与执行前硬闸（§4.7）；搜索按「原生接入优先」收敛，并正式评估原生文件能力接管（§4.4）。已确认的最高优先级缺口是普通工具未接入原生审批标记，不能再用「Ask 放行即由 ToolApprovalAgent 接管」作为安全结论。
 - `Disable` 不是反模式：关闭不适用的默认能力，再通过官方扩展点装配产品能力，是有效组合方式。
 - Skills 已复用 `AgentSkillsProviderBuilder`，记忆检索已复用 `TextSearchProvider`，压缩已复用 MAF provider 与大部分策略；不能统称「禁用 MAF 后自研一套」。
 - 会话工作记忆改为按 profile 启用 **Harness 内置 FileMemoryProvider**（待实施，§4.2）：配置原生 store，不自研或重复装配 provider。对话历史仍由 Session/history 管理；OneCode 从工作产物提炼长期知识与偏好，继续用 TextSearchProvider 检索。不得以「FileMemory 不能整换长期库」推导继续全局关闭它。
@@ -111,7 +112,7 @@ Harness Options 有 10 个 `Disable*` 属性，不代表 OneCode 全部置 true�
 | AgentMode | 关闭默认；宿主驱动模式，Main 注入 `ModeInstructionProvider` | 保留。不能恢复 LLM `mode_set` 形成第二套模式状态；子代理由角色/profile 控制 |
 | FileMemory | 全局关闭；仅有长期 MEMORY.md + 检索 + 宿主治理 | 按 profile 启用 Harness 内置实例管理会话工作记忆，配置原生 store；OneCode 整理产物为长期知识，不替代原始历史（§4.2） |
 | AgentSkills | 关闭 Harness 默认；官方 builder 组合文件、bundled、MCP 与 runner | 保留原生 provider/builder 薄装配；重构双入口技能规则、脚本执行边界与资源释放，不为减少 Disable 改写 source 管道（§4.3） |
-| WebSearch | 关闭 hosted tool；产品 AIFunction 走搜索提供方链 | 当前多后端政策下保留；不是 MAF .NET 普遍不能搜索 |
+| WebSearch | 关闭 hosted tool；产品 AIFunction 走搜索提供方链 | 按 §4.4 收敛：保留薄 AIFunction + 提供方抽象；hosted 标记不承担 Tavily/DDG 后端（§4.4.2），通用文件工具按 §4.4.3 评估 FileAccessProvider 接管 |
 | Compaction | 关闭 Harness 压缩；官方 provider 在输入 ChatClient 上装配 | 保证唯一入口；先按 §4.5 批次一修复 L0/手动压缩边界与摘要契约，批次二收敛预算与状态失效，最后在 P2 评估是否迁入 Harness 策略入口，不以「迁移必然双挂」或减少 Disable 否决 |
 | HarnessInstructions | 空字符串；`PromptComposer` 提前合成产品指令 | 改用 MAF 合成：通用产品片段 → HarnessInstructions，角色/主模板正文 → ChatOptions.Instructions；保留加载、覆盖与渲染，删除重复拼接（§4.6） |
 
@@ -308,13 +309,87 @@ MAF `AgentFileSkillScript` 负责脚本协议与使用前路径校验，但实�
 
 结论：按 §4.3.3 落实宿主释放责任并验证所有退出路径，不以潜在资源较轻为由长期悬空。上文 source 迁移仅说明技术可行性，不是本轮施工任务；继续复用官方 builder，不手写其内部政策。
 
-### 4.4 搜索并非单一能力
+### 4.4 搜索专项：原生接入与文件能力优先，保留必要检索后端
 
-- `HostedWebSearchTool` 是交给模型服务端执行的工具；Harness 默认加入，不先检测后端支持。当前多后端通用配置下关闭它合理。
-- OneCode `WebSearchTool` 是本地 AIFunction 调用 Tavily / DuckDuckGo 提供方链，包含产品错误处理、缓存和域过滤；与 hosted 搜索不是同一执行边界。
-- `TextSearchProvider` 用于注入自定义检索，当前承接记忆；`ToolSearch` 是工具发现，Grep / Glob / 符号检索是代码库搜索。不能仅因都叫搜索就合并。
+#### 4.4.1 决定、需求与能力边界
 
-是否有独立 profile 使用 hosted 搜索，应由支持的后端、费用与隐私政策决定，不应仅为恢复默认而自动启用。
+**决定（待实施）**：按「直接使用原生 → 配置原生 → 最小扩展 → 确有差异才保留产品实现」收敛。正式评估 `FileAccessProvider` 接管通用文件工具，不预设旧工具必须全部保留；长期知识继续使用 `TextSearchProvider`；网页搜索优先精简现有 AIFunction，不用 hosted 标记伪装本地搜索。保留 LSP、工作区政策及工具激活等产品职责，不新建通用搜索平台或工具执行循环。
+
+本专项为静态源码结论，尚无新增 C# 行为测试。已核对项目实际资产与 §1.1 版本一致；本轮检查的 TextSearchProvider/Options、ChatHistoryMemoryProvider、Core/Harness 路径在 `dotnet-1.21.0..HEAD` 无差异，不向其他后端适配器外推。
+
+| 能力 | MAF 提供 | OneCode 需求与处置 |
+|---|---|---|
+| 网页搜索 | `HostedWebSearchTool` 标记支持的服务端搜索 | 多模型后端、Tavily/DDG、域参数、费用/外发政策；保留薄 AIFunction + 后端适配 |
+| 长期知识检索 | `TextSearchProvider` 查询委托、按需工具/调用前注入、格式化及自身日志脱敏 | Project/User、排名、来源、人工条目与反馈仍归产品；不重写 provider |
+| 历史语义检索 | `ChatHistoryMemoryProvider` 使用 VectorStore 存储和召回历史消息，可按需调用 | 当前未使用；有跨对话原始历史检索需求时优先评估，不把长期条目伪装为聊天消息 |
+| 会话工作文件 | `FileMemoryProvider` 文件工具、索引与 grep | 按 §4.2 原生启用，不自研工作记忆 CRUD/search |
+| 工作区文件/文本 | `FileAccessProvider` + `AgentFileStore` 的枚举、grep、行号原语 | 通用职责优先迁移；ignore、多根工作区、rg、高级参数和编辑事务有差异时才保留适配 |
+| 符号 | 通用文件 grep 不提供 LSP 符号语义 | 保留 LSP-first + 索引 fallback；路径、kind、取消与截断需统一 |
+| 工具发现 | 原生上下文/Options 可贡献工具；所查 Core/Harness 没有等价的产品目录激活器 | 保留目录排名与能力裁剪；动态工具注入复用原生调用点，不重写循环 |
+
+只读不等于没有外部影响：WebSearch 会外发查询并可能收费；记忆检索会回写命中统计；ToolSearch 可激活工具。政策必须明确这些边界，不能仅凭“不写代码”断言任何 profile 无条件允许，也不意味着所有检索都必须人工询问。
+
+#### 4.4.2 HostedWebSearchTool 与 Tavily/DDG 的最终选择
+
+`HostedWebSearchTool` 位于已引用的 `Microsoft.Extensions.AI.Abstractions`，**自身不执行搜索，不是 Bing/Google/Tavily 引擎，也不承诺免费**。Harness 默认向 ChatOptions 添加该标记，不先探测支持。真正执行依赖 `IChatClient` 适配器、API 类型、模型、服务配置和凭据；搜索次数、模型 token、资源费用及免费额度按实际服务核验。
+
+当前 API 没有搜索委托、`IWebSearchProvider` 或 Tavily/DDG 后端注入入口；`AdditionalProperties` 只有被适配器/服务端识别才有意义，不能通过任意 provider 字段自动接入 Tavily。OneCode 当前 OpenAI 路径使用 `GetChatClient().AsIChatClient()`，不能将服务商其他 API 的 hosted 能力自动算到这条链上。
+
+| 方案 | 决定 |
+|---|---|
+| HostedWebSearchTool 直接配置 Tavily/DDG | 当前 API 不支持；不作为施工方案 |
+| 自写 ChatClient 转换 hosted 标记为本地 AIFunction | 不做：原后端仍需保留，又多一层转换，无当前产品收益 |
+| 薄 WebSearch AIFunction + 现有提供方抽象 | 当前优先，保留 query / allowed_domains / blocked_domains 显式参数；MAF 负责函数循环、审批协议与回传 |
+| TextSearchProvider + 搜索委托 | 接受单查询参数时可评估，原生按需工具不直接保留独立域参数；不以隐藏状态/字符串编码强行兼容 |
+| 服务或网关本身支持 hosted 并配置 Tavily | 由该服务实现，不是 MAF 标记的本地扩展能力；后端、费用、隐私和引用验收后才按 profile 启用 |
+
+Hosted 搜索不经过本地 AIFunction 调用边界，不能声称本地权限、逐工具计数和日志会自动逐次覆盖服务端搜索。产品搜索与 hosted 不意外双挂；不能仅为消除 Disable 开启后者。
+
+#### 4.4.3 FileAccessProvider / AgentFileStore：重复职责与替换边界
+
+两者不是两个并列搜索引擎：`FileAccessProvider` 面向模型，提供文件工具、指令和审批标记；`AgentFileStore` 面向后端，提供读写、枚举与搜索协议。OneCode 的 Read/Write/Edit/Delete/LS/Grep 与前者通用职责重叠；`IFileSystem` + `LocalAgentFileStore` 与后者部分重叠。**LocalAgentFileStore 仅实现 IFileSystem，没有继承原生 AgentFileStore。** 其“当前不用 MAF 文件 provider”注释不能成为永远保留自研的理由；FileAccess 是 opt-in 未装配，不应写成关闭了一个默认 provider。
+
+原生 `FileAccessProviderOptions` 支持 `DisableWriteTools`、分别控制读/写审批及产品 Instructions；只读 profile 不需要为裁剪写工具另造 provider。原生文件系统 store 提供目录约束、符号链接/reparse point 排除、5 秒正则超时；不能把任何目录配置夸大为完整沙箱。
+
+优先复用的原语：
+
+- `FindMatchingFilesAsync`：可扩展候选发现，允许多返回但不得漏候选；索引方言不等价时应扩大候选范围，原生基类继续扫描。
+- `ScanContent` / `SplitLines`：复用逐行匹配和行号定义，先与 OneCode Read/Edit 的 CRLF/LF/CR 契约验证一致。
+- `Microsoft.Extensions.FileSystemGlobbing`：OneCode 已在用的独立 Microsoft 库，不是 MAF 专属能力；统一它上面的重复枚举/ignore 政策，而不是新写匹配器。
+
+**实现约束**：`FileSystemAgentFileStore` 自己覆盖 SearchAsync，不能只 override 候选 hook 就假定实际搜索会调用它。原生默认逐行、大小写不敏感，未直接覆盖当前全部上下文、多行、分页和 rg 选项。先验证实际 dispatch 与公共行为，再决定采用原生 store、最小适配或保留高级扩展；不得为接 store 复制整套无关 CRUD。
+
+迁移顺序：列出真实调用方和必要契约 → 原生 provider 接管等价通用工具 → 后端差异通过 store 扩展 → 保留高级 Grep/LSP 等必要部分 → 同批删除旧工具及注册。工具名、路径参数、权限分类、附加目录、ignore、输出预算、事务/验证中间件和最终工具集必须共同验收。Core 的宿主 I/O 抽象不因 SDK 有 store 就直接引入 SDK 依赖；只有确认无剩余消费者才删除接口或实现。不得长期同时广告新旧两套文件工具。
+
+#### 4.4.4 已确认实现差距与修复边界
+
+| 优先级 / 证据 | 当前差距 | 重构要求 |
+|---|---|---|
+| P1 / 源码确认 | WebSearch 仅以 query 为键，却缓存已域过滤结果；更换/放宽域条件会丢失候选 | 优先缓存原始结果，每次独立过滤；定义提供方配置变化和作用域失效 |
+| P1 / 并发风险待行为验证 | WebSearch 单例、元数据默认可并发，缓存为无同步 Dictionary；旧 query 过期项无整体容量治理 | 复用现有 IMemoryCache 并配置容量/过期；需要时合并同 query 并发，不自建缓存平台 |
+| P1 / 源码确认 | WebSearch 把取消作为普通错误，所有 OperationCanceledException 混为取消；空结果触发 fallback；缓存前未检查取消 | 区分调用方取消、超时、正常零结果、解析失败和服务错误；取消传播，超时按政策回退 |
+| P1 / 源码确认 | WebSearch 原始 query 日志及异常原文回传；fallback 改变外发服务；域过滤只在结果端 | 稳定错误分类和日志脱敏；明确备选服务外发许可，不把结果过滤当网络/隐私边界 |
+| P1 / 源码确认 | Grep 的 rg -c 统计匹配行，native 统计出现次数；rg --multiline 与 native Singleline 不等价；文案称 PCRE 但未显式启用 PCRE2 | 先定义公共语义再对齐或显式声明限制；不以两套各自测试通过证明等价 |
+| P1 / 源码确认 | native Regex 未显式设超时；Grep 全量收集后分页；Glob catch 吞取消，Task.Run 的 token 不会中断已开始的同步枚举 | 复用原生有界能力或最小限额；区分扫描资源与最终输出预算；取消传播 |
+| P1 / 源码确认 | SymbolSearch 的 path 仅在索引 fallback 生效，LSP 成功路径未过滤；工具签名无 CancellationToken | LSP/索引均先 path/kind 过滤再截断，贯通取消 |
+| P1 / 源码确认 | ToolSearch 先取全局前 20 再能力过滤，合法工具可能被漏掉 | 候选先受 profile 约束再 Top-K；此问题是漏召回，不宣称当前放出未授权工具 |
+| P2 / 源码确认 | MemoryService 连续中文 token 子串计分、Top 6 全文无总预算；工厂注释把实际 retrieval 也归于 MAF | 保留原生 provider，评测产品召回与排名、预算和来源；修正误导注释；取消/日志修复归 §4.2 M1 |
+
+精简项：DDG 外部调用/解析迁入 Infrastructure 下既有 IWebSearchProvider 边界；合并 SearchHit/WebSearchResult，删除仅测试调用的 CleanHtmlText。保留必要缓存、提供方和错误政策，不增加无职责转发层。TextSearchProvider 自定义 formatter 会替换默认格式化；优先使用 SourceName/SourceLink/Text，仅必要时渲染 scope/category/score，不把错误伪装成真实检索命中。不要将原生自身日志脱敏等同产品委托已脱敏。
+
+ToolSearch 关键词分支当前只发现，select: 才显式激活；同步 SessionToolSet 的不一致注释。TryActivate 成功不证明同一模型循环已看到工具，需要时通过原生 ChatClient-level 上下文/Options 扩展点刷新，不新写循环。MCP 元数据不能仅按名字永久缓存首次描述；随可用性/描述变化更新。现有 CJK bigram、IDF 与字段加权排名先用评测保护，不机械退回裸子串。此处产品目录不与记忆检索强行合并。
+
+#### 4.4.5 搜索施工计划与验收（全部待实施）
+
+| 批次 | 改造与删除范围 | 验收 |
+|---|---|---|
+| S1 / P1 | 修 Web 缓存/取消/外发分类、SymbolSearch path、ToolSearch 能力过滤；记忆错误联动 M1 | 实际工具路径：同 query 窄白名单→无白名单→另一域；超时按政策回退、调用方取消不回退；合法工具排在大量不允许候选之后仍命中；LSP/索引同 scope |
+| S2 / P1 | 缓存并发/容量、Regex 超时、Glob 取消、扫描和输出预算；统一 Grep 引擎契约 | 单例并发、过期、配置变化；大输入有界；固定文件分别走 rg/native，覆盖同一行多命中、大小写、多行、无结果和非法表达式，不用外网验证替代可控测试 |
+| S3 / P1 | DDG 迁既有提供方抽象，合并结果模型、删除死 helper；收敛产品 logger/错误与 MCP 元数据生命周期 | Tavily 和可控 HTML/HTTP 响应通过真实工具调用；错误结果无测试秘密；提供方注册无重复，断连/描述变化不留下失效工具；旧实现退出生产路径 |
+| S4 / P1–P2 | 优先评估 FileAccessProvider 接管通用文件工具，复用 store/候选发现/行号原语；契约满足即替换并删除旧职责 | 原生工具→真实文件→读回；实际 dispatch、CRLF/LF/CR 行号、ignore、附加目录、只读 profile、审批标记及事务/验证通过；必要高级扩展有保留理由，无双工具集 |
+| S5 / P2 | 中文/代码词长期召回、工具检索和总预算评测；动态激活用原生请求扩展点；按需求独立评估历史向量检索和 hosted | 固定样本记录召回、预算及最终模型工具；不因类名相同合并不同语义；没有需求时不引入向量后端；hosted 的支持/费用/引用/外发边界有结果 |
+
+S4 的审批和最终工具名迁移依赖 §4.7 R1/R2，不在普通工具审批入口未接线时扩大原生文件工具暴露。先复用已引用库，新增存储/向量依赖须经需求和项目依赖约束核验。每批同步实际引用的工具文档、提示词、权限元数据与测试；删除旧实现专属测试，保留并迁移产品行为测试。
 
 ### 4.5 Compaction：先修正确性与状态边界，再评估装配入口
 
@@ -440,6 +515,50 @@ C1 的具体约束：当前 stateKey 为 `compaction`，Harness 按策略类型�
 - AutoDream 等独立入口的专用政策有单独用例；模式提示和工具提示与实际 profile 一致。调用方配置不被公共 opt-out 清空；有意传空串的路径仍保持抑制行为。
 - 更新 ADR 0007 中旧“提前合成 + 空 HarnessInstructions”决定，全文同步 PromptComposer、公共 opt-out 和指令合成相关文档/注释。本轮仅更新本文计划，不表示代码或 ADR 已完成迁移。
 
+### 4.7 工具审批专项：MAF 接管流程，OneCode 只留政策与交互
+
+#### 4.7.1 决定与证据边界
+
+**决定（待实施）**：审批核心能力全部使用 MAF——审批标记（`ApprovalRequiredAIFunction`）、请求/响应绑定（按 §5 的 1.21.0 语义）、`ToolApprovalAgent` 的自动批准/排队/Session 内 standing rules、以及 Workflows 的 `InterceptUserInputRequests` 外部审批桥接。OneCode 保留且仅保留：四种工作模式与四类审批行为的政策定义、TUI 与无交互交互、子代理权限收窄与传递、路由/白名单/路径等执行前硬闸、宿主会话持久化。不重写 MAF 状态机，不新增第二套审批状态机、待审批队列或响应绑定存储。
+
+本节为静态源码结论（基于 1.21.0 对应路径），未运行端到端审批测试；「审批绑定/绕过」继续受 §5 版本边界约束。**普通工具未接线原生审批标记是本轮新确认的最高优先级缺口**，它推翻了「Permission 中间件把 Ask 放行即等于交给 ToolApprovalAgent」的旧假设。
+
+#### 4.7.2 MAF 能力分层与四类用户行为
+
+| 层次 | MAF 提供 | 边界（不承担） |
+|---|---|---|
+| 审批标记 | `ApprovalRequiredAIFunction`；FICC 全有或全无规则 + bypass/binding 装饰器区分混合批次 | 不解释产品模式/风险元数据；自动批准规则按工具名匹配的安全警告见框架注释 |
+| 函数执行协议 | 请求产生、响应消费、绑定与单次结算 | 不做产品授权决策 |
+| 审批交互编排 | `ToolApprovalAgent`：排队逐个呈现、自动批准回调、standing rules、`MaxAutoApprovalIterations`（默认 40） | 只处理**已产生**的请求；不会因元数据自动加标记；sealed，匹配优先级不可重写 |
+| 会话批准记录 | standing rules：Session × 工具级 / Session × 工具+参数级「以后允许」 | 不跨 Session、不跨 Agent 自动传播 |
+| Workflow 桥接 | `InterceptUserInputRequests` + 外部请求/响应，Agent 恢复运行 | 「以后允许」包装能否无损通过桥接未验证，不得静默降级 |
+
+四类用户行为与实现映射：**默认允许**＝政策 Allow（普通函数或自动批准命中）；**人工允许**＝有审批标记且无 standing rule 时询问，本次可允许/拒绝；**拒绝**＝政策硬闸（不可被普通确认覆盖）＋单次用户拒绝用原生否决响应；**总是允许**＝首次询问后按用户选择记录原生 standing rule（工具级或参数级，仅当前 Session）。「每次询问」是否可被「以后允许」免除是待定的产品政策点：若要求强制每次确认，仅靠 `AutoApprovalRules` 返回 false 不能实现（standing rules 先于自定义规则短路），须按原生扩展能力单独验收，不得假装现有 API 已支持。
+
+#### 4.7.3 当前差距（源码确认）
+
+| 优先级 / 证据 | 当前差距 | 重构要求 |
+|---|---|---|
+| P0 / 源码确认 | `ApprovalMode` 只进入元数据；`ToolCatalog` 直接返回注册函数，未按元数据包 `ApprovalRequiredAIFunction`；`RequiresApprovalBoundary` 全仓无消费；MAF 函数中间件只包装调用委托，不补标记 → 普通工具 Ask 放行后无原生审批请求产生 | R1：在工具装配边界按统一政策接入原生审批标记；provider 已包装的工具（Skills/FileAccess）不重复包裹 |
+| P1 / 源码确认 | 两条授权计算不一致：`AutoApprovalRulesFactory` 用 `PermissionProfiles.Check`；执行中间件用 `IPermissionChecker.CheckAsync`（Auto 模式加 YOLO） | R2：唯一产品政策入口，向框架适配层做结果映射；不把 bool 自动批准回调当三态授权 |
+| P1 / 源码确认 | Team inline 审批建立在「工作流无法处理审批」旧假设上；MAF Workflows 已有工具审批外部桥接，OneCode 宿主入口未接 | R4：迁原生桥接后删除 inline 分支与 Team 专属关闭；「以后允许」经桥接的映射未验证前只提供单次批准 |
+| P1 / 源码确认 | Main 用 `FirstOrDefault` 抽审批请求并丢弃同 update 的非审批内容；MAF 达自动批准上限时会原样返回多项/混合内容 | R5：完整枚举拆分，保留非审批内容，复用原生排队 |
+| P2 / 源码确认 | `ApprovalBroker` 把取消转 Deny，丢失「用户拒绝 vs 取消」语义；`SessionAllowlist` 在所查路径仅传递、无 Add/Contains 消费，疑悬空 | R6：取消传播，UI 故障按政策拒绝；核实后删除悬空字段，不与原生 standing rules 并存自建会话授权 |
+| P2 / 设计确认 | TeamMember 固定 `PermissionMode.Team`，不等于继承父级授权 | R6：子代理有效权限＝父级可授予范围 ∩ 模式政策 ∩ 子任务约束，只收窄；不复制父级 Session standing rules |
+
+#### 4.7.4 重构批次 R1–R6（全部待实施）
+
+| 批次 | 内容 | 验收 |
+|---|---|---|
+| R1 / P0 | 原生审批标记接线（普通工具）；明确 `ApprovalMode` 语义（进入协议 vs 强制每次确认） | 可控 ChatClient → 实际 Harness：需要确认的调用在确认前未执行；Allow/Deny/Ask 三态正确；批次混有普通工具与技能工具时只拦需审批项；单次调用恰好执行一次、计数一次；多项审批与混合内容不丢失。现有反射私有方法的假 next 测试不作为通过依据 |
+| R2 / P1 | 统一产品政策入口：同一政策服务映射到自动批准回调（仅 Allow 自动批准）、人工提示前校验（Deny 不进提示）与执行前硬闸 | 两种计算路径结果一致；Deny 工具不作为可批准请求展示；规则变化即时生效 |
+| R3 / P1 | 保留执行前硬闸（白名单、路径、模式、预算） | 用户「以后允许」不能突破当前 Deny、profile 能力收窄或路径边界；有反证测试 |
+| R4 / P1 | Team 迁原生 Workflow 审批桥接；删除 inline Ask 分支、Team 专属关闭与仅为 inline 的 broker 传递 | Workflow 外部请求→UI broker→外部响应→成员 Session 恢复；无 UI 通道 fail-safe；单次/长期授权范围有结果；无双轨 |
+| R5 / P1 | Main 流式桥接：完整拆分审批内容与非审批内容；多请求逐个桥接、同 Session 恢复；宿主不重做队列/自动批准；启用原生参数级「以后允许」UI | 混合 update 不丢内容；多请求逐个到达 UI 且各响应一次；上限达到时多项请求可完整呈现 |
+| R6 / P2 | 取消语义贯通（取消≠拒绝，UI 故障可按政策拒绝）；核实并删除 `SessionAllowlist` 残留；跨重启恢复走 Session 持久化 + 宿主路由信息，不自建审批队列存储；子代理权限收窄政策落档 | 审批等待中取消：run 终止且不误执行；恢复路径按 §5 版本边界重跑绑定用例；权限继承有反证测试 |
+
+R1 是其他审批精简的前置：普通工具审批边界未接线时，不扩大原生文件工具暴露（§4.4 S4）、不删除执行前权限检查、不引入任何全工具自动批准规则。
+
 ## 5. 保留 Harness 与显式组装 ChatClientAgent
 
 当前建议保留 Harness：仍在复用重要执行与协议行为，不只是为了获得三个便利属性。DI 不是迁出理由。
@@ -481,11 +600,12 @@ C1 的具体约束：当前 stateKey 为 `compaction`，Harness 按策略类型�
 | P1 | 按 §4.1.3 将普通 TODO 迁至 MAF，移除旧清单装配；明确各 profile 的 Todo 政策 | 实际 agent 只暴露一套普通清单工具；Explore/Plan 提示与有效工具一致，provider 工具权限有行为证据 |
 | P1 | 验收 Todo Session 生命周期与宿主执行回归 | 原生工具写入 → Session 保存/重载后可见；独立 Session 隔离；压缩保留、清空/新建按政策重置；后台停止/输出、Worker 状态、Build 依赖与恢复不回归 |
 | P1 | 覆盖审批批次的绑定/绕过语义（含 §5 版本边界） | 同一响应混有技能工具与普通工具时只拦需要审批的调用；「暂停→恢复」与「只回显响应」两条路径符合所引用版本语义；升级后按 §5 重跑 |
+| P1 | 按 §4.7 审批专项实施 R1–R6 | §4.7.4 各批次验收；R1（原生审批标记接线）先于其他审批精简，并用真实 Harness 链路验证 |
 | P1 | 固定压缩唯一所有者与执行契约（先完成 §4.5 批次一 A1–A4） | 在一个 run 内多轮工具/模型调用触发压缩；状态恢复、工具结果配对、历史回调和计数通过；L0 移除后有同名同参数不同结果的反证测试 |
 | P1 | 完成 §4.5 批次二 B1–B4：预算、折叠效果、Session 状态和告警口径 | 最终请求预算有证据；Todo 启用前通过历史定向失效与保存恢复验收；不把历史规模当模型输入压力 |
 | P2 | 在 §4.5 批次一/二契约保护下评估 Harness 策略入口（C1） | 比较改前改后行为与复杂度；明确 stateKey 变化、显式 history 无 reducer、摘要不递归和唯一 Provider；允许保留当前装配。Skills Source 迁移不列入本轮任务 |
 | P2 | 按 §4.6 将指令合成迁入 MAF，保留产品加载/覆盖/渲染 | 实际模型输入中通用片段仅一次且在主体前；公共 opt-out 不清空调用方配置；模板、覆盖与缺失失败策略保持，AutoDream 单独验证 |
-| P2 | 验证各类搜索边界 | 每条路径提示与实际工具一致；hosted 与产品搜索不意外双挂 |
+| P1–P2 | 按 §4.4 搜索专项实施 S1–S5（正确性→稳定性→精简→文件能力原生接管评估→评测） | §4.4.5 各批次验收；每条路径提示与实际工具一致；hosted 与产品搜索不意外双挂 |
 
 ## 7. 验证范围与尚缺证据
 
@@ -509,6 +629,9 @@ Todo、Memory、HarnessInstructions、Skills 与 Compaction 专项均仅修订�
 - MAF 技能工具 → 文件 script runner，覆盖成功/非零退出/大输出/超时/取消；审批与只读政策保持，进程清理、输出上限与失败信息有可观察结果（§4.3.2）。
 - Skills provider/source 释放覆盖完整使用期的所有退出路径，释放后共享 MCP 客户端仍可用，同 run 缓存及下次 run 新文件/连接变化分别验证。
 - 审批批次：同一响应混有技能工具与普通工具时只拦需要审批的调用；「暂停 → 恢复」与「只回显响应」两条路径符合所引用版本的绑定语义（§5 版本边界）。
+- §4.7 R1：实际 Harness 链路验证普通工具审批——确认前未执行、Allow/Deny/Ask 三态、批准后恰好执行一次且计数一次、多项审批与混合内容不丢失；现有私有方法假 next 测试不作为依据。
+- §4.7 R4：Team 子代理审批请求经 Workflow 外部请求到 UI broker 再响应恢复；无 UI 通道 fail-safe；「以后允许」经桥接的映射未验证前只提供单次批准，不静默降级。
+- §4.4 S1–S3：同 query 更换域条件得到正确结果；调用方取消与超时分类正确；固定样本上 rg 与 native 的计数、大小写、多行、无结果和非法表达式契约一致；错误结果不含 query 与异常原文。
 - 工厂产生 `search_memories` → 真实记忆写入端 → 命中反馈落盘 → 重新加载验证；取消不转为普通结果。
 - 一次 run 中多次模型调用，观察压缩执行次数、历史内容与恢复，而不只检查属性值。
 - 压缩专项 §4.5：通过真实 MAF 分组/Provider 捕获同参数不同结果（含 FAIL→PASS），验证删除 L0 后不再无条件排除；当前只有规则复算，尚无该 C# 用例的执行记录。
@@ -534,6 +657,8 @@ Todo、Memory、HarnessInstructions、Skills 与 Compaction 专项均仅修订�
 - [ ] 压缩 §4.5 A1–A4 已完成：L0 移除有真实行为反证；Full/Partial 区间与原子工具组契约通过；两路径摘要格式一致，取消/空摘要/无收益摘要状态保全通过。
 - [ ] 压缩 §4.5 B1–B4、C1–C2 有结果：最终请求预算与无法达标政策明确；Todo 等非历史状态跨压缩保存恢复；告警不混淆指标；入口迁移或保留有明确决定并同步长期文档。
 - [ ] 记忆 §4.2 M1–M5 已验收：按 profile 启用 Harness 内置 FileMemory，配置原生 store，无重复 provider/工具；同 Session 恢复与跨 Session 隔离、compact 保留、清空/归档/清理政策有行为证据。
+- [ ] 审批 §4.7 R1–R6 已验收：普通工具接入原生审批标记；政策单一来源；执行前硬闸保留；Team 迁原生桥接并删除 inline 路径；Main 流式拆分与原生「以后允许」映射正确；真实 Harness 链路测试通过。
+- [ ] 搜索 §4.4 S1–S5 已验收：正确性与稳定性修复落地；DDG 迁移、结果模型合并与死代码删除完成；文件能力按 §4.4.3 原生接管评估有结论；无双工具集，被替代实现退出生产路径。
 - [ ] AutoDream 已消费工作产物并可核验来源；快照、去重、条件提交、失败重试及长期检索闭环通过；长期存储错误、取消、隐私、人工保护、反馈保留与预算均有结果。
 - [ ] 已按 §1.3 逐批列出“删除 / 保留 / 新增”的实现及理由；已迁移职责只有一个所有者和一套运行路径，被替代的自定义实现及旧装配同步删除，不以关闭开关或注释代码代替清理，无双轨兼容层及无职责包装层。
 - [ ] 被替代实现的引用链已清理：无未使用的接口/模型、DI 注册、能力引用、废弃配置或仅服务旧实现的依赖与测试辅助代码；共享组件的剩余调用方已核对，注释与文档同步，无失效类名和路径。
@@ -593,3 +718,17 @@ Todo、Memory、HarnessInstructions、Skills 与 Compaction 专项均仅修订�
 | [产品审批规则](../../src/OneCode.Infrastructure/Agent/AutoApprovalRulesFactory.cs) | 仅放行 `ReadOnlyToolsAutoApprovalRule` + `PermissionProfiles.Check` 的 Allow |
 | [Profile 能力集](../../src/OneCode.Infrastructure/Agent/PipelineProfile.cs) | Explore/Plan 的减法清单（`TaskContext` 未移除）与 `ReadOnlyAgentTools` 白名单 |
 | [上下文入口](../../src/OneCode.App/Services/Agent/AgentContextPipeline.cs) | shared（Worker/Explore/Plan/TeamMember）与 Main 两条装配入口 |
+| [原生审批编排](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgent.cs) / [选项](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgentOptions.cs) / [状态](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalState.cs) | standing rules 先于 AutoApprovalRules（589–605）、排队/绑定/上限（§4.7.2，1.21.0 对应路径） |
+| [审批请求扩展](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalRequestContentExtensions.cs) | 工具级/参数级「以后允许」包装（R5 复用） |
+| [函数中间件](../../agent-framework/dotnet/src/Microsoft.Agents.AI/FunctionInvocationDelegatingAgent.cs) | 只包装调用委托，不会自动添加审批标记（R1 依据） |
+| [Workflow 审批桥接](../../agent-framework/dotnet/src/Microsoft.Agents.AI.Workflows/Specialized/AIAgentHostExecutor.cs) / [选项](../../agent-framework/dotnet/src/Microsoft.Agents.AI.Workflows/AIAgentHostOptions.cs) | `InterceptUserInputRequests` 外部请求/响应处理（R4 依据） |
+| [权限中间件](../../src/OneCode.Infrastructure/Middleware/PermissionAndLimitMiddleware.cs) | Allow/Deny/Ask 路由；Ask 放行假设与 inline broker（R2/R4 修复项） |
+| [审批 broker](../../src/OneCode.App/Services/Agent/ApprovalBroker.cs) / [Main 审批处理](../../src/OneCode.App/Services/Agent/MainAgentRunner.Approval.cs) | 取消→Deny、事件桥接与响应创建（R5/R6 修复项） |
+| [工具目录](../../src/OneCode.App/Tools/ToolCatalog.cs) / [元数据注册表](../../src/OneCode.Core/Tools/ToolMetadataRegistry.cs) | ApprovalMode 登记与原生审批标记接线缺口（R1） |
+| [产品搜索](../../src/OneCode.App/Tools/WebSearchTool.cs) | AIFunction 后端链；缓存/取消/并发差距（§4.4.4） |
+| [搜索内核](../../src/OneCode.App/Services/Search/TextSearchService.cs) | rg/native 双引擎；计数、多行、超时与分页差距 |
+| [符号搜索](../../src/OneCode.App/Tools/SymbolSearchTool.cs) / [工具发现](../../src/OneCode.App/Tools/ToolSearchTool.cs) / [会话工具集](../../src/OneCode.App/Query/SessionToolSet.cs) | path 过滤、能力过滤顺序与激活注释不一致（§4.4.4） |
+| [文件系统实现](../../src/OneCode.Infrastructure/LocalAgentFileStore.cs) / [抽象](../../src/OneCode.Core/IO/IFileSystem.cs) | 仅实现 IFileSystem，未实现原生 AgentFileStore（§4.4.3） |
+| [原生文件访问](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/FileAccess/FileAccessProvider.cs) / [选项](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/FileAccess/FileAccessProviderOptions.cs) / [store 基类](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/FileStore/AgentFileStore.cs) | 文件工具、读/写审批开关、候选发现与行号原语（§4.4.3/S4） |
+| [历史向量检索](../../agent-framework/dotnet/src/Microsoft.Agents.AI/Memory/ChatHistoryMemoryProvider.cs) | 当前未使用；历史语义检索优先评估项（§4.4.1） |
+| [HostedWebSearch 默认装配](../../agent-framework/dotnet/src/Microsoft.Agents.AI.Harness/HarnessAgent.cs) | `DisableWebSearch=false` 时向 ChatOptions 添加 hosted 标记（§4.4.2） |
