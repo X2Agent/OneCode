@@ -20,9 +20,10 @@ public enum PermissionMode
     GoalAuto,
     /// <summary>
     /// TEAM 模式专用：多 Agent 协作模式。
-    /// 与 AcceptEdits 类似（文件写入 + 常规开发命令自动放行），
-    /// 但危险 Shell 命令通过 OrchestrationEvent.ApprovalRequest 事件驱动审批。
-    /// 子 Agent 无 ToolApprovalAgent（InProcessExecution 无审批响应循环）。
+    /// 与 AcceptEdits 类似（文件写入 + 常规开发命令自动放行）。
+    /// 危险 Shell 命令产生 Ask 决策，进入 MAF 审批协议；审批请求由 Team 任务工作流
+    /// 桥接为 OrchestrationEvent.ApprovalRequest 事件（见 TeamWorkflowRunner），
+    /// 成员自身拥有 ToolApprovalAgent。
     /// </summary>
     Team,
 }
@@ -63,7 +64,6 @@ public sealed record ToolPermissionContext
         = new Dictionary<string, AdditionalWorkingDirectory>();
     public IReadOnlyDictionary<string, PermissionRuleGroup> RulesBySource { get; init; }
         = new Dictionary<string, PermissionRuleGroup>();
-    public HashSet<string> SessionAllowlist { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>

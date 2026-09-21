@@ -9,4 +9,4 @@ public sealed record ForkedAgentRuntimeDependencies(
     IModelManager ModelManager,
     IWorkingDirectoryAccessor WorkingDirectory,
     ToolMetadataRegistry ToolMetadata,
-    CompactionProviderBuilder CompactionBuilder);
+    CompactionStrategyFactory CompactionBuilder);

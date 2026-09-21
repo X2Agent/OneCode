@@ -113,21 +113,33 @@ public sealed class AgentSessionStore
 
         try
         {
-            var json = await agent.SerializeSessionAsync(session, null, ct).ConfigureAwait(false);
-            conversation.Metadata[MafSessionMetadataKey] = json;
+            // 序列化是异步的，期间可能有 compact/clear 结构性改动消息历史并递增 historyEpoch。
+            // 因此 epoch 必须与快照同时捕获、写回前再校验一次：把「当前」epoch 盖在「更早」的
+            // 快照上会让恢复路径误判快照仍然有效，把已压缩掉的历史重新喂给模型。
+            var epochAtSnapshot = MafSessionInvalidator.GetHistoryEpoch(conversation);
 
-            // 持久化 mafSession 时记录当前 historyEpoch 快照，
-            // 恢复时比对以检测结构性变更（compact/clear/snip）。
-            conversation.Metadata[MafSessionInvalidator.MafSessionEpochKey] =
-                MafSessionInvalidator.GetHistoryEpoch(conversation);
+            var json = await agent.SerializeSessionAsync(session, null, ct).ConfigureAwait(false);
+
+            var currentEpoch = MafSessionInvalidator.GetHistoryEpoch(conversation);
+            if (currentEpoch != epochAtSnapshot)
+            {
+                _logger.LogWarning(
+                    "Discarding MAF session snapshot: history epoch changed while serializing " +
+                    "(snapshot={Snapshot}, current={Current}). The snapshot references the pre-change history.",
+                    epochAtSnapshot, currentEpoch);
+                conversation.Metadata.Remove(MafSessionMetadataKey);
+                conversation.Metadata.Remove(MafSessionInvalidator.MafSessionEpochKey);
+                return;
+            }
+
+            conversation.Metadata[MafSessionMetadataKey] = json;
+            conversation.Metadata[MafSessionInvalidator.MafSessionEpochKey] = epochAtSnapshot;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to serialize MAF session");
         }
     }
-
-    /// <summary>读取 mafSession 持久化时的 epoch 快照（未记录时返回 0）。</summary>
 
     /// <summary>
     /// W5-A: when the interactive path already injects Session transcript as

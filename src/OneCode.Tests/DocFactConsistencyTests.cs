@@ -41,6 +41,8 @@ public sealed class DocFactConsistencyTests
     private const string RootAgentsFile = "AGENTS.md";
     private const string AppAgentsFile = "src/OneCode.App/AGENTS.md";
     private const string HooksDocFile = "docs/hooks.md";
+    private const string CompactThresholdsDocFile = "docs/compact-thresholds.md";
+    private const string CompactionBuilderFile = "src/OneCode.Infrastructure/Agent/CompactionPipelineBuilder.cs";
 
     // ---------------------------------------------------------------- 幽灵 API 守卫
 
@@ -56,6 +58,8 @@ public sealed class DocFactConsistencyTests
     [InlineData("RegisterHookSubsystem")]
     [InlineData("RegisterMemoryServices")]
     [InlineData("LambdaHookExecutor")]
+    [InlineData("SnipDuplicateCallsCompactionStrategy")]
+    [InlineData("CompactionProviderBuilder")]
     public void Docs_DoNotReferenceNonExistentApis(string ghostApi)
     {
         foreach (var doc in OperativeDocs())
@@ -103,7 +107,8 @@ public sealed class DocFactConsistencyTests
     [Fact]
     public void Docs_ServiceCollectionExtensionPathsExist()
     {
-        var pathPattern = new Regex(@"[\w./\\-]*ServiceCollectionExtensions(?:\.\w+)?\.cs", RegexOptions.Compiled);
+        // 负向断言同上：避免把 `XxxServiceCollectionExtensions.csproj` 的前缀当成路径
+        var pathPattern = new Regex(@"[\w./\\-]*ServiceCollectionExtensions(?:\.\w+)?\.cs(?![\w])", RegexOptions.Compiled);
         var violations = new List<string>();
 
         foreach (var doc in AllDocsWithPathReferences())
@@ -142,6 +147,110 @@ public sealed class DocFactConsistencyTests
         violations.Should().BeEmpty(
             "文档引用的注册类必须真实存在；如需记录历史路径，须写限定词（原/已下沉/已解散/历史/旧）"
             + "并同时给出一个真实存在的新路径。");
+    }
+
+    // ---------------------------------------------------------------- 计数守卫
+
+    /// <summary>
+    /// 文档中引用的 <c>.cs</c> 文件必须真实存在（不限 <c>*ServiceCollectionExtensions*</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为何需要这条更宽的守卫</b>：原守卫的正则只匹配 <c>*ServiceCollectionExtensions*.cs</c>，
+    /// 其余 <c>.cs</c> 引用完全不检查。历史后果：已删除的 <c>TaskContextProvider.cs</c> 与
+    /// 已迁移的 <c>App/Services/Memory/MemoryEntryStore.cs</c> 长期留在文档里，
+    /// 而 <c>SkillChangeWatcher.cs</c> 这个<b>从未存在过</b>的类名（真实类为
+    /// <c>SkillFilesWatcher</c>）也通过了全部检查。
+    /// </para>
+    /// <para>
+    /// <b>排除项</b>：
+    /// <list type="bullet">
+    /// <item>MAF 源码引用（<c>agent-framework/</c>）——本地只读 checkout；存在时一并校验，未 checkout 时跳过</item>
+    /// <item>占位符示例名（<c>Xxx*</c> / <c>My*</c> 等，见 <see cref="IsPlaceholderPath"/>）</item>
+    /// <item>历史引用（限定词 + 同行给出真实新位置，或删除限定词，见 <see cref="IsHistoricalReference(string, string?, string)"/>）</item>
+    /// <item>被省略的路径片段（如 <c>.cs</c>、<c>ServiceCollectionExtensions.*.cs</c> 通配）</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Docs_AllReferencedSourceFilesExist()
+    {
+        // 负向断言：`.cs` 后不得再接单词字符，否则会把 `OneCode.Cli.csproj` 的前缀当成路径。
+        // 不能排除 `)`/`]` 等后续字符——多数引用写在 Markdown 链接 `[标签](路径)` 里。
+        var pathPattern = new Regex(@"[\w./\\-]*\.cs(?![\w])", RegexOptions.Compiled);
+        var violations = new List<string>();
+        var mafAvailable = Directory.Exists(Path.Combine(FindRepoRoot(), "agent-framework"));
+
+        foreach (var doc in AllDocsWithPathReferences())
+        {
+            var lines = File.ReadAllLines(RepoPath(doc));
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                // MAF 源码是本地只读 checkout；未 checkout 时无法校验，跳过而非报假违规
+                if (!mafAvailable && MentionsMafSource(lines[i]))
+                {
+                    continue;
+                }
+
+                foreach (Match match in pathPattern.Matches(lines[i]))
+                {
+                    var referenced = match.Value;
+
+                    if (!IsCheckablePath(referenced)
+                        || IsGlobFragment(lines[i], match)
+                        || ExistsAsSourceFile(referenced)
+                        || IsHistoricalReference(lines[i], EnclosingTableHeader(lines, i), referenced))
+                    {
+                        continue;
+                    }
+
+                    violations.Add($"{doc}:{i + 1} 引用不存在的源文件「{referenced}」");
+                }
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "文档引用的源文件必须真实存在；幽灵类名与失效路径会长期滞留并误导后续改动。"
+            + "如需记录历史路径，须写限定词（原/已下沉/已解散/历史/旧/不再）并同时给出真实新路径。"
+            + (violations.Count > 0 ? Environment.NewLine + string.Join(Environment.NewLine, violations) : ""));
+    }
+
+    /// <summary>
+    /// 是否为 glob 通配的一部分（如 <c>*Tests.cs</c>、<c>Xxx*.cs</c>）——通配片段不是具体路径。
+    /// </summary>
+    private static bool IsGlobFragment(string line, Match match)
+        => (match.Index > 0 && line[match.Index - 1] == '*')
+        || (match.Index + match.Length < line.Length && line[match.Index + match.Length] == '*');
+
+    /// <summary>该行是否在引用 MAF 源码（只读 checkout，可能未拉取）。</summary>
+    private static bool MentionsMafSource(string line)
+        => line.Contains("agent-framework", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Microsoft.Agents", StringComparison.Ordinal)
+        || line.Contains("Microsoft.Extensions.AI", StringComparison.Ordinal);
+
+    /// <summary>
+    /// 是否值得校验：排除通配片段、占位符与省略前缀。
+    /// </summary>
+    private static bool IsCheckablePath(string referenced)
+    {
+        // 通配符片段（`ServiceCollectionExtensions.*.cs`、`OneCodeToplevel*.cs`）不是具体路径
+        if (referenced.Contains('*', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // 占位符示例名
+        if (IsPlaceholderPath(referenced))
+        {
+            return false;
+        }
+
+        // 省略前缀的片段（如 `.cs`、`ChatClientHarnessExtensions.cs` 之外的裸后缀）
+        var fileName = Path.GetFileName(referenced.Replace('\\', '/'));
+        return fileName.Length > 3
+            && fileName.Contains('.')
+            && !fileName.StartsWith('.');
     }
 
     // ---------------------------------------------------------------- 计数守卫
@@ -201,6 +310,68 @@ public sealed class DocFactConsistencyTests
             "会话记忆子系统已删除，不应再作为记忆作用域出现");
     }
 
+    /// <summary>
+    /// 压缩阈值文档声明的比例必须等于 <c>CompactionPipelineBuilder</c> 的常量，且不得重新引入被移除的钳制。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>docs/compact-thresholds.md</c> 是阈值唯一对外说明；比例一旦漂移，读者会按错误的触发点判断
+    /// 「为什么没有压缩」。真相源是 builder 的常量，文档是被验证的读取端。
+    /// </para>
+    /// <para>
+    /// 反证部分锁死修复前的形态：<c>inputBudget = max(1, window - output)</c>。该钳制会把非法模型配置
+    /// 变成永不触发的阈值，文档不得再以任何形式描述它。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Docs_CompactThresholdRatiosMatchBuilderConstants()
+    {
+        var builder = File.ReadAllText(RepoPath(CompactionBuilderFile));
+        var doc = File.ReadAllText(RepoPath(CompactThresholdsDocFile));
+
+        var ratios = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (Match match in Regex.Matches(builder, @"const double (\w+Ratio) = ([\d.]+);"))
+        {
+            ratios[match.Groups[1].Value] = double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        }
+
+        ratios.Should().NotBeEmpty("阈值常量是真相源；解析不到说明常量被重命名，须同步本测试");
+
+        var expectations = new (string Agent, string Prefix)[]
+        {
+            ("Main", "Main"),
+            ("Worker", "Worker"),
+        };
+
+        foreach (var (agent, prefix) in expectations)
+        {
+            var row = Regex.Match(
+                doc,
+                $@"^\|\s*`BuildFor{agent}Agent`\s*\|[^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|",
+                RegexOptions.Multiline);
+            row.Success.Should().BeTrue($"{CompactThresholdsDocFile} 必须列出 BuildFor{agent}Agent 的阈值行");
+
+            var declared = row.Groups.Cast<Group>().Skip(1)
+                .Select(g => g.Value.Trim())
+                .ToArray();
+            var expected = new[]
+            {
+                ratios[$"{prefix}ToolEvictionRatio"],
+                ratios[$"{prefix}SummarizationRatio"],
+                ratios[$"{prefix}TruncationRatio"],
+            }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)).ToArray();
+
+            declared.Should().Equal(expected,
+                $"文档阈值行必须与 {prefix}*Ratio 常量一致（顺序：折叠 / 摘要 / 截断）");
+        }
+
+        var overhead = ratios["RequestOverheadRatio"].ToString("0.00", CultureInfo.InvariantCulture);
+        doc.Should().Contain($"RequestOverheadRatio = {overhead}",
+            "预算必须扣除请求开销预留，文档须给出与代码一致的比例");
+        doc.Should().NotContain("max(1,",
+            "被移除的钳制会让非法配置退化成永不触发的阈值，文档不得再描述该公式");
+    }
+
     // ---------------------------------------------------------------- 辅助
 
     /// <summary>操作性文档——其中的 API 名与路径是"施工图"，必须与代码一致。</summary>
@@ -211,6 +382,7 @@ public sealed class DocFactConsistencyTests
         AppAgentsFile,
         ReadmeFile,
         ReadmeCnFile,
+        CompactThresholdsDocFile,
     ];
 
     /// <summary>含路径引用的文档——含 docs/ 与 ADR（ADR 的扩展示例同样是施工图）。</summary>
@@ -222,16 +394,23 @@ public sealed class DocFactConsistencyTests
         "docs/adr/0005-hook-module-design.md",
         "docs/adr/0007-maf-integration-boundaries.md",
         "docs/background-services.md",
+        "docs/compact-thresholds.md",
         "docs/hooks.md",
         "docs/memory-overview.md",
         "docs/settings.md",
         "docs/skills.md",
         "docs/commands.md",
-        "docs/plan/harness-defaults-replacement-audit.md",
+        "docs/maf/integration-guide.md",
     ];
 
     /// <summary>限定词——出现这些词说明该行是历史叙述，而非当前路径指引。</summary>
-    private static readonly string[] HistoricalQualifiers = ["原", "已下沉", "已解散", "历史", "旧", "不再", "曾经的"];
+    private static readonly string[] HistoricalQualifiers = ["原", "已下沉", "已解散", "历史", "旧", "不再", "曾经的", "改名", "更名", "重命名"];
+
+    /// <summary>
+    /// 删除限定词——类型/文件已被删除时没有「新位置」可指，不适用 <see cref="IsHistoricalReference(string, string?, string)"/> 的
+    /// 「限定词 + 真实新位置」双重条件。
+    /// </summary>
+    private static readonly string[] DeletionQualifiers = ["已删除", "已移除", "已废弃", "已取消"];
 
     /// <summary>
     /// 占位符文件名前缀——文档惯用的「示例命名」（如 <c>XxxServiceCollectionExtensions.cs</c>、<c>MyTool.cs</c>），
@@ -239,9 +418,19 @@ public sealed class DocFactConsistencyTests
     /// </summary>
     private static readonly string[] PlaceholderPrefixes = ["Xxx", "Foo", "Bar", "Your", "My", "Some", "Example"];
 
+    /// <summary>
+    /// 是否为占位符/命名模板。<c>Xxx</c> 是本仓库约定的占位 token，允许出现在文件名任意位置
+    /// （命名规范表的左列形如 <c>IXxx.cs</c>、<c>XxxService.cs</c>——它们描述模式，不是路径引用）。
+    /// </summary>
     private static bool IsPlaceholderPath(string referenced)
     {
         var fileName = Path.GetFileName(referenced.Replace('\\', '/'));
+
+        if (fileName.Contains("Xxx", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         return PlaceholderPrefixes.Any(p => fileName.StartsWith(p, StringComparison.Ordinal));
     }
 
@@ -258,14 +447,29 @@ public sealed class DocFactConsistencyTests
     /// </list>
     /// </remarks>
     private static bool IsHistoricalReference(string line, string referenced)
+        => IsHistoricalReference(line, enclosingTableHeader: null, referenced);
+
+    /// <summary>
+    /// 判定是否为「历史引用」。<paramref name="enclosingTableHeader"/> 为所在表格的表头行——
+    /// 表头写「原位置」时，整张表的旧路径都由表头承担限定词，无需逐行重复。
+    /// </summary>
+    private static bool IsHistoricalReference(string line, string? enclosingTableHeader, string referenced)
     {
-        if (!HistoricalQualifiers.Any(q => line.Contains(q, StringComparison.Ordinal)))
+        var context = enclosingTableHeader is null ? line : line + "\n" + enclosingTableHeader;
+
+        // 删除记录：文件已不存在，文档记录的正是「它没了」——不要求给出新位置
+        if (DeletionQualifiers.Any(q => context.Contains(q, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (!HistoricalQualifiers.Any(q => context.Contains(q, StringComparison.Ordinal)))
         {
             return false;
         }
 
-        var pathPattern = new Regex(@"[\w./\\-]*\.cs", RegexOptions.Compiled);
-        if (pathPattern.Matches(line)
+        var pathPattern = new Regex(@"[\w./\\-]*\.cs(?![\w])", RegexOptions.Compiled);
+        if (pathPattern.Matches(context)
             .Select(m => m.Value)
             .Any(p => !string.Equals(p, referenced, StringComparison.Ordinal) && ExistsAsSourceFile(p)))
         {
@@ -274,10 +478,49 @@ public sealed class DocFactConsistencyTests
 
         // 全限定类型名（至少两段点分，首字母大写）末段须是真实声明的类型。
         var typePattern = new Regex(@"\b(?:[A-Z]\w+\.)+([A-Z]\w+)\b", RegexOptions.Compiled);
-        return typePattern.Matches(line)
+        return typePattern.Matches(context)
             .Select(m => m.Groups[1].Value)
             .Any(name => DeclaredTypeNames().Contains(name));
     }
+
+    /// <summary>
+    /// 返回 <paramref name="index"/> 所在 Markdown 表格的表头行；不在表格中则返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 表格里「原位置 / 新位置」这类列语义由表头一次性声明。只看单行会让每行都必须重复限定词，
+    /// 于是校验被迫放宽或文档被迫啰嗦——两者都不好。
+    /// </remarks>
+    private static string? EnclosingTableHeader(string[] lines, int index)
+    {
+        // 表格以 `|---|` 分隔行紧跟表头；向上找到最近的分隔行，其上一行即表头。
+        for (var i = index - 1; i >= 0 && i >= index - 40; i--)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.Length == 0)
+            {
+                return null;
+            }
+
+            if (!trimmed.StartsWith('|'))
+            {
+                return null;
+            }
+
+            if (IsTableSeparator(trimmed) && i > 0)
+            {
+                return lines[i - 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsTableSeparator(string trimmed)
+        => trimmed.Replace("|", "", StringComparison.Ordinal)
+            .Replace("-", "", StringComparison.Ordinal)
+            .Replace(":", "", StringComparison.Ordinal)
+            .Replace(" ", "", StringComparison.Ordinal)
+            .Length == 0;
 
     private static HashSet<string>? _declaredTypeNames;
 
@@ -307,33 +550,58 @@ public sealed class DocFactConsistencyTests
     }
 
     /// <summary>
-    /// 判断文档中的路径片段是否对应真实源文件。支持三种写法：
-    /// 仓库相对路径（<c>src/...</c>）、项目内部分路径（<c>Query/Foo.cs</c>）、仅文件名（<c>Foo.cs</c>）。
+    /// 判断文档中的路径片段是否对应真实源文件。支持四种写法：
+    /// 仓库相对路径（<c>src/...</c> 或 <c>agent-framework/...</c>）、项目内部分路径（<c>Query/Foo.cs</c>）、仅文件名（<c>Foo.cs</c>）。
     /// </summary>
     /// <remarks>
     /// 「项目内部分路径」是常见写法（如在 <c>src/AGENTS.md</c> 中引用 <c>Query/ChatClientServiceCollectionExtensions.cs</c>，
-    /// 省略了 <c>src/OneCode.App/</c> 前缀）——不能按仓库根拼接，需在 <c>src</c> 下按后缀匹配。
+    /// 省略了 <c>src/OneCode.App/</c> 前缀）——不能按仓库根拼接，需按路径后缀匹配。
     /// </remarks>
     private static bool ExistsAsSourceFile(string referenced)
     {
         var repoRoot = FindRepoRoot();
         var normalized = referenced.Replace('\\', '/').TrimStart('.', '/');
 
-        if (normalized.StartsWith("src/", StringComparison.Ordinal))
+        if (normalized.StartsWith("src/", StringComparison.Ordinal)
+            || normalized.StartsWith("agent-framework/", StringComparison.Ordinal))
         {
             return File.Exists(Path.Combine(repoRoot, normalized));
         }
 
-        // 部分路径或纯文件名：在 src 下按「路径后缀」匹配（排除 obj/bin）
+        // 部分路径或纯文件名：按「路径后缀」匹配（排除 obj/bin）
         var suffix = Path.DirectorySeparatorChar + normalized.Replace('/', Path.DirectorySeparatorChar);
-        return SourceFiles(repoRoot)
+        return VerifiableSourceFiles(repoRoot)
             .Any(p => p.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IEnumerable<string> SourceFiles(string repoRoot) =>
-        Directory.EnumerateFiles(Path.Combine(repoRoot, "src"), "*.cs", SearchOption.AllDirectories)
-            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                     && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+        EnumerateSourceFiles(Path.Combine(repoRoot, "src"));
+
+    /// <summary>
+    /// 可校验的源文件集合：本仓库 <c>src/</c> + 本地 MAF checkout（若存在）。
+    /// </summary>
+    /// <remarks>
+    /// 声明类型名只应扫本仓库 <c>src/</c>（见 <see cref="DeclaredTypeNames"/>）——把 MAF 类型算进来
+    /// 会让历史豁免误接受框架类型名。此处只用于「文件是否存在」的判断。
+    /// </remarks>
+    private static IEnumerable<string> VerifiableSourceFiles(string repoRoot)
+    {
+        var roots = new List<string> { Path.Combine(repoRoot, "src") };
+        var mafRoot = Path.Combine(repoRoot, "agent-framework", "dotnet", "src");
+        if (Directory.Exists(mafRoot))
+        {
+            roots.Add(mafRoot);
+        }
+
+        return roots.SelectMany(EnumerateSourceFiles);
+    }
+
+    private static IEnumerable<string> EnumerateSourceFiles(string root) =>
+        Directory.Exists(root)
+            ? Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                         && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            : [];
 
     /// <summary>统计注册的工具数：<c>AddToolInstance</c> 调用数 + Cron 工具数。</summary>
     private static int CountRegisteredTools()

@@ -22,7 +22,8 @@ public enum PipelineProfile
 
     /// <summary>
     /// Team orchestration member — fixed <see cref="Core.Permissions.PermissionMode.Team"/>,
-    /// event-driven ApprovalBroker, no post-edit verification.
+    /// MAF approval protocol carried through the Team workflow approval bridge
+    /// (see <c>TeamWorkflowRunner</c>), no post-edit verification.
     /// </summary>
     TeamMember,
 
@@ -103,33 +104,43 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
         PipelineProfile.Full => new(AllExcept(AgentCapability.ReadOnlyTools)),
 
         // Worker: inherits parent permissions; no state machine / 3-strike, and no LSP or shell
-        // context (those are interactive-Main affordances).
+        // context (those are interactive-Main affordances). Working memory is withheld until private
+        // sessions and artefact delivery are verified — a shared writable directory would be worse
+        // than none. The agent's own checklist is independent per session, so it stays.
         PipelineProfile.Worker => new(AllExcept(
             AgentCapability.StateMachine,
             AgentCapability.TaskRecovery,
             AgentCapability.LspDiagnostics,
             AgentCapability.ShellEnvironment,
+            AgentCapability.FileMemory,
             AgentCapability.ReadOnlyTools)),
 
-        // TeamMember: fixed Team permission, event-driven ApprovalBroker instead of MAF approval,
-        // no CodeAct sandbox and no post-edit verification. Keeps design/task/LSP/shell context.
+        // TeamMember: fixed Team permission; MAF approval stays enabled — approval requests surface
+        // as workflow external requests and TeamWorkflowRunner bridges them to the product events.
+        // No CodeAct sandbox and no post-edit verification. Keeps design/task/LSP/shell context.
+        // No working memory: members would share one writable directory across concurrent members.
         PipelineProfile.TeamMember => new(AllExcept(
             AgentCapability.StateMachine,
             AgentCapability.TaskRecovery,
             AgentCapability.CodeAct,
-            AgentCapability.ToolApproval,
             AgentCapability.Verification,
+            AgentCapability.FileMemory,
             AgentCapability.ReadOnlyTools)),
 
         // Read-only agents: no post-edit verification, contracts or 3-strike recovery, plus the tool
-        // whitelist.
+        // whitelist. No working memory either — a read-only agent must not be handed a write surface,
+        // even one confined to its own scratch directory. The checklist is withheld for the same
+        // reason: `todos_*` are write tools, and the read-only whitelist would reject them anyway,
+        // leaving the agent with a prompt that advertises tools it cannot call.
         PipelineProfile.Explore or PipelineProfile.Plan => new(AllExcept(
             AgentCapability.StateMachine,
             AgentCapability.TaskRecovery,
             AgentCapability.LspDiagnostics,
             AgentCapability.ShellEnvironment,
             AgentCapability.BehaviorContracts,
-            AgentCapability.Verification)),
+            AgentCapability.Verification,
+            AgentCapability.FileMemory,
+            AgentCapability.Todo)),
 
         _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null),
     };

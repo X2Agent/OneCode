@@ -54,8 +54,9 @@ public sealed class PromptConfigBuilderTests
         var result = await builder.BuildDefaultPromptContentAsync(
             "sys", user, mem, availableTools: "", ct);
 
-        result.Should().Contain("Shared harness.");
-        result.Should().Contain("Prompt injection defense");
+        // The harness fragment is a separate input now — MAF composes it ahead of this body.
+        result.Should().NotContain("Shared harness.");
+        result.Should().NotContain("Prompt injection defense");
         result.Should().Contain(user);
         result.Should().Contain(mem);
         result.Split(user, StringSplitOptions.None).Length.Should().Be(2);
@@ -104,9 +105,8 @@ public sealed class PromptConfigBuilderTests
 
         var result = await builder.BuildSystemPromptAsync(ct);
 
-        // Harness is prepended
-        result.Should().Contain("Shared harness.");
-        result.Should().Contain("Prompt injection defense");
+        // The harness fragment is composed by MAF, so it must not be baked into this body.
+        result.Should().NotContain("Shared harness.");
         // Memory section is injected
         result.Should().Contain("MEMORY_SENTINEL");
         result.Split("MEMORY_SENTINEL", StringSplitOptions.None).Length.Should().Be(2,

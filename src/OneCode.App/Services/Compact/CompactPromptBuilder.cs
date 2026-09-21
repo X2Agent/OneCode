@@ -1,7 +1,7 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Prompt;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Compact;
 
@@ -12,18 +12,8 @@ namespace OneCode.App.Services.Compact;
 /// Extracted from <see cref="CompactService"/> to keep prompt construction concerns
 /// in one place and out of the orchestration flow.
 /// </summary>
-public sealed partial class CompactPromptBuilder
+public sealed class CompactPromptBuilder
 {
-    // 预编译正则——消除 FormatSummary 中重复编译开销。
-    // pattern 固定（非用户输入），无 ReDoS 风险，但 [GeneratedRegex] 在编译时生成源码，
-    // 避免每次调用 Regex.Replace/Match 时重新编译正则树。
-    [GeneratedRegex(@"<analysis>[\s\S]*?</analysis>", RegexOptions.IgnoreCase)]
-    private static partial Regex AnalysisBlockRegex();
-
-    // 带捕获组——Match 用于提取 <summary> 内文，Replace 用于整块替换（捕获组不影响 Replace 语义）。
-    [GeneratedRegex(@"<summary>([\s\S]*?)</summary>", RegexOptions.IgnoreCase)]
-    private static partial Regex SummaryBlockRegex();
-
     private readonly IPromptManager _promptManager;
 
     public CompactPromptBuilder(IPromptManager promptManager)
@@ -83,7 +73,7 @@ public sealed partial class CompactPromptBuilder
         var options = new ChatOptions
         {
             ModelId = model,
-            MaxOutputTokens = 8192,
+            MaxOutputTokens = SummarizationDefaults.MaxOutputTokens,
         };
 
         // System prompt as first message
@@ -93,22 +83,23 @@ public sealed partial class CompactPromptBuilder
     }
 
     /// <summary>
-    /// Strip the &lt;analysis&gt; scratchpad and unwrap the &lt;summary&gt; tags,
-    /// matching the TypeScript formatCompactSummary() behaviour.
+    /// Normalises the summariser's raw output into the stored summary text.
     /// </summary>
-    public static string FormatSummary(string raw)
-    {
-        var formatted = AnalysisBlockRegex().Replace(raw, string.Empty);
-
-        var match = SummaryBlockRegex().Match(formatted);
-        if (match.Success)
-        {
-            var inner = match.Groups[1].Value.Trim();
-            formatted = SummaryBlockRegex().Replace(formatted, $"Summary:\n{inner}");
-        }
-
-        return formatted.Trim();
-    }
+    /// <remarks>
+    /// <para>
+    /// Both compact paths (explicit <c>/compact</c> and the in-pipeline MAF summarisation strategy)
+    /// share one contract: the model returns the work summary directly, with no <c>&lt;analysis&gt;</c>
+    /// scratchpad and no <c>&lt;summary&gt;</c> wrapper. The old contract asked for both blocks and then
+    /// stripped them here, which only worked for the explicit path — the automatic path stored the
+    /// raw tagged text verbatim, so the same conversation produced two different summary formats
+    /// depending on which path ran.
+    /// </para>
+    /// <para>
+    /// Trimming is still applied: leading/trailing whitespace carries no meaning and would otherwise
+    /// be inserted verbatim into the transcript.
+    /// </para>
+    /// </remarks>
+    public static string FormatSummary(string raw) => raw.Trim();
 
     /// <summary>
     /// Maps a domain <see cref="Message"/> to a MAF <see cref="ChatMessage"/>.

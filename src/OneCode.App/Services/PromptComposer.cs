@@ -4,9 +4,21 @@ using OneCode.Core.Prompt;
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Composes shared <c>system/harness.prompt</c> with role- or product-specific prompt bodies.
-/// Single source of truth for harness text used by main session, forked Explore/Plan agents, and Team workers.
+/// Loads and renders the two prompt halves the agent needs, without joining them.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The shared harness fragment and the agent-specific body stay <b>separate</b> all the way to the
+/// agent. MAF composes them (harness first, then the agent body, separated by a blank line) via
+/// <c>HarnessInstructions</c> and <c>ChatOptions.Instructions</c>, so the product no longer needs a
+/// <c>Compose</c> step — and the two inputs can no longer be passed in the wrong order or duplicated
+/// by a caller that pre-joined them.
+/// </para>
+/// <para>
+/// What this class owns is loading and rendering: which file wins, and substituting the template
+/// placeholders. Composition is not its job.
+/// </para>
+/// </remarks>
 public sealed class PromptComposer(IPromptManager promptManager)
 {
     public const string HarnessPromptName = "system/harness";
@@ -21,32 +33,31 @@ public sealed class PromptComposer(IPromptManager promptManager)
     }
 
     /// <summary>
-    /// Main-session system prompt: harness + rendered <c>system/default.prompt</c> placeholders.
+    /// Renders the Main agent body: <c>system/default.prompt</c> with its runtime placeholders
+    /// substituted. Returned without the harness fragment.
     /// </summary>
-    public async Task<string> ComposeMainAsync(
+    public async Task<string> RenderMainBodyAsync(
         string systemContext,
         string userContext,
         string? memorySection,
         string? availableTools,
         CancellationToken ct = default)
     {
-        var harness = await GetHarnessAsync(ct).ConfigureAwait(false);
         var template = await promptManager.GetPromptAsync(DefaultPromptName, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException(
                 $"Base prompt '{DefaultPromptName}' not found in any IPromptManager store.");
 
-        var body = RenderDefaultPrompt(template, systemContext, userContext, memorySection, availableTools);
-        return Compose(harness, body);
+        return RenderDefaultPrompt(template, systemContext, userContext, memorySection, availableTools);
     }
 
     /// <summary>
-    /// Worker / fork system prompt: harness + role-specific body (Team role file or Explore/Plan overlay).
+    /// Renders a Worker / fork body (Team role file or Explore/Plan overlay), with the memory recall
+    /// hint appended. Returned without the harness fragment.
     /// </summary>
-    public async Task<string> ComposeWithRoleAsync(string roleBody, CancellationToken ct = default)
+    public string RenderRoleBody(string roleBody)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(roleBody);
-        var harness = await GetHarnessAsync(ct).ConfigureAwait(false);
-        return Compose(harness, AppendMemoryHint(roleBody));
+        return AppendMemoryHint(roleBody);
     }
 
     // 子代理（Team 成员 / Explore、Plan fork）持有 search_memories 工具但没有主会话的
@@ -60,15 +71,6 @@ public sealed class PromptComposer(IPromptManager promptManager)
 
     private static string AppendMemoryHint(string roleBody) =>
         $"{roleBody.TrimEnd()}\n\n{MemoryRecallHint}";
-
-    internal static string Compose(string harness, string body)
-    {
-        var sb = new StringBuilder(harness.Length + body.Length + 2);
-        sb.Append(harness.TrimEnd());
-        sb.Append("\n\n");
-        sb.Append(body.Trim());
-        return sb.ToString();
-    }
 
     private static string RenderDefaultPrompt(
         string template,

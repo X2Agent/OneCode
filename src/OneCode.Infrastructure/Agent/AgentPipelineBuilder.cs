@@ -6,6 +6,7 @@ using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Permissions;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Hooks;
 using OneCode.Core.Tools;
@@ -21,7 +22,19 @@ public sealed class AgentPipelineMetrics
     public int IncrementToolCallCount() => Interlocked.Increment(ref _toolCallCount);
 }
 
-public sealed record AgentPipelineHandle(AIAgent Agent, AgentPipelineMetrics Metrics);
+public sealed record AgentPipelineHandle(AIAgent Agent, AgentPipelineMetrics Metrics)
+{
+    /// <summary>
+    /// Lifetime owner for the per-run context providers handed to the agent.
+    /// </summary>
+    /// <remarks>
+    /// MAF's <c>ChatClientAgent</c> does not dispose its <c>AIContextProviders</c>. Providers built per
+    /// run (skills) hold real resources, so the assembling host sets this and disposes it after the
+    /// run's last use — including cancellation, exceptions and early stream exit. Null when the caller
+    /// owns the providers (DI singletons) or nothing disposable was built.
+    /// </remarks>
+    public IDisposable? ContextProviderLease { get; set; }
+}
 
 public sealed record ChatClientAgentBuildOptions
 {
@@ -31,7 +44,25 @@ public sealed record ChatClientAgentBuildOptions
     public required ILoggerFactory LoggerFactory { get; init; }
     public required IServiceProvider ServiceProvider { get; init; }
     public required AgentPipelineOptions PipelineOptions { get; init; }
-    public IReadOnlyList<AIContextProvider>? ChatClientContextProviders { get; init; }
+
+    /// <summary>
+    /// Product tool registry used to decide which tools must carry an approval boundary.
+    /// When null the approval protocol has no marker source and <see cref="ToolApprovalMarker"/> is a no-op.
+    /// </summary>
+    public ToolMetadataRegistry? ToolMetadata { get; init; }
+
+    /// <summary>
+    /// Product compaction strategy, handed to Harness so it owns the single compaction provider.
+    /// When null (AutoDream and other tool-only paths) no in-loop compaction runs.
+    /// </summary>
+    public CompactionStrategy? CompactionStrategy { get; init; }
+
+    /// <summary>
+    /// Shared harness instructions. MAF composes them ahead of the agent instructions carried by
+    /// <see cref="ChatOptions"/>. Null leaves MAF's default in place; an empty string suppresses it.
+    /// </summary>
+    public string? HarnessInstructions { get; init; }
+
     public IReadOnlyList<AIContextProvider>? AgentContextProviders { get; init; }
 }
 
@@ -73,9 +104,20 @@ public sealed record AgentPipelineOptions
 
     // MAF Harness: ToolApprovalAgent — standard MAF approval flow
     public bool EnableToolApproval { get; init; } = true;
-    public IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules { get; init; }
 
-    public IApprovalBroker? ApprovalBroker { get; init; }
+    /// <summary>
+    /// When true, Harness mounts its <c>FileMemoryProvider</c> so the agent has session working-memory
+    /// tools. Decided per profile: read-only and concurrent paths must not receive a write surface.
+    /// </summary>
+    public bool EnableFileMemory { get; init; }
+
+    /// <summary>
+    /// When true, Harness mounts its <c>TodoProvider</c> so the agent keeps its own per-session
+    /// checklist. Distinct from host execution tracking, which the product task service owns.
+    /// </summary>
+    public bool EnableTodo { get; init; }
+
+    public IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules { get; init; }
 
     // Permission context fields
     // These populate ToolPermissionContext so that PermissionChecker strategies
@@ -86,9 +128,6 @@ public sealed record AgentPipelineOptions
 
     /// <summary>Additional working directories beyond the main WorkingDirectory.</summary>
     public IReadOnlyDictionary<string, AdditionalWorkingDirectory>? AdditionalWorkingDirectories { get; init; }
-
-    /// <summary>Session-level allowlist of tool names that bypass permission checks.</summary>
-    public HashSet<string>? SessionAllowlist { get; init; }
 
 
     /// <summary>
@@ -139,14 +178,6 @@ public static class AgentPipelineBuilder
     public static AgentPipelineHandle BuildChatClientAgent(ChatClientAgentBuildOptions options)
     {
         var chatClient = options.ChatClient;
-        if (options.ChatClientContextProviders is { Count: > 0 })
-        {
-            var builder = chatClient.AsBuilder();
-            foreach (var provider in options.ChatClientContextProviders)
-                builder = builder.UseAIContextProviders(provider);
-
-            chatClient = builder.Build();
-        }
 
         var harnessToolApproval = options.PipelineOptions.EnableToolApproval
             ? new ToolApprovalAgentOptions
@@ -157,14 +188,26 @@ public static class AgentPipelineBuilder
                         options.PipelineOptions.WorkingDirectory,
                         options.PipelineOptions.RulesBySource,
                         options.PipelineOptions.AdditionalWorkingDirectories,
-                        options.PipelineOptions.SessionAllowlist),
+                        options.PipelineOptions.PermissionChecker),
             }
             : null;
+
+        // The approval boundary is an opt-in marker on each tool, not something the framework infers
+        // from a permission decision. Applying it here — the single funnel for Main / forked / Team
+        // assembly — keeps one policy source (ToolMetadataRegistry.ApprovalMode) and prevents the
+        // paths from drifting. Skipped when this path has no approval machinery, because an
+        // unresolvable approval request would otherwise block every call in the batch.
+        var markedTools = options.PipelineOptions.EnableToolApproval
+            ? ToolApprovalMarker.Apply(options.ChatOptions.Tools, options.ToolMetadata)
+            : options.ChatOptions.Tools;
+
+        var chatOptions = options.ChatOptions.Clone();
+        chatOptions.Tools = markedTools;
 
         var agentOptions = new HarnessAgentOptions
         {
             Name = options.Name,
-            ChatOptions = options.ChatOptions,
+            ChatOptions = chatOptions,
             AIContextProviders = options.AgentContextProviders,
             // W5-B: MAF core package (1.21.0) still ships InMemory only — official file-backed
             // ChatHistoryProviders (CosmosNoSql / Valkey) live in separate packages.
@@ -175,7 +218,29 @@ public static class AgentPipelineBuilder
             DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
             // P1: same numeric source as middleware MaxToolCalls (iteration rounds ≈ tool-call budget).
             MaximumIterationsPerRequest = options.PipelineOptions.MaxToolCalls,
+
+            // Harness owns the composition order: harness fragment first, then the agent body.
+            HarnessInstructions = options.HarnessInstructions,
+
+            // Compaction has exactly one owner: Harness. The product builds the strategy (its ratios,
+            // formatter, summary guard and prompt) and Harness installs the provider in its own
+            // pipeline position. Mounting a second provider from the product side would compact the
+            // same request twice and shadow this one's session state.
+            CompactionStrategy = options.CompactionStrategy,
+
+            // Per-profile opt-in. Harness defaults this to enabled, so the value must be stated
+            // explicitly in both directions rather than only turned off.
+            DisableFileMemory = !options.PipelineOptions.EnableFileMemory,
+            DisableTodoProvider = !options.PipelineOptions.EnableTodo,
         };
+
+        // Bind working memory to the session's project instead of the Harness default, which roots it
+        // at the process directory and would cross project boundaries on /cd.
+        if (options.PipelineOptions.EnableFileMemory)
+        {
+            agentOptions.FileMemoryStore = FileMemoryStorePaths.CreateStore(options.PipelineOptions.WorkingDirectory);
+        }
+
         OneCodeHarnessDefaults.ApplyProductOptOuts(agentOptions);
 
         var agent = new HarnessAgent(
@@ -326,7 +391,7 @@ public static class AgentPipelineBuilder
                     options.WorkingDirectory,
                     options.RulesBySource,
                     options.AdditionalWorkingDirectories,
-                    options.SessionAllowlist);
+                    options.PermissionChecker);
             // Prefer assignment so approval wraps the pipeline (MAF builder chaining).
             builder = builder.UseToolApproval(
                 new ToolApprovalAgentOptions

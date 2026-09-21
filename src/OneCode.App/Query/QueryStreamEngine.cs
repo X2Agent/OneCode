@@ -106,7 +106,8 @@ internal sealed class QueryStreamEngine
         string? workingDirectory = null,
         [EnumeratorCancellation] CancellationToken ct = default,
         WorkingMode workingMode = WorkingMode.Build,
-        Action<FileChange>? fileChangeCallback = null)
+        Action<FileChange>? fileChangeCallback = null,
+        string? harnessInstructions = null)
     {
         yield return new ToolPoolReadyEvent(0, 0, 0);
         var includeNextPrompt = _configManager.Current.Effective.NextPromptSuggesterEnabled == true;
@@ -159,7 +160,8 @@ internal sealed class QueryStreamEngine
             includeNextPrompt, localTools, agentRunId,
             ControlledExecution: false,
             WorkingMode: workingMode,
-            FileChangeCallback: fileChangeCallback);
+            FileChangeCallback: fileChangeCallback,
+            HarnessInstructions: harnessInstructions);
 
         await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
             conversationId?.ToString(), capabilities, agentRunId,
@@ -197,7 +199,8 @@ internal sealed class QueryStreamEngine
             ControlledExecution: true,
             WorkingMode: request.WorkingMode,
             FileChangeCallback: null,
-            PrescribedBuildPlan: request.PrescribedBuildPlan);
+            PrescribedBuildPlan: request.PrescribedBuildPlan,
+            HarnessInstructions: request.HarnessInstructions);
 
         await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
             request.SessionId.ToString(), capabilities, request.RunId,
@@ -406,6 +409,10 @@ internal sealed class QueryStreamEngine
         {
             ModelId = request.ModelId,
             SystemPrompt = request.SystemPrompt,
+            // Harness fragment travels as its own MAF input: HarnessAgent composes it ahead of
+            // SystemPrompt. Null here means MAF's default instructions, which is intentional for
+            // paths without the product fragment (AutoDream); an empty string would suppress them.
+            HarnessInstructions = request.HarnessInstructions,
             UserPrompt = request.UserPrompt,
             UserMessage = request.IsMultimodal ? request.LastUserMessage : null,
             Messages = request.HistoryMessages,
@@ -568,6 +575,9 @@ internal sealed class QueryStreamEngine
         LastCacheSafeParams = new CacheSafeParams
         {
             SystemPrompt = request.SystemPrompt,
+            // HarnessInstructions is deliberately absent: the fragment is injected by MAF at agent
+            // build time for every agent, so a forked child that reuses the parent's product fragment
+            // (TeamAgentFactory / ForkedAgentRunner read it directly) must not also receive it here.
             ModelId = request.ModelId,
             ThinkingBudget = request.ThinkingBudget,
             Tools = toolList.Count > 0 ? toolList : null,

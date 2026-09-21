@@ -29,14 +29,24 @@ public enum AgentCapability
     /// <summary>On-demand memory recall via the <c>search_memories</c> tool over <c>MEMORY.md</c>.</summary>
     MemorySearch,
 
+    /// <summary>
+    /// Harness <c>FileMemoryProvider</c>: agent-managed working notes for the current session
+    /// (<c>file_memory_*</c> tools). Separate from <see cref="MemorySearch"/>, which recalls curated
+    /// long-term entries — working notes are raw material, not governed knowledge.
+    /// </summary>
+    FileMemory,
+
     /// <summary>Design/document context from the session (tracked design docs and decisions).</summary>
     DesignContext,
 
     /// <summary>LSP diagnostics injected so the model sees compile errors without running a build.</summary>
     LspDiagnostics,
 
-    /// <summary>Task list context (task dependency/status awareness).</summary>
-    TaskContext,
+    /// <summary>
+    /// Harness <c>TodoProvider</c>: the agent's own per-session checklist (<c>todos_*</c> tools).
+    /// Distinct from host execution tracking, which stays on the product task service.
+    /// </summary>
+    Todo,
 
     /// <summary>Shell environment probing for the foreground conversation (cwd, available tooling).</summary>
     ShellEnvironment,

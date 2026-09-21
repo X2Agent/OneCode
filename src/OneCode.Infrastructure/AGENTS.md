@@ -19,7 +19,9 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Abstractions/` | 内部 Infrastructure 接口（仅 Infrastructure 内部使用） |
 | `Remote/` | 远程 Agent 通信 |
 
-> Memory 记忆持久化契约在 `OneCode.Core/Memory/`（`IMemoryEntryStore` / `MemoryEntry` / `MemoryScope`），实现位于 `OneCode.App/Services/Memory/`，Infrastructure 层不再持有 Memory 实现。
+> Memory 记忆持久化契约在 `OneCode.Core/Memory/`（`IMemoryEntryStore` / `MemoryEntry` / `MemoryScope`），
+> 文件实现位于 `OneCode.Infrastructure/Memory/`（`MemoryEntryStore` / `MemdirPaths`）；
+> 领域编排（检索、提示词注入、AutoDream 治理）留在 App 层。
 
 ---
 

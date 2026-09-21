@@ -156,6 +156,24 @@ public sealed class GrepToolTests : IDisposable
         result.Content.Should().Contain("cnt.cs:3");
     }
 
+    /// <summary>
+    /// S2 反证：count 模式统计的是**匹配行数**，与 ripgrep 的 <c>-c</c> 一致。
+    /// 修复前 native 路径统计出现次数，同一个文件在两条引擎下会给出不同数字，
+    /// 调用方无法判断结果变化是代码变了还是引擎换了。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_CountMode_CountsMatchingLinesNotOccurrences()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile("src/multi.cs", "MATCH MATCH MATCH\nother\nMATCH");
+        var tool = CreateNativeTool();
+
+        var result = await tool.SearchAsync("MATCH", path: "src", output_mode: "count", ct: ct);
+
+        result.Content.Should().Contain("multi.cs:2",
+            "two lines match; the line with three occurrences still counts once, as rg -c does");
+    }
+
     [Fact]
     public async Task SearchAsync_ContentMode_ReturnsMatchingLinesWithLineNumbers()
     {

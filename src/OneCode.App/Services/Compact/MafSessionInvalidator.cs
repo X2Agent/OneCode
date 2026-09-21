@@ -1,12 +1,62 @@
+using Microsoft.Agents.AI;
+
 namespace OneCode.App.Services.Compact;
 
 /// <summary>
-/// 失效 Conversation.Metadata 中的 mafSession，避免双源分叉。
+/// 使 <c>mafSession</c> 中**与消息历史相关的状态**失效，避免双源分叉。
 /// 在 App 层任何结构性删除/清空消息后必须调用。
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>为什么不是整体删除。</b> <c>mafSession</c> 里除了消息历史，还装着与历史无关的 provider 状态
+/// （会话待办清单、工作记忆的 WorkingFolder 等）。整体删除会让这些状态在每次 compact 后丢失：
+/// 待办清单被清空、工作记忆目录指针被重置，而用户看到的对话历史只是被压缩，并没有重置会话。
+/// </para>
+/// <para>
+/// <b>为什么仍然需要失效。</b> 压缩索引与 InMemory 消息历史都按位置引用具体消息；
+/// 消息被替换后继续使用旧状态会让模型重新看到已被压缩掉的内容。因此这些键必须丢弃，
+/// 由 provider 在下次调用时按新历史重建。
+/// </para>
+/// </remarks>
 public static class MafSessionInvalidator
 {
     private const string MafSessionMetadataKey = "mafSession";
+
+    /// <summary>
+    /// <c>mafSession</c> 中必须随消息历史一起丢弃的 StateBag 键。
+    /// </summary>
+    /// <remarks>
+    /// 仅包含按位置绑定消息的状态：
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>PipelineCompactionStrategy</c> — Harness 挂载压缩 provider 时的状态键。
+    ///     Harness 未显式指定 stateKey，因此键名是策略类型名；产品的管道策略类型是
+    ///     <c>PipelineCompactionStrategy</c>。保存的是消息分组索引，按位置引用具体消息。
+    ///   </description></item>
+    ///   <item><description><c>InMemoryChatHistoryProvider</c> — MAF 默认内存历史的状态键。</description></item>
+    ///   <item><description>
+    ///     <c>compaction</c> — 迁移前的压缩状态键。旧装配显式传 <c>"compaction"</c> 作为
+    ///     <c>CompactionProvider</c> 的 stateKey；改为由 Harness 挂载后键名变为策略类型名，
+    ///     旧键不再被任何 provider 读取。
+    ///     政策是一次性丢弃、按新历史重建，不做旧格式转换：旧值同样是按消息位置绑定的分组索引，
+    ///     跨装配版本转换没有可信的等价映射。留在快照里只会让每次保存携带一段永不使用的索引。
+    ///   </description></item>
+    /// </list>
+    /// 不在列表中的键（会话待办、工作记忆目录、工具审批的 standing rules）与消息位置无关，
+    /// 必须原样保留。
+    /// </remarks>
+    private static readonly string[] HistoryBoundStateKeys =
+    [
+        "PipelineCompactionStrategy",
+        nameof(InMemoryChatHistoryProvider),
+        LegacyCompactionStateKey,
+    ];
+
+    /// <summary>
+    /// 迁移前 <c>CompactionProvider</c> 的状态键（旧装配显式传入的固定字符串）。
+    /// 仅用于在失效时清除遗留状态，不再有写入方。
+    /// </summary>
+    private const string LegacyCompactionStateKey = "compaction";
 
     /// <summary>
     /// Invalidates the MAF runtime without changing transcript history. Use this when
@@ -26,19 +76,94 @@ public static class MafSessionInvalidator
     /// <summary>mafSession 持久化时记录的 epoch 快照 key，用于恢复时比对。</summary>
     public const string MafSessionEpochKey = "mafSessionEpoch";
 
-    /// <summary>失效 mafSession 并记录日志源。</summary>
+    /// <summary>
+    /// 失效 mafSession 中与消息历史绑定的状态，并记录日志源。
+    /// </summary>
+    /// <remarks>
+    /// 当无法解析已持久化的 mafSession（缺失或格式不符）时，退化为整体删除——
+    /// 此时没有可信的非历史状态可保留，保留一个不可解析的快照只会让它继续失效。
+    /// </remarks>
     public static void Invalidate(Conversation conversation, string source)
     {
-        conversation.Metadata.Remove(MafSessionMetadataKey);
-        conversation.Metadata.Remove(MafSessionEpochKey);
+        var pruned = TryPruneHistoryBoundState(conversation);
+
         conversation.Metadata["lastMafSessionInvalidatedAt"] = DateTimeOffset.UtcNow.ToString("O");
         conversation.Metadata["lastMafSessionInvalidationSource"] = source;
 
         // 递增 historyEpoch，标记消息历史发生结构性变更。
-        // CreateOrRestoreSessionAsync 恢复时会比对 mafSessionEpoch 与 historyEpoch，
-        // 不一致则 drop session（防御 mafSession key 残留但内容已过时的竞态/遗漏场景）。
-        var epoch = GetHistoryEpoch(conversation);
-        conversation.Metadata[HistoryEpochKey] = epoch + 1;
+        var epoch = GetHistoryEpoch(conversation) + 1;
+        conversation.Metadata[HistoryEpochKey] = epoch;
+
+        if (pruned)
+        {
+            // 定向失效：快照里剩下的状态仍然有效，把 epoch 快照同步到新值，
+            // 使 CreateOrRestoreSessionAsync 不会因 epoch 不一致而把保留的状态一起丢弃。
+            // 被丢弃的只有与消息位置绑定的键，provider 会在下次调用时按新历史重建。
+            conversation.Metadata[MafSessionEpochKey] = epoch;
+            return;
+        }
+
+        // 快照缺失或不可解析：没有可信的非历史状态可保留，退化为整体删除。
+        // 保留 epoch key 的缺失状态，让恢复路径按「无会话」处理。
+        conversation.Metadata.Remove(MafSessionMetadataKey);
+        conversation.Metadata.Remove(MafSessionEpochKey);
+    }
+
+    /// <summary>
+    /// Removes only the history-bound keys from the persisted session snapshot.
+    /// </summary>
+    /// <returns><see langword="true"/> when the snapshot was readable and rewritten; otherwise false.</returns>
+    private static bool TryPruneHistoryBoundState(Conversation conversation)
+    {
+        if (!conversation.Metadata.TryGetValue(MafSessionMetadataKey, out var raw))
+            return false;
+
+        JsonElement sessionElement;
+        if (raw is JsonElement element)
+        {
+            sessionElement = element;
+        }
+        else if (raw is string text && !string.IsNullOrWhiteSpace(text))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                sessionElement = doc.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        if (sessionElement.ValueKind != JsonValueKind.Object
+            || !sessionElement.TryGetProperty("stateBag", out var stateBag)
+            || stateBag.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var retained = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var property in stateBag.EnumerateObject())
+        {
+            if (!HistoryBoundStateKeys.Contains(property.Name, StringComparer.Ordinal))
+                retained[property.Name] = property.Value.Clone();
+        }
+
+        var prunedSession = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var property in sessionElement.EnumerateObject())
+        {
+            prunedSession[property.Name] = property.Name == "stateBag"
+                ? JsonSerializer.SerializeToElement(retained)
+                : property.Value.Clone();
+        }
+
+        conversation.Metadata[MafSessionMetadataKey] = JsonSerializer.SerializeToElement(prunedSession);
+        return true;
     }
 
     /// <summary>读取当前 historyEpoch（未初始化时返回 0）。</summary>

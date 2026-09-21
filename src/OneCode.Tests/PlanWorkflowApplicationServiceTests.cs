@@ -1277,7 +1277,8 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             new WorkingModeController(),
             SshHost: null,
             SlashCommands: [],
-            Model: "test-model");
+            Model: "test-model",
+            HarnessPrompt: "harness");
 
     private static async IAsyncEnumerable<QueryEvent> EmptyQueryEvents()
     {

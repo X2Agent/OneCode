@@ -71,6 +71,12 @@ public sealed class ApprovalBroker : IApprovalBroker
         }, logger);
     }
 
+    /// <summary>
+    /// Team 路径 broker（R4）：由 <c>TeamWorkflowRunner.BridgeToolApprovalAsync</c> 在成员审批请求
+    /// 以 <c>RequestInfoEvent</c> 浮出时调用，推送 <c>OrchestrationEvent.ApprovalRequest</c> 并等待
+    /// TUI 决策；决策经 <c>SendResponseAsync</c> 送回同一工作流。
+    /// 「总是允许」经该桥接当前只提供单次批准（standing rule 包装未验证通过端口响应类型校验）。
+    /// </summary>
     public static ApprovalBroker ForTeam(
         string agentName,
         Action<OrchestrationEvent>? eventSink,
@@ -101,12 +107,31 @@ public sealed class ApprovalBroker : IApprovalBroker
             var decision = await _request(request, ct).ConfigureAwait(false);
             return decision;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Caller cancellation is not a decision. Returning Deny here would make "the user stopped
+            // the run" indistinguishable from "the user said no", and the run would keep unwinding as
+            // if a policy judgement had been made. The token was cancelled, so the run is over either
+            // way — propagate and let the caller observe the cancellation it asked for.
+            _logger?.LogDebug(
+                "Approval wait cancelled for tool {ToolName}, request {RequestId}",
+                request.ToolName,
+                request.RequestId);
+            throw;
+        }
         catch (OperationCanceledException)
         {
+            // The wait timed out without the caller cancelling (e.g. an internal timeout).
+            // There is no user decision to honour, so fail closed.
+            _logger?.LogWarning(
+                "Approval wait ended without a decision for tool {ToolName}, request {RequestId}; denying",
+                request.ToolName,
+                request.RequestId);
             return ApprovalDecision.Deny;
         }
         catch (Exception ex)
         {
+            // UI failure: the user was never asked, so the safe outcome is to refuse the tool.
             _logger?.LogError(
                 ex,
                 "Approval broker failed closed for tool {ToolName}, request {RequestId}",

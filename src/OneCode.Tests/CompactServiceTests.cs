@@ -34,7 +34,7 @@ public sealed class CompactServiceTests
         var (sut, client) = CreateSut();
         var session = CreateSession(8);
         var response = Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-            "<analysis>testing compaction</analysis>\n<summary>User wants to build a calculator app with basic arithmetic.</summary>")));
+            "User wants to build a calculator app with basic arithmetic.")));
         client.GetResponseAsync(
                 Arg.Any<IEnumerable<ChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
@@ -44,7 +44,6 @@ public sealed class CompactServiceTests
         var result = await sut.CompactAsync(session, ct: TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
-        result.Should().NotContain("testing compaction");
         result.Should().Contain("calculator");
     }
 
@@ -55,7 +54,7 @@ public sealed class CompactServiceTests
         var session = CreateSession(10);
         var originalCount = session.Messages.Count;
         var response = Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-            "<analysis>various</analysis>\n<summary>Refactored auth module, added unit tests.</summary>")));
+            "Refactored auth module, added unit tests.")));
         client.GetResponseAsync(
                 Arg.Any<IEnumerable<ChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
@@ -82,7 +81,7 @@ public sealed class CompactServiceTests
         var (sut, client) = CreateSut();
         var session = CreateSession(6);
         var response = Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-            "<analysis>various</analysis>\n<summary>Summary here.</summary>")));
+            "Summary here.")));
         client.GetResponseAsync(
                 Arg.Any<IEnumerable<ChatMessage>>(),
                 Arg.Any<ChatOptions?>(),
@@ -149,7 +148,6 @@ public sealed class CompactServiceTests
         promptManager.RegisterTemplate(new PromptTemplate("system/compact",
             """
             Summarize the conversation so far into a concise briefing for continuing work.
-            Respond with <analysis>...</analysis> then <summary>...</summary>.
             """));
 
         var sut = new CompactService(client, logger,

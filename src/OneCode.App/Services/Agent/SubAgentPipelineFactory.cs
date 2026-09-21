@@ -21,7 +21,6 @@ public sealed record SubAgentPipelineRequest
     public IReadOnlyList<string>? AllowedTools { get; init; }
     public Action<OrchestrationEvent>? OrchestrationEventSink { get; init; }
     public Action<FileChange>? FileChangeCallback { get; init; }
-    public IApprovalBroker? ApprovalBroker { get; init; }
     public string? TeamMemberId { get; init; }
 }
 
@@ -84,7 +83,6 @@ public sealed class SubAgentPipelineFactory(
             tokenLedger: tokenLedger,
             rulesBySource: permCtx?.RulesBySource,
             additionalWorkingDirectories: permCtx?.AdditionalWorkingDirectories,
-            sessionAllowlist: permCtx?.SessionAllowlist,
             verificationProvider: verificationProviderForProfile,
             enableVerification: enableVerification,
             orchestrationEventSink: request.OrchestrationEventSink,
@@ -111,12 +109,13 @@ public sealed class SubAgentPipelineFactory(
 
         return profile switch
         {
+            // Approval stays enabled: member approval requests surface as external requests on
+            // the workflow stream and are bridged to the product approval events by
+            // TeamWorkflowRunner — the pipeline itself never holds a broker.
             PipelineProfile.TeamMember => new PipelineRoleOverrides(
                 MaxToolCalls: request.MaxToolCalls,
                 ToolLimitMessage: $"Team member '{memberLabel}' tool call limit ({request.MaxToolCalls}) reached.",
-                IsToolAllowed: isToolAllowed,
-                EnableToolApproval: false,
-                ApprovalBroker: request.ApprovalBroker),
+                IsToolAllowed: isToolAllowed),
             PipelineProfile.Explore or PipelineProfile.Plan => new PipelineRoleOverrides(
                 MaxToolCalls: request.MaxToolCalls,
                 ToolLimitMessage: $"Sub-agent tool call limit ({request.MaxToolCalls}) reached.",

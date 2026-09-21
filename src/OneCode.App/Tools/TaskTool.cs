@@ -7,8 +7,17 @@ using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 namespace OneCode.App.Tools;
 
 /// <summary>
-/// Unified Task tool — manages background tasks via action-based routing.
-/// Replaces the former TaskCreate/TaskUpdate/TaskList/TaskGet/TaskStop/TaskOutput tools.
+/// Host execution management for background tasks.
+///
+/// <para><b>Not the agent's checklist.</b> The agent's own todo list is the Harness <c>todos_*</c>
+/// tool set (per-session, owned by the model). This tool exposes the <b>host</b> view: records created
+/// by background execution (<c>BackgroundRun</c>, <c>Agent</c>), worker calls and Build tasks. Those
+/// records carry output, cancellation and dependency state that a checklist cannot express, so they
+/// stay on the product task service.</para>
+///
+/// <para>The former <c>create</c> / <c>update</c> actions are gone: they only ever wrote the ordinary
+/// checklist, which <c>todos_*</c> now owns. Keeping both would leave two competing checklists in the
+/// same context.</para>
 /// </summary>
 public sealed class TaskTool
 {
@@ -16,72 +25,26 @@ public sealed class TaskTool
 
     public TaskTool(ITaskService taskService) => _taskService = taskService;
 
-    [Description("Manage background tasks: create, update, get, list, stop, or get output. " +
-                 "Use 'list' to see all tasks, 'get' for details, 'create' to make a new task, " +
-                 "'update' to change status/subject, 'stop' to cancel, 'output' to read task output.")]
+    [Description("Inspect and control host-managed background tasks. " +
+                 "'list' shows active and recent tasks, 'get' shows one task's details, " +
+                 "'stop' cancels a running task, 'output' reads a task's output. " +
+                 "For your own step-by-step plan use the todo tools instead.")]
     public Task<ToolResult> ExecuteAsync(
-        [Description("Action: create, update, get, list, stop, output.")] string action,
-        [Description("Task ID (required for get/update/stop/output, ignored for list/create).")] string? taskId = null,
-        [Description("Task subject/title (for create or update).")] string? subject = null,
-        [Description("Task description (for create or update).")] string? description = null,
-        [Description("New status for update: pending, in_progress, completed, failed, cancelled.")] string? status = null,
-        [Description("Present continuous form for spinner display, e.g. 'Running tests' (for create or update).")] string? activeForm = null,
+        [Description("Action: get, list, stop, output.")] string action,
+        [Description("Task ID (required for get/stop/output, ignored for list).")] string? taskId = null,
         [Description("Max lines to return (for output action).")] int? maxLines = null,
         CancellationToken ct = default)
     {
         return action.ToLowerInvariant() switch
         {
-            "create" => CreateAsync(subject, description, activeForm),
-            "update" => UpdateAsync(taskId, subject, description, status, activeForm),
             "get" => Task.FromResult(Get(taskId)),
             "list" => Task.FromResult(List()),
             "stop" => Task.FromResult(Stop(taskId)),
             "output" => Task.FromResult(GetOutput(taskId, maxLines)),
             _ => Task.FromResult(ToolResult.Error(
-                $"Unknown action '{action}'. Valid: create, update, get, list, stop, output.")),
+                $"Unknown action '{action}'. Valid: get, list, stop, output. " +
+                "For your own checklist use the todo tools.")),
         };
-    }
-
-    private Task<ToolResult> CreateAsync(string? subject, string? description, string? activeForm)
-    {
-        if (string.IsNullOrWhiteSpace(subject))
-            return Task.FromResult(ToolResult.Error("subject is required for create action"));
-
-        var convId = ToolActivationContext.CurrentConversationId;
-        var task = _taskService.CreateTask(
-            subject,
-            description ?? "",
-            activeForm,
-            conversationId: convId,
-            buildRunId: OneCodeAgentRunContext.CurrentBuildRunId);
-        return Task.FromResult(ToolResult.JsonSuccess(
-            new { task = new { id = task.Id, subject = task.Subject } }));
-    }
-
-    private Task<ToolResult> UpdateAsync(
-        string? taskId, string? subject, string? description, string? status, string? activeForm)
-    {
-        if (string.IsNullOrEmpty(taskId))
-            return Task.FromResult(ToolResult.Error("taskId is required for update action"));
-
-        TaskStatus? statusEnum = status?.ToLowerInvariant() switch
-        {
-            "pending" => TaskStatus.Pending,
-            "in_progress" => TaskStatus.InProgress,
-            "completed" => TaskStatus.Completed,
-            "failed" => TaskStatus.Failed,
-            "cancelled" => TaskStatus.Cancelled,
-            _ => null,
-        };
-
-        if (!TryGetScopedTask(taskId, out _))
-            return Task.FromResult(ToolResult.Error($"Task #{taskId} not found"));
-
-        var updated = _taskService.UpdateTask(taskId, subject, description, statusEnum, activeForm);
-        return Task.FromResult(updated
-            ? ToolResult.JsonSuccess(
-                new { task = new { id = taskId, status = statusEnum?.ToString() ?? "updated" } })
-            : ToolResult.Error($"Task #{taskId} not found"));
     }
 
     private ToolResult Get(string? taskId)

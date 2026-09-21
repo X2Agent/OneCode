@@ -10,7 +10,8 @@ public sealed record WorkflowRunRequest(
     string ModelId,
     WorkingMode WorkingMode,
     string? WorkingDirectory = null,
-    BuildPlan? PrescribedBuildPlan = null);
+    BuildPlan? PrescribedBuildPlan = null,
+    string? HarnessInstructions = null);
 
 /// <summary>
 /// 把一段 prompt 当作用户输入提交给 LLM 跑一遍的契约。
@@ -34,6 +35,16 @@ public sealed record WorkflowRunRequest(
 /// </remarks>
 public interface IConversationRunner
 {
+    /// <summary>
+    /// Streams one interactive query.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="systemPrompt"/> carries the agent body (<c>system/default</c>) only, and
+    /// <paramref name="harnessPrompt"/> the shared harness fragment (<c>system/harness</c>) — MAF
+    /// composes the two via <c>HarnessInstructions</c>. A null <paramref name="harnessPrompt"/>
+    /// leaves MAF's generic default instructions in place; passing the loaded fragment is what makes
+    /// the product's security guidance reach the model.
+    /// </remarks>
     IAsyncEnumerable<QueryEvent> StreamQueryAsync(
         string prompt,
         string systemPrompt,
@@ -42,7 +53,8 @@ public interface IConversationRunner
         CancellationToken ct = default,
         WorkingMode workingMode = WorkingMode.Build,
         Action<FileChange>? fileChangeCallback = null,
-        IReadOnlyList<string>? imagePaths = null);
+        IReadOnlyList<string>? imagePaths = null,
+        string? harnessPrompt = null);
 
     IAsyncEnumerable<QueryEvent> StreamWorkflowRunAsync(
         WorkflowRunRequest request,

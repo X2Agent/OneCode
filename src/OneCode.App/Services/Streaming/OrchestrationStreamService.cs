@@ -53,6 +53,9 @@ public sealed class OrchestrationStreamService(
             ?? throw new InvalidOperationException("Goal mode requires an active conversation.");
         var budget = ModeBudgetSettings.FromSettings(configManager.Current.Effective);
         var tools = toolCatalog.Tools.ToList<AITool>();
+        // Goal definition hash is computed from the body only: the harness fragment is deliberately
+        // excluded so existing checkpoints stay valid, and the same source (session.SystemPrompt)
+        // feeds both BeginAsync here and the resume path below — the two must never diverge.
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(session.SystemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
         // Checkpoint 序列化选项单一来源：BeginAsync 计算 DefinitionHash 与执行期 Compile

@@ -51,7 +51,12 @@ public sealed class GlobTool
                 ? new WorkspaceIgnoreSnapshot(null, [], [])
                 : await _ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
             var workspaceRoot = Path.GetFullPath(_wd.WorkingDirectory);
-            var files = await Task.Run(() => FindFiles(fullPath, pattern, ignore, workspaceRoot), ct);
+
+            // Task.Run's token only prevents the task from *starting*; once the synchronous
+            // enumeration is running it cannot be interrupted. Checking inside the loop makes a
+            // cancel take effect during a large tree instead of after it finishes.
+            var files = await Task.Run(() => FindFiles(fullPath, pattern, ignore, workspaceRoot, ct), ct)
+                .ConfigureAwait(false);
 
             if (files.Count == 0)
                 return ToolResult.Success($"No files matching '{pattern}' in '{path}'");
@@ -62,13 +67,18 @@ public sealed class GlobTool
 
             return ToolResult.Success($"{header}\n{string.Join("\n", files)}");
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return ToolResult.Error($"Error searching for files: {ex.Message}");
         }
     }
 
-    private static List<string> FindFiles(string baseDir, string pattern, WorkspaceIgnoreSnapshot ignore, string workspaceRoot)
+    private static List<string> FindFiles(
+        string baseDir, string pattern, WorkspaceIgnoreSnapshot ignore, string workspaceRoot, CancellationToken ct)
     {
         pattern = pattern.Replace('\\', '/');
 
@@ -80,11 +90,19 @@ public sealed class GlobTool
         var dirInfo = new DirectoryInfoWrapper(new DirectoryInfo(baseDir));
         var result = matcher.Execute(dirInfo);
 
-        return result.Files
-            .Select(f => f.Path.Replace('/', Path.DirectorySeparatorChar))
-            .Where(path => !ignore.IsIgnored(ToWorkspaceRelative(Path.Combine(baseDir, path), workspaceRoot)))
-            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        List<string> files = [];
+        foreach (var file in result.Files)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var path = file.Path.Replace('/', Path.DirectorySeparatorChar);
+            if (ignore.IsIgnored(ToWorkspaceRelative(Path.Combine(baseDir, path), workspaceRoot)))
+                continue;
+
+            files.Add(path);
+        }
+
+        return files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>

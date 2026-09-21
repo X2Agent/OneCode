@@ -50,7 +50,6 @@ public sealed class AgentPipelineAssembly(
             tokenLedger: tokenLedger,
             rulesBySource: options.PermissionRules,
             additionalWorkingDirectories: BuildAdditionalWorkingDirectories(),
-            sessionAllowlist: options.SessionAllowlist,
             verificationProvider: verificationProvider,
             enableVerification: PermissionProfiles.GetProfile(modeProvider.CurrentMode).EnableVerification,
             orchestrationEventSink: options.OrchestrationEventSink,
@@ -76,10 +75,13 @@ public sealed class AgentPipelineAssembly(
             // 全放行规则（AutoApprovalRulesFactory 对 GoalAuto 自动放行全部工具），
             // 否则 LoopAgent 会因 pending tool approval 无人解析而直接停止。
             // SuppressToolApproval 保留受控 Build（broker=null + 显式禁用）的语义。
+            //
+            // 该布尔同时门控「工具是否带原生审批标记」：只有真正存在审批通道时才能标记，
+            // 否则每个函数调用都会变成无人应答的审批请求。因此 SuppressToolApproval 时
+            // 标记必须一并关闭——这与它“不挂交互 broker”的意图一致。
             EnableToolApproval: (options.ApprovalBroker is not null
                 || modeProvider.CurrentMode == PermissionMode.GoalAuto)
-                && !options.SuppressToolApproval,
-            ApprovalBroker: options.ApprovalBroker);
+                && !options.SuppressToolApproval);
     }
 
     /// <summary>

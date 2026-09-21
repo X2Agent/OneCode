@@ -68,9 +68,9 @@ MAF workflow manager 无法处理 `ToolApprovalRequestContent`（与 Main 路径
 
 | 类型 | 原位置 | 删除原因 |
 |------|------|------|
-| `IApprovalUi` | `Permissions/IApprovalUi.cs` | 抽象被完全事件流替代 |
-| `TuiPermissionUi` | `Tui/TuiPermissionUi.cs` | TUI 审批改为消费 `TuiApprovalRequest` 事件 |
-| `ConsolePermissionUi` | `Tui/ConsolePermissionUi.cs` | headless 路径改为依赖 `PermissionMode` 策略 |
+| `IApprovalUi` | `Permissions/IApprovalUi.cs`（已删除） | 抽象被完全事件流替代 |
+| `TuiPermissionUi` | `Tui/TuiPermissionUi.cs`（已删除） | TUI 审批改为消费 `TuiApprovalRequest` 事件 |
+| `ConsolePermissionUi` | `Tui/ConsolePermissionUi.cs`（已删除） | headless 路径改为依赖 `PermissionMode` 策略 |
 
 ### 修改文件
 
@@ -79,7 +79,7 @@ MAF workflow manager 无法处理 `ToolApprovalRequestContent`（与 Main 路径
 | `MainAgentRunner.Approval.cs` | `HandleToolApprovalAsync` 改为纯事件驱动（推送事件 + await ResponseSource） |
 | `MainAgentRunner.cs` | `BuildChatOptions` 使用 `PermissionCheckHelpers.ApprovalRequiredTools` 包装危险工具 |
 | `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射 + Team 路径 `OrchestrationEvent.ApprovalRequest` → `TuiApprovalRequest` 映射，均桥接 ResponseSource |
-| `TeamEventMapper.cs` | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest` |
+| `TeamEventMapper.cs`（已删除） | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest`；该职责现由 `ApprovalBroker.ForTeam` 承担 |
 | `TeamAgentFactory.cs` / `TeamOrchestrationService.cs` | 移除 `IApprovalUi` 构造参数 |
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 `workingMode: WorkingMode.Plan` 实现只读策略 |
@@ -121,6 +121,10 @@ R1 原型的"双路径并行"是典型的兼容性陷阱：为了不破坏现有
 
 1. **`PermissionCheckHelpers.ApprovalRequiredTools` 静态名单已不存在**。危险工具判别改为运行时分类：`ToolNames.FileWriteTools` / `ToolNames.ReadOnlyTools` + `IsReadOnlyShell` / `IsDestructiveShell` 分类器 + `AutoAllowFileWriteAndShell`（`PermissionCheckHelpers.cs`）。
 2. **Main 路径决策链路经 `IApprovalBroker` 抽象**：`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 通过 `IApprovalBroker.RequestAsync` 获取决策（`OneCode.Core/Permissions/IApprovalBroker.cs`），不再直接 await `ResponseSource.Task`。
-3. **文件改名**：`CodeAssistantToplevel.Events.cs` → `OneCodeToplevel.Events.cs`（TUI 审批事件消费现位于此）。
-4. **Cron 路径工作模式**：`CronJobExecutor` 现使用 `workingMode: WorkingMode.Goal`（非本文所述 `WorkingMode.Plan`）实现无审批 UI 的只读策略。
-5. **Team 路径改用 `ApprovalBroker.ForTeam`**：正文第 22/40 行所述的 inline `ApprovalHandler` 委托已由 `ApprovalBroker.ForTeam(...)`（`OneCode.App/Services/Agent/ApprovalBroker.cs`）取代，Team 成员经 `OrchestrationEvent.ApprovalRequest` 事件驱动审批；且不再设 30 秒固定超时，改为仅依赖 `ct` 取消（fail-closed，与 Main 路径一致）。
+3. **文件改名**：`CodeAssistantToplevel.Events.cs` → `OneCodeToplevel.Events.cs`（TUI 审批事件消费现位于此）。4. **Cron 路径工作模式**：`CronJobExecutor` 现使用 `workingMode: WorkingMode.Goal`（非本文所述 `WorkingMode.Plan`）实现无审批 UI 的只读策略。
+5. **Team 路径完全回归 MAF 审批协议 + 工作流层桥接（2026-09-18 R4）**：Team 成员保留 MAF
+   `ToolApprovalAgent`（`EnableToolApproval` 不再固定为 `false`），Ask 决策产生的审批请求经工作流
+   `RequestInfoEvent` 由 `TeamWorkflowRunner.BridgeToolApprovalAsync` 桥接：`ApprovalBroker.ForTeam`
+   （现位于工作流 watch 循环，不再是成员级 inline 中间件）推送 `OrchestrationEvent.ApprovalRequest`，
+   TUI 决策经 `SendResponseAsync` 送回同一工作流。无 30 秒固定超时，仅依赖 `ct` 取消（fail-closed）。
+   权限中间件的 inline `ApprovalBroker` 分支与管道级 broker 传递已删除——Ask 单通道进入 MAF 审批协议。

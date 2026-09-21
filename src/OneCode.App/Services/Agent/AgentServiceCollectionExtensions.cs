@@ -19,7 +19,7 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<AgentContextPipeline>();
         services.AddSingleton<AgentPipelineAssembly>();
         services.AddSingleton<SubAgentPipelineFactory>();
-        services.AddSingleton<CompactionProviderBuilder>();
+        services.AddSingleton<CompactionStrategyFactory>();
         services.AddSingleton<AgentSessionStore>();
 
         services.AddSingleton<MainAgentRunner>();

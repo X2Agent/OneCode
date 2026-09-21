@@ -8,7 +8,8 @@ namespace OneCode.Infrastructure.Ai;
 /// 最多 RecoveryLimit=3 次。
 ///
 /// 注意：此机制依赖 M.E.AI 标准 ChatFinishReason.Length，与具体提供商无关。
-/// 此装饰器在 MainAgentRunner 构建时与 CompactionProvider 一起组装，不在 DI 单例层注册。
+/// 此装饰器在 MainAgentRunner 构建 ChatClient 栈时组装，不在 DI 单例层注册。
+/// （自动压缩不在这里：它由 Harness 经 <c>HarnessAgentOptions.CompactionStrategy</c> 挂载。）
 /// </summary>
 public sealed class MaxOutputTokensDecorator : IChatClient
 {

@@ -18,7 +18,7 @@ public partial class MainAgentRunner
         string cwd,
         CancellationToken ct = default)
     {
-        var (compactionProvider, providerId) = await _compactionBuilder
+        var (compactionStrategy, providerId) = await _compactionBuilder
             .BuildAsync(options.ModelId, ct).ConfigureAwait(false);
 
         var contextProviders = await _contextPipeline
@@ -31,16 +31,24 @@ public partial class MainAgentRunner
         var pipelineOptions = _pipelineAssembly.BuildMainOptions(
             options, transaction, cwd, options.ModelId, providerId);
 
-        return AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
+        var handle = AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
         {
             ChatClient = new MaxOutputTokensDecorator(_chatClient),
             Name = "main-agent",
             ChatOptions = BuildChatOptions(options),
             LoggerFactory = _loggerFactory,
             ServiceProvider = _serviceProvider,
-            ChatClientContextProviders = [compactionProvider],
+            ToolMetadata = _toolMetadata,
+            CompactionStrategy = compactionStrategy,
+            HarnessInstructions = options.HarnessInstructions,
             AgentContextProviders = contextProviders,
             PipelineOptions = pipelineOptions,
         });
+
+        // MAF does not dispose the context providers it is handed, and some of them are built per run
+        // (skills, so a server that connected in the background is visible next run). The lease gives
+        // the runner an owner that releases them after the last use.
+        handle.ContextProviderLease = AgentContextProviderLease.Track(contextProviders);
+        return handle;
     }
 }

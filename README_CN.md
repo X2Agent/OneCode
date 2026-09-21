@@ -43,7 +43,7 @@
 > **已知限制**：
 > - `Microsoft.Agents.AI.Hyperlight` (preview)：沙箱功能受限，默认启用（运行时不可用则静默降级）
 > - GOAL 模式流式输出不支持自动重试（非流式模式支持 PromptTooLong 恢复）
-> - Team 子 Agent 路径权限审批为 inline 降级（不走 MAF `ToolApprovalAgent`，见 M4 完全事件驱动审批）；Main 路径已接入 MAF 审批
+> - Team 子 Agent 审批经 Team 工作流桥呈现：成员保留 MAF `ToolApprovalAgent`，审批请求以 `RequestInfoEvent` 浮出后由 `TeamWorkflowRunner` 推 `OrchestrationEvent.ApprovalRequest`；Main 路径为流式审批拆分（见 M4 完全事件驱动审批）
 
 ---
 
@@ -332,20 +332,21 @@ HarnessAgent
 
 > 工具调用时序观测由 Harness 默认启用的 OpenTelemetry 提供（`DisableOpenTelemetry` 保持 false），OneCode 不再重复挂一层。
 
-**共享 AIContextProvider（7 种，由 `SharedContextProviderBuilder.BuildCommon` 按能力枚举装配）**：
+**共享 AIContextProvider（由 `SharedContextProviderBuilder.BuildCommon` 按能力枚举装配）**：
 
 | Provider | 能力（`AgentCapability`） |
 |----------|------|
 | `SkillProviderFactory` → MAF `AgentSkillsProvider` | `Skills` |
 | `MemorySearchProviderFactory` → MAF `TextSearchProvider`（`search_memories`） | `MemorySearch` |
+| Harness `FileMemoryProvider`（`file_memory_*` 会话工作记忆） | `FileMemory` |
 | `DesignContextProvider` | `DesignContext` |
 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
-| `TaskContextProvider` | `TaskContext` |
 | `ShellEnvironmentProvider` | `ShellEnvironment` |
 | `CodeActProvider`（Hyperlight 沙箱，MAF `HyperlightCodeActProvider`） | `CodeAct` |
 
 > Main 路径另追加 `ModeInstructionProvider`（取代 MAF `AgentModeProvider`，仅注入指令不给 `mode_set` 工具）与模式专属 Provider（Plan/Build/Goal）。
-> `CompactionProvider` **不在此列表**——它经 ChatClient builder 层注入（`.AsBuilder().UseAIContextProviders(...)`），见 [compact-thresholds.md](docs/compact-thresholds.md)。
+> `CompactionProvider` **不在此列表**——策略经 `HarnessAgentOptions.CompactionStrategy` 交给 Harness 挂载，见 [compact-thresholds.md](docs/compact-thresholds.md)。
+> Harness `TodoProvider`（`todos_*`）按 profile 启用，同样不在此列表（由 `HarnessAgentOptions.DisableTodoProvider` 门控）。
 
 ### 四种工作模式
 
@@ -411,7 +412,7 @@ HarnessAgent
 
 ### 上下文压缩
 
-多级压缩策略：MAF `CompactionProvider` in-pipeline 自动压缩 + `AutoCompactService`（token 预算告警，阈值约 70%）+ `SnipDuplicateCallsCompactionStrategy`（重复工具调用瘦身）+ 手动 `/compact`（`CompactService`，支持全文/部分两种模式）。
+多级压缩策略：Harness 策略入口（`HarnessAgentOptions.CompactionStrategy`）驱动 in-pipeline 自动压缩（工具调用瘦身 + LLM 摘要，含摘要守卫与预算校验）+ `AutoCompactService`（转写规模提示）+ 手动 `/compact`（`CompactService`，支持全文/部分两种模式）。
 
 ---
 
@@ -534,7 +535,7 @@ HarnessAgent
 | 限制项 | 说明 |
 |--------|------|
 | GOAL 模式流式输出 | 不支持自动重试（非流式模式支持 PromptTooLong 恢复） |
-| Team 子 Agent 审批 | inline 审批降级，不走 MAF `ToolApprovalAgent`（Main 路径已接入 MAF 审批，见 M4 完全事件驱动审批） |
+| Team 子 Agent 审批 | 审批请求经 Team 工作流桥（`TeamWorkflowRunner` → `OrchestrationEvent.ApprovalRequest`）呈现；「总是允许」暂按单次批准生效（standing rule 包装未经验证，见 ADR 0007 §5.1） |
 | 鼠标点击模式标签 | Terminal.Gui 中未实现鼠标处理 |
 | Hyperlight 沙箱 | `Microsoft.Agents.AI.Hyperlight` 为 preview 包，沙箱功能受限（运行时不可用时自动降级） |
 

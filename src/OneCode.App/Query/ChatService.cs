@@ -54,11 +54,13 @@ public sealed class ChatService : IConversationRunner, ICacheSafeParamsProvider
         CancellationToken ct = default,
         WorkingMode workingMode = WorkingMode.Build,
         Action<FileChange>? fileChangeCallback = null,
-        IReadOnlyList<string>? imagePaths = null)
+        IReadOnlyList<string>? imagePaths = null,
+        string? harnessPrompt = null)
     {
         var userMessage = QueryStreamHelpers.BuildUserMessage(prompt, imagePaths, _logger);
-        var messages = new List<ChatMessage> { userMessage };
-        return StreamQueryAsync(messages, systemPrompt, modelId, thinkingBudget, null, null, ct, workingMode, fileChangeCallback);
+        return _engine.StreamInteractiveAsync(
+            [userMessage], systemPrompt, modelId, thinkingBudget, sessionId: null,
+            workingDirectory: null, ct, workingMode, fileChangeCallback, harnessPrompt);
     }
 
     /// <summary>

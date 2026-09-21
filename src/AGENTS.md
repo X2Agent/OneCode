@@ -900,13 +900,13 @@ public PermissionCheckResult Check(...)
 
 | 类型 | 规范 | 示例 |
 |------|------|------|
-| 接口 | `IXxx.cs` | `ITool.cs`, `IPermissionChecker.cs` |
+| 接口 | `IXxx.cs` | `ISessionManager.cs`, `ITextSearchService.cs` |
 | 实现 | `XxxService.cs` / `XxxManager.cs` | `MemoryService.cs` |
-| DTO/记录 | `XxxDto.cs` / `XxxModel.cs` 或直接 `Xxx.cs` | `ApiMessage.cs` |
-| 扩展方法 | `XxxExtensions.cs` | `JsonExtensions.cs` |
-| 测试 | `XxxTests.cs` | `PermissionCheckerTests.cs` |
+| DTO/记录 | `XxxDto.cs` / `XxxModel.cs` 或直接 `Xxx.cs` | `OrchestrationEvent.cs` |
+| 扩展方法 | `XxxExtensions.cs` | `DebugLoggingExtensions.cs` |
+| 测试 | `XxxTests.cs` | `AgentContextPipelineTests.cs` |
 | 枚举 | `XxxKind.cs` / `XxxMode.cs` | `PermissionMode.cs` |
-| 常量类 | `XxxConstants.cs` | `ApiConstants.cs` |
+| 常量类 | `XxxConstants.cs` | `CompactConstants.cs` |
 
 ---
 

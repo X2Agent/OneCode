@@ -4,7 +4,7 @@ namespace OneCode.App.Services.Hooks;
 /// Hook 配置热重载器——监视 hooks.json / notification-providers.json 变更，
 /// 防抖后整体重建 HookRegistry（不做增量 Bootstrap）。
 ///
-/// 设计要点（对齐 CodeIndexHotReloader / SkillChangeWatcher 既有模式）：
+/// 设计要点（对齐 CodeIndexHotReloader / SkillFilesWatcher 既有模式）：
 /// - FileSystemWatcher 仅监视两层配置目录顶层（不含子目录），文件名过滤 hooks.json 与 notification-providers.json
 /// - Timer 防抖合并保存风暴（编辑器"保存时格式化"等）为单次重建
 /// - 整体重建走 <see cref="HookConfigBootstrapper.Build"/> 快照，经 <see cref="HookRegistry.ReplaceAll"/> 原子交换；

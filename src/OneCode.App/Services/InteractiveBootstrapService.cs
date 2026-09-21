@@ -36,6 +36,11 @@ public sealed class InteractiveBootstrapService(
         var systemPrompt = await promptConfigBuilder.BuildSystemPromptAsync(
             ct).ConfigureAwait(false);
 
+        // The harness fragment travels with the body: MAF composes the two halves at agent build time,
+        // so both must be loaded once per session and handed over separately. Missing file throws here
+        // rather than degrading to MAF's generic default instructions.
+        var harnessPrompt = await promptConfigBuilder.LoadHarnessAsync(ct).ConfigureAwait(false);
+
         var model = discovery.ConfigManager.Current.Effective.Model ?? string.Empty;
 
         HydrateAppStateFromConfig();
@@ -56,7 +61,7 @@ public sealed class InteractiveBootstrapService(
         return new InteractiveSession(
             session.ConversationRunner, systemPrompt, session.SessionManager,
             modeController,
-            null, slashCommands, model);
+            null, slashCommands, model, harnessPrompt);
     }
 
     private void HydrateAppStateFromConfig()

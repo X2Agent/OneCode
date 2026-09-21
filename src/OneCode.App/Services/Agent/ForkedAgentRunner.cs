@@ -30,7 +30,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
     private readonly IModelManager _modelManager;
     private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor;
     private readonly Core.Tools.ToolMetadataRegistry _toolMetadata;
-    private readonly CompactionProviderBuilder _compactionBuilder;
+    private readonly CompactionStrategyFactory _compactionBuilder;
     private readonly PromptComposer _promptComposer;
     private readonly ConcurrentDictionary<string, ForkedAgentRun> _activeRuns = new();
 
@@ -124,16 +124,18 @@ public sealed class ForkedAgentRunner : IAgentRunner
                     MaxOutputTokens = parameters.MaxOutputTokens ?? 4096,
                     Tools = tools.Count > 0 ? tools : null,
                     ToolMode = tools.Count > 0 ? ChatToolMode.Auto : null,
+                    Instructions = parameters.AgentInstructions,
                 },
                 LoggerFactory = _loggerFactory,
                 ServiceProvider = _serviceProvider,
-                ChatClientContextProviders =
-                [
-                    await _compactionBuilder.BuildForWorkerAsync(
-                        csp?.ModelId,
-                        parameters.MaxOutputTokens,
-                        linkedToken).ConfigureAwait(false)
-                ],
+                ToolMetadata = _toolMetadata,
+                CompactionStrategy = await _compactionBuilder.BuildForWorkerAsync(
+                    csp?.ModelId,
+                    parameters.MaxOutputTokens,
+                    linkedToken).ConfigureAwait(false),
+                // MAF 把 harness 片段拼在 Instructions（角色正文）前面。此前该片段在这里取到却被
+                // 丢弃，子 Agent 静默退化成 MAF 的通用默认指令，拿不到产品的注入防护指引。
+                HarnessInstructions = parameters.HarnessInstructions,
                 AgentContextProviders = contextProviders,
                 PipelineOptions = pipelineOptions,
             });
@@ -142,9 +144,6 @@ public sealed class ForkedAgentRunner : IAgentRunner
 
             if (csp?.SystemPrompt is { Length: > 0 } sysPrompt)
                 chatMessages.Add(new ChatMessage(ChatRole.System, sysPrompt));
-
-            if (parameters.ForkContextMessages != null)
-                chatMessages.AddRange(parameters.ForkContextMessages);
 
             if (parameters.PromptMessages != null)
                 chatMessages.AddRange(parameters.PromptMessages);
@@ -224,12 +223,13 @@ public sealed class ForkedAgentRunner : IAgentRunner
         var profile = PipelineProfileBehavior.FromAgentType(request.Agent);
         var roleInstruction = PipelineProfileBehavior.GetRoleInstruction(profile);
 
-        IReadOnlyList<ChatMessage>? forkContext = null;
-        if (roleInstruction is not null)
-        {
-            var system = await _promptComposer.ComposeWithRoleAsync(roleInstruction, ct).ConfigureAwait(false);
-            forkContext = [new ChatMessage(ChatRole.System, system)];
-        }
+        // 片段是**所有**子 Agent 的公共输入：父级 CacheSafeParams.SystemPrompt 自 §4.6 起只承载
+        // 主 Agent 正文，不再包含片段，所以 Worker 分支不能靠继承父级 system 消息拿到它。
+        // 只有角色 overlay 是 Explore/Plan 专属；两段保持分离，合成交给 MAF。
+        var harnessInstructions = await _promptComposer.GetHarnessAsync(ct).ConfigureAwait(false);
+        var agentInstructions = roleInstruction is null
+            ? null
+            : _promptComposer.RenderRoleBody(roleInstruction);
 
         var childAllowedTools = profile is PipelineProfile.Explore or PipelineProfile.Plan
             ? PipelineProfileBehavior.ReadOnlyAgentTools
@@ -242,7 +242,10 @@ public sealed class ForkedAgentRunner : IAgentRunner
         var parameters = new ForkedAgentParams
         {
             PromptMessages = [new ChatMessage(ChatRole.User, request.Prompt)],
-            ForkContextMessages = forkContext,
+            AgentInstructions = agentInstructions,
+            // Unconditional: the fragment is not part of the inherited cache-safe prompt any more,
+            // so a null here would silently degrade Worker forks to MAF's generic default text.
+            HarnessInstructions = harnessInstructions,
             ForkLabel = request.Agent,
             Profile = profile,
             MaxTurns = request.MaxTurns ?? 50,

@@ -43,18 +43,30 @@ public sealed partial class SkillCatalog(string workingDir)
 
         foreach (var dir in GetSkillDirectories())
         {
-            foreach (var path in EnumerateSkillFiles(dir))
+            // Shared skills (the ones the model also sees) are read first so they win over a legacy
+            // top-level file of the same name in the same directory.
+            foreach (var skillDir in SkillDiscovery.EnumerateSharedSkillDirectories(
+                dir, MaxSharedSkillSearchDepth))
             {
-                var fallbackName = Path.GetFileName(path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)
-                    ? Path.GetFileName(Path.GetDirectoryName(path))
-                    : Path.GetFileNameWithoutExtension(path);
-                if (!TryLoad(path, fallbackName!, out var skill) || !skill.UserInvocable)
+                var path = SkillDiscovery.FindSharedSkillFile(skillDir);
+                if (path is null || !SkillDiscovery.TryLoad(path, out var shared) || !shared.UserInvocable)
                     continue;
-                skills[skill.Name] = skill;
+
+                skills[shared.Name] = shared;
             }
+
+            foreach (var legacy in SkillDiscovery.LoadUserOnlySkills(dir))
+                skills.TryAdd(legacy.Name, legacy);
         }
+
         return skills.Values.ToList();
     }
+
+    /// <summary>
+    /// Search depth for shared skill directories. Matches MAF's default so both entry points look in the
+    /// same places.
+    /// </summary>
+    private const int MaxSharedSkillSearchDepth = 2;
 
     public SkillDocument? Find(string name) => LoadUserInvocableSkills()
         .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -75,38 +87,6 @@ public sealed partial class SkillCatalog(string workingDir)
                 return joined;
             return match.Value;
         });
-    }
-
-    private static IEnumerable<string> EnumerateSkillFiles(string dir)
-    {
-        foreach (var file in Directory.EnumerateFiles(dir, "*.md")
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            yield return file;
-
-        foreach (var skillDir in Directory.EnumerateDirectories(dir)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-        {
-            var file = Path.Combine(skillDir, "SKILL.md");
-            if (File.Exists(file)) yield return file;
-        }
-    }
-
-    private static bool TryLoad(string path, string fallbackName, out SkillDocument skill)
-    {
-        try
-        {
-            return SkillFrontmatterParser.TryParse(File.ReadAllText(path), fallbackName, out skill);
-        }
-        catch (IOException)
-        {
-            skill = default!;
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            skill = default!;
-            return false;
-        }
     }
 
     private static string[] InferPlaceholderNames(string prompt) => NamedPlaceholderRegex().Matches(prompt)

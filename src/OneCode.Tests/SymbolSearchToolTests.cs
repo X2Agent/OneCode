@@ -136,4 +136,72 @@ public sealed class SymbolSearchToolTests : IDisposable
 
         result.Content.Should().Contain("still building");
     }
+
+    // S1: LSP 成功路径也必须遵守 path 作用域
+
+    /// <summary>
+    /// 反证：修复前 path 只在索引回退路径生效，LSP 成功时直接返回全部命中。
+    /// 这条用例在 LSP 分支漏掉 path 过滤时失败。
+    /// </summary>
+    [Fact]
+    public async Task SymbolSearchAsync_LspHits_AreFilteredByPathScope()
+    {
+        var inScope = Path.Combine(_tmpDir, "src");
+        var outOfScope = Path.Combine(_tmpDir, "other");
+
+        var servers = Substitute.For<ILspServerManager>();
+        servers.GetStatus().Returns([new LspServerStatus { Name = "csharp", IsInitialized = true, IsRunning = true }]);
+        servers.SendRequestAsync("csharp", "workspace/symbol", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns(JsonSerializer.SerializeToElement(new object[]
+            {
+                SymbolInfo("InScope", "class", Path.Combine(inScope, "A.cs")),
+                SymbolInfo("OutOfScope", "class", Path.Combine(outOfScope, "B.cs")),
+            }));
+
+        var wd = Substitute.For<IWorkingDirectoryAccessor>();
+        wd.WorkingDirectory.Returns(_tmpDir);
+        var sut = new SymbolSearchTool(Substitute.For<ICodeIndexService>(), wd, servers);
+
+        var result = await sut.SymbolSearchAsync("Scope", path: "src");
+
+        result.Content.Should().Contain("InScope");
+        result.Content.Should().NotContain("OutOfScope",
+            "the LSP path must honour the caller's path scope, not only the index fallback");
+    }
+
+    /// <summary>调用方取消必须穿透 LSP 请求，而不是被当成「服务器失败」后回退到索引。</summary>
+    [Fact]
+    public async Task SymbolSearchAsync_CallerCancelled_PropagatesInsteadOfFallingBack()
+    {
+        var servers = Substitute.For<ILspServerManager>();
+        servers.GetStatus().Returns([new LspServerStatus { Name = "csharp", IsInitialized = true, IsRunning = true }]);
+        servers.SendRequestAsync("csharp", "workspace/symbol", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns<JsonElement?>(_ => throw new OperationCanceledException());
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var sut = new SymbolSearchTool(
+            Substitute.For<ICodeIndexService>(), Substitute.For<IWorkingDirectoryAccessor>(), servers);
+
+        var act = () => sut.SymbolSearchAsync("Scope", ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private static object SymbolInfo(string name, string kind, string filePath) => new
+    {
+        name,
+        kind = KindNumber(kind),
+        location = new
+        {
+            uri = new Uri(filePath).AbsoluteUri,
+            range = new { start = new { line = 0, character = 0 } },
+        },
+    };
+
+    private static int KindNumber(string kind) => kind switch
+    {
+        "class" => 5,
+        _ => 0,
+    };
 }

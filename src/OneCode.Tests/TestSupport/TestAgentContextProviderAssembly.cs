@@ -54,8 +54,7 @@ public static class TestAgentContextProviderAssembly
             new HyperlightCodeActService(
                 NullLogger<HyperlightCodeActService>.Instance,
                 Substitute.For<IHyperlightRuntimeProbe>()),
-            new LspDiagnosticRegistry(),
-            new TaskContextProvider(Substitute.For<ITaskService>()));
+            new LspDiagnosticRegistry());
 
         var shared = new SharedContextProviderBuilder(
             NullLoggerFactory.Instance,

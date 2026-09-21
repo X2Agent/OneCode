@@ -18,12 +18,27 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 > 读取/发现按固定优先级枚举 OneCode 与 Agent Skills 兼容目录：`.agents` → `.cursor` → `.onecode` → `.claude`；项目级目录在用户级目录之后加载，因此项目技能覆盖用户技能。写入/安装始终使用主目录 `.onecode`。技能列表、动态斜杠命令和热重载共用同一目录解析入口。
 
-同名技能**后加载者覆盖先加载者**：`BundledSkills`（硬编码）→ 打包技能目录 → 用户技能 → 项目技能（`SkillCatalog.LoadUserInvocableSkills` 按字典后写覆盖）。因此实际生效优先级为**项目 > 用户 > 内置**——项目级同名技能最后写入，会覆盖用户级/内置的同名技能。
+同名技能**后加载者覆盖先加载者**：`BundledSkills`（硬编码）→ 打包技能目录 → 用户技能 → 项目技能。因此实际生效优先级为**项目 > 用户 > 内置**——项目级同名技能最后写入，会覆盖用户级/内置的同名技能。
+
+同一目录内，共享技能（`SKILL.md`，模型也能看到）优先于仅供用户调用的顶层 `*.md`。
+
+> **发现规则单一来源**：模型入口与斜杠入口共用 `SkillDiscovery`。共享技能按 MAF 的规则发现
+> （递归查找 `SKILL.md`，深度上限 2，`SKILL.md` 所在目录即技能根，不再向下），
+> 顶层 `*.md` 保持为**仅供用户调用**的布局——MAF 不读它，提升它等于悄悄扩大模型可调用的技能范围。
+> 修复前两侧规则不同（一侧递归、一侧只看直接子目录），同一仓库可能对一侧可见、对另一侧不可见。
 
 > **架构决策**：技能 provider 由 `SkillProviderFactory` 通过 MAF `AgentSkillsProviderBuilder` 自建
 > （文件技能 + 内置技能 + MCP 技能 + 自定义 script runner），而非使用 Harness 默认 `AgentSkillsProvider`
 > ——当前由官方 builder 统一管理 source 聚合、缓存、去重及所有权。Harness 的 `AgentSkillsSource` 同样可携带 runner，
 > 并非技术上无法迁移；是否改用该入口须验证生命周期与总体维护收益。理由与边界见 [ADR 0007 §1](./adr/0007-maf-integration-boundaries.md)。
+
+> **资源所有权**：provider 每 run 重建，MAF 的 `ChatClientAgent` 不释放交给它的 `AIContextProviders`，
+> 因此由 `AgentContextProviderLease` 在 run 结束后（含取消、异常、流提前结束）统一释放。
+> DI 单例不实现 `IDisposable`，不会被误释放。
+
+> **脚本执行边界**：`SubprocessScriptRunner` 有 2 分钟超时、30,000 字符输出上限（超出标注截断）、
+> 非零退出码返回错误结果、取消时 `Kill(entireProcessTree: true)`。审批通过不等于沙箱——
+> 子进程与 Agent 本身有相同的文件系统与网络权限。
 
 ---
 

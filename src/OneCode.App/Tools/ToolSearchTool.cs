@@ -5,7 +5,7 @@ namespace OneCode.App.Tools;
 
 /// <summary>
 /// ToolSearch — search for available tools by keyword.
-/// 排序由 <see cref="ToolMetadataRegistry.SearchTools"/> 的统一检索索引给出
+/// 排序由 <see cref="ToolMetadataRegistry.SearchTools(string, int, System.Func{string, bool})"/> 的统一检索索引给出
 /// （分词 + 字段加权 + IDF），取代旧的 +3/+2/+1 子串计分。
 /// </summary>
 /// <remarks>
@@ -47,9 +47,10 @@ public sealed class ToolSearchTool
             return ToolResult.JsonSuccess(new { matches = found, query, total_tools = allNames.Count });
         }
 
-        var ranked = _metadata.SearchTools(query, MaxResultsCap)
-            .Where(m => allNames.Contains(m.ToolName))
-            .Take(maxResults)
+        // The profile constraint is a candidate filter, not a result filter: taking a global Top-N
+        // first and then dropping disallowed tools would let a large set of disallowed high-scoring
+        // candidates push legitimate tools out of the result entirely.
+        var ranked = _metadata.SearchTools(query, maxResults, allNames.Contains)
             .Select(m => BuildInfo(m.ToolName, activated: false))
             .ToList();
 

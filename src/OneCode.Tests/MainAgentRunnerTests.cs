@@ -67,7 +67,7 @@ public sealed class MainAgentRunnerTests : IDisposable
         _runner = new MainAgentRunner(
             new AgentContextPipeline(sharedBuilder, mainContextBuilder),
             _pipelineAssembly,
-            new CompactionProviderBuilder(chatClient, NullLoggerFactory.Instance, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
+            new CompactionStrategyFactory(chatClient, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
             new AgentSessionStore(null, NullLogger<AgentSessionStore>.Instance),
             chatClient,
             NullLoggerFactory.Instance,

@@ -21,7 +21,7 @@ public partial class MainAgentRunner : IMainAgentRunner
     private readonly Core.Tools.ToolMetadataRegistry _toolMetadata;
     private readonly AgentContextPipeline _contextPipeline;
     private readonly AgentPipelineAssembly _pipelineAssembly;
-    private readonly CompactionProviderBuilder _compactionBuilder;
+    private readonly CompactionStrategyFactory _compactionBuilder;
     private readonly AgentSessionStore _sessionStore;
     private readonly IToolProtocolValidator _toolProtocolValidator;
     private readonly IVerificationProvider? _verificationProvider;
@@ -29,7 +29,7 @@ public partial class MainAgentRunner : IMainAgentRunner
     public MainAgentRunner(
         AgentContextPipeline contextPipeline,
         AgentPipelineAssembly pipelineAssembly,
-        CompactionProviderBuilder compactionBuilder,
+        CompactionStrategyFactory compactionBuilder,
         AgentSessionStore sessionStore,
         IChatClient chatClient,
         ILoggerFactory loggerFactory,
@@ -125,6 +125,10 @@ public partial class MainAgentRunner : IMainAgentRunner
         var evidence = new MainAgentRunEvidenceCollector(
             options.AgentRunId ?? Guid.NewGuid().ToString("N"));
 
+        // Declared outside the try so the finally block can release the per-run providers on every
+        // exit path, including a failure before the stream starts.
+        AgentPipelineHandle? pipeline = null;
+
         try
         {
             var chatMessages = BuildMessages(options);
@@ -151,7 +155,7 @@ public partial class MainAgentRunner : IMainAgentRunner
 
             // PromptTooLong 恢复由 PromptTooLongRecoveryRunMiddleware 在 Agent Run 级处理，
             // Runner 层不再包裹恢复循环 — 符合 MAF 最佳实践（异常在 middleware 层拦截）。
-            var pipeline = await BuildAgentPipelineAsync(runOptions, transaction, cwd, ct: ct).ConfigureAwait(false);
+            pipeline = await BuildAgentPipelineAsync(runOptions, transaction, cwd, ct: ct).ConfigureAwait(false);
             var builtAgent = pipeline.Agent;
 
             _logger.LogDebug("MainAgentRunner session creating...");
@@ -178,17 +182,39 @@ public partial class MainAgentRunner : IMainAgentRunner
                 await foreach (var evt in builtAgent.RunStreamingAsync(
                     currentMessages, session, new AgentRunOptions(), ct).ConfigureAwait(false))
                 {
-                    // PERM-1.6: 检测 ToolApprovalRequestContent，不输出给用户
-                    var approvalReq = evt.Contents?.OfType<ToolApprovalRequestContent>().FirstOrDefault();
-                    if (approvalReq is not null)
-                    {
-                        approvalRequests.Add(approvalReq);
-                    }
-                    else
+                    // An update can carry approval requests alongside ordinary content: the framework
+                    // converts every call in a response once any tool in it requires approval, and on
+                    // reaching its auto-approval cap it returns a multi-request batch. Splitting the
+                    // contents rather than dropping the whole update keeps the text the model produced
+                    // — losing it would silently truncate the visible answer.
+                    var approvalContents = evt.Contents?
+                        .OfType<ToolApprovalRequestContent>()
+                        .ToList();
+
+                    if (approvalContents is not { Count: > 0 })
                     {
                         evidence.Observe(evt);
                         await writer.WriteAsync(evt, ct).ConfigureAwait(false);
+                        continue;
                     }
+
+                    approvalRequests.AddRange(approvalContents);
+
+                    var nonApprovalContents = evt.Contents!
+                        .Where(content => content is not ToolApprovalRequestContent)
+                        .ToList();
+
+                    if (nonApprovalContents.Count == 0)
+                        continue;
+
+                    var visibleUpdate = new AgentResponseUpdate(evt.Role, nonApprovalContents)
+                    {
+                        ResponseId = evt.ResponseId,
+                        MessageId = evt.MessageId,
+                        AuthorName = evt.AuthorName,
+                    };
+                    evidence.Observe(visibleUpdate);
+                    await writer.WriteAsync(visibleUpdate, ct).ConfigureAwait(false);
                 }
 
                 // MAF completed the run without surfacing another approval request.
@@ -277,6 +303,12 @@ public partial class MainAgentRunner : IMainAgentRunner
             // 仅独立事务时 dispose（触发回滚若未 commit）；共享事务由创建者管理。
             if (ownsTransaction)
                 ((IDisposable)transaction).Dispose();
+
+            // Release per-run context providers after the last use. Placed here rather than after the
+            // stream loop so cancellation and exceptions release too, and a stream abandoned by the
+            // consumer still runs this path when the runner unwinds.
+            pipeline?.ContextProviderLease?.Dispose();
+
             writer.TryComplete();
         }
 
@@ -306,23 +338,26 @@ public partial class MainAgentRunner : IMainAgentRunner
     internal static bool ShouldRollBackForValidation(BuildValidationStatus status)
         => status == BuildValidationStatus.Failed;
 
-    private static ChatOptions BuildChatOptions(MainAgentRunOptions options)
+    internal static ChatOptions BuildChatOptions(MainAgentRunOptions options)
     {
+        // 开启扩展思考时不能再用 4096 这个默认上限：Anthropic 要求 budget_tokens < max_tokens，
+        // 显式设了 MaxOutputTokens 时适配器只能把 budget 压到 max_tokens - 1，输出预算会被吃光。
+        // 留空则由适配器按 budget 自行抬高 max_tokens。
+        var reasoningEffort = ResolveReasoningEffort(options);
+
         var chatOptions = new ChatOptions
         {
             ModelId = options.ModelId,
-            MaxOutputTokens = options.MaxOutputTokens ?? 4096,
+            MaxOutputTokens = reasoningEffort is null ? options.MaxOutputTokens ?? 4096 : options.MaxOutputTokens,
+            // 主体正文走 MAF 的 agent-instructions 入口，而不是自己拼一条 system 消息：
+            // HarnessAgent 会把 harness 片段拼在它前面（片段缺失时用 MAF 默认文案）。
+            Instructions = string.IsNullOrEmpty(options.SystemPrompt) ? null : options.SystemPrompt,
         };
 
-        // Thinking settings are translated by ProviderAwareDecorator.
-        if (options.EnableThinking)
-        {
-            chatOptions.AdditionalProperties ??= new AdditionalPropertiesDictionary();
-            if (options.ThinkingBudgetTokens > 0)
-                chatOptions.AdditionalProperties["thinking_budget"] = options.ThinkingBudgetTokens;
-            if (!string.IsNullOrEmpty(options.ThinkingEffort))
-                chatOptions.AdditionalProperties["thinking_effort"] = options.ThinkingEffort;
-        }
+        // 思考意图走 MEAI 标准 ChatOptions.Reasoning，由各 provider 适配器翻译成自家参数。
+        // 不要往 AdditionalProperties 里塞 provider 私有 wire key：那不是任何 SDK 的契约。
+        if (reasoningEffort is { } effort)
+            chatOptions.Reasoning = new ReasoningOptions { Effort = effort };
 
         // Tool approval wrapping is centralized in AgentPipelineBuilder from
         // ToolMetadataRegistry. Keeping it there prevents Main/Worker/Team policy drift.
@@ -335,13 +370,40 @@ public partial class MainAgentRunner : IMainAgentRunner
         return chatOptions;
     }
 
-    private static List<ChatMessage> BuildMessages(MainAgentRunOptions options)
+    /// <summary>
+    /// 解析本轮的思考档位。未开启思考返回 <c>null</c>（不设置 <see cref="ChatOptions.Reasoning"/>，
+    /// 让 provider 使用自身默认值）；显式 effort 字符串优先于 budget 推导。
+    /// </summary>
+    private static ReasoningEffort? ResolveReasoningEffort(MainAgentRunOptions options)
+    {
+        if (!options.EnableThinking)
+            return null;
+
+        if (!string.IsNullOrEmpty(options.ThinkingEffort))
+            return ParseReasoningEffort(options.ThinkingEffort);
+
+        if (options.ThinkingBudgetTokens > 0)
+            return EffortThinking.ToReasoningEffort(options.ThinkingBudgetTokens);
+
+        return null;
+    }
+
+    private static ReasoningEffort? ParseReasoningEffort(string effort) => effort.ToLowerInvariant() switch
+    {
+        "none" or "disabled" or "off" => ReasoningEffort.None,
+        "low" => ReasoningEffort.Low,
+        "medium" => ReasoningEffort.Medium,
+        "high" => ReasoningEffort.High,
+        "max" or "extrahigh" => ReasoningEffort.ExtraHigh,
+        _ => null,
+    };
+
+    internal static List<ChatMessage> BuildMessages(MainAgentRunOptions options)
     {
         List<ChatMessage> messages = [];
 
-        if (!string.IsNullOrEmpty(options.SystemPrompt))
-            messages.Add(new ChatMessage(ChatRole.System, options.SystemPrompt));
-
+        // 正文已由 BuildChatOptions 交给 ChatOptions.Instructions，这里不能再加一条 system
+        // 消息，否则同一段正文会既作指令又作对话消息重复送达模型。
         if (options.Messages is { Count: > 0 })
             messages.AddRange(options.Messages);
 

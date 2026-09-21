@@ -11,7 +11,7 @@ namespace OneCode.App.Services.Compact;
 /// <para><b>与 MAF CompactionProvider 的分工</b>：
 /// <list type="bullet">
 ///   <item><description><b>MAF CompactionProvider</b>（Infrastructure 层）：in-pipeline 自动压缩，
-///   每次 agent 调用前按 token 预算自动执行 4 层策略（L0 去重→L1 ToolResult 折叠→L2 LLM 摘要→L3 截断），
+///   每次 agent 调用前按 token 预算自动执行 3 层策略（L1 ToolResult 折叠→L2 LLM 摘要→L3 截断），
 ///   <b>不修改持久化的消息历史</b>，只压缩发给模型的消息。用户无感知。</description></item>
 ///   <item><description><b>本类</b>（App 层）：用户显式 /compact 命令触发的深度压缩——
 ///   发送完整对话历史给模型生成摘要，然后<b>替换持久化消息历史</b>为压缩边界标记 + 摘要内容。
@@ -83,11 +83,20 @@ public sealed class CompactService(
 
         var systemPrompt = await promptBuilder.BuildSystemPromptAsync(customInstructions, ct).ConfigureAwait(false);
 
+        // Resolve the compaction range exactly once, before summarisation.
+        // The summariser must see the messages that will actually be replaced; letting the applier
+        // expand the range afterwards would delete messages the model never summarised.
         IReadOnlyList<Message> messagesToCompact;
+        int? resolvedFromIndex = null;
+        int? resolvedUpToIndex = null;
         if (isPartial)
         {
-            var from = Math.Max(0, fromMessageIndex ?? 0);
-            var to = Math.Min(messages.Count, upToMessageIndex ?? messages.Count);
+            var requestedFrom = Math.Max(0, fromMessageIndex ?? 0);
+            var requestedTo = Math.Min(messages.Count, upToMessageIndex ?? messages.Count);
+            var (from, to) = MessageApiInvariantHelper
+                .AdjustRangeToAtomicBoundaries(messages, requestedFrom, requestedTo);
+            resolvedFromIndex = from;
+            resolvedUpToIndex = to;
             messagesToCompact = messages.Skip(from).Take(to - from).ToList();
         }
         else
@@ -120,7 +129,7 @@ public sealed class CompactService(
 
         if (isPartial)
         {
-            applier.ApplyPartialCompact(session, formattedSummary, fromMessageIndex ?? 0, upToMessageIndex ?? messages.Count);
+            applier.ApplyPartialCompact(session, formattedSummary, resolvedFromIndex!.Value, resolvedUpToIndex!.Value);
         }
         else
         {

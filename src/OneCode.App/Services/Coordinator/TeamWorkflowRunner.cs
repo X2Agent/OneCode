@@ -138,10 +138,11 @@ internal sealed class TeamWorkflowRunner(
                 member, transaction, cwd, eventSink, taskAllowedTools)
             .ConfigureAwait(false);
 
-        // W3-B: SequentialWorkflowBuilder only — never ConcurrentWorkflowBuilder / true parallel.
-        var workflow = new SequentialWorkflowBuilder([agent])
-            .WithName(config.TeamName)
-            .Build();
+        // W3-B: Sequential thin wrapper — never ConcurrentWorkflowBuilder / true parallel.
+        // Built explicitly rather than through SequentialWorkflowBuilder so the host options can
+        // enable EmitAgentResponseEvents (the builder hard-codes its AIAgentHostOptions); approval
+        // requests surface as external requests and are bridged by ExecuteWorkflowAsync.
+        var workflow = BuildSequentialWorkflow(config.TeamName, [agent]);
 
         var inputMessage = BuildInputMessage(goal, imagePaths);
         var (result, sessionId) = await ExecuteWorkflowAsync(
@@ -158,14 +159,16 @@ internal sealed class TeamWorkflowRunner(
     /// W3-C: TeamRun-level approval already covered Magentic plan review — auto-approve once here.
     /// Do not add a second product plan-approval path.
     /// </summary>
-    private async IAsyncEnumerable<WorkflowEvent> WatchWithMagenticPlanAutoApprovalAsync(
+    private async IAsyncEnumerable<WorkflowEvent> WatchWithHostDecisionsAsync(
         StreamingRun streamingRun,
         string teamName,
+        IApprovalBroker approvalBroker,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         await foreach (var evt in streamingRun.WatchStreamAsync(ct).ConfigureAwait(false))
         {
             await TryAutoApproveMagenticPlanReviewAsync(streamingRun, evt, teamName).ConfigureAwait(false);
+            await BridgeToolApprovalAsync(streamingRun, evt, teamName, approvalBroker, ct).ConfigureAwait(false);
             yield return evt;
         }
     }
@@ -189,6 +192,71 @@ internal sealed class TeamWorkflowRunner(
             pending.PortInfo,
             pending.RequestId,
             new PortableValue(planReview.Approve()))).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// R4 审批桥：把成员产生的 <see cref="ToolApprovalRequestContent"/> 外部请求接到产品审批事件流。
+    ///
+    /// <para><b>为什么必须桥接。</b> 成员 Agent 挂了 MAF 审批（Ask 决策 → 审批请求而非执行）。
+    /// 工作流把该请求作为外部请求抛出（<see cref="RequestInfoEvent"/>）；若无人应答，
+    /// 成员 turn 永久挂起、工作流停摆——审批请求绝不允许静默丢失，也绝不静默放行。</para>
+    ///
+    /// <para><b>映射语义</b>：AllowOnce / AllowAlways 均为单次批准（后者显式降级并留痕——原生
+    /// AlwaysApprove 包装能否无损通过工作流端口未经验证，见方法内注释与 ADR 0007 §5.1），
+    /// 其余按拒绝。取消传播为 <see cref="OperationCanceledException"/>（取消 ≠ 拒绝），
+    /// broker 内部已对 UI 故障 fail-closed Deny。</para>
+    ///
+    /// <para><b>成员归属。</b> <see cref="RequestInfoEvent"/> 不携带产生请求的成员标识，
+    /// 因此审批卡片的 AgentName 统一为团队名。</para>
+    /// </summary>
+    private async Task BridgeToolApprovalAsync(
+        StreamingRun streamingRun,
+        WorkflowEvent evt,
+        string teamName,
+        IApprovalBroker approvalBroker,
+        CancellationToken ct)
+    {
+        if (evt is not RequestInfoEvent { Request: { } pending }
+            || !pending.TryGetDataAs<ToolApprovalRequestContent>(out var approvalRequest)
+            || approvalRequest is null)
+        {
+            return;
+        }
+
+        var functionCall = approvalRequest.ToolCall as FunctionCallContent;
+        var toolName = functionCall?.Name ?? "unknown";
+        var toolInput = functionCall?.Arguments is not null
+            ? JsonSerializer.SerializeToElement(functionCall.Arguments)
+            : JsonSerializer.SerializeToElement(new { });
+
+        logger.LogInformation(
+            "Bridging tool approval request for team '{Team}': tool={Tool} requestId={RequestId}",
+            teamName, toolName, pending.RequestId);
+
+        var decision = await approvalBroker.RequestAsync(
+            new ApprovalRequest(
+                RequestId: pending.RequestId,
+                ToolName: toolName,
+                ToolInput: toolInput.GetRawText()),
+            ct).ConfigureAwait(false);
+
+        // Team 桥当前只提供单次批准。原生「总是允许」依赖 AlwaysApproveToolApprovalResponseContent
+        // 包装（直接继承 AIContent，非 ToolApprovalResponseContent 子类），能否无损通过工作流端口的
+        // 响应类型校验并进入成员管线未经验证——审计 §4.7.2 明确不得静默降级，故显式降为单次并留痕。
+        // 成员 session 随工作流运行销毁，standing rule 本就不跨 run 传播，实际损失有限。
+        var approved = decision is ApprovalDecision.AllowOnce or ApprovalDecision.AllowAlways;
+        if (decision == ApprovalDecision.AllowAlways)
+        {
+            logger.LogInformation(
+                "Team bridge maps AllowAlways to a single approval (standing-rule wrapper not verified through the workflow port).");
+        }
+
+        var response = approvalRequest.CreateResponse(
+            approved,
+            approved ? $"User approved {toolName}" : "User denied.");
+
+        await streamingRun.SendResponseAsync(
+            pending.CreateResponse(response)).ConfigureAwait(false);
     }
 
     private static string BuildTaskGoal(TeamTaskDefinition task)
@@ -342,9 +410,47 @@ internal sealed class TeamWorkflowRunner(
     }
 
     /// <summary>
+    /// Builds a sequential workflow chaining the given member agents as bound executors.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why manual binding.</b> <c>SequentialWorkflowBuilder</c> hard-codes its
+    /// <see cref="AIAgentHostOptions"/> and exposes no way to set
+    /// <see cref="AIAgentHostOptions.EmitAgentResponseEvents"/>, which the event processor needs
+    /// for turn counting, so the executors are bound here. The topology is identical: members
+    /// chained in order, workflow output taken from the last one.
+    /// </para>
+    /// <para>
+    /// <b>Approval delivery.</b> <see cref="AIAgentHostOptions.InterceptUserInputRequests"/> stays
+    /// off (the default): member approval requests surface as external requests
+    /// (<see cref="RequestInfoEvent"/>) on the watch stream and are answered by
+    /// <see cref="BridgeToolApprovalAsync"/>. Intercepting would send the request as a workflow
+    /// message — which a single-member chain has no downstream executor to deliver to, silently
+    /// dropping the request and stalling the member's turn.
+    /// </para>
+    /// </remarks>
+    private static Workflow BuildSequentialWorkflow(string teamName, IReadOnlyList<AIAgent> agents)
+    {
+        var hostOptions = new AIAgentHostOptions
+        {
+            EmitAgentResponseEvents = true,
+        };
+
+        var bindings = agents.Select(agent => agent.BindAsExecutor(hostOptions)).ToList();
+        var builder = new WorkflowBuilder(bindings[0]);
+        for (var i = 1; i < bindings.Count; i++)
+            builder.AddEdge(bindings[i - 1], bindings[i]);
+
+        return builder
+            .WithOutputFrom(bindings[^1])
+            .WithName(teamName)
+            .Build();
+    }
+
+    /// <summary>
     /// 统一的 Workflow 执行入口，封装 Mermaid 可视化和事件流处理。
     ///
-    /// 提取此方法消除 GroupChat/Magentic 两条路径的执行逻辑重复。
+    /// 提取此方法消除 GroupChat/Magentic/ParallelDag 三条路径的执行逻辑重复。
     /// 任务级工作流是一次性幂等单元：不再维护 Checkpoint/会话缓存，
     /// 崩溃恢复由 TeamRun 业务聚合 + Durable Workflow Host 新世代负责。
     /// </summary>
@@ -397,8 +503,11 @@ internal sealed class TeamWorkflowRunner(
         try
         {
             // W3-C: Magentic plan review auto-approve is a single helper (TeamRun already approved).
+            // R4: tool approvals raised by members surface as external requests on the same stream;
+            // the broker bridges them to the product approval event stream and sends the decision back.
+            var approvalBroker = ApprovalBroker.ForTeam(teamName, eventSink);
             result = await AgentWorkflowEventProcessor.ProcessStreamAsync(
-                WatchWithMagenticPlanAutoApprovalAsync(streamingRun, teamName, ct),
+                WatchWithHostDecisionsAsync(streamingRun, teamName, approvalBroker, ct),
                 maxTurns,
                 "Team '{Name}' {Mode} member failed: {Error}",
                 [teamName, modeName],

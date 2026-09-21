@@ -94,8 +94,6 @@ public sealed class SharedContextProviderBuilder
                 b._loggerFactory.CreateLogger<LspDiagnosticContextProvider>(),
                 cwd),
 
-            [AgentCapability.TaskContext] = (b, _, _) => b._runtime.TaskContextProvider,
-
             [AgentCapability.ShellEnvironment] = (b, _, _) =>
                 b._memory.SessionManager.ForegroundConversation is { } shellConversation
                 && b._runtime.ShellExecutorManager.TryGet(shellConversation.Id) is { } shellExecutor

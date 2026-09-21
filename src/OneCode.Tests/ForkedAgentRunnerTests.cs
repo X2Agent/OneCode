@@ -64,9 +64,8 @@ public sealed class ForkedAgentRunnerTests
                 Substitute.For<IModelManager>(),
                 Substitute.For<IWorkingDirectoryAccessor>(),
                 new ToolMetadataRegistry(),
-                new CompactionProviderBuilder(
+                new CompactionStrategyFactory(
                     null!,
-                    NullLoggerFactory.Instance,
                     Substitute.For<IModelManager>(),
                     new OneCode.App.Services.Compact.CompactPromptBuilder(new PromptManager()))),
             promptComposer: new PromptComposer(promptManager));
@@ -128,7 +127,7 @@ public sealed class ForkedAgentRunnerTests
     }
 
     [Fact]
-    public async Task ComposeExploreSystem_IncludesHarnessAndRoleOverlay()
+    public async Task ComposeExploreSystem_KeepsHarnessAndRoleOverlaySeparate()
     {
         var ct = TestContext.Current.CancellationToken;
         var promptManager = new PromptManager();
@@ -138,11 +137,15 @@ public sealed class ForkedAgentRunnerTests
         var composer = new PromptComposer(promptManager);
 
         var role = PipelineProfileBehavior.GetRoleInstruction(PipelineProfile.Explore)!;
-        var system = await composer.ComposeWithRoleAsync(role, ct);
+        var harness = await composer.GetHarnessAsync(ct);
+        var body = composer.RenderRoleBody(role);
 
-        system.Should().Contain("Prompt injection defense");
-        system.Should().Contain("Explore sub-agent");
-        system.Should().Contain("read-only");
+        // MAF composes these two; the product must not pre-join them.
+        harness.Should().Contain("Prompt injection defense");
+        harness.Should().NotContain("Explore sub-agent");
+        body.Should().Contain("Explore sub-agent");
+        body.Should().Contain("read-only");
+        body.Should().NotContain("Prompt injection defense");
     }
 
     [Fact]
@@ -153,7 +156,6 @@ public sealed class ForkedAgentRunnerTests
             PermissionMode: PermissionMode.Default,
             RulesBySource: null,
             AdditionalWorkingDirectories: null,
-            SessionAllowlist: null,
             Hook: null,
             VerificationProvider: null,
             EnableVerification: false,

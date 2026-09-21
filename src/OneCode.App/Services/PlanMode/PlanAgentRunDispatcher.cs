@@ -215,7 +215,8 @@ public sealed class PlanAgentRunDispatcher(
                 session.Model,
                 WorkingMode.Build,
                 session.SessionManager.WorkingDirectory,
-                approvedSnapshot.Project());
+                approvedSnapshot.Project(),
+                HarnessInstructions: session.HarnessPrompt);
 
             await foreach (var queryEvent in session.ConversationRunner
                 .StreamWorkflowRunAsync(request, ct).ConfigureAwait(false))

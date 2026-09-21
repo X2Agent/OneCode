@@ -1,8 +1,7 @@
-using System.Text;
-using System.Text.RegularExpressions;
 using OneCode.Core.Memory;
+using OneCode.Core.Tools;
 
-namespace OneCode.App.Services.Memory;
+namespace OneCode.Infrastructure.Memory;
 
 /// <summary>
 /// File-based implementation of <see cref="IMemoryEntryStore"/>.
@@ -60,6 +59,18 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     private const string FrontmatterStart = "---";
     private const string EntryHeaderPrefix = "## ";
 
+    /// <summary>Lock file that serializes writers across processes (see <see cref="EnterMutationAsync"/>).</summary>
+    private const string LockFileName = ".MEMORY.lock";
+
+    /// <summary>How many times to retry taking the cross-process lock before giving up.</summary>
+    /// <remarks>
+    /// The holder's critical section is one file read plus one write. A bounded retry means a stuck peer
+    /// surfaces as a failure to the caller instead of hanging the agent indefinitely.
+    /// </remarks>
+    private const int LockRetryLimit = 50;
+
+    private static readonly TimeSpan LockRetryDelay = TimeSpan.FromMilliseconds(50);
+
     /// <summary>Source value marking user-authored entries (never auto-evicted, see <see cref="PruneAsync"/>).</summary>
     private const string ManualSource = "manual";
 
@@ -86,23 +97,60 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Query path: an unreadable store degrades to an empty list so a broken file cannot break the
+    /// caller (e.g. <c>/memory list</c> or prompt injection). Mutation paths must not use this
+    /// degradation — they call <see cref="LoadForMutationAsync"/> so a read failure refuses the write
+    /// instead of overwriting the store with an unknown baseline.
+    /// </remarks>
     public async Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(MemoryScope scope, CancellationToken ct = default)
+    {
+        try
+        {
+            return await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+        }
+        catch (MemoryStoreReadException ex)
+        {
+            _logger?.LogWarning(ex, "Failed to read memory file {Path}; treating as empty", ex.FilePath);
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Read the store for a read-modify-write operation: returns an empty list only when the file
+    /// genuinely does not exist, and throws <see cref="MemoryStoreReadException"/> when it exists but
+    /// cannot be read. Cancellation propagates unchanged.
+    /// </summary>
+    private async Task<IReadOnlyList<MemoryEntry>> LoadForMutationAsync(MemoryScope scope, CancellationToken ct)
     {
         var dir = ResolveDirectory(scope);
         var filePath = GetFilePath(dir);
-        if (!File.Exists(filePath))
-            return [];
 
+        // "Not there" and "cannot read" must stay distinguishable: the first is a legitimate empty
+        // baseline for a write, the second must refuse the write (see MemoryStoreReadException).
+        string content;
         try
         {
-            var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct).ConfigureAwait(false);
-            return ParseEntries(content);
+            content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct).ConfigureAwait(false);
+        }
+        catch (FileNotFoundException)
+        {
+            return [];
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return [];
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to read memory file {Path}", filePath);
-            return [];
+            throw new MemoryStoreReadException(scope, $"Failed to read memory store '{filePath}'.", ex) { FilePath = filePath };
         }
+
+        return ParseEntries(content);
     }
 
     /// <inheritdoc/>
@@ -113,73 +161,59 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             return;
 
         var dir = ResolveDirectory(scope);
-        var gate = GetLock(dir);
-        await gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var existing = await LoadAllAsync(scope, ct).ConfigureAwait(false);
-            var dict = existing.ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
+        using var scopeLock = await EnterMutationAsync(dir, ct).ConfigureAwait(false);
 
-            foreach (var entry in entryList)
+        var existing = await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+        var dict = existing.ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entryList)
+        {
+            if (dict.TryGetValue(entry.Key, out var existingEntry))
             {
-                if (dict.TryGetValue(entry.Key, out var existingEntry))
+                // Content update keeps the original creation time and the accumulated usage
+                // feedback: a rewrite of the value is not evidence that the entry was never
+                // recalled, and resetting the counters would silently change eviction ranking.
+                dict[entry.Key] = entry with
                 {
-                    // Preserve original CreatedAt on update
-                    dict[entry.Key] = entry with { CreatedAt = existingEntry.CreatedAt };
-                }
-                else
-                {
-                    dict[entry.Key] = entry;
-                }
+                    CreatedAt = existingEntry.CreatedAt,
+                    HitCount = existingEntry.HitCount,
+                    LastHitAt = existingEntry.LastHitAt,
+                };
             }
+            else
+            {
+                dict[entry.Key] = entry;
+            }
+        }
 
-            await WriteEntriesAsync(dir, dict.Values, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        await WriteEntriesAsync(dir, dict.Values, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
     public async Task<bool> RemoveAsync(MemoryScope scope, string key, CancellationToken ct = default)
     {
         var dir = ResolveDirectory(scope);
-        var gate = GetLock(dir);
-        await gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var existing = await LoadAllAsync(scope, ct).ConfigureAwait(false);
-            var dict = existing.ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
+        using var scopeLock = await EnterMutationAsync(dir, ct).ConfigureAwait(false);
 
-            if (!dict.Remove(key))
-                return false;
+        var existing = await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+        var dict = existing.ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
 
-            await WriteEntriesAsync(dir, dict.Values, ct).ConfigureAwait(false);
-            return true;
-        }
-        finally
-        {
-            gate.Release();
-        }
+        if (!dict.Remove(key))
+            return false;
+
+        await WriteEntriesAsync(dir, dict.Values, ct).ConfigureAwait(false);
+        return true;
     }
 
     /// <inheritdoc/>
     public async Task ClearAsync(MemoryScope scope, CancellationToken ct = default)
     {
         var dir = ResolveDirectory(scope);
-        var gate = GetLock(dir);
-        await gate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var filePath = GetFilePath(dir);
-            if (File.Exists(filePath))
-                File.Delete(filePath);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        using var scopeLock = await EnterMutationAsync(dir, ct).ConfigureAwait(false);
+
+        var filePath = GetFilePath(dir);
+        if (File.Exists(filePath))
+            File.Delete(filePath);
     }
 
     /// <inheritdoc/>
@@ -189,11 +223,12 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             return;
 
         var dir = ResolveDirectory(scope);
-        var gate = GetLock(dir);
-        await gate.WaitAsync(ct).ConfigureAwait(false);
+
         try
         {
-            var existing = await LoadAllAsync(scope, ct).ConfigureAwait(false);
+            using var scopeLock = await EnterMutationAsync(dir, ct).ConfigureAwait(false);
+
+            var existing = await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
             if (existing.Count == 0)
                 return;
 
@@ -224,11 +259,10 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Best-effort: a failed bookkeeping write must not fail the caller's search.
+            // A MemoryStoreReadException lands here too — refusing to record hits is the correct
+            // outcome when the store cannot be read, and the search that produced them already
+            // succeeded.
             _logger?.LogWarning(ex, "Failed to record memory hits in {Dir}", dir);
-        }
-        finally
-        {
-            gate.Release();
         }
     }
 
@@ -236,50 +270,43 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     public async Task<int> PruneAsync(MemoryScope scope, CancellationToken ct = default)
     {
         var dir = ResolveDirectory(scope);
-        var gate = GetLock(dir);
-        await gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        using var scopeLock = await EnterMutationAsync(dir, ct).ConfigureAwait(false);
+
+        var existing = await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+        if (existing.Count == 0)
+            return 0;
+
+        var before = existing.Count;
+
+        var alive = existing.Where(e => !e.IsExpired).ToList();
+
+        // Usage-ranked eviction: manual entries are exempt, then least-recalled first,
+        // ties broken by oldest entry so never-recalled stale entries are removed first.
+        if (alive.Count > MaxEntries)
         {
-            var existing = await LoadAllAsync(scope, ct).ConfigureAwait(false);
-            if (existing.Count == 0)
-                return 0;
+            var exempt = alive.Where(e => IsEvictionExempt(e)).ToList();
+            var candidates = alive.Where(e => !IsEvictionExempt(e)).ToList();
 
-            var before = existing.Count;
+            var keepCount = Math.Max(0, MaxEntries - exempt.Count);
+            // Descending on both keys keeps the most-recalled, most-recent candidates; the
+            // ascending form would keep the least-recalled, oldest ones — the exact inverse.
+            var survivors = candidates
+                .OrderByDescending(e => e.HitCount)
+                .ThenByDescending(e => e.UpdatedAt)
+                .Take(keepCount)
+                .ToList();
 
-            var alive = existing.Where(e => !e.IsExpired).ToList();
-
-            // Usage-ranked eviction: manual entries are exempt, then least-recalled first,
-            // ties broken by oldest entry so never-recalled stale entries are removed first.
-            if (alive.Count > MaxEntries)
-            {
-                var exempt = alive.Where(e => IsEvictionExempt(e)).ToList();
-                var candidates = alive.Where(e => !IsEvictionExempt(e)).ToList();
-
-                var keepCount = Math.Max(0, MaxEntries - exempt.Count);
-                // Descending on both keys keeps the most-recalled, most-recent candidates; the
-                // ascending form would keep the least-recalled, oldest ones — the exact inverse.
-                var survivors = candidates
-                    .OrderByDescending(e => e.HitCount)
-                    .ThenByDescending(e => e.UpdatedAt)
-                    .Take(keepCount)
-                    .ToList();
-
-                alive = [.. exempt, .. survivors];
-            }
-
-            var removed = before - alive.Count;
-            if (removed > 0)
-            {
-                await WriteEntriesAsync(dir, alive, ct).ConfigureAwait(false);
-                _logger?.LogInformation("Pruned {Count} memory entries from {Dir}", removed, dir);
-            }
-
-            return removed;
+            alive = [.. exempt, .. survivors];
         }
-        finally
+
+        var removed = before - alive.Count;
+        if (removed > 0)
         {
-            gate.Release();
+            await WriteEntriesAsync(dir, alive, ct).ConfigureAwait(false);
+            _logger?.LogInformation("Pruned {Count} memory entries from {Dir}", removed, dir);
         }
+
+        return removed;
     }
 
     /// <summary>
@@ -466,13 +493,38 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
 
         Directory.CreateDirectory(memoryDir);
 
-        var tempPath = filePath + ".tmp";
-        await File.WriteAllTextAsync(tempPath, content, Encoding.UTF8, ct).ConfigureAwait(false);
+        // Unique temp name: a fixed `<file>.tmp` makes two concurrent writers race on the same path,
+        // so one can replace the file while the other is still writing into the shared temp file.
+        var tempPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, content, Encoding.UTF8, ct).ConfigureAwait(false);
 
-        if (File.Exists(filePath))
-            File.Replace(tempPath, filePath, destinationBackupFileName: null);
-        else
-            File.Move(tempPath, filePath);
+            if (File.Exists(filePath))
+                File.Replace(tempPath, filePath, destinationBackupFileName: null);
+            else
+                File.Move(tempPath, filePath);
+        }
+        catch
+        {
+            // Leaving a partial temp file behind would make the next write's cleanup ambiguous.
+            TryDeleteTemp(tempPath);
+            throw;
+        }
+    }
+
+    private void TryDeleteTemp(string tempPath)
+    {
+        try
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+        catch (Exception ex)
+        {
+            // Best effort: an orphaned temp file is noise, not corruption.
+            _logger?.LogDebug(ex, "Failed to remove temp memory file {Path}", tempPath);
+        }
     }
 
     internal static string SerializeEntries(IReadOnlyList<MemoryEntry> entries)
@@ -517,6 +569,83 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
     {
         var normalized = Path.GetFullPath(memoryDir);
         return s_locks.GetOrAdd(normalized, _ => new SemaphoreSlim(1, 1));
+    }
+
+    /// <summary>
+    /// Acquires both the in-process semaphore and the cross-process file lock for a memory directory,
+    /// and returns a scope that releases them in reverse order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read-modify-write must hold both: the semaphore keeps this process's async continuations from
+    /// interleaving, and the file lock keeps a second process from merging against the same stale
+    /// baseline.
+    /// </para>
+    /// <para>
+    /// <b>A file lock, not a mutex.</b> <see cref="Mutex"/> ownership is thread-affine, but every
+    /// <c>await</c> here can resume on a different thread pool thread, so releasing it would throw
+    /// <see cref="ApplicationException"/>. A <see cref="FileStream"/> opened with
+    /// <see cref="FileShare.None"/> carries no such affinity and is released on dispose from any thread.
+    /// </para>
+    /// </remarks>
+    private async Task<MutationScope> EnterMutationAsync(string memoryDir, CancellationToken ct)
+    {
+        var gate = GetLock(memoryDir);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            var lockFile = await AcquireCrossProcessLockAsync(memoryDir, ct).ConfigureAwait(false);
+            return new MutationScope(gate, lockFile);
+        }
+        catch
+        {
+            // Never leave the semaphore held if the cross-process lock could not be taken.
+            gate.Release();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Opens the memory directory's lock file with exclusive sharing, retrying briefly so a concurrent
+    /// writer's short critical section does not surface as a failure.
+    /// </summary>
+    private static async Task<FileStream> AcquireCrossProcessLockAsync(string memoryDir, CancellationToken ct)
+    {
+        Directory.CreateDirectory(memoryDir);
+        var lockPath = Path.Combine(memoryDir, LockFileName);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                return new FileStream(
+                    lockPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 1,
+                    FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (attempt < LockRetryLimit)
+            {
+                // Another process holds it. The critical section is one read plus one write, so a short
+                // backoff is enough; waiting forever would hang the caller on a stuck peer.
+                await Task.Delay(LockRetryDelay, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Holds the in-process and cross-process write gates for one read-modify-write.</summary>
+    private readonly struct MutationScope(SemaphoreSlim gate, FileStream lockFile) : IDisposable
+    {
+        public void Dispose()
+        {
+            lockFile?.Dispose();
+            gate.Release();
+        }
     }
 
     [GeneratedRegex(@"^##\s+(.+)$", RegexOptions.Multiline)]

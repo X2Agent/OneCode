@@ -32,6 +32,7 @@ public sealed class CronJobExecutor : ICronJobExecutor
     private readonly IModelManager _modelManager;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _cachedSystemPrompt;
+    private string? _cachedHarnessPrompt;
 
     public CronJobExecutor(
         ILogger<CronJobExecutor> logger,
@@ -80,6 +81,10 @@ public sealed class CronJobExecutor : ICronJobExecutor
             await _preconnector.EnsureConnectedAsync(ct).ConfigureAwait(false);
             _cachedSystemPrompt ??= await _promptConfigBuilder.BuildSystemPromptAsync(
                 ct).ConfigureAwait(false);
+            // Harness fragment is cached with the body: MAF needs both halves and cron has no
+            // InteractiveSession carrying them. Missing file throws — same fail-fast as interactive.
+            _cachedHarnessPrompt ??= await _promptConfigBuilder.LoadHarnessAsync(
+                ct).ConfigureAwait(false);
 
             // Ensure a foreground conversation exists before submitting.
             await _sessionManager.EnsureActiveSessionAsync(
@@ -91,7 +96,8 @@ public sealed class CronJobExecutor : ICronJobExecutor
             // 因此不适合作为无人值守 Cron 的执行模式。
             await foreach (var _ in _runner.StreamQueryAsync(
                 prompt, _cachedSystemPrompt, modelId, ct: ct,
-                workingMode: WorkingMode.Goal).ConfigureAwait(false))
+                workingMode: WorkingMode.Goal,
+                harnessPrompt: _cachedHarnessPrompt).ConfigureAwait(false))
             {
                 // Cron runs are headless; events are not surfaced to a TUI.
             }

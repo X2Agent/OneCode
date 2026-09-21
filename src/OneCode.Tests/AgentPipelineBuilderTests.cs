@@ -41,10 +41,9 @@ public sealed class AgentPipelineBuilderTests
         var rulesBySource = options.RulesBySource ?? new Dictionary<string, PermissionRuleGroup>();
         var additionalWorkingDirectories = options.AdditionalWorkingDirectories
             ?? new Dictionary<string, AdditionalWorkingDirectory>();
-        var sessionAllowlist = options.SessionAllowlist ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var boxed = CheckPermissionMethod.Invoke(
-            null, new object[] { options, rulesBySource, additionalWorkingDirectories, sessionAllowlist, ctx, next, ct });
+            null, new object[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, ct });
         return ((ValueTask<object>)boxed!).AsTask();
     }
 
@@ -67,15 +66,13 @@ public sealed class AgentPipelineBuilderTests
         IPermissionChecker? checker = null,
         PermissionMode mode = PermissionMode.Default,
         string workingDirectory = "/test",
-        IApprovalBroker? broker = null,
         bool? enableToolApproval = null)
         => new()
         {
             WorkingDirectory = workingDirectory,
             PermissionChecker = checker,
             PermissionMode = mode,
-            ApprovalBroker = broker,
-            // 默认 true（与生产配置一致）；测试可显式覆盖以验证 Team inline 审批路径
+            // 默认 true（与生产配置一致）：Ask 单通道进入 MAF 审批协议
             EnableToolApproval = enableToolApproval ?? true,
         };
 
@@ -182,7 +179,7 @@ public sealed class AgentPipelineBuilderTests
         result.Should().Be("tool-result");
     }
 
-    // Test 5: Ask + 无 broker → 放行到 next（由 MAF ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）
+    // Test 5: Ask → 放行到 next（由 MAF ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）
     [Fact]
     public async Task CheckPermission_AskDecision_WithoutBroker_PassesThrough()
     {
@@ -196,7 +193,7 @@ public sealed class AgentPipelineBuilderTests
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, broker: null);
+        var options = BuildOptions(checker: checker);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(
@@ -209,72 +206,7 @@ public sealed class AgentPipelineBuilderTests
         result.Should().Be("tool-result");
     }
 
-    // Test 6: EnableToolApproval:false + Ask + ApprovalBroker 批准 → inline 放行到 next（Team 路径）
-    [Fact]
-    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndBrokerApproves_InvokesNext()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var checker = Substitute.For<IPermissionChecker>();
-        checker.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<JsonElement>(),
-                Arg.Any<ToolPermissionContext>(),
-                Arg.Any<CancellationToken>())
-            .Returns(PermissionCheckResult.Ask("confirm?"));
-
-        var broker = Substitute.For<IApprovalBroker>();
-        broker.RequestAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(ApprovalDecision.AllowOnce));
-
-        var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, broker: broker, enableToolApproval: false);
-        var holder = new FlagHolder();
-
-        var result = await InvokeCheckPermissionAsync(
-            options, ctx,
-            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
-            ct);
-
-        await broker.Received(1).RequestAsync(
-            Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeTrue("ApprovalBroker inline 批准后应放行到 next");
-        result.Should().Be("tool-result");
-    }
-
-    // Test 7: EnableToolApproval:false + Ask + ApprovalBroker 拒绝 → 返回 ToolResult.Error
-    [Fact]
-    public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndBrokerDenies_ReturnsDeny()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var checker = Substitute.For<IPermissionChecker>();
-        checker.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<JsonElement>(),
-                Arg.Any<ToolPermissionContext>(),
-                Arg.Any<CancellationToken>())
-            .Returns(PermissionCheckResult.Ask("confirm?"));
-
-        var broker = Substitute.For<IApprovalBroker>();
-        broker.RequestAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(ApprovalDecision.Deny));
-
-        var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, broker: broker, enableToolApproval: false);
-        var holder = new FlagHolder();
-
-        var result = await InvokeCheckPermissionAsync(
-            options, ctx,
-            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
-            ct);
-
-        await broker.Received(1).RequestAsync(
-            Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>());
-        holder.Value.Should().BeFalse("ApprovalBroker 拒绝后不应调用 next");
-        result.Should().BeOfType<ToolResult>()
-            .Which.Content.Should().Contain("denied by approval broker");
-    }
-
-    // Test 8: fail-safe — EnableToolApproval:false + Ask + 无 ApprovalBroker → fail-safe Deny（防止 fail-open）
+    // Test 8: fail-safe — EnableToolApproval:false + Ask + 无审批通道 → fail-safe Deny（防止 fail-open）
     [Fact]
     public async Task CheckPermission_AskDecision_WithApprovalDisabled_AndNoBroker_FailSafeDeny()
     {
@@ -288,7 +220,7 @@ public sealed class AgentPipelineBuilderTests
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
         var ctx = CreateContext("Write");
-        var options = BuildOptions(checker: checker, broker: null, enableToolApproval: false);
+        var options = BuildOptions(checker: checker, enableToolApproval: false);
         var holder = new FlagHolder();
 
         var result = await InvokeCheckPermissionAsync(
@@ -356,7 +288,6 @@ public sealed class AgentPipelineBuilderTests
         {
             ["extra"] = new AdditionalWorkingDirectory("/extra", WorkingDirectorySource.AddDirCommand),
         };
-        var allowlist = new HashSet<string> { "Read" };
 
         var ctx = CreateContext("Bash");
         var options = new AgentPipelineOptions
@@ -365,7 +296,6 @@ public sealed class AgentPipelineBuilderTests
             PermissionChecker = checker,
             RulesBySource = rules,
             AdditionalWorkingDirectories = additionalDirs,
-            SessionAllowlist = allowlist,
         };
 
         await InvokeCheckPermissionAsync(
@@ -375,7 +305,6 @@ public sealed class AgentPipelineBuilderTests
         captured.Should().NotBeNull();
         captured!.RulesBySource.Should().BeSameAs(rules);
         captured.AdditionalWorkingDirectories.Should().BeSameAs(additionalDirs);
-        captured.SessionAllowlist.Should().BeEquivalentTo(allowlist);
     }
 
     // PIPE-1.6: Pipeline factory contract tests
@@ -406,7 +335,6 @@ public sealed class AgentPipelineBuilderTests
         {
             ["extra"] = new AdditionalWorkingDirectory("/extra", WorkingDirectorySource.AddDirCommand),
         },
-        SessionAllowlist: new HashSet<string> { "Read" },
         Hook: Substitute.For<IHookExecutionService>(),
         VerificationProvider: verificationProvider,
         EnableVerification: enableVerification,
@@ -442,9 +370,6 @@ public sealed class AgentPipelineBuilderTests
 
         main.AdditionalWorkingDirectories.Should().BeSameAs(worker.AdditionalWorkingDirectories);
         main.AdditionalWorkingDirectories.Should().BeSameAs(team.AdditionalWorkingDirectories);
-
-        main.SessionAllowlist.Should().BeSameAs(worker.SessionAllowlist);
-        main.SessionAllowlist.Should().BeSameAs(team.SessionAllowlist);
 
         main.SafetyInvariants.Should().BeSameAs(worker.SafetyInvariants);
         main.SafetyInvariants.Should().BeSameAs(team.SafetyInvariants);
@@ -524,7 +449,6 @@ public sealed class AgentPipelineBuilderTests
                 WorkingDirectory = main.WorkingDirectory,
                 RulesBySource = main.RulesBySource,
                 AdditionalWorkingDirectories = main.AdditionalWorkingDirectories,
-                SessionAllowlist = main.SessionAllowlist,
             }, ct);
         var workerResult = await checker.CheckAsync("Bash", input,
             new ToolPermissionContext
@@ -533,7 +457,6 @@ public sealed class AgentPipelineBuilderTests
                 WorkingDirectory = worker.WorkingDirectory,
                 RulesBySource = worker.RulesBySource,
                 AdditionalWorkingDirectories = worker.AdditionalWorkingDirectories,
-                SessionAllowlist = worker.SessionAllowlist,
             }, ct);
 
         mainResult.Decision.Should().Be(PermissionDecision.Deny, "Main 路径应拒绝 rm *");

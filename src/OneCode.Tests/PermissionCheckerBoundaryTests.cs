@@ -426,26 +426,6 @@ public sealed class PermissionCheckerBoundaryTests
             $"{mode} mode should {expected} for Bash '{command}'");
     }
 
-    // SessionAllowlist interaction
-
-    [Fact]
-    public async Task CheckAsync_DefaultMode_ReadOnlyTool_IgnoresSessionAllowlist()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var ctx = new ToolPermissionContext
-        {
-            Mode = PermissionMode.Default,
-            WorkingDirectory = Path.GetTempPath(),
-            SessionAllowlist = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Read" },
-        };
-        var input = ParseJson(@"{""path"":""file.txt""}");
-
-        var result = await _sut.CheckAsync("Read", input, ctx, ct);
-
-        result.Decision.Should().Be(PermissionDecision.Allow,
-            "read-only tools are always allowed regardless of allowlist");
-    }
-
     // Bypass / rule overrides (migrated from PermissionCheckerTests)
 
     [Fact]

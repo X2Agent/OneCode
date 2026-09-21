@@ -1,4 +1,3 @@
-using OneCode.App.Services.Context;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Session;
 using OneCode.App.Tools;
@@ -12,9 +11,8 @@ public sealed record AgentMemoryDependencies(
     IMemoryService MemoryService,
     ISessionManager SessionManager);
 
-/// <summary>Shell / CodeAct / LSP / task providers for shared agent context.</summary>
+/// <summary>Shell / CodeAct / LSP providers for shared agent context.</summary>
 public sealed record AgentRuntimeContextDependencies(
     ConversationShellExecutorManager ShellExecutorManager,
     IHyperlightCodeActService CodeActService,
-    LspDiagnosticRegistry LspDiagnosticRegistry,
-    TaskContextProvider TaskContextProvider);
+    LspDiagnosticRegistry LspDiagnosticRegistry);

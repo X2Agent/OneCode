@@ -14,7 +14,7 @@ namespace OneCode.Infrastructure.Middleware;
 ///   <item>工具调用计数 + MaxToolCalls 上限（超限时返回当前调用错误结果）</item>
 ///   <item>IsToolAllowed 白名单过滤</item>
 ///   <item>权限检查（Allow/Deny/Ask 路由）</item>
-///   <item>审批路由：Ask → MAF ToolApprovalAgent 或 inline ApprovalBroker（Team）</item>
+///   <item>审批路由：Ask → MAF 审批协议（标记工具产生审批请求，绝不静默执行；无通道时 fail-safe Deny）</item>
 /// </list>
 /// </summary>
 public static class PermissionAndLimitMiddleware
@@ -29,7 +29,6 @@ public static class PermissionAndLimitMiddleware
         var rulesBySource = options.RulesBySource ?? new Dictionary<string, PermissionRuleGroup>();
         var additionalWorkingDirectories = options.AdditionalWorkingDirectories
             ?? new Dictionary<string, AdditionalWorkingDirectory>();
-        var sessionAllowlist = options.SessionAllowlist ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         return async (_, ctx, next, ct) =>
         {
@@ -56,7 +55,6 @@ public static class PermissionAndLimitMiddleware
                 options,
                 rulesBySource,
                 additionalWorkingDirectories,
-                sessionAllowlist,
                 ctx,
                 ExecuteWithLimitAsync,
                 ct).ConfigureAwait(false);
@@ -71,7 +69,6 @@ public static class PermissionAndLimitMiddleware
         AgentPipelineOptions options,
         IReadOnlyDictionary<string, PermissionRuleGroup> rulesBySource,
         IReadOnlyDictionary<string, AdditionalWorkingDirectory> additionalWorkingDirectories,
-        HashSet<string> sessionAllowlist,
         FunctionInvocationContext ctx,
         Func<FunctionInvocationContext, CancellationToken, ValueTask<object>> next,
         CancellationToken ct)
@@ -89,7 +86,6 @@ public static class PermissionAndLimitMiddleware
             WorkingDirectory = options.WorkingDirectory,
             RulesBySource = rulesBySource,
             AdditionalWorkingDirectories = additionalWorkingDirectories,
-            SessionAllowlist = sessionAllowlist,
         };
 
         var perm = await options.PermissionChecker.CheckAsync(
@@ -105,35 +101,18 @@ public static class PermissionAndLimitMiddleware
                 "Request user permission or modify the tool call.");
         }
 
-        // Ask 处理（单通道）：
-        // - EnableToolApproval: true → 放行到 MAF ToolApprovalAgent（Main/Worker/Explore/Plan）。
-        //   由 ToolApprovalAgent 依据 AutoApprovalRules 决定自动放行或产出 ToolApprovalRequestContent。
-        // - EnableToolApproval: false → inline ApprovalBroker（Team 路径，因 MAF workflow
-        //   manager 无法处理 ToolApprovalRequestContent）。
-        //   两者皆无 → fail-safe Deny。
+        // Ask 处理（单通道）：唯一通道是 MAF 的审批协议。放行到 next 后，
+        // FunctionInvokingChatClient 遇到带 ApprovalRequiredAIFunction 标记的工具会产生
+        // ToolApprovalRequestContent 而不是执行；由 ToolApprovalAgent 的自动规则决定放行，
+        // 否则交给上层桥（Main 流式审批拆分 / Team 工作流审批桥）呈现给用户。
+        // 中间件自身从不询问用户，也不持有 broker——那会形成第二套审批通道。
+        // 路径未启用审批时不存在可应答的通道，fail-safe Deny。
         if (perm.Decision == PermissionDecision.Ask)
         {
             if (options.EnableToolApproval)
                 return await next(ctx, ct).ConfigureAwait(false);
 
-            if (options.ApprovalBroker is not null)
-            {
-                var approval = await options.ApprovalBroker.RequestAsync(
-                    new ApprovalRequest(
-                        RequestId: Guid.NewGuid().ToString("N"),
-                        ToolName: ctx.Function.Name,
-                        ToolInput: toolInput.GetRawText()),
-                    ct).ConfigureAwait(false);
-
-                if (approval is ApprovalDecision.AllowOnce or ApprovalDecision.AllowAlways)
-                    return await next(ctx, ct).ConfigureAwait(false);
-
-                return ToolResult.Error(
-                    $"Tool '{ctx.Function.Name}' denied by approval broker.",
-                    "Request user permission or modify the tool call.");
-            }
-
-            // fail-safe Deny：无任何审批通道时仅返回当前调用的拒绝结果。
+            // fail-safe Deny：无审批通道时仅返回当前调用的拒绝结果。
             return ToolResult.Error(
                 $"Tool '{ctx.Function.Name}' requires approval but no approval channel is available (decision={perm.Decision}).",
                 "Adjust permission rules to auto-allow this tool.");

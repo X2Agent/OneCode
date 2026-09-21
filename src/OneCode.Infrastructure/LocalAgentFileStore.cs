@@ -13,9 +13,10 @@ namespace OneCode.Infrastructure;
 /// and validated against the working directory and any additional directories.
 /// </para>
 /// <para>
-/// This type deliberately does <b>not</b> implement MAF's <c>AgentFileStore</c>: the product
-/// disables the Harness file-memory and file-access providers, so no MAF component consumes that
-/// abstraction (see the MAF overlap plan).
+/// This type deliberately does <b>not</b> implement MAF's <c>AgentFileStore</c>: no MAF component
+/// consumes that abstraction on the product's own file tools. Harness working memory uses
+/// <c>FileSystemAgentFileStore</c> with a project-scoped root (see <c>FileMemoryStorePaths</c>),
+/// which is a different store instance and a different concern.
 /// </para>
 /// </summary>
 public sealed class LocalAgentFileStore : IFileSystem

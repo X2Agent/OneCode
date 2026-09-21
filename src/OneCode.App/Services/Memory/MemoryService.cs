@@ -1,5 +1,6 @@
-using System.Text.RegularExpressions;
 using OneCode.Core.Memory;
+using OneCode.Core.Text;
+using OneCode.Infrastructure.Memory;
 
 namespace OneCode.App.Services.Memory;
 
@@ -21,13 +22,20 @@ namespace OneCode.App.Services.Memory;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed partial class MemoryService : IMemoryService
+public sealed class MemoryService : IMemoryService
 {
     private const int MaxSummaryValueChars = 80;
     private const int MaxRelevantMemories = 6;
 
-    [GeneratedRegex(@"[\p{L}\p{N}_-]{2,}")]
-    private static partial Regex QueryTokenRegex();
+    /// <summary>
+    /// Total character budget for the injected memory index.
+    /// </summary>
+    /// <remarks>
+    /// Entry count is not a token bound: 200 short lines and 200 long ones cost very different amounts
+    /// of context, and the index is injected on <b>every</b> turn. A character budget is what actually
+    /// caps the cost; the per-entry limit only shapes each line.
+    /// </remarks>
+    private const int MaxIndexChars = 4_000;
 
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -67,13 +75,19 @@ public sealed partial class MemoryService : IMemoryService
         var manualEntries = entries.Where(e => e.Entry.Source == "manual").ToList();
         var autoEntries = entries.Where(e => e.Entry.Source != "manual").ToList();
 
+        var budget = MaxIndexChars;
+
         if (manualEntries.Count > 0)
         {
             sections.Add("### User memories");
             sections.Add("");
             foreach (var entry in manualEntries)
             {
-                sections.Add($"- `{entry.Entry.Key}` — {Summarize(entry.Entry.Value)}");
+                var line = $"- `{entry.Entry.Key}` — {Summarize(entry.Entry.Value)}";
+                if (!TrySpend(ref budget, line.Length))
+                    break;
+
+                sections.Add(line);
             }
             sections.Add("");
         }
@@ -82,13 +96,30 @@ public sealed partial class MemoryService : IMemoryService
         {
             sections.Add("### Auto-recalled memories");
             sections.Add("");
-            foreach (var entry in autoEntries.Take(MemoryEntryStore.MaxAutoRecalledInSummary))
+
+            // Project entries first: project knowledge applies to the work at hand, user-level entries
+            // are background. Without this the newest-N slice let a busy user-level store crowd out the
+            // project's own conventions.
+            var ordered = autoEntries
+                .OrderByDescending(e => e.Scope == MemoryScope.Project)
+                .ThenByDescending(e => e.Entry.UpdatedAt)
+                .ToList();
+
+            var shown = 0;
+            foreach (var entry in ordered.Take(MemoryEntryStore.MaxAutoRecalledInSummary))
             {
-                sections.Add($"- `[{entry.Entry.Category}]` {Summarize(entry.Entry.Value)}");
+                var scopeLabel = entry.Scope == MemoryScope.Project ? "project" : "global";
+                var line = $"- `[{entry.Entry.Category}]` ({scopeLabel}) {Summarize(entry.Entry.Value)}";
+                if (!TrySpend(ref budget, line.Length))
+                    break;
+
+                sections.Add(line);
+                shown++;
             }
-            if (autoEntries.Count > MemoryEntryStore.MaxAutoRecalledInSummary)
+
+            if (shown < autoEntries.Count)
             {
-                sections.Add($"- ... and {autoEntries.Count - MemoryEntryStore.MaxAutoRecalledInSummary} more (use search_memories tool to retrieve)");
+                sections.Add($"- ... and {autoEntries.Count - shown} more (use search_memories tool to retrieve)");
             }
             sections.Add("");
         }
@@ -180,8 +211,10 @@ public sealed partial class MemoryService : IMemoryService
         if (string.IsNullOrWhiteSpace(query))
             return [];
 
-        return QueryTokenRegex().Matches(query)
-            .Select(match => match.Value.Trim().ToLowerInvariant())
+        // 分词规则与工具检索共用 TextTokenizer（拉丁大小写边界 + 去复数 + CJK 二字滑窗）。
+        // 旧实现用 \p{L}{2,} 取连续串，中文整句会变成一个 token：既过滤掉全部中文
+        // （长度 ≥ 2 也匹配不上），又让任何中文子串查询召回为空。
+        return TextTokenizer.Tokenize(query)
             .Where(token => token.Length >= 2 && !StopWords.Contains(token))
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -227,6 +260,22 @@ public sealed partial class MemoryService : IMemoryService
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Spends from a character budget, refusing the line when it would overrun it.
+    /// </summary>
+    /// <remarks>
+    /// A line that does not fit is skipped rather than truncated: a half-written index entry is worse
+    /// than an absent one, because the model cannot tell it was cut.
+    /// </remarks>
+    private static bool TrySpend(ref int remaining, int cost)
+    {
+        if (cost > remaining)
+            return false;
+
+        remaining -= cost;
+        return true;
     }
 
     private static string Summarize(string value)

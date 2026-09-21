@@ -1,3 +1,4 @@
+using OneCode.Core.Agent;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
@@ -12,7 +13,7 @@ namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
 /// PIPE-1: 跨角色共享的安全上下文。
-/// 所有 profile 的 SafetyInvariants/BehaviorContracts/RulesBySource/AdditionalWorkingDirectories/SessionAllowlist
+/// 所有 profile 的 SafetyInvariants/BehaviorContracts/RulesBySource/AdditionalWorkingDirectories
 /// 必须从同一 PipelineSecurityContext 获取，确保 Worker/Team 与 Main 安全字段等价。
 /// </summary>
 public sealed record PipelineSecurityContext(
@@ -20,7 +21,6 @@ public sealed record PipelineSecurityContext(
     PermissionMode PermissionMode,
     IReadOnlyDictionary<string, PermissionRuleGroup>? RulesBySource,
     IReadOnlyDictionary<string, AdditionalWorkingDirectory>? AdditionalWorkingDirectories,
-    HashSet<string>? SessionAllowlist,
     IHookExecutionService? Hook,
     IVerificationProvider? VerificationProvider,
     bool EnableVerification,
@@ -38,7 +38,8 @@ public sealed record PipelineSecurityContext(
 
 /// <summary>
 /// 角色级覆盖 — 仅裁剪工具集与配额，不裁剪安全层。
-/// ApprovalBroker 用于 Team 路径的 inline 审批（MAF workflow manager 无法处理 ToolApprovalRequestContent）。
+/// 审批单通道：Ask 一律进入 MAF 审批协议；交互呈现由上层桥承担
+/// （Main 流式审批拆分 / Team 工作流审批桥），中间件与管道不持有 broker。
 /// </summary>
 public sealed record PipelineRoleOverrides(
     int MaxToolCalls,
@@ -46,8 +47,7 @@ public sealed record PipelineRoleOverrides(
     Func<string, bool>? IsToolAllowed = null,
     bool EnableToolApproval = true,
     IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules = null,
-    VerificationOptions? VerificationOptions = null,
-    IApprovalBroker? ApprovalBroker = null);
+    VerificationOptions? VerificationOptions = null);
 
 /// <summary>
 /// PIPE-1: 统一的 AgentPipelineOptions 工厂。
@@ -73,7 +73,7 @@ public static class AgentPipelineOptionsFactory
                 ctx.WorkingDirectory,
                 ctx.RulesBySource,
                 ctx.AdditionalWorkingDirectories,
-                ctx.SessionAllowlist);
+                ctx.PermissionChecker);
 
         var enableVerification = ctx.EnableVerification;
         if (ctx.VerificationProvider is not null)
@@ -103,7 +103,6 @@ public static class AgentPipelineOptionsFactory
             PermissionMode = ctx.PermissionMode,
             RulesBySource = ctx.RulesBySource,
             AdditionalWorkingDirectories = ctx.AdditionalWorkingDirectories,
-            SessionAllowlist = ctx.SessionAllowlist,
             HookExecutionService = ctx.Hook,
             BehaviorContracts = behavior.EnableBehaviorContracts
                 ? ctx.BehaviorContracts ?? [new FileEditContract(ctx.WorkingDirectory)]
@@ -114,13 +113,14 @@ public static class AgentPipelineOptionsFactory
             EnableTaskRecovery = behavior.EnableTaskRecovery,
             EnableBehaviorContracts = behavior.EnableBehaviorContracts,
             EnableToolApproval = enableToolApproval,
+            EnableFileMemory = behavior.Has(AgentCapability.FileMemory),
+            EnableTodo = behavior.Has(AgentCapability.Todo),
 
             VerificationProvider = ctx.VerificationProvider,
             EnableVerification = enableVerification,
             VerificationOptions = overrides.VerificationOptions,
 
             AutoApprovalRules = autoApprovalRules,
-            ApprovalBroker = overrides.ApprovalBroker,
 
             MaxToolCalls = overrides.MaxToolCalls,
             ToolLimitMessage = overrides.ToolLimitMessage,

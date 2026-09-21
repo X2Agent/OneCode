@@ -236,7 +236,8 @@ public sealed class QueryStreamService(
             ct: ct,
             workingMode: session.ModeController.Mode,
             fileChangeCallback: fileChangeCallback,
-            imagePaths: imagePaths).ConfigureAwait(false))
+            imagePaths: imagePaths,
+            harnessPrompt: session.HarnessPrompt).ConfigureAwait(false))
         {
             if (TuiEventMapper.MapQueryEventToTuiEvent(evt) is { } mapped)
                 yield return mapped;

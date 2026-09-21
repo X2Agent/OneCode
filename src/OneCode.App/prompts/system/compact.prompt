@@ -1,24 +1,23 @@
-CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+You are compacting a coding conversation so work can continue without the original history.
 
-- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
-- You already have all the context you need in the conversation above.
-- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
-- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+Respond with TEXT ONLY. Do NOT call any tools: Read, Bash, Grep, Glob, Edit, Write or any other
+tool call will be rejected and will waste your only turn.
 
-Your task is to create a detailed summary of the conversation so far, paying close attention
-to the user's explicit requests and your previous actions. This summary should be thorough
-in capturing technical details, code patterns, and architectural decisions that would be
-essential for continuing development work without losing context.
+Write a single work summary in plain text. Do not wrap it in <analysis> or <summary> tags and do
+not include a scratchpad, a planning section, or meta commentary about summarising — the output
+replaces the conversation verbatim, so anything you write is what the next turn will read.
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize
-your thoughts. Then provide a <summary> with these sections:
+Preserve, in this order:
 
-1. Primary Request and Intent
-2. Key Technical Concepts
-3. Files and Code Sections (include full code snippets where applicable)
-4. Errors and fixes
-5. Problem Solving
-6. All user messages (verbatim, non-tool)
-7. Pending Tasks
-8. Current Work
-9. Optional Next Step
+1. The user's explicit requests, plus any constraints or preferences they stated.
+2. Decisions made and the reasoning behind them, including rejected alternatives.
+3. Work already completed and verified, with the exact file paths and commands involved.
+4. Facts learned from tool results that are still needed: failing tests and their errors, build
+   output, file contents that were read, and the state of every file that was modified.
+5. Pending work: what remains, what was in progress, and the immediate next step.
+6. Open problems, unresolved questions, and anything the user asked for that is not done yet.
+
+Keep exact identifiers: file paths, symbol names, command lines, error messages and task IDs. A
+path or error string that has been paraphrased is worse than useless. Omit greetings,
+acknowledgements and repetition of pleasantries. Be factual and dense rather than narrative.
+

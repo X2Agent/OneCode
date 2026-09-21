@@ -13,8 +13,7 @@ namespace OneCode.Tests;
 /// Unit tests for <see cref="LspDiagnosticContextProvider"/> — Layer 3 LSP context
 /// injection: no-op when there are no Error/Warning diagnostics under the working
 /// directory, file/severity summary injection otherwise.
-/// Uses reflection to invoke the protected ProvideAIContextAsync method
-/// (same pattern as <see cref="TaskContextProviderTests"/>).
+/// Uses reflection to invoke the protected ProvideAIContextAsync method.
 /// </summary>
 public sealed class LspDiagnosticContextProviderTests : IDisposable
 {

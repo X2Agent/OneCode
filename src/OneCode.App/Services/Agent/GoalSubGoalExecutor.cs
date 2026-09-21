@@ -174,6 +174,12 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         return new MainAgentRunOptions
         {
             SystemPrompt = systemPrompt,
+            // No product harness fragment: system/goal-subgoal.prompt is self-contained (it ships its
+            // own prompt-injection defense) and was never composed with the shared fragment. Suppression
+            // rather than null so MAF does not inject DefaultInstructions on top of it — the §4.6
+            // migration must not change prompt text as a side effect, and pre-migration the defaults
+            // were suppressed.
+            HarnessInstructions = OneCodeHarnessDefaults.SuppressFrameworkDefaults,
             UserPrompt = userPrompt,
             ModelId = options.ModelId,
             WorkingDirectory = options.WorkingDirectory,

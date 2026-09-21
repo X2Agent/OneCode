@@ -69,7 +69,7 @@ public static class ToolServiceCollectionExtensions
         services.AddToolInstance("WebSearch", (WebSearchTool tool) => AIFunctionFactory.Create(tool.SearchAsync, name: "WebSearch"), ToolRisk.ReadOnly, searchHint: "search the web",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["web search", "search web"]);
 
-        services.AddToolInstance("Task", (TaskTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Task"), ToolRisk.Safe, searchHint: "manage background tasks (create/update/get/list/stop/output)",
+        services.AddToolInstance("Task", (TaskTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Task"), ToolRisk.Safe, searchHint: "inspect and control host background tasks (get/list/stop/output)",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["task", "background task"], category: ToolCategory.PlanAllowed);
         services.AddToolInstance("BackgroundRun", (BackgroundRunTool tool) => AIFunctionFactory.Create(tool.RunAsync, name: "BackgroundRun"), ToolRisk.Destructive, concurrency: false, searchHint: "run command in background",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["background"]);

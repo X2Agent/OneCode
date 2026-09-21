@@ -117,15 +117,13 @@ public sealed record TextBlock(string Text) : ContentBlock;
 public sealed record ToolUseBlock(
     string Id,
     string Name,
-    string Input,
-    string? CacheControl = null) : ContentBlock;
+    string Input) : ContentBlock;
 
 /// <summary>
 /// 思考内容块——AI 的内部推理过程
 /// </summary>
 public sealed record ThinkingBlock(
-    string Thinking,
-    string? CacheControl = null) : ContentBlock;
+    string Thinking) : ContentBlock;
 
 /// <summary>
 /// 红acted 思考内容块——用户不可见的思考

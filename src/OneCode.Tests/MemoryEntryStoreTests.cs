@@ -3,12 +3,12 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.AutoDream;
-using OneCode.App.Services.Memory;
 using OneCode.App.Tools;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
+using OneCode.Infrastructure.Memory;
 using System.Diagnostics;
 
 namespace OneCode.Tests;
@@ -1049,6 +1049,111 @@ public sealed class MemoryEntryStoreTests : IDisposable
 
         written.Should().Be(0);
         (await _store.LoadAsync(MemoryScope.Project, default)).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 反证：存储存在但读不出时，Upsert 必须拒绝提交，而不是把“读不到”当成“空库”
+    /// 然后用只含新条目的内容覆盖掉原有数据。
+    /// </summary>
+    /// <remarks>
+    /// 用目录占位 <c>MEMORY.md</c> 让读取稳定失败（Windows/Linux 行为一致），
+    /// 避免依赖文件锁这类平台相关时序。
+    /// </remarks>
+    [Fact]
+    public async Task UpsertAsync_StoreUnreadable_RefusesWriteAndLeavesFileIntact()
+    {
+        var memoryDir = MemdirPaths.ProjectMemoryDir(_projectDir);
+        var filePath = MemoryEntryStore.GetFilePath(memoryDir);
+        Directory.CreateDirectory(filePath); // 同名目录 → ReadAllTextAsync 必然失败
+
+        var entry = new MemoryEntry
+        {
+            Key = "fact:new",
+            Value = "must not be written",
+            Source = "autodream",
+            Category = "fact",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var act = () => _store.UpsertAsync(MemoryScope.Project, [entry], default);
+
+        await act.Should().ThrowAsync<MemoryStoreReadException>();
+        Directory.Exists(filePath).Should().BeTrue(
+            "a refused write must not replace the unreadable store with a fresh file");
+    }
+
+    /// <summary>
+    /// 查询路径仍然降级：读不到存储时 <see cref="MemoryEntryStore.LoadAllAsync"/> 返回空列表，
+    /// 不让损坏的 MEMORY.md 拖垮提示词注入与 /memory list。
+    /// </summary>
+    [Fact]
+    public async Task LoadAllAsync_StoreUnreadable_DegradesToEmpty()
+    {
+        var memoryDir = MemdirPaths.ProjectMemoryDir(_projectDir);
+        var filePath = MemoryEntryStore.GetFilePath(memoryDir);
+        Directory.CreateDirectory(filePath);
+
+        var loaded = await _store.LoadAllAsync(MemoryScope.Project, default);
+
+        loaded.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 内容更新不是“从未被召回”的证据：重写 value 不得把累计的命中反馈清零，
+    /// 否则 AutoDream 每次整理都会静默重置淘汰排名。
+    /// </summary>
+    [Fact]
+    public async Task UpsertAsync_ExistingEntry_PreservesUsageFeedback()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await _store.UpsertAsync(MemoryScope.Project, [
+            new MemoryEntry
+            {
+                Key = "fact:keep-hits",
+                Value = "first",
+                Source = "autodream",
+                Category = "fact",
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+        ], default);
+
+        await _store.RecordHitsAsync(MemoryScope.Project, ["fact:keep-hits"], default);
+        await _store.RecordHitsAsync(MemoryScope.Project, ["fact:keep-hits"], default);
+
+        await _store.UpsertAsync(MemoryScope.Project, [
+            new MemoryEntry
+            {
+                Key = "fact:keep-hits",
+                Value = "second",
+                Source = "autodream",
+                Category = "fact",
+                CreatedAt = now.AddHours(1),
+                UpdatedAt = now.AddHours(1),
+            },
+        ], default);
+
+        var loaded = await _store.LoadAsync(MemoryScope.Project, default);
+        var entry = loaded.Single(e => e.Key == "fact:keep-hits");
+        entry.Value.Should().Be("second");
+        entry.HitCount.Should().Be(2, "a content rewrite must not reset accumulated recall feedback");
+        entry.LastHitAt.Should().NotBeNull();
+        entry.CreatedAt.Should().Be(now, "creation time survives updates");
+    }
+
+    /// <summary>
+    /// 取消必须穿透存储层，不能因为读失败就被吞掉。
+    /// </summary>
+    [Fact]
+    public async Task LoadAllAsync_CancelledToken_PropagatesCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => _store.LoadAllAsync(MemoryScope.Project, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     // Test helpers

@@ -121,7 +121,9 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 `MemoryService.FindRelevantMemoriesAsync` 供 `search_memories` 工具使用。
 
-**Query 分词**：正则 `[\p{L}\p{N}_-]{2,}` 提取 token（≥ 2 字符），过滤中英文停用词（`the`/`and`/`继续`/`实现`/`需要` 等）。
+**Query 分词**：共用 `OneCode.Core/Text/TextTokenizer`——拉丁词按大小写边界切分并去复数后缀（`FindReferences` → `find` / `reference` / `references` / `findreferences`），CJK 按二字滑窗切分（单字保留 unigram）。再过滤 ≥ 2 字符与中英文停用词（`the`/`and`/`继续`/`实现`/`需要` 等）。
+
+> **设计决策（2026-09-18 修订）**：旧实现用 `[\p{L}\p{N}_-]{2,}` 取连续串，但 `\p{L}` 匹配 CJK——中文整句会被切成**单个 token**，语料侧同样如此，导致任何中文查询召回**恒为空**。评测（`MemoryRecallEvaluationTests`）首轮即失败并暴露此缺陷。现与 `ToolRetrievalIndex` 共用同一分词器：两条检索路径规则不一致时，同一查询会在 ToolSearch 命中、在 `search_memories` 为空。
 
 **评分**（`MemoryService.Score`）：
 
@@ -133,6 +135,8 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 | 来源加成 | `Source == "manual"` +2（用户手动记忆权重更高） |
 
 **选取**：评分 > 0 的条目按分数降序 → `UpdatedAt` 降序，最多取 6 条（`MaxRelevantMemories`）。
+
+**输出预算**：`MaxRelevantMemories = 6` 只限条数，6 条完整正文可任意大。`MaxSearchResultChars = 12_000` 限制单次检索总字符数，超出部分显式报告省略。常驻索引另有 `MaxIndexChars = 4_000`——索引**每轮**注入，条目数不等于 token 上限。
 
 > **设计决策**：不使用"年龄桶加成"。评分应反映"相关性"而非"新旧"，且 `UpdatedAt` 降序作为次要排序键已隐含新鲜度偏好。
 
@@ -247,7 +251,7 @@ _Use the `search_memories` tool to retrieve full memory content._
 2. OneCode 是单用户 CLI，"Agent 团队"是同进程同工作目录的子 Agent；独立目录 + 环境变量路由的"团队"语义没有真实落点
 3. 独立 md 目录 + 自有 frontmatter 解析器 + 截断保护的维护成本，相对"成员多读一份 MEMORY.md"没有增量价值
 
-已知小缺口（已于 2026-08-15 补齐）：Team 成员的 system prompt 经 `ComposeWithRoleAsync`（harness + role）合成，不含主会话的 `{{memory_section}}` 摘要索引——现由 `PromptComposer.ComposeWithRoleAsync` 在 role prompt 末尾追加一行 `search_memories` 引导（Team 成员与 Explore/Plan fork 子代理均生效），无需架构变更。
+已知小缺口（已于 2026-08-15 补齐）：Team 成员的 system prompt 经 `PromptComposer.GetHarnessAsync` + `PromptComposer.RenderRoleBody` 两段取得（合成由 MAF 负责），不含主会话的 `{{memory_section}}` 摘要索引——现由 `RenderRoleBody` 在 role prompt 末尾追加一行 `search_memories` 引导（Team 成员与 Explore/Plan fork 子代理均生效），无需架构变更。
 
 > 历史设计稿（目录解析 / MemdirFrontmatterParser / 截断保护 / 专用 Provider 注入）见 git history 本文件 2026-08-15 之前的版本。
 
@@ -291,15 +295,18 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 |------|---------|------|
 | 1 | MAF `AgentSkillsProvider`（`SkillProviderFactory` 构建） | `Skills` |
 | 2 | `search_memories`（`MemorySearchProviderFactory` → MAF `TextSearchProvider`） | `MemorySearch` |
-| 3 | `DesignContextProvider` | `DesignContext` |
-| 4 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
-| 5 | `TaskContextProvider`（运行时注入） | `TaskContext` |
+| 3 | Harness `FileMemoryProvider`（会话工作记忆，按 profile 启用） | `FileMemory` |
+| 4 | `DesignContextProvider` | `DesignContext` |
+| 5 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
 | 6 | `ShellEnvironmentProvider` | `ShellEnvironment`（且前台会话存在 shell executor） |
 | 7 | `CodeActProvider` | `CodeAct` |
 
 > 注入顺序 = `AgentCapability` 枚举声明顺序，保证同一 profile 的 provider 顺序恒定。
+> 原 `TaskContextProvider` 已删除：普通清单由 Harness `todos_*` 承担，宿主执行记录仍归 `ITaskService`。
 > 各 profile 的能力差异见 `PipelineProfileBehavior.For`（以「全集减去若干能力」形式表达）。
-> Team 子 Agent 专用 Provider（如 `TeamSystemPromptProvider`）由 `TeamAgentFactory` 在装配时追加。MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建。
+> Team 子 Agent 的角色指令不再由专属 Provider 注入：`TeamAgentFactory` 将角色正文交给
+> `ChatOptions.Instructions`，由 MAF 与 Harness 通用指令合成，产品侧不再持有重复的注入职责。
+> MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建。
 
 ### 11. 记忆治理与演进方向
 
@@ -355,7 +362,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 而“从未被检索 = 低价值”已覆盖绝大多数场景。若后续发现高价值类别被误淘汰，再评估。
 
 代码：`src/OneCode.Core/Memory/MemoryEntry.cs`、`IMemoryEntryStore.cs`（`RecordHitsAsync` 契约）、
-`src/OneCode.App/Services/Memory/MemoryEntryStore.cs`（`PruneAsync` 淘汰排序）、
+`src/OneCode.Infrastructure/Memory/MemoryEntryStore.cs`（`PruneAsync` 淘汰排序）、
 `MemorySearchProviderFactory.cs`（命中回写）。
 
 #### 11.3 AutoDream 从“提取器”升级为“治理器”（⛔ 未实施）
@@ -454,9 +461,38 @@ MAF `AIContextProvider.StoreAIContextAsync` 在 exchange 结束时被调用，�
 
 **预留方式**：先做 `IMemoryIndex` 抽取，不引入任何新依赖。
 
-#### 11.6 不引入 MAF `FileMemoryProvider`（重申 §1 决策并补论证）
+#### 11.6 召回评测与中文分词（2026-09-18）
 
-MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**语义不匹配**：
+评测样本冻结在 `src/OneCode.Tests/MemoryRecallEvaluationTests.cs`（10 条中英混合语料 + 6 个中文查询 +
+5 个代码术语查询 + 2 个负样本），分词规则本身由 `TextTokenizerTests.cs` 锁定。
+
+**评测首轮即失败，暴露真实缺陷**：旧分词器 `[\p{L}\p{N}_-]{2,}` 中 `\p{L}` 匹配 CJK，
+「测试怎么跑」会被切成**单个 token**，语料侧同样如此——**任何中文查询的召回恒为空**。
+
+**根因是两条检索路径各写一套分词**：`ToolRetrievalIndex` 已有 CJK bigram，`MemoryService` 没有，
+同一查询在 ToolSearch 能命中、在 `search_memories` 为空。现抽出 `OneCode.Core/Text/TextTokenizer`
+（拉丁按大小写边界切分并去复数后缀 + CJK 二字滑窗，单字保留 unigram），两条路径共用；
+`ToolRetrievalIndex` 只叠加 Hint 字段停用词政策。
+
+**评测方法**：断言**相对召回**（期望条目出现在 Top-N）而非绝对分数——分数随语料变化，锁定分数会让每次
+新增条目都变成无意义的维护。负样本（无关查询必须零召回）防止「查询非空就返回前 N 条」的实现通过。
+
+**反证**：临时让 `FindRelevantEntries` 跳过评分直接返回前 6 条，10 项用例全部失败（含 2 个负样本），
+确认用例有判别力。
+
+**未闭环**：「动态激活用原生请求扩展点」与「历史向量检索」无需求驱动，按 §11.5 的触发条件保留，
+不引入向量后端。中文二字滑窗使长词的部分匹配依赖 bigram 重叠数，属可接受的召回/精确度权衡；
+如需更高精确度，应先补充固定样本证明现状不足，再考虑词典或向量方案。
+
+#### 11.7 不引入 MAF `FileMemoryProvider` 替换长期记忆（重申 §1 决策并补论证）
+
+> **范围限定（2026-09-18 补充）**：本节结论**只针对长期记忆（Memdir / `MEMORY.md`）**——
+> 不用 `FileMemoryProvider` 替换它。会话工作记忆是**另一个领域**，确实已改用原生
+> `FileMemoryProvider`（仅 Main 启用，见 [ADR 0007](./0007-maf-integration-boundaries.md) 的能力归属表）。
+> 两者分目录共存：Memdir 管跨会话知识，`FileMemoryProvider` 管当前会话工作产物。
+> 不得据本节断言「OneCode 不使用 `FileMemoryProvider`」。
+
+MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**不适合替换长期记忆**：
 
 | 维度 | `FileMemoryProvider` | OneCode 需求 |
 |---|---|---|
@@ -467,8 +503,9 @@ MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**语义不匹配**：
 | 注入内容 | 仅索引（名 + 描述） | 摘要索引 + 全量 manual + Top-8 auto |
 | 自动整合 | **无** | AutoDream |
 
-**最关键的一点**：它是“让 LLM 自己决定记什么”，而 OneCode 的安全模型是“LLM 不能直接写记忆”。
-这不仅是实现差异，是**架构冲突**。
+**最关键的一点**：它是“让 LLM 自己决定记什么”，而 OneCode 的长期记忆安全模型是“LLM 不能直接写记忆”。
+这不仅是实现差异，是**架构冲突**。会话工作记忆则相反——LLM 本就该自主写工作产物，
+不存在结构注入风险，因此该冲突不适用于它。
 
 **结构性约束**：`FileMemoryProvider` 为 `sealed`，**不能派生**，只能组合/包装；其
 `WorkingFolder` 策略硬编码在 `HarnessAgent` 内，外部无法覆盖；`FileSystemAgentFileStore`
@@ -483,7 +520,7 @@ MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**语义不匹配**：
 
 **不该借鉴**：LLM 持有写工具、一记忆一文件、无生命周期管理。
 
-#### 11.7 验证状态与已知覆盖缺口
+#### 11.8 验证状态与已知覆盖缺口
 
 > 本节补充于 2026-09-16，记录 §11.2 落地后的**验证边界**——哪些结论已被守卫测试保护、哪些仍是缺口。
 > 过程证据（缺陷复现、逐阶段清单、实测数字）原属 `docs/plan/memory-module-refactor-plan.md`，

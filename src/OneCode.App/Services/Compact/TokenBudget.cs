@@ -15,6 +15,10 @@ public static class TokenBudget
         IModelCatalog? catalog = null)
     {
         var maxContextTokens = GetMaxContextTokens(session.Model, modelManager, catalog);
+        // 这里是**告警口径**（完整 transcript 规模），不是模型本次实际收到的输入预算——
+        // 后者由 CompactionPipelineBuilder.ResolveInputBudget 计算，非法窗口/输出对会直接抛错。
+        // 因此保留钳制：上下文窗口被配置成 ≤ ReservedOutputTokens 时，MaxInputTokens 变成 1，
+        // UsageRatio 立刻越线并持续告警，配置问题以可见告警暴露，而不是被算成一个「看起来合理」的预算。
         var effectiveMaxTokens = Math.Max(1, maxContextTokens - ReservedOutputTokens);
         var estimatedTokens = EstimateTextTokens(systemPrompt, tokenEstimator);
 

@@ -18,7 +18,6 @@ namespace OneCode.Tests;
 /// 1. PermissionChecker.CheckAsync 抛 InvalidOperationException → 中间件应阻止工具执行
 /// 2. PermissionChecker.CheckAsync 抛 TimeoutException → 中间件应阻止工具执行
 /// 3. 未知 PermissionMode 值时的 fail-closed fallback 行为
-/// 4. ApprovalBroker 抛异常时的 fail-closed 行为
 ///
 /// 这些测试防止安全关键的 fail-open 漏洞：如果权限检查器因任何原因失败，
 /// 工具调用必须被拒绝，而非默认放行。
@@ -41,10 +40,9 @@ public sealed class PermissionCheckerFailClosedTests
         var rulesBySource = options.RulesBySource ?? new Dictionary<string, PermissionRuleGroup>();
         var additionalWorkingDirectories = options.AdditionalWorkingDirectories
             ?? new Dictionary<string, AdditionalWorkingDirectory>();
-        var sessionAllowlist = options.SessionAllowlist ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var boxed = CheckPermissionMethod.Invoke(
-            null, new object[] { options, rulesBySource, additionalWorkingDirectories, sessionAllowlist, ctx, next, ct });
+            null, new object[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, ct });
         return ((ValueTask<object>)boxed!).AsTask();
     }
 
@@ -190,50 +188,6 @@ public sealed class PermissionCheckerFailClosedTests
 
         result.Decision.Should().Be(PermissionDecision.Ask,
             "unknown permission mode must fall back to Default (Ask), not Allow (fail-open)");
-    }
-
-    // ApprovalBroker 抛异常时的 fail-closed 行为
-
-    [Fact]
-    public async Task CheckPermission_ApprovalBrokerThrows_PropagatesExceptionWithoutExecuting()
-    {
-        // Arrange: PermissionChecker 返回 Ask，ApprovalBroker 抛异常
-        // 中间件不应吞掉异常后 fail-open 放行工具调用
-        var ct = TestContext.Current.CancellationToken;
-        var checker = Substitute.For<IPermissionChecker>();
-        checker.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<JsonElement>(),
-                Arg.Any<ToolPermissionContext>(),
-                Arg.Any<CancellationToken>())
-            .Returns(PermissionCheckResult.Ask("confirm?"));
-
-        var approvalBroker = Substitute.For<IApprovalBroker>();
-        approvalBroker.RequestAsync(Arg.Any<ApprovalRequest>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<ApprovalDecision>(
-                new InvalidOperationException("approval service unavailable")));
-
-        var ctx = CreateContext("Write");
-        var options = new AgentPipelineOptions
-        {
-            WorkingDirectory = "/test",
-            PermissionChecker = checker,
-            PermissionMode = PermissionMode.Default,
-            ApprovalBroker = approvalBroker,
-            EnableToolApproval = false, // 强制走 ApprovalBroker inline 路径
-        };
-        var holder = new FlagHolder();
-
-        // Act
-        var act = () => InvokeCheckPermissionAsync(
-            options, ctx,
-            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
-            ct);
-
-        // Assert: ApprovalBroker 异常必须传播，不能 fail-open 放行
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "ApprovalBroker exception must propagate — no fail-open when approval service fails");
-        holder.Value.Should().BeFalse("tool must not execute when approval broker throws");
     }
 
     private static YoloClassifier CreateYoloClassifier()

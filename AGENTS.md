@@ -41,6 +41,7 @@ src/
 - **Prompt 管理**：文件化 prompt（三层覆盖），缺失处理双策略见 [src/OneCode.App/AGENTS.md](src/OneCode.App/AGENTS.md)。
 - **快捷键**：默认绑定源头在 `src/OneCode.Core/Keybindings/KeybindingDefaults.cs`，参考 [docs/keybindings.md](docs/keybindings.md)。
 - **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs` 的 `AddCommands()`，新增/删除命令须同步 [docs/commands.md](docs/commands.md)。
+- **MAF 接入**：装配顺序、扩展点与现状对照见 [docs/maf/integration-guide.md](docs/maf/integration-guide.md)；集成边界与禁令见 [docs/adr/0007-maf-integration-boundaries.md](docs/adr/0007-maf-integration-boundaries.md)。
 
 ## Agent Guidelines
 

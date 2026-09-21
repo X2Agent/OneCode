@@ -69,7 +69,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 1. `IsToolAllowed` 白名单过滤（超限只失败当前调用，保留批次完整性）
 2. 工具调用计数 + `MaxToolCalls` 上限（被拒绝的调用不计入）
 3. 权限检查（`PermissionChecker.CheckAsync`，Allow/Deny/Ask 三路决策）
-4. 审批路由：Ask → MAF `ToolApprovalAgent` 或 inline `ApprovalBroker`（`IApprovalBroker` 抽象，见「M4 完全事件驱动审批」现状注记）
+4. 审批路由：Ask → MAF 审批协议（单通道，标记工具产生审批请求；Main 由流式审批拆分、Team 由工作流审批桥呈现，见「M4 完全事件驱动审批」现状注记；无通道时 fail-safe Deny）
 
 观测性中间件（`RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking）仍为无决策权的 `.Use()` 拦截器，与本 ADR 约束一致。
 
@@ -80,7 +80,7 @@ MAF AutoApprovalRules 与 Permission **不再**用 PermissionProfile.AutoApprove
 - **确定性单一源**：AutoApprovalRulesFactory 调用 PermissionProfiles.Check；仅当结果为 Allow 时自动批准。
 - **不含 YOLO**：IPermissionChecker / YOLO 仍只在 PermissionAndLimitMiddleware 路径；避免审批层双跑。
 - **产品定义**：MAF 自动批集合 = 确定性 Permission Allow 集合（含 Default/Plan 下只读工具）。
-- **仍保留**：Permission 为唯一 Allow/Deny 安全门；Ask 继续交给 ToolApproval / ApprovalBroker；EnableVerification 仍在 PermissionProfile。
+- **仍保留**：Permission 为唯一 Allow/Deny 安全门；Ask 一律进入 MAF 审批协议（Main 流式拆分 / Team 工作流审批桥）；EnableVerification 仍在 PermissionProfile。
 
 ## 现状补充（2026-09-15，W2-B 编辑守卫合并）
 

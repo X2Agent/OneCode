@@ -1,5 +1,4 @@
-using System.Text;
-using System.Text.RegularExpressions;
+using OneCode.Core.Text;
 
 namespace OneCode.Core.Tools;
 
@@ -201,80 +200,16 @@ public sealed partial class ToolRetrievalIndex
 
     private static List<string> Tokenize(string text, bool isHint)
     {
+        // 分词规则与记忆检索共用 TextTokenizer：两条检索路径对同一查询必须给出同一套 token，
+        // 否则中文查询在一边能召回、在另一边为空。此处只叠加 Hint 字段的停用词政策。
         var tokens = new List<string>();
-        var latin = new StringBuilder();
-        var cjk = new StringBuilder();
-
-        foreach (var ch in text)
+        foreach (var token in TextTokenizer.Tokenize(text))
         {
-            if (IsCjk(ch))
-            {
-                FlushLatin(tokens, latin, isHint);
-                cjk.Append(ch);
-            }
-            else if (char.IsLetterOrDigit(ch))
-            {
-                FlushCjk(tokens, cjk);
-                latin.Append(ch);
-            }
-            else
-            {
-                FlushLatin(tokens, latin, isHint);
-                FlushCjk(tokens, cjk);
-            }
+            if (isHint && StopWords.Contains(token))
+                continue;
+            tokens.Add(token);
         }
-        FlushLatin(tokens, latin, isHint);
-        FlushCjk(tokens, cjk);
         return tokens;
-    }
-
-    private static void FlushLatin(List<string> tokens, StringBuilder latin, bool isHint)
-    {
-        if (latin.Length == 0)
-            return;
-
-        var segment = latin.ToString();
-        latin.Clear();
-
-        // PascalCase 切分（"FindReferences" → find/reference(s)），整段小写一并保留（"findreferences"）
-        foreach (var part in CamelBoundaryRegex().Split(segment))
-        {
-            var lower = part.ToLowerInvariant();
-            AddToken(tokens, lower, isHint);
-
-            // 简单去复数让 "reference" 与 "references" 互为 exact 匹配
-            var stemmed = StripPluralSuffix(lower);
-            if (stemmed.Length != lower.Length)
-                AddToken(tokens, stemmed, isHint);
-        }
-        AddToken(tokens, segment.ToLowerInvariant(), isHint);
-    }
-
-    private static void FlushCjk(List<string> tokens, StringBuilder cjk)
-    {
-        if (cjk.Length == 0)
-            return;
-
-        var segment = cjk.ToString();
-        cjk.Clear();
-
-        // 单字保留 unigram（否则 "读" 永远不可达），更长序列按二字滑窗切 bigram
-        if (segment.Length == 1)
-        {
-            tokens.Add(segment);
-            return;
-        }
-        for (var i = 0; i < segment.Length - 1; i++)
-            tokens.Add(segment.Substring(i, 2));
-    }
-
-    private static void AddToken(List<string> tokens, string token, bool isHint)
-    {
-        if (token.Length == 0)
-            return;
-        if (isHint && StopWords.Contains(token))
-            return;
-        tokens.Add(token);
     }
 
     private static string StripPluralSuffix(string word)
@@ -282,12 +217,6 @@ public sealed partial class ToolRetrievalIndex
         => word.Length > 3 && word.EndsWith('s') && !word.EndsWith("ss", StringComparison.Ordinal)
             ? word[..^1]
             : word;
-
-    private static bool IsCjk(char ch)
-        => ch is >= '一' and <= '鿿' or >= '㐀' and <= '䶿';
-
-    [GeneratedRegex(@"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")]
-    private static partial Regex CamelBoundaryRegex();
 
     private sealed record FieldTokens(HashSet<string> Tokens, string JoinedText);
 

@@ -94,6 +94,7 @@ public static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddWebSearchProviders(this IServiceCollection services)
     {
         services.AddSingleton<IWebSearchProvider, TavilySearchProvider>();
+        services.AddSingleton<IWebSearchProvider, DuckDuckGoSearchProvider>();
         return services;
     }
 }

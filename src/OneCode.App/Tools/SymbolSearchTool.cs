@@ -42,12 +42,20 @@ public sealed class SymbolSearchTool
         [Description("Optional symbol kind: class, interface, struct, enum, method, etc.")] string? kind = null,
         [Description("Optional directory/file path scope.")] string? path = null,
         [Description("Max results (default 20, max 100).")] int maxResults = 20,
-        [Description("When true (default), try LSP workspace/symbol first and fall back to the code index on failure.")] bool useLsp = true)
+        [Description("When true (default), try LSP workspace/symbol first and fall back to the code index on failure.")] bool useLsp = true,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query))
             return ToolResult.Error("'query' is required.");
 
         maxResults = Math.Clamp(maxResults, 1, Constants.Lsp.MaxResultsUpper);
+
+        // Resolve the path scope once, up front, so the LSP and index paths filter on the same value.
+        // Previously the scope was only computed on the fallback path, so an LSP hit list ignored it
+        // entirely and could return symbols from files the caller had explicitly excluded.
+        var pathScope = path;
+        if (!string.IsNullOrEmpty(pathScope) && !Path.IsPathRooted(pathScope))
+            pathScope = Path.GetFullPath(Path.Combine(_wd.WorkingDirectory, pathScope));
 
         // LSP-first path
         // workspace/symbol returns SymbolInformation objects with proper namespace
@@ -56,11 +64,15 @@ public sealed class SymbolSearchTool
         {
             try
             {
-                var lspResults = await TrySearchViaLspAsync(query, kind, maxResults).ConfigureAwait(false);
+                var lspResults = await TrySearchViaLspAsync(query, kind, pathScope, maxResults, ct).ConfigureAwait(false);
                 if (lspResults.Count > 0)
                 {
                     return ToolResult.Success(FormatLspResults(query, kind, lspResults));
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -75,10 +87,6 @@ public sealed class SymbolSearchTool
 
         if (!_indexService.LastIndexedAt.HasValue && !_indexService.IsIndexing)
             return ToolResult.Error("Code index is still building. Please retry in a moment, or ensure an LSP server is running for semantic search.");
-
-        var pathScope = path;
-        if (!string.IsNullOrEmpty(pathScope) && !Path.IsPathRooted(pathScope))
-            pathScope = Path.GetFullPath(Path.Combine(_wd.WorkingDirectory, pathScope));
 
         var matches = _indexService.Search(query, maxResults, kind, pathScope);
         if (matches.Count == 0)
@@ -115,7 +123,13 @@ public sealed class SymbolSearchTool
     /// Returns an empty list when no server is initialized or no results come back,
     /// signalling the caller to fall back to the code index.
     /// </summary>
-    private async Task<List<LspSymbolResult>> TrySearchViaLspAsync(string query, string? kind, int maxResults)
+    /// <param name="query">Symbol name to search for.</param>
+    /// <param name="kind">Optional symbol kind filter (case-insensitive substring match).</param>
+    /// <param name="pathScope">Absolute directory or file path the caller scoped to, or null for no scope.</param>
+    /// <param name="maxResults">Upper bound on returned results.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<List<LspSymbolResult>> TrySearchViaLspAsync(
+        string query, string? kind, string? pathScope, int maxResults, CancellationToken ct)
     {
         var status = _serverManager!.GetStatus();
         if (status.Count == 0)
@@ -126,10 +140,12 @@ public sealed class SymbolSearchTool
 
         foreach (var s in status)
         {
+            ct.ThrowIfCancellationRequested();
+
             if (!s.IsInitialized) continue;
             try
             {
-                var result = await _serverManager.SendRequestAsync(s.Name, "workspace/symbol", @params).ConfigureAwait(false);
+                var result = await _serverManager.SendRequestAsync(s.Name, "workspace/symbol", @params, ct).ConfigureAwait(false);
                 if (result is not { } el || el.ValueKind != JsonValueKind.Array)
                     continue;
 
@@ -146,8 +162,15 @@ public sealed class SymbolSearchTool
                         continue;
                     }
 
+                    if (!IsWithinPathScope(parsed.File, pathScope))
+                        continue;
+
                     merged.Add(parsed);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -157,6 +180,24 @@ public sealed class SymbolSearchTool
         }
 
         return merged.Take(maxResults).ToList();
+    }
+
+    /// <summary>
+    /// Filters <b>before</b> truncation so a scoped search cannot be crowded out by out-of-scope hits.
+    /// The index path applies the same rule inside <c>ICodeIndexService.Search</c>.
+    /// </summary>
+    private static bool IsWithinPathScope(string filePath, string? pathScope)
+    {
+        if (string.IsNullOrEmpty(pathScope) || string.IsNullOrEmpty(filePath))
+            return true;
+
+        var normalizedFile = Path.GetFullPath(filePath);
+        var normalizedScope = Path.GetFullPath(pathScope);
+
+        return normalizedFile.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase)
+            || normalizedFile.StartsWith(
+                normalizedScope.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

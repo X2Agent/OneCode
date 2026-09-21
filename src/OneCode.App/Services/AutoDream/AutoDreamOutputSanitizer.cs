@@ -20,7 +20,7 @@ internal static partial class AutoDreamOutputSanitizer
 
     /// <summary>
     /// 清洗 Agent 输出的 Key，防止 MEMORY.md 结构注入。
-    /// - 换行 → 空格：Key 必须单行（<see cref="OneCode.App.Services.Memory.MemoryEntryStore"/> 序列化为 <c>## {Key}</c> 单行 header）
+    /// - 换行 → 空格：Key 必须单行（<c>OneCode.Infrastructure.Memory.MemoryEntryStore</c> 序列化为 <c>## {Key}</c> 单行 header）
     /// - 前导 <c>#</c> → 移除：防止 <c>## fact:foo</c> 被解析器当作已存在的 header 而错位
     /// - 长度限制：防止超长 Key 撑爆 MEMORY.md 单行
     /// </summary>

@@ -111,6 +111,69 @@ public sealed class ToolCatalogTests
         catalog.Find("MCP__Playwright__Navigate").Should().BeSameAs(mcpTool);
     }
 
+    /// <summary>
+    /// 反证：工具描述变化后元数据必须更新。旧实现按名字缓存首次注册结果，
+    /// 服务器改了描述之后仍会广告旧措辞与旧关键词。
+    /// </summary>
+    [Fact]
+    public void Tools_McpToolDescriptionChanges_MetadataIsUpdated()
+    {
+        var registry = new ToolMetadataRegistry();
+        var live = new List<AIFunction> { CreateFunction("mcp__a__tool", "original description") };
+        var catalog = ToolCatalog.FromRegistrations(
+            Substitute.For<IServiceProvider>(), registry, [], CreateMcpManagerOver(live));
+
+        _ = catalog.Tools;
+        registry.Get("mcp__a__tool")!.SearchHint.Should().Contain("original description");
+
+        // The server updates the tool's description between turns.
+        live[0] = CreateFunction("mcp__a__tool", "revised description");
+        _ = catalog.Tools;
+
+        var metadata = registry.Get("mcp__a__tool")!;
+        metadata.SearchHint.Should().Contain("revised description",
+            "a tool's description is its retrieval signal; caching the first one keeps advertising stale wording");
+        metadata.Keywords.Should().Contain("revised");
+    }
+
+    /// <summary>
+    /// 反证：服务器断开后其工具必须退出注册表，否则 ToolSearch 会推荐一个永远调不通的工具。
+    /// </summary>
+    [Fact]
+    public void Tools_McpToolDisappears_MetadataIsRemoved()
+    {
+        var registry = new ToolMetadataRegistry();
+        var live = new List<AIFunction>
+        {
+            CreateFunction("mcp__a__tool", "a tool"),
+            CreateFunction("mcp__b__tool", "another tool"),
+        };
+        var catalog = ToolCatalog.FromRegistrations(
+            Substitute.For<IServiceProvider>(), registry, [], CreateMcpManagerOver(live));
+
+        _ = catalog.Tools;
+        registry.GetVisibleToolNames().Should().Contain("mcp__a__tool");
+
+        // Server A disconnects.
+        live.RemoveAll(tool => tool.Name == "mcp__a__tool");
+        _ = catalog.Tools;
+
+        registry.Get("mcp__a__tool").Should().BeNull(
+            "a disconnected server's tool must not remain selectable");
+        registry.GetVisibleToolNames().Should().NotContain("mcp__a__tool");
+        registry.Get("mcp__b__tool").Should().NotBeNull("the still-connected server is unaffected");
+    }
+
+    /// <summary>
+    /// MCP manager double over a live list, so a test can change what the server serves between turns.
+    /// </summary>
+    private static IMcpConnectionManager CreateMcpManagerOver(List<AIFunction> liveTools)
+    {
+        var manager = Substitute.For<IMcpConnectionManager>();
+        manager.GetAllTools().Returns(_ => liveTools.ToList());
+        return manager;
+    }
+
     // TokenizeDescription：检索词提取规则（≥3 字符、停用词过滤、去重、上限 8 个）
 
     [Theory]

@@ -15,8 +15,20 @@ public sealed class ForkedAgentParams
     /// <summary>Parent agent context (for cache sharing and state isolation).</summary>
     public string? ParentWorkingDirectory { get; init; }
 
-    /// <summary>Fork context messages (prepended to the message list).</summary>
-    public IReadOnlyList<ChatMessage>? ForkContextMessages { get; init; }
+    /// <summary>
+    /// Fork 自身的角色正文（角色 overlay + 记忆检索提示），交给 MAF 作为
+    /// <c>ChatOptions.Instructions</c>；harness 片段由 MAF 拼在它前面。Worker 等无角色
+    /// overlay 的路径为 null，此时子 Agent 只保留 harness 片段 + 继承的父级 cache-safe system prompt。
+    /// </summary>
+    public string? AgentInstructions { get; init; }
+
+    /// <summary>
+    /// Shared harness fragment (<c>system/harness</c>) for the child agent, handed to MAF as
+    /// <c>HarnessInstructions</c>. Set on every fork path — the fragment is never pre-joined into
+    /// <see cref="AgentInstructions"/>, because MAF owns the composition order. Null only for callers
+    /// that deliberately want MAF's default instructions instead.
+    /// </summary>
+    public string? HarnessInstructions { get; init; }
 
     /// <summary>Tools the child agent is allowed to use (null = all tools).</summary>
     public IReadOnlyList<string>? AllowedTools { get; init; }

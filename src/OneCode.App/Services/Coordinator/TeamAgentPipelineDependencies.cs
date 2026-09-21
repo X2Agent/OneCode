@@ -6,5 +6,6 @@ namespace OneCode.App.Services.Coordinator;
 public sealed record TeamAgentPipelineDependencies(
     AgentContextPipeline ContextPipeline,
     SubAgentPipelineFactory PipelineFactory,
-    CompactionProviderBuilder CompactionBuilder,
-    ISessionConversationAccess SessionAccess);
+    CompactionStrategyFactory CompactionBuilder,
+    ISessionConversationAccess SessionAccess,
+    Core.Tools.ToolMetadataRegistry ToolMetadata);

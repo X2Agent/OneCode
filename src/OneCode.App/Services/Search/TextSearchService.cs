@@ -19,6 +19,16 @@ public sealed class TextSearchService(
     /// 涵盖 .NET、Node、Rust、Python、Java、Go 等多语言构建与缓存产物。
     /// </summary>
     private static readonly string[] DefaultExcludes = [.. FileIgnore.Folders];
+
+    /// <summary>
+    /// Upper bound for a single native regex evaluation.
+    /// </summary>
+    /// <remarks>
+    /// Without a timeout a pathological pattern (nested quantifiers over a long line) can run
+    /// unbounded inside one file, and the tool call never returns. 5s matches the framework's own
+    /// default for the file-skills regexes.
+    /// </remarks>
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(5);
     public async Task<IReadOnlyList<string>> SearchAsync(TextSearchRequest request, CancellationToken ct = default)
     {
         var contextBefore = request.ContextBefore;
@@ -199,7 +209,7 @@ public sealed class TextSearchService(
         var regexOptions = request.CaseInsensitive ? RegexOptions.IgnoreCase | RegexOptions.Compiled : RegexOptions.Compiled;
         if (request.Multiline) regexOptions |= RegexOptions.Singleline;
         Regex regex;
-        try { regex = new Regex(request.Pattern, regexOptions); }
+        try { regex = new Regex(request.Pattern, regexOptions, RegexTimeout); }
         catch (ArgumentException ex) { return new List<string> { $"Invalid regex: {ex.Message}" }; }
 
         var excludePatterns = string.IsNullOrEmpty(request.ExcludeGlob)
@@ -260,9 +270,15 @@ public sealed class TextSearchService(
                 }
                 if (request.OutputMode == "count")
                 {
+                    // Count matching LINES, matching ripgrep's `-c` (which counts matching lines,
+                    // not occurrences). Counting occurrences here made the two engines report
+                    // different numbers for the same file, so a caller could not tell whether a
+                    // result changed because the code changed or because the engine changed.
                     var count = 0;
                     await foreach (var line in File.ReadLinesAsync(file, ct).ConfigureAwait(false))
-                        count += regex.Matches(line).Count;
+                    {
+                        if (regex.IsMatch(line)) count++;
+                    }
                     if (count > 0) results.Add($"{relativePath}:{count}");
                     continue;
                 }

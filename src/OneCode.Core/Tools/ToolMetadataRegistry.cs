@@ -132,6 +132,37 @@ public sealed class ToolMetadataRegistry
         }
     }
 
+    /// <summary>
+    /// Removes a tool's metadata.
+    /// </summary>
+    /// <remarks>
+    /// Used when a tool stops being served (e.g. an MCP server disconnected). Leaving the entry behind
+    /// keeps the tool in retrieval results, so the model can select something that can no longer run.
+    /// </remarks>
+    /// <returns><see langword="true"/> if an entry was removed.</returns>
+    public bool Unregister(string toolName)
+    {
+        lock (_lock)
+        {
+            if (!_byName.Remove(toolName, out var removed))
+                return false;
+
+            // Aliases are a shared lookup table: only drop ones that still point at this tool, or a
+            // re-registered alias would be lost along with it.
+            foreach (var alias in removed.Aliases)
+            {
+                if (_byAlias.TryGetValue(alias, out var current)
+                    && ReferenceEquals(current, removed))
+                {
+                    _byAlias.Remove(alias);
+                }
+            }
+
+            _index.Remove(toolName);
+            return true;
+        }
+    }
+
     /// <summary>按名称或别名查找元数据。</summary>
     public ToolMetadata? Get(string name)
     {
@@ -210,11 +241,29 @@ public sealed class ToolMetadataRegistry
     /// 按评分降序返回最多 <paramref name="maxResults"/> 条。
     /// </summary>
     public IReadOnlyList<ToolSearchMatch> SearchTools(string query, int maxResults)
+        => SearchTools(query, maxResults, candidateFilter: null);
+
+    /// <summary>
+    /// 按相关度搜索工具，并先用 <paramref name="candidateFilter"/> 限定候选集。
+    /// </summary>
+    /// <param name="query">检索关键词。</param>
+    /// <param name="maxResults">返回条数上限。</param>
+    /// <param name="candidateFilter">
+    /// 候选谓词，返回 false 的工具在排名与截断之前被排除。
+    /// 调用方必须在这里表达 profile 能力约束，而不是在结果上过滤：
+    /// 先取全局 Top-N 再剔除不允许的工具，会让合法工具因为被大量不允许的候选
+    /// 挤出名额而漏召回。
+    /// </param>
+    public IReadOnlyList<ToolSearchMatch> SearchTools(
+        string query,
+        int maxResults,
+        Func<string, bool>? candidateFilter)
     {
         lock (_lock)
         {
             return _index.Search(query)
                 .Where(m => _byName.TryGetValue(m.ToolName, out var meta) && meta.IsVisible && meta.IsEnabled)
+                .Where(m => candidateFilter is null || candidateFilter(m.ToolName))
                 .Take(maxResults)
                 .ToList();
         }

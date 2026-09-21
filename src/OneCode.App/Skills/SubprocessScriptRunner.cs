@@ -1,8 +1,40 @@
+using System.Diagnostics;
 using Microsoft.Agents.AI;
+
 namespace OneCode.App.Skills;
 
+/// <summary>
+/// Runs file-based skill scripts as child processes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Not a sandbox.</b> Approval to run a script means the user agreed to run it; it says nothing about
+/// isolation. The child process has the same filesystem and network access as the agent itself.
+/// </para>
+/// <para>
+/// <b>Bounded.</b> A script that hangs, floods stdout or exits non-zero must not be able to wedge the
+/// agent or masquerade as success. Each of those has an explicit outcome: a timeout, a truncation marker,
+/// or an error result carrying the exit code.
+/// </para>
+/// </remarks>
 public static class SubprocessScriptRunner
 {
+    /// <summary>Maximum time a single script may run before it is killed.</summary>
+    /// <remarks>
+    /// Scripts are helper steps inside a tool call, not long-running jobs. A hung interpreter would
+    /// otherwise hold the tool call open until the user cancels the whole run.
+    /// </remarks>
+    private static readonly TimeSpan ScriptTimeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>Maximum characters of stdout returned to the model.</summary>
+    private const int MaxOutputChars = 30_000;
+
+    /// <summary>Maximum characters of stderr echoed into a failure result.</summary>
+    private const int MaxErrorChars = 2_000;
+
+    /// <summary>Marker appended when output was cut short, so truncation is visible to the model.</summary>
+    private const string TruncationMarker = "\n… [output truncated]";
+
     private static readonly Dictionary<string, string> ExtensionToInterpreter = new(StringComparer.OrdinalIgnoreCase)
     {
         [".py"] = "python",
@@ -78,30 +110,88 @@ public static class SubprocessScriptRunner
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ScriptTimeout);
+
+        Process? process = null;
         try
         {
-            using var process = Process.Start(psi);
+            process = Process.Start(psi);
             if (process is null)
-                return null;
+                return ToolFailure(scriptPath, "the process could not be started.");
 
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
 
             var stdout = await stdoutTask.ConfigureAwait(false);
             var stderr = await stderrTask.ConfigureAwait(false);
 
             if (process.ExitCode != 0)
             {
-                logger?.LogWarning("Script {Path} exited with code {ExitCode}: {Stderr}", scriptPath, process.ExitCode, stderr);
+                // A non-zero exit is a failure, not a result. Returning stdout here would let the
+                // model treat a crashed script's partial output as the answer.
+                logger?.LogWarning(
+                    "Skill script {Path} exited with code {ExitCode}",
+                    scriptPath, process.ExitCode);
+                return ToolFailure(scriptPath, $"exit code {process.ExitCode}. {Bound(stderr, MaxErrorChars)}");
             }
 
-            return stdout;
+            return Bound(stdout, MaxOutputChars);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // Caller cancellation stays cancellation — the agent run is stopping.
+            KillProcessTree(process, logger, scriptPath);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Only the timeout fired. Kill the tree before reporting: the interpreter may have spawned
+            // children that would otherwise keep running after the tool call returned.
+            KillProcessTree(process, logger, scriptPath);
+            logger?.LogWarning("Skill script {Path} timed out after {Seconds}s", scriptPath, ScriptTimeout.TotalSeconds);
+            return ToolFailure(scriptPath, $"timed out after {ScriptTimeout.TotalSeconds:F0}s.");
+        }
+        catch (Exception ex)
+        {
+            KillProcessTree(process, logger, scriptPath);
             logger?.LogError(ex, "Failed to run script {Path}", scriptPath);
-            return $"Error running script: {ex.Message}";
+            return ToolFailure(scriptPath, "the process could not be run.");
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
+
+    /// <summary>
+    /// Kills the child process and its descendants.
+    /// </summary>
+    /// <remarks>
+    /// Cancelling the wait or disposing the <see cref="Process"/> only detaches from the child; the
+    /// interpreter keeps running. <c>Kill(entireProcessTree: true)</c> is what actually terminates it.
+    /// </remarks>
+    private static void KillProcessTree(Process? process, ILogger? logger, string scriptPath)
+    {
+        if (process is null || process.HasExited)
+            return;
+
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex)
+        {
+            // The process may have exited between the check and the kill; nothing actionable remains.
+            logger?.LogDebug(ex, "Failed to kill skill script {Path}", scriptPath);
+        }
+    }
+
+    private static string ToolFailure(string scriptPath, string reason) =>
+        $"Error running script '{Path.GetFileName(scriptPath)}': {reason}";
+
+    /// <summary>Bounds a value and marks the cut so the model knows the output is incomplete.</summary>
+    private static string Bound(string value, int maxChars) =>
+        value.Length <= maxChars ? value : value[..maxChars] + TruncationMarker;
 }

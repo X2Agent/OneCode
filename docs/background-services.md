@@ -112,19 +112,23 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 
 ### 3.2 App 层后台服务
 
-#### 3.2.1 SkillChangeWatcher
+#### 3.2.1 SkillFilesWatcher
 
 | 属性 | 值 |
 |------|-----|
-| 文件 | [OneCode.App/Services/Skills/SkillChangeWatcher.cs](../src/OneCode.App/Services/Skills/SkillChangeWatcher.cs) |
+| 文件 | [OneCode.App/Services/Skills/SkillFilesWatcher.cs](../src/OneCode.App/Services/Skills/SkillFilesWatcher.cs) |
 | 类型 | `BackgroundService` |
 | 执行时机 | FileSystemWatcher 事件驱动 + **300ms Channel 去抖** |
-| 职责 | 监视 skills 目录（内置/用户/项目），变化后重建 `AgentSkillsProvider` |
-| 依赖 | `SkillProviderHolder`、`AgentSkillsProvider`（MAF）、`HookEventDispatcher` |
+| 职责 | 监视 skills 目录（内置/用户/项目），变化后触发 `SkillsChanged` 事件，让 TUI 重渲染斜杠命令列表 |
+| 依赖 | `SkillCatalog`（读文件系统） |
 
-留在 App 层的原因：依赖 MAF 的 `AgentSkillsProvider` 类型，不属于 Core 抽象。
+**它不构建也不替换 provider**：agent 可见的技能由 `SkillProviderFactory` 在**每次 agent run** 时解析，
+斜杠命令发现由 `SkillCatalog` 直接读文件系统——两者都不需要重建。因此本服务只负责通知，不持有
+`AgentSkillsProvider` 或 `SkillProviderHolder`。
 
-去抖机制：使用 `BoundedChannel`（容量 1，`DropOldest` 模式）+ 300ms `CancellationTokenSource.CancelAfter` 实现去抖，避免文件连续修改触发多次重建。
+留在 App 层的原因：需要 `SkillCatalog` 与 TUI 重渲染通知，不属于 Core 抽象。
+
+去抖机制：使用 `BoundedChannel`（容量 1，`DropOldest` 模式）+ 300ms `CancellationTokenSource.CancelAfter` 实现去抖，避免文件连续修改触发多次通知。
 
 #### 3.2.2 LspHostedService
 

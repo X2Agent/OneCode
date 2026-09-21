@@ -1,8 +1,7 @@
 using OneCode.Core.Memory;
-using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Memory;
+namespace OneCode.Infrastructure.Memory;
 
 /// <summary>
 /// File-system path helpers for the memory subsystem.

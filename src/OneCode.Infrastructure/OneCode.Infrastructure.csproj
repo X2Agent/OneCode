@@ -26,6 +26,8 @@
     <PackageReference Include="SSH.NET" />
     <PackageReference Include="CliWrap" />
     <PackageReference Include="SkiaSharp" />
+    <!-- HTML DOM 解析：DuckDuckGo 搜索结果的站点适配（与 App 层 WebFetchTool 同一库，版本集中管理）。 -->
+    <PackageReference Include="AngleSharp" />
     <!-- AI SDK 下沉：Anthropic / MAF / Hyperlight 包引用从 App 层迁移至 Infrastructure -->
     <PackageReference Include="Anthropic" />
     <PackageReference Include="Microsoft.Agents.AI" />

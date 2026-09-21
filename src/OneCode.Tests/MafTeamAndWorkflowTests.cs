@@ -32,7 +32,12 @@ public sealed class MafTeamOrchestrationTests
             new TeamAgentToolSources(
                 Substitute.For<ICacheSafeParamsProvider>(),
                 new ToolCatalog(new Lazy<List<AIFunction>>(() => []), new ToolMetadataRegistry(), null)),
-            new TeamAgentPipelineDependencies(null!, null!, null!, Substitute.For<OneCode.App.Session.ISessionConversationAccess>()));
+            new TeamAgentPipelineDependencies(
+                null!,
+                null!,
+                null!,
+                Substitute.For<OneCode.App.Session.ISessionConversationAccess>(),
+                new ToolMetadataRegistry()));
         var workflowRunner = new TeamWorkflowRunner(
             agentFactory,
             NullLogger<TeamWorkflowRunner>.Instance,

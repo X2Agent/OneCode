@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using OneCode.Core.Config;
@@ -11,13 +12,12 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Unit tests for <see cref="WebSearchTool"/> — covers query-length validation,
-/// the failover-chain assembly (order by <c>webSearchProvider</c>, keyless Tavily skipped),
+/// the failover-chain assembly (order by <c>webSearchProvider</c>, provider without a key skipped),
 /// failover error aggregation, the empty-results-as-challenge policy, query caching,
-/// and the private static helpers that implement DuckDuckGo HTML parsing, domain
-/// filtering, domain normalization, redirect resolution, and HTML-text cleaning.
+/// and the private static helpers that implement domain filtering and domain normalization.
 ///
-/// The private helpers carry the tool's real business logic (HTML parsing,
-/// domain matching) and are tested via reflection, mirroring the pattern in
+/// The private helpers carry the tool's real business logic (domain matching) and are tested
+/// via reflection, mirroring the pattern in
 /// <see cref="WebFetchToolSsrfTests"/>.
 /// </summary>
 public sealed class WebSearchToolTests : IDisposable
@@ -36,15 +36,6 @@ public sealed class WebSearchToolTests : IDisposable
     }
 
     // Reflection helpers for private static methods
-
-    private static IReadOnlyList<(string Title, string Url, string? Snippet)> InvokeParseDuckDuckGoResults(string html)
-    {
-        var method = typeof(WebSearchTool).GetMethod(
-            "ParseDuckDuckGoResults",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (System.Collections.IEnumerable)method.Invoke(null, new object[] { html })!;
-        return ExtractHits(result);
-    }
 
     private static IReadOnlyList<(string Title, string Url, string? Snippet)> InvokeFilterDomains(
         IEnumerable<(string Title, string Url, string? Snippet)> hits,
@@ -86,38 +77,6 @@ public sealed class WebSearchToolTests : IDisposable
         return list;
     }
 
-    private static string InvokeNormalizeDomain(string domain)
-    {
-        var method = typeof(WebSearchTool).GetMethod(
-            "NormalizeDomain",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (string)method.Invoke(null, new object[] { domain })!;
-    }
-
-    private static string InvokeResolveDuckDuckGoRedirect(string href)
-    {
-        var method = typeof(WebSearchTool).GetMethod(
-            "ResolveDuckDuckGoRedirect",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (string)method.Invoke(null, new object[] { href })!;
-    }
-
-    private static string InvokeCleanHtmlText(string text)
-    {
-        var method = typeof(WebSearchTool).GetMethod(
-            "CleanHtmlText",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (string)method.Invoke(null, new object[] { text })!;
-    }
-
-    private static object InvokeResolveProvider(AppSettings settings)
-    {
-        var method = typeof(WebSearchTool).GetMethod(
-            "ResolveProvider",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return method.Invoke(null, new object[] { settings })!;
-    }
-
     // SearchAsync: query-length validation
 
     [Theory]
@@ -127,8 +86,7 @@ public sealed class WebSearchToolTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         var config = new ConfigManager(_tempDir);
-        var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var sut = new WebSearchTool(config, httpClientFactory, NullLogger<WebSearchTool>.Instance, []);
+        var sut = new WebSearchTool(config, NullLogger<WebSearchTool>.Instance, [], CreateCache());
 
         var result = await sut.SearchAsync(query, ct: ct);
 
@@ -140,13 +98,28 @@ public sealed class WebSearchToolTests : IDisposable
 
     private WebSearchTool CreateTool(IWebSearchProvider? tavily = null)
     {
-        var providers = tavily is null ? [] : new[] { tavily };
+        // DuckDuckGo is always available (no key required), so the chain always includes it.
+        var providers = new List<IWebSearchProvider> { CreateDuckDuckGoProvider() };
+        if (tavily is not null)
+            providers.Add(tavily);
+
         return new WebSearchTool(
             new ConfigManager(_tempDir),
-            Substitute.For<IHttpClientFactory>(),
             NullLogger<WebSearchTool>.Instance,
-            providers);
+            providers,
+            CreateCache());
     }
+
+    private static IWebSearchProvider CreateDuckDuckGoProvider()
+    {
+        var provider = Substitute.For<IWebSearchProvider>();
+        provider.Name.Returns("duckduckgo");
+        provider.IsConfigured.Returns(true);
+        return provider;
+    }
+
+    /// <summary>每个测试独立缓存，避免用例间通过静态状态串扰。</summary>
+    private static IMemoryCache CreateCache() => new MemoryCache(new MemoryCacheOptions());
 
     private static IWebSearchProvider CreateTavilyProvider(bool configured)
     {
@@ -225,15 +198,17 @@ public sealed class WebSearchToolTests : IDisposable
         var tavily = CreateTavilyProvider(configured: true);
         tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromException<IReadOnlyList<WebSearchResult>>(new InvalidOperationException("quota")));
-        // IHttpClientFactory 替身 CreateClient 返回 null → DuckDuckGo 尝试同样失败，
-        // 错误中出现 "duckduckgo:" 即证明回退真实发生而非 Tavily 失败后直接报错。
+        // DuckDuckGo 替身也会失败（未配置任何 SearchAsync 返回），因此错误里同时出现两个提供方，
+        // 证明链路走完了全部已配置提供方，而不是首个失败就报错。
         var sut = new WebSearchTool(
-            config, Substitute.For<IHttpClientFactory>(), NullLogger<WebSearchTool>.Instance, [tavily]);
+            config, NullLogger<WebSearchTool>.Instance, [CreateDuckDuckGoProvider(), tavily], CreateCache());
 
         var result = await sut.SearchAsync("test query", ct: ct);
 
         result.IsError.Should().BeTrue();
-        result.Content.Should().Contain("tavily: quota");
+        // 失败按稳定分类报告，不回传提供方原始异常文本（可能回显 query 与凭据）。
+        result.Content.Should().Contain("tavily: no usable results");
+        result.Content.Should().NotContain("quota");
         result.Content.Should().Contain("duckduckgo:");
     }
 
@@ -249,7 +224,7 @@ public sealed class WebSearchToolTests : IDisposable
         var result = await sut.SearchAsync("test query", ct: ct);
 
         result.IsError.Should().BeTrue();
-        result.Content.Should().Contain("returned no results");
+        result.Content.Should().Contain("no usable results");
     }
 
     [Fact]
@@ -285,110 +260,6 @@ public sealed class WebSearchToolTests : IDisposable
         second.Content.Should().Contain("cached");
         // 配额保护：TTL 内重复查询只允许触发一次真实提供方调用。
         await tavily.Received(1).SearchAsync("onecode cli", Arg.Any<int>(), Arg.Any<CancellationToken>());
-    }
-
-    // ParseDuckDuckGoResults
-
-    private const string SampleDuckDuckGoHtml = """
-        <html><body>
-        <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=abc">Example Title</a>
-        <a class="result__snippet" href="#">This is the <b>snippet</b> text</a>
-        <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Frepo&amp;rut=def">GitHub Repo</a>
-        <div class="result__snippet">A repo description</div>
-        </body></html>
-        """;
-
-    [Fact]
-    public void ParseDuckDuckGoResults_ValidHtml_ExtractsAllFields()
-    {
-        var hits = InvokeParseDuckDuckGoResults(SampleDuckDuckGoHtml);
-
-        hits.Should().HaveCount(2);
-        hits.Should().Contain(h => h.Title == "Example Title");
-        hits.Should().Contain(h => h.Title == "GitHub Repo");
-        hits.Should().Contain(h => h.Url == "https://example.com/page");
-        hits.Should().Contain(h => h.Url == "https://github.com/repo");
-
-        var example = hits.Single(h => h.Title == "Example Title");
-        example.Snippet.Should().Contain("snippet");
-        example.Snippet.Should().NotContain("<b>");
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("<html><body>No results here</body></html>")]
-    [InlineData("<html><body><a href='#'>No result class</a></body></html>")]
-    public void ParseDuckDuckGoResults_NoResults_ReturnsEmpty(string html)
-    {
-        var hits = InvokeParseDuckDuckGoResults(html);
-        hits.Should().BeEmpty();
-    }
-
-    // NormalizeDomain
-
-    [Theory]
-    [InlineData("www.example.com", "example.com")]
-    [InlineData("WWW.EXAMPLE.COM", "example.com")]
-    [InlineData("example.com", "example.com")]
-    [InlineData(" example.com ", "example.com")]
-    [InlineData(".example.com.", "example.com")]
-    public void NormalizeDomain_StripsWwwTrimsAndLowercases(string input, string expected)
-    {
-        InvokeNormalizeDomain(input).Should().Be(expected);
-    }
-
-    // ResolveDuckDuckGoRedirect
-
-    [Fact]
-    public void ResolveDuckDuckGoRedirect_RedirectWithUddg_ExtractsActualUrl()
-    {
-        var href = "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&rut=abc";
-
-        InvokeResolveDuckDuckGoRedirect(href).Should().Be("https://example.com/page");
-    }
-
-    [Theory]
-    [InlineData("https://example.com/page")]
-    [InlineData("https://github.com/repo")]
-    public void ResolveDuckDuckGoRedirect_NonDuckDuckGoHost_ReturnsOriginal(string url)
-    {
-        InvokeResolveDuckDuckGoRedirect(url).Should().Be(url);
-    }
-
-    [Fact]
-    public void ResolveDuckDuckGoRedirect_DuckDuckGoHostWithoutUddg_ReturnsOriginal()
-    {
-        var href = "https://duckduckgo.com/?q=test";
-
-        InvokeResolveDuckDuckGoRedirect(href).Should().Be(href);
-    }
-
-    [Fact]
-    public void ResolveDuckDuckGoRedirect_InvalidUri_ReturnsOriginal()
-    {
-        const string href = "not a url at all";
-
-        InvokeResolveDuckDuckGoRedirect(href).Should().Be(href);
-    }
-
-    // CleanHtmlText
-
-    [Fact]
-    public void CleanHtmlText_StripsTagsAndCollapsesWhitespace()
-    {
-        InvokeCleanHtmlText("<b>Hello</b>   <i>World</i>").Should().Be("Hello World");
-    }
-
-    [Fact]
-    public void CleanHtmlText_DecodesHtmlEntities()
-    {
-        InvokeCleanHtmlText("a &amp; b &lt; c").Should().Be("a & b < c");
-    }
-
-    [Fact]
-    public void CleanHtmlText_PureText_ReturnsUnchanged()
-    {
-        InvokeCleanHtmlText("just plain text").Should().Be("just plain text");
     }
 
     // FilterDomains
@@ -441,5 +312,69 @@ public sealed class WebSearchToolTests : IDisposable
         var hits = InvokeFilterDomains(SampleHits(), allowedDomains: null, blockedDomains: null);
 
         hits.Should().HaveCount(4);
+    }
+
+    // S1: 缓存必须保存原始结果，域条件每次独立应用
+
+    /// <summary>
+    /// 反证：缓存里存的必须是**未过滤**结果。旧实现把已过滤结果当缓存值，
+    /// 先窄白名单再放宽时会永远拿不到先前被滤掉的候选——这条用例在缓存键/缓存值
+    /// 重新带上域条件时失败。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_NarrowWhitelistThenWideWhitelist_SecondCallSeesAllCandidates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new WebSearchResult("A", "https://a.example.com/1", "a"),
+                new WebSearchResult("B", "https://b.example.com/2", "b"),
+            ]);
+        var sut = CreateTool(tavily);
+
+        var narrow = await sut.SearchAsync("shared query", allowed_domains: ["a.example.com"], ct: ct);
+        var wide = await sut.SearchAsync("shared query", allowed_domains: ["example.com"], ct: ct);
+
+        narrow.Content.Should().Contain("https://a.example.com/1");
+        narrow.Content.Should().NotContain("https://b.example.com/2");
+        wide.Content.Should().Contain("https://b.example.com/2",
+            "the cached value is the unfiltered provider output, so widening the whitelist recovers it");
+        await tavily.Received(1).SearchAsync("shared query", Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>域条件变化不得回源；同一 query 的提供方调用只发生一次。</summary>
+    [Fact]
+    public async Task SearchAsync_DifferentDomainFilters_DoNotTriggerProviderRefetch()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([new WebSearchResult("A", "https://a.example.com/1", "a")]);
+        var sut = CreateTool(tavily);
+
+        await sut.SearchAsync("shared query", blocked_domains: ["blocked.com"], ct: ct);
+        await sut.SearchAsync("shared query", ct: ct);
+
+        await tavily.Received(1).SearchAsync("shared query", Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// 调用方取消必须传播，且不得触发提供方故障转移——
+    /// 否则用户停止后仍会继续向外发请求。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_CallerCancelled_PropagatesAndDoesNotFailOver()
+    {
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<WebSearchResult>>(_ => throw new OperationCanceledException());
+        var sut = CreateTool(tavily);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => sut.SearchAsync("cancel me", ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }

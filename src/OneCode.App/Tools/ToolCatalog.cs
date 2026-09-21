@@ -74,18 +74,29 @@ public sealed class ToolCatalog : IToolCatalog
         if (_mcpConnectionManager is null)
             return;
 
+        var liveNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var names = new HashSet<string>(tools.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var tool in _mcpConnectionManager.GetAllTools())
         {
+            liveNames.Add(tool.Name);
+
             if (!names.Add(tool.Name))
                 continue;
 
             tools.Add(tool);
             lock (_mcpMetadataLock)
             {
-                // 注册表是覆盖语义；同名工具元数据不变，重复 Register 只会白白重建检索索引。
-                if (_registeredMcpMetadata.ContainsKey(tool.Name))
+                // Re-register when the description changed. A tool's description is its retrieval
+                // signal and its prompt hint; caching the first one seen would keep advertising stale
+                // wording after a server updates, and would keep matching keywords the tool no longer
+                // claims. Register only on change so an unchanged server does not rebuild the index
+                // every turn.
+                var searchHint = $"MCP tool: {tool.Description}";
+                if (_registeredMcpMetadata.TryGetValue(tool.Name, out var registered)
+                    && string.Equals(registered.SearchHint, searchHint, StringComparison.Ordinal))
+                {
                     continue;
+                }
 
                 var metadata = new ToolMetadata
                 {
@@ -93,7 +104,7 @@ public sealed class ToolCatalog : IToolCatalog
                     Risk = ToolRisk.Dynamic,
                     ApprovalMode = ToolApprovalMode.Conditional,
                     IsConcurrencySafe = false,
-                    SearchHint = $"MCP tool: {tool.Description}",
+                    SearchHint = searchHint,
                     // ToolMetadata.LoadPolicy 默认 Always，MCP 工具必须显式 Contextual：
                     // 本地小模型按关键词激活，避免 playwright 等多工具服务器全量撑爆上下文。
                     LoadPolicy = ToolLoadPolicy.Contextual,
@@ -103,6 +114,32 @@ public sealed class ToolCatalog : IToolCatalog
                 };
                 Metadata.Register(metadata);
                 _registeredMcpMetadata[tool.Name] = metadata;
+            }
+        }
+
+        RemoveStaleMcpMetadata(liveNames);
+    }
+
+    /// <summary>
+    /// Removes metadata for MCP tools that are no longer served.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AddMcpTools"/> only ever adds. Without this, a disconnected server's tools stay in
+    /// the registry — and therefore in <c>ToolSearch</c> results and the local-model keyword index —
+    /// as phantom entries the model can select but never call.
+    /// </remarks>
+    private void RemoveStaleMcpMetadata(IReadOnlySet<string> liveToolNames)
+    {
+        lock (_mcpMetadataLock)
+        {
+            var stale = _registeredMcpMetadata.Keys
+                .Where(name => !liveToolNames.Contains(name))
+                .ToList();
+
+            foreach (var name in stale)
+            {
+                Metadata.Unregister(name);
+                _registeredMcpMetadata.Remove(name);
             }
         }
     }

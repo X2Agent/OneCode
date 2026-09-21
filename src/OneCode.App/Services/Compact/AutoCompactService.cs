@@ -5,16 +5,22 @@ namespace OneCode.App.Services.Compact;
 /// <summary>
 /// 自动压缩监控服务：在 token 使用率超过 70% 时发射告警，提醒用户执行 /compact。
 ///
+/// <para><b>指标口径</b>：本服务度量的是<b>完整 transcript 的规模</b>
+/// （<see cref="TokenBudget.Estimate"/> 遍历全部 <c>Conversation.Messages</c> 并按产品估算器计数），
+/// 而不是模型本次实际收到的输入。in-pipeline 压缩只减少发给模型的消息，
+/// 不会减少持久化的 transcript——因此「已自动压缩」之后本指标仍可能继续增长并告警。
+/// 这是一个<b>历史规模提示</b>，不是「即将超出上下文窗口」的预警，
+/// 也不能承诺一定在压缩发生前触发。</para>
+///
 /// <para><b>架构变更</b>：实际压缩由 MAF <c>CompactionProvider</c> 在 pipeline 内自动完成
-/// （L0 去重 → L1 ToolResult 折叠 → L2 LLM 摘要 → L3 截断），本类不再执行任何压缩动作。
-/// 保留的职责仅剩 70% 告警——这是 MAF 没有的能力（MAF 只在 token 超阈值时静默压缩，
-/// 不会提前提醒用户）。</para>
+/// （L1 ToolResult 折叠 → L2 LLM 摘要 → L3 截断），本类不再执行任何压缩动作。
+/// 保留的职责仅剩 70% 告警——提醒用户主动整理会话历史。</para>
 ///
 /// <para><b>运行时集成点</b>：<see cref="Streaming.QueryStreamService"/> 在每次 agent turn 结束后
 /// 调用 <c>CheckAndWarnAsync</c>，通过 <see cref="ConsumeWarning"/> 发射 <c>TuiCompactSuggested</c> 事件。</para>
 ///
 /// <para><b>阈值即语义</b>：
-///   0.70 (<see cref="WarningThreshold"/>) — 首次跨越时发射告警，提醒用户执行 /compact（无 LLM，无压缩）
+///   0.70 (<see cref="WarningThreshold"/>) — transcript 规模首次跨越时发射告警（无 LLM，无压缩）
 ///   ≥ 0.5（Main）/0.4（Worker）inputBudget — MAF in-pipeline L1 ToolResult 折叠，用户无感知
 ///   ≥ 0.7/0.6 — MAF in-pipeline L2 LLM 摘要；≥ 0.85/0.8 — L3 截断兜底，用户无感知
 /// </para>
@@ -44,7 +50,7 @@ public sealed class AutoCompactService
     }
 
     /// <summary>
-    /// 检查 token 使用率并在 70% 阈值时设置告警标志。
+    /// 检查 transcript 规模并在 70% 阈值时设置告警标志。
     /// 实际压缩由 MAF CompactionProvider 在 pipeline 内自动完成，本方法不触发任何压缩动作。
     /// </summary>
     public async Task CheckAndWarnAsync(string? systemPrompt = null, CancellationToken ct = default)
@@ -55,7 +61,7 @@ public sealed class AutoCompactService
     }
 
     /// <summary>
-    /// 检查指定会话的 token 使用率并在 70% 阈值时设置告警标志。
+    /// 检查指定会话的 transcript 规模并在 70% 阈值时设置告警标志。
     /// </summary>
     public Task CheckAndWarnAsync(
         Conversation session,

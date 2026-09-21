@@ -14,8 +14,7 @@ public sealed class PromptConfigBuilder(
     ToolMetadataRegistry toolMetadataRegistry)
 {
     /// <summary>
-    /// Builds the default system prompt by composing shared harness with
-    /// <c>system/default.prompt</c> and injecting runtime context sections.
+    /// Builds the Main agent body (harness fragment excluded — MAF composes it).
     /// Throws if either prompt file is unavailable — the three-layer store
     /// (project &gt; user &gt; built-in) guarantees built-in copies are shipped via csproj.
     /// </summary>
@@ -25,7 +24,26 @@ public sealed class PromptConfigBuilder(
         string? memorySection,
         string? availableTools,
         CancellationToken ct) =>
-        promptComposer.ComposeMainAsync(systemContext, userContext, memorySection, availableTools, ct);
+        promptComposer.RenderMainBodyAsync(systemContext, userContext, memorySection, availableTools, ct);
+
+    /// <summary>
+    /// Loads the shared harness fragment (<c>system/harness</c>) for the paths that hand it to
+    /// MAF as <c>HarnessAgentOptions.HarnessInstructions</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The fragment is loaded alongside the body, not derived from it: MAF composes the two halves
+    /// (harness first, then the body) and needs them as separate inputs. Pre-joining them would
+    /// duplicate the fragment, because the body is also fed to the model through the transcript.
+    /// </para>
+    /// <para>
+    /// Throws when the file is missing from every store — the same fail-fast policy as
+    /// <see cref="BuildSystemPromptAsync"/>. Returning null here would silently fall back to MAF's
+    /// generic default instructions and drop the product's security guidance.
+    /// </para>
+    /// </remarks>
+    public Task<string> LoadHarnessAsync(CancellationToken ct) =>
+        promptComposer.GetHarnessAsync(ct);
 
     /// <summary>
     /// Builds the runtime system prompt and bootstraps MCP + skills.

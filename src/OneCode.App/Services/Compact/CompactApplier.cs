@@ -39,15 +39,27 @@ public sealed class CompactApplier
         foreach (var retained in retainedMessages)
             session.Messages.Add(MessageCloner.CloneMessage(retained));
 
-        RunPostCompactCleanup(session);
+        RemoveDuplicateSystemMarkers(session);
         MafSessionInvalidator.Invalidate(session, "compact.full");
     }
 
     /// <summary>
-    /// Partial compact: collapse the message range [<paramref name="fromIndex"/>,
-    /// <paramref name="upToIndex"/>) into a boundary marker + summary, preserving
-    /// the messages before and after the range.
+    /// Partial compact: collapse the message range [<paramref name="fromIndex"/>, <paramref name="upToIndex"/>) 
+    /// into a boundary marker + summary, preserving the messages before and after the range.
     /// </summary>
+    /// <param name="session">Conversation whose message history is rewritten.</param>
+    /// <param name="formattedSummary">Summary text that replaces the collapsed range.</param>
+    /// <param name="fromIndex">Range start. Expanded outward to the enclosing atomic tool group.</param>
+    /// <param name="upToIndex">Range end (exclusive). Expanded outward to the enclosing atomic tool group.</param>
+    /// <remarks>
+    /// The range passed in must be the <b>same</b> range whose messages were sent to the summariser.
+    /// Callers resolve it once via <see cref="MessageApiInvariantHelper.AdjustRangeToAtomicBoundaries"/>;
+    /// the normalisation re-applied here is <b>idempotent</b> — an already-aligned boundary sits exactly on
+    /// a group edge, which the helper leaves untouched — so it cannot expand the range past what the model
+    /// summarised. That idempotency is what makes this defensive call safe, and it is asserted by
+    /// <c>CompactApplierRangeTests.AdjustRangeToAtomicBoundaries_IsIdempotent</c>; if it ever regresses,
+    /// this call would start replacing messages the model never saw.
+    /// </remarks>
     public void ApplyPartialCompact(
         Conversation session,
         string formattedSummary,
@@ -83,7 +95,9 @@ public sealed class CompactApplier
         foreach (var msg in afterRange)
             session.Messages.Add(MessageCloner.CloneMessage(msg));
 
-        RunPostCompactCleanup(session);
+        // Deliberately no count-based trimming here: a partial compact owns only its range, and
+        // trimming by message count would silently delete messages outside it.
+        RemoveDuplicateSystemMarkers(session);
         MafSessionInvalidator.Invalidate(session, "compact.partial");
     }
 
@@ -146,11 +160,17 @@ public sealed class CompactApplier
         return normalized;
     }
 
-    private static void RunPostCompactCleanup(Conversation session)
+    /// <summary>
+    /// Removes consecutive duplicate system markers left over from previous compactions.
+    /// </summary>
+    /// <remarks>
+    /// Full compact already selects the retained tail by atomic boundaries, so it needs no
+    /// count-based trimming: an earlier <c>while (Count &gt; 3 + RecentMessagesToKeep) RemoveAt(3)</c>
+    /// would cut the retained tail by message count and could split an atomic tool group that
+    /// <see cref="NormalizeToolPairs"/> had just made valid.
+    /// </remarks>
+    private static void RemoveDuplicateSystemMarkers(Conversation session)
     {
-        while (session.Messages.Count > 3 + CompactConstants.RecentMessagesToKeep)
-            session.Messages.RemoveAt(3);
-
         for (var index = session.Messages.Count - 1; index > 0; index--)
         {
             if (session.Messages[index] is SystemMessage current

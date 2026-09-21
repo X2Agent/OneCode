@@ -4,10 +4,28 @@ Project root: {{project_root}}
 
 Since the last consolidation at {{since}}, there have been {{session_count}} new sessions for this project.
 
-Your task:
-1. Review the recent sessions for **this project** in the global session directory (~/.onecode/events/*.jsonl). Each file is JSONL: one session event per line. The session metadata event (`"type": "session_started"` or `"type": "session_snapshot"`) carries the project path at `payload.working_directory` — only review sessions whose value matches `{{project_root}}` (use Grep to filter). User turns are `"type": "user_message"`, assistant turns are `"type": "assistant_message"`. Use Read/Glob/Grep tools.
-2. Extract durable knowledge that will make future sessions smarter — especially **lessons from failures** and **user corrections**, which are the highest-value memories.
-3. Output **incremental changes** as a JSON array. Each change is either an "upsert" (add or update) or a "delete" (remove an outdated entry).
+## Working memory (primary source)
+
+While working, the agent keeps notes under `{{working_memory_root}}`. These artefacts are the agent's
+own record of what it found, decided and left unresolved — treat them as the **primary** candidate
+source, because they already reflect what the agent judged worth writing down.
+
+{{working_memory_section}}
+
+## Task
+
+1. Review the working-memory artefacts above. For each, decide whether it contains durable knowledge:
+   a fact about the project, a convention, a lesson from a failure, or a user correction.
+2. Verify anything that looks load-bearing against the session events for **this project** in the global
+   session directory (~/.onecode/events/*.jsonl). Each file is JSONL: one session event per line. The
+   session metadata event (`"type": "session_started"` or `"type": "session_snapshot"`) carries the
+   project path at `payload.working_directory` — only review sessions whose value matches
+   `{{project_root}}` (use Grep to filter). User turns are `"type": "user_message"`, assistant turns are
+   `"type": "assistant_message"`. Use Read/Glob/Grep tools.
+3. Promote only what survives verification. A note the agent wrote is a **candidate**, not confirmed
+   knowledge: never promote an unverified inference to a `user`-scope preference.
+4. Output **incremental changes** as a JSON array. Each change is either an "upsert" (add or update) or
+   a "delete" (remove an outdated entry).
 
 ## Scope
 

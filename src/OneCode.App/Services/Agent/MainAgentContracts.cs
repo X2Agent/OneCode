@@ -10,6 +10,16 @@ public sealed record MainAgentRunOptions
 {
     public string? ModelId { get; init; }
     public string? SystemPrompt { get; init; }
+
+    /// <summary>
+    /// Shared harness instructions, passed to MAF as <c>HarnessInstructions</c> so the framework
+    /// composes them with <see cref="SystemPrompt"/> (harness first, then the agent body).
+    /// </summary>
+    /// <remarks>
+    /// Kept separate from <see cref="SystemPrompt"/> rather than pre-joined: MAF owns the composition
+    /// order, and a pre-joined string would enter the agent body as well, duplicating the fragment.
+    /// </remarks>
+    public string? HarnessInstructions { get; init; }
     public string? UserPrompt { get; init; }
 
     /// <summary>
@@ -69,9 +79,6 @@ public sealed record MainAgentRunOptions
 
     /// <summary>Additional working directories for path validation.</summary>
     public IReadOnlyDictionary<string, AdditionalWorkingDirectory>? AdditionalWorkingDirectories { get; init; }
-
-    /// <summary>Session-level allowlist (e.g., from "Always Allow" user choice).</summary>
-    public HashSet<string>? SessionAllowlist { get; init; }
 
     /// <summary>
     /// 编排事件回调。当设置时，Pipeline 中间件会发射 OrchestrationEvent.ToolStart/ToolDone

@@ -2,13 +2,14 @@ using OneCode.Core.Config;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Hosting;
-using OneCode.App.Services.Memory;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
+using System.Text;
 using System.Threading.Channels;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Memory;
 
 namespace OneCode.App.Services.AutoDream;
 
@@ -57,6 +58,12 @@ public sealed class AutoDreamService : BackgroundService
     /// <summary>用户手写条目的 key 前缀；AutoDream 也不得以该前缀创建条目（否则分类语义混乱）。</summary>
     private const string ManualKeyPrefix = "manual:";
 
+    /// <summary>
+    /// Upper bound on working-memory artefacts included in one consolidation prompt.
+    /// Working notes are unbounded in principle; the prompt is not.
+    /// </summary>
+    private const int MaxWorkingMemoryArtefacts = 20;
+
     // 依赖
 
     private readonly ILogger<AutoDreamService> _logger;
@@ -83,6 +90,7 @@ public sealed class AutoDreamService : BackgroundService
     private readonly string _globalConfigDir;
 
     private readonly AutoDreamSessionScanner _sessionScanner;
+    private readonly AutoDreamWorkingMemoryScanner _workingMemoryScanner;
     private readonly AutoDreamStateStore _stateStore;
 
     public AutoDreamService(
@@ -103,6 +111,8 @@ public sealed class AutoDreamService : BackgroundService
         _wdAccessor = storage.WorkingDirectory;
         _globalConfigDir = globalConfigDirOverride ?? PathsHelper.GetUserConfigDir();
         _sessionScanner = new AutoDreamSessionScanner(logger, _globalConfigDir);
+        _workingMemoryScanner = new AutoDreamWorkingMemoryScanner(
+            loggerFactory.CreateLogger<AutoDreamWorkingMemoryScanner>());
         _stateStore = new AutoDreamStateStore(logger, GetProjectStateDir);
     }
 
@@ -275,6 +285,16 @@ public sealed class AutoDreamService : BackgroundService
         var agentOptions = new HarnessAgentOptions
         {
             Name = "autodream",
+            // AutoDream deliberately does NOT receive the product harness fragment
+            // (system/harness.prompt): it runs a single consolidated prompt (system/autodream-consolidation)
+            // on a light model with a fixed tool allowlist, so the interactive security guidance
+            // (prompt-injection defense for arbitrary tool output, sensitive-file policy) does not apply
+            // to its restricted surface. The empty string is required rather than null: null would let
+            // MAF inject its generic DefaultInstructions, widening the instruction surface beyond the
+            // dedicated consolidation prompt — the §4.6 migration must not change prompt text as a side
+            // effect. OneCodeHarnessDefaults.SuppressFrameworkDefaults keeps the pre-migration
+            // behaviour (framework defaults suppressed) explicit.
+            HarnessInstructions = OneCodeHarnessDefaults.SuppressFrameworkDefaults,
             ChatOptions = new ChatOptions
             {
                 ModelId = modelId,
@@ -317,7 +337,7 @@ public sealed class AutoDreamService : BackgroundService
     /// 解析 Agent 输出的增量变更 JSON 数组，合并写入对应的 MEMORY.md 文件。
     /// 容错：容忍 Agent 在 JSON 前后添加 markdown 围栏或额外说明文本。
     /// 安全：Agent 输出为不可信内容，必须经过 <see cref="AutoDreamOutputSanitizer.SanitizeKey"/> / <see cref="AutoDreamOutputSanitizer.SanitizeValue"/>
-    /// 清洗，防止 MEMORY.md 结构注入（如 <c>## </c> 开头的行会被 <see cref="OneCode.App.Services.Memory.MemoryEntryStore.ParseEntries"/>
+    /// 清洗，防止 MEMORY.md 结构注入（如 <c>## </c> 开头的行会被 <c>OneCode.Infrastructure.Memory.MemoryEntryStore.ParseEntries</c>
     /// 误识别为新的 entry header，导致条目边界错乱、内容串入相邻条目）。
     /// </summary>
     private async Task<int> ApplyConsolidationChangesAsync(string outputText, CancellationToken ct)
@@ -578,14 +598,48 @@ public sealed class AutoDreamService : BackgroundService
     private async Task<string> BuildConsolidationPromptAsync(DateTimeOffset since, int sessionCount, CancellationToken ct)
     {
         var projectRoot = GetCurrentProjectRoot() ?? "(unknown)";
+
+        // Working-memory artefacts are the primary candidate source: they hold what the agent wrote
+        // down while working. Session events stay available for verification, but they only record
+        // that a conversation happened.
+        var artefacts = _workingMemoryScanner.Collect(projectRoot, since, MaxWorkingMemoryArtefacts, ct);
         var variables = new Dictionary<string, string>
         {
             ["since"] = since.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
             ["session_count"] = sessionCount.ToString(CultureInfo.InvariantCulture),
             ["project_root"] = projectRoot,
+            ["working_memory_root"] = FileMemoryStorePaths.ResolveRoot(projectRoot),
+            ["working_memory_section"] = FormatWorkingMemorySection(artefacts),
         };
         return await _promptManager.RenderPromptAsync("system/autodream-consolidation", variables, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Renders the snapshot as prompt text. The path and timestamp are included so every candidate can
+    /// be attributed back to the revision it came from.
+    /// </summary>
+    private static string FormatWorkingMemorySection(IReadOnlyList<WorkingMemoryArtefact> artefacts)
+    {
+        if (artefacts.Count == 0)
+        {
+            return "No working-memory artefacts were written since the last consolidation. " +
+                   "Fall back to reviewing the recent sessions below.";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine(CultureInfo.InvariantCulture,
+            $"{artefacts.Count} artefact(s) were written since the last consolidation:");
+
+        foreach (var artefact in artefacts)
+        {
+            sb.AppendLine();
+            sb.AppendLine(CultureInfo.InvariantCulture,
+                $"### {artefact.RelativePath} (modified {artefact.LastModifiedAt:yyyy-MM-dd HH:mm:ss}Z)");
+            sb.AppendLine(artefact.Content.TrimEnd());
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     // 路径工具

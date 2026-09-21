@@ -119,8 +119,64 @@ public sealed class MemorySearchProviderFactoryTests
             memoryService, Logger, "anything", TestContext.Current.CancellationToken)).ToList();
 
         results.Should().ContainSingle();
-        results[0].Text.Should().Contain("Memory search failed");
-        results[0].Text.Should().Contain("MEMORY.md is corrupt");
+        results[0].Text.Should().Contain("unavailable");
+    }
+
+    /// <summary>
+    /// 反证：错误结果**不得**回传异常原文。异常消息常含文件路径与内容片段，
+    /// 而工具结果会进入模型上下文（并可能被写进日志/会话）。
+    /// 删除结果侧脱敏后本用例必须失败。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_SearchThrows_DoesNotLeakExceptionTextIntoResult()
+    {
+        const string secret = "C:\\Users\\someone\\.onecode\\memory\\MEMORY.md is corrupt";
+        var memoryService = Substitute.For<IMemoryService>();
+        memoryService.FindRelevantMemoriesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<MemoryEntryMatch>>(_ => throw new IOException(secret));
+
+        var results = (await MemorySearchProviderFactory.SearchAsync(
+            memoryService, Logger, "anything", TestContext.Current.CancellationToken)).ToList();
+
+        results[0].Text.Should().NotContain("corrupt");
+        results[0].Text.Should().NotContain("someone");
+        results[0].Text.Should().NotContain("MEMORY.md");
+    }
+
+    /// <summary>
+    /// 读取失败与「没有记忆」必须可区分：模型不得把读不到存储当成知识不存在。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_StoreUnreadable_SaysUnavailableNotEmpty()
+    {
+        var memoryService = Substitute.For<IMemoryService>();
+        memoryService.FindRelevantMemoriesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<MemoryEntryMatch>>(_ =>
+                throw new MemoryStoreReadException(MemoryScope.Project, "unreadable", new IOException("locked")));
+
+        var results = (await MemorySearchProviderFactory.SearchAsync(
+            memoryService, Logger, "anything", TestContext.Current.CancellationToken)).ToList();
+
+        results.Should().ContainSingle();
+        results[0].Text.Should().Contain("unavailable");
+        results[0].Text.Should().NotContain("No relevant memories");
+    }
+
+    /// <summary>
+    /// 取消是调用方的意图，不是检索失败。若把它降级成普通结果，模型会把
+    /// “搜索被取消”当成真实检索输出继续推理，而且 run 取消不再能停下来。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_Cancelled_PropagatesCancellation()
+    {
+        var memoryService = Substitute.For<IMemoryService>();
+        memoryService.FindRelevantMemoriesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<MemoryEntryMatch>>(_ => throw new OperationCanceledException());
+
+        var act = () => MemorySearchProviderFactory.SearchAsync(
+            memoryService, Logger, "anything", TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     /// <summary>

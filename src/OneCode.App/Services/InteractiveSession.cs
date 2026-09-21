@@ -10,6 +10,12 @@ namespace OneCode.App.Services;
 /// <see cref="TuiHostConfigurator"/>. Carries the shared, immutable session
 /// state needed to wire the TUI and dispatch queries.
 /// </summary>
+/// <remarks>
+/// <see cref="SystemPrompt"/> is the agent body (<c>system/default</c> or role prompt) and
+/// <see cref="HarnessPrompt"/> the shared harness fragment (<c>system/harness</c>). They stay
+/// separate because MAF composes them via <c>HarnessInstructions</c> (harness first) and
+/// <c>ChatOptions.Instructions</c> (body second). Both are loaded once per session, together.
+/// </remarks>
 public sealed record InteractiveSession(
     IConversationRunner ConversationRunner,
     string SystemPrompt,
@@ -17,4 +23,5 @@ public sealed record InteractiveSession(
     WorkingModeController ModeController,
     string? SshHost,
     IReadOnlyList<SlashCommandEntry> SlashCommands,
-    string Model);
+    string Model,
+    string HarnessPrompt);

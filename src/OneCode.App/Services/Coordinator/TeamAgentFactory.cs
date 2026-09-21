@@ -15,8 +15,8 @@ namespace OneCode.App.Services.Coordinator;
 /// 职责：为 Team 成员构建 MAF <see cref="AIAgent"/>，包括：
 ///   - 角色 prompt 解析（YAML 内联 → system/{role}.prompt → 兜底）
 ///   - 工具集装配（toolsAccessor fallback → ToolCatalog → AllowedTools 过滤）
-///   - ContextProvider 装配（SystemPrompt + 通用 provider）
-///   - Pipeline 配置（AgentPipelineOptionsFactory + ApprovalBroker 审批映射）
+///   - ContextProvider 装配（通用 provider；角色正文改由 ChatOptions.Instructions 承载）
+///   - Pipeline 配置（AgentPipelineOptionsFactory；审批经 MAF 协议，由 TeamWorkflowRunner 桥接）
 ///
 /// 管道配置与 MainAgentRunner.BuildAgentPipeline 对齐。
 /// </summary>
@@ -50,8 +50,10 @@ internal sealed class TeamAgentFactory(
         IReadOnlyList<string>? taskAllowedTools = null)
     {
         var roleBody = await ResolveRolePromptAsync(member).ConfigureAwait(false);
-        var systemPrompt = await promptComposer.ComposeWithRoleAsync(roleBody, CancellationToken.None)
+        // Two halves, kept apart: MAF composes the harness fragment ahead of the role body.
+        var harnessInstructions = await promptComposer.GetHarnessAsync(CancellationToken.None)
             .ConfigureAwait(false);
+        var systemPrompt = promptComposer.RenderRoleBody(roleBody);
 
         // Prefer parent query tool snapshot; fall back to full catalog before first query.
         List<AIFunction>? toolList = toolSources.CacheSafeParams.Current?.Tools?.OfType<AIFunction>().ToList();
@@ -79,7 +81,7 @@ internal sealed class TeamAgentFactory(
 
         // 解析 Team 成员模型 limits：Team 成员通常使用主模型，阈值按其上下文窗口比例计算
         var teamModelInfo = modelManager?.GetMainModel();
-        var compactionProvider = await pipelineDeps.CompactionBuilder.BuildForWorkerAsync(
+        var compactionStrategy = await pipelineDeps.CompactionBuilder.BuildForWorkerAsync(
             teamModelInfo?.Id,
             maxOutputTokensOverride: null,
             CancellationToken.None).ConfigureAwait(false);
@@ -89,12 +91,7 @@ internal sealed class TeamAgentFactory(
         // MaxTurns 语义：TeamConfig.MaxTurns = 外层轮数；pipelineMaxToolCallsPerMember = 每 Agent 内部工具调用上限。
         const int pipelineMaxToolCallsPerMember = 50;
 
-        var approvalBroker = ApprovalBroker.ForTeam(member.AgentId, eventSink);
-
         var contextProviders = new List<AIContextProvider>();
-        if (!string.IsNullOrWhiteSpace(systemPrompt))
-            contextProviders.Add(new TeamSystemPromptProvider(systemPrompt));
-
         contextProviders.AddRange(pipelineDeps.ContextPipeline.BuildShared(
             PipelineProfile.TeamMember,
             new AgentContextProviderOptions { WorkingDirectory = cwd }));
@@ -113,7 +110,6 @@ internal sealed class TeamAgentFactory(
                 change.FileName,
                 change.AddedLines,
                 change.RemovedLines)),
-            ApprovalBroker = approvalBroker,
             TeamMemberId = member.AgentId,
             AllowedTools = effectiveAllowedTools,
         });
@@ -127,10 +123,16 @@ internal sealed class TeamAgentFactory(
                 MaxOutputTokens = 4096,
                 Tools = tools?.Count > 0 ? tools : null,
                 ToolMode = tools?.Count > 0 ? ChatToolMode.Auto : null,
+                // 角色正文走 MAF 的 agent-instructions 入口，与 harness 片段在 MAF 内合成。
+                Instructions = string.IsNullOrWhiteSpace(systemPrompt) ? null : systemPrompt,
             },
             LoggerFactory = loggerFactory,
             ServiceProvider = serviceProvider,
-            ChatClientContextProviders = [compactionProvider],
+            ToolMetadata = pipelineDeps.ToolMetadata,
+            CompactionStrategy = compactionStrategy,
+            // Shared harness fragment → MAF HarnessInstructions. Handing the fragment to MAF is what
+            // keeps it from being dropped, then silently replaced by MAF's generic default instructions.
+            HarnessInstructions = harnessInstructions,
             AgentContextProviders = contextProviders,
             PipelineOptions = pipelineOptions,
         }).Agent;
@@ -160,7 +162,7 @@ internal sealed class TeamAgentFactory(
     /// 1. member.SystemPrompt (YAML instructions 内联) → 非空则用
     /// 2. system/{role}.prompt (按角色名约定路径，orchestrator/lead → system/coordinator) → 文件存在则用
     /// 3. DefaultSystemPrompt(role) (极简兜底，仅用于自定义角色)
-    /// 调用方经 <see cref="PromptComposer.ComposeWithRoleAsync"/> 与 system/harness 合成。
+    /// 调用方经 <see cref="PromptComposer.GetHarnessAsync"/> + <see cref="PromptComposer.RenderRoleBody"/> 取得两段提示词；合成由 MAF 负责。
     /// </summary>
     private async Task<string> ResolveRolePromptAsync(TeamMember member)
     {
@@ -242,18 +244,5 @@ internal sealed class TeamAgentFactory(
 
         public object? GetService(Type serviceType, object? serviceKey = null) => _inner.GetService(serviceType, serviceKey);
         void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
-    }
-
-    private sealed class TeamSystemPromptProvider(string systemPrompt) : AIContextProvider
-    {
-        protected override ValueTask<AIContext> ProvideAIContextAsync(
-            InvokingContext context,
-            CancellationToken cancellationToken = default)
-        {
-            return new ValueTask<AIContext>(new AIContext
-            {
-                Messages = [new ChatMessage(ChatRole.System, systemPrompt)],
-            });
-        }
     }
 }
