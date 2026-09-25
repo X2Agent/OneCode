@@ -18,12 +18,14 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   CONFIGURATION: Release
   SOLUTION: src/OneCode.slnx
+  CLI_PROJECT: src/OneCode.Cli/OneCode.Cli.csproj
   TEST_PROJECT: src/OneCode.Tests/OneCode.Tests.csproj
 
 jobs:
-  build-test:
-    name: Build and test
+  docs:
+    name: Command docs sync
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +33,22 @@ jobs:
       - name: Check command docs sync
         shell: pwsh
         run: ./scripts/check-docs.ps1 -RepoRoot "$env:GITHUB_WORKSPACE"
+
+  build-test:
+    name: Build and test (${{ matrix.os }})
+    # 主目标平台是 Windows,而 Terminal.Gui 的鼠标/按键绑定按平台分支
+    # (PlatformMouseBinding: windows / linux / macos),只在 Linux 上跑会漏掉 Windows 专属回归。
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -44,4 +62,65 @@ jobs:
         run: dotnet build "$SOLUTION" -c "$CONFIGURATION" --no-restore
 
       - name: Test
-        run: dotnet test "$TEST_PROJECT" -c "$CONFIGURATION" --no-build --no-restore
+        run: dotnet test "$TEST_PROJECT" -c "$CONFIGURATION" --no-build --no-restore --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
+
+      - name: Enforce coverage floor
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: ./scripts/check-coverage.ps1 -ResultsDirectory ./artifacts/coverage
+
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: artifacts/coverage
+          if-no-files-found: error
+
+  publish-smoke:
+    name: Publish and smoke test (win-x64)
+    # release.yml 只在 tag 上验证"发布产物 + 冒烟测试"这条链路,坏了要到发版当天才发现。
+    # 这里在每次 PR 上用与 release.yml 完全相同的发布参数预先跑一遍。
+    needs: build-test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        shell: pwsh
+        # 非 tag 提交没有发布版本号,用 0.0.0 占位:冒烟测试只断言输出形状
+        # 与传入的 ExpectedVersion 一致,不依赖真实 tag。
+        env:
+          VERSION: 0.0.0
+          BINARY_VERSION: 0.0.0.0
+        run: |
+          dotnet publish $env:CLI_PROJECT `
+            -c $env:CONFIGURATION `
+            -r win-x64 `
+            --self-contained true `
+            -p:Version=$env:VERSION `
+            -p:AssemblyVersion=$env:BINARY_VERSION `
+            -p:FileVersion=$env:BINARY_VERSION `
+            -p:PublishSingleFile=true `
+            -p:PublishReadyToRun=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o "$env:GITHUB_WORKSPACE/artifacts/publish/win-x64"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke test published executable
+        shell: pwsh
+        env:
+          VERSION: 0.0.0
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/smoke-test-release.ps1" `
+            -PublishDir "$env:GITHUB_WORKSPACE/artifacts/publish/win-x64" `
+            -ExpectedVersion $env:VERSION `
+            -Runtime win-x64

@@ -49,7 +49,7 @@ public sealed class HookSettingsLoaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo hi" } ] }
               ]
             }
@@ -59,21 +59,21 @@ public sealed class HookSettingsLoaderTests : IDisposable
 
         result.Status.Should().Be(HookFileLoadStatus.Loaded);
         result.Hooks.Should().NotBeNull();
-        result.Hooks!.Should().ContainKey(HookEvent.PreToolUse);
-        result.Hooks![HookEvent.PreToolUse].Should().ContainSingle();
+        result.Hooks!.Should().ContainKey(HookInterceptionPoint.PreToolCall);
+        result.Hooks![HookInterceptionPoint.PreToolCall].Should().ContainSingle();
         result.Errors.Should().BeEmpty();
     }
 
     [Fact]
-    public void Load_UnknownEventName_RecordsWarningAndSkipsOnlyThatEvent()
+    public void Load_UnknownEventName_RecordsWarningAndSkipsOnlyThatPoint()
     {
         WriteHooksJson("""
             {
               "NotARealEvent": [
                 { "matcher": "*", "hooks": [ { "type": "command", "command": "echo hi" } ] }
               ],
-              "Stop": [
-                { "matcher": "Completed", "hooks": [ { "type": "command", "command": "echo done" } ] }
+              "output": [
+                { "hooks": [ { "type": "command", "command": "echo done" } ] }
               ]
             }
             """);
@@ -81,9 +81,51 @@ public sealed class HookSettingsLoaderTests : IDisposable
         var result = CreateSut().Load(_configDir);
 
         result.Status.Should().Be(HookFileLoadStatus.Loaded);
-        result.Hooks!.Keys.Should().ContainSingle().Which.Should().Be(HookEvent.Stop);
+        result.Hooks!.Keys.Should().ContainSingle().Which.Should().Be(HookInterceptionPoint.Output);
         result.Errors.Should().ContainSingle();
         result.Errors[0].Should().Contain("NotARealEvent");
+    }
+
+    [Fact]
+    public void Load_MigratedEventName_PointsToSuccessorNode()
+    {
+        WriteHooksJson("""
+            {
+              "PreToolUse": [
+                { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
+              ],
+              "pre_tool_call": [
+                { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v2" } ] }
+              ]
+            }
+            """);
+
+        var result = CreateSut().Load(_configDir);
+
+        result.Hooks!.Keys.Should().ContainSingle().Which.Should().Be(HookInterceptionPoint.PreToolCall);
+        result.Errors.Should().ContainSingle();
+        result.Errors[0].Should().Contain("pre_tool_call").And.Contain("PreToolUse");
+    }
+
+    [Fact]
+    public void Load_RemovedEventName_ReportsUnsupportedWithoutSilentDrop()
+    {
+        WriteHooksJson("""
+            {
+              "GoalStageInvoke": [
+                { "matcher": "*", "hooks": [ { "type": "command", "command": "echo hi" } ] }
+              ],
+              "input": [
+                { "hooks": [ { "type": "command", "command": "echo ok" } ] }
+              ]
+            }
+            """);
+
+        var result = CreateSut().Load(_configDir);
+
+        result.Hooks!.Keys.Should().ContainSingle().Which.Should().Be(HookInterceptionPoint.Input);
+        result.Errors.Should().ContainSingle();
+        result.Errors[0].Should().Contain("GoalStageInvoke").And.Contain("不再属于");
     }
 
     [Fact]
@@ -91,7 +133,7 @@ public sealed class HookSettingsLoaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "Stop": [
+              "output": [
 
             "matcher": broken
             """);
@@ -123,7 +165,7 @@ public sealed class HookSettingsLoaderTests : IDisposable
               "MysteryEvent": [
                 { "matcher": "*", "hooks": [ { "type": "command", "command": "echo hi" } ] }
               ],
-              "Stop": [
+              "output": [
                 { "matcher": "Completed", "hooks": [ { "type": "command", "command": "echo done" } ] }
               ]
             }

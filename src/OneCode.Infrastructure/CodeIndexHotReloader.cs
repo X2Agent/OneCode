@@ -131,8 +131,6 @@ public sealed class CodeIndexHotReloader : IDisposable
     private void OnWatcherError(object _, ErrorEventArgs e) =>
         _logger.LogWarning(e.GetException(), "FileSystemWatcher error");
 
-    // Debounce
-
     /// <summary>Reset (or start) the debounce timer. Must be called inside <see cref="_lock"/>.</summary>
     private void ScheduleFlush()
     {
@@ -171,8 +169,6 @@ public sealed class CodeIndexHotReloader : IDisposable
         }, TaskScheduler.Default);
     }
 
-    // Helpers
-
     private static readonly HashSet<string> _sourceExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".cs", ".ts", ".tsx", ".js", ".jsx",
@@ -182,8 +178,6 @@ public sealed class CodeIndexHotReloader : IDisposable
 
     private static bool IsSourceFile(string path) =>
         _sourceExtensions.Contains(Path.GetExtension(path));
-
-    // IDisposable
 
     public void Dispose()
     {

@@ -1,7 +1,6 @@
 namespace OneCode.App.Tui;
 
-// 渲染辅助逻辑——从 ChatTranscriptView 提取。
-// 纯函数 + 共享常量，无实例状态依赖。
+// 渲染辅助逻辑：纯函数 + 共享常量，无实例状态依赖。
 
 internal static class ConversationRenderer
 {

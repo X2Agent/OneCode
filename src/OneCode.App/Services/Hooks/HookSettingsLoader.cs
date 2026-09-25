@@ -5,9 +5,10 @@ namespace OneCode.App.Services.Hooks;
 ///
 /// 加载结果由 HookConfigBootstrapper 注册到 HookRegistry，并写入 <see cref="HookLoadDiagnostics"/>。
 ///
-/// 配置格式：每个事件下是 matcher 分组数组（HookMatcherGroup）。
-/// 未知事件名降级为警告并跳过（记录到诊断，不中断整个文件）；
-/// JSON 损坏 / IO 失败记录错误并整体跳过（含行号）。
+/// 配置格式：每个拦截点下是 matcher 分组数组（HookMatcherGroup）。
+/// 节点名只接受 <see cref="HookInterceptionPoints"/> 的协议线格式名；
+/// 已废弃的 OneCode 专有事件名给出**显式迁移诊断**（有后继节点的提示新名，无后继节点的提示不支持），
+/// 不静默跳过；JSON 损坏 / IO 失败记录错误并整体跳过（含行号）。
 /// </summary>
 public sealed class HookSettingsLoader
 {
@@ -15,6 +16,9 @@ public sealed class HookSettingsLoader
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private static readonly string OpenPointList =
+        string.Join(", ", HookInterceptionPoints.Open.Select(HookInterceptionPoints.ToWireName));
 
     private readonly ILogger<HookSettingsLoader> _logger;
 
@@ -42,14 +46,27 @@ public sealed class HookSettingsLoader
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
                 return Fail(hooksJsonPath, ["hooks.json 根节点必须是 JSON 对象"]);
 
-            Dictionary<HookEvent, List<HookMatcherGroup>> result = [];
+            Dictionary<HookInterceptionPoint, List<HookMatcherGroup>> result = [];
             List<string> errors = [];
 
             foreach (var eventProp in doc.RootElement.EnumerateObject())
             {
-                if (!Enum.TryParse<HookEvent>(eventProp.Name, ignoreCase: true, out var hookEvent))
+                if (HookInterceptionPoints.TryParseWireName(eventProp.Name, out var point))
                 {
-                    var message = $"未知事件名 '{eventProp.Name}'（有效值: {string.Join(", ", Enum.GetNames<HookEvent>())}），已跳过";
+                    if (!HookInterceptionPoints.IsOpen(point))
+                    {
+                        var closed = $"拦截点 '{eventProp.Name}' 为内部生命周期边界，不对用户配置开放，已跳过";
+                        errors.Add(closed);
+                        _logger.LogWarning("hooks.json: {Message}", closed);
+                        continue;
+                    }
+                }
+                else
+                {
+                    var successor = HookInterceptionPoints.TryGetLegacySuccessor(eventProp.Name);
+                    var message = successor is not null
+                        ? $"事件 '{eventProp.Name}' 已迁移为拦截点 '{successor}'，请改写 hooks.json"
+                        : $"事件 '{eventProp.Name}' 不再属于 Hook 拦截范围（有效节点: {OpenPointList}），已跳过";
                     errors.Add(message);
                     _logger.LogWarning("hooks.json: {Message}", message);
                     continue;
@@ -57,7 +74,7 @@ public sealed class HookSettingsLoader
 
                 var groups = ParseEventHooks(eventProp.Value);
                 if (groups is { Count: > 0 })
-                    result[hookEvent] = groups;
+                    result[point] = groups;
             }
 
             return new HookFileLoadResult(
@@ -84,16 +101,16 @@ public sealed class HookSettingsLoader
     }
 
     /// <summary>
-    /// 解析单个事件下的 hook 配置（matcher-group 格式）。
+    /// 解析单个拦截点下的 hook 配置（matcher-group 格式）。
     /// </summary>
-    private static List<HookMatcherGroup> ParseEventHooks(JsonElement eventArray)
+    private static List<HookMatcherGroup> ParseEventHooks(JsonElement pointArray)
     {
-        if (eventArray.ValueKind != JsonValueKind.Array)
+        if (pointArray.ValueKind != JsonValueKind.Array)
             return [];
 
         List<HookMatcherGroup> groups = [];
 
-        foreach (var item in eventArray.EnumerateArray())
+        foreach (var item in pointArray.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object)
                 continue;

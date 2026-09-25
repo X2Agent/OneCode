@@ -5,8 +5,7 @@ namespace OneCode.App.Services;
 
 /// <summary>
 /// Interactive-session bootstrap: trust flow, system prompt, AppState hydration,
-/// and slash-command discovery. Extracted from <see cref="InteractiveModeExecutor"/>
-/// to keep the orchestrator under the DI constructor-parameter limit.
+/// and slash-command discovery.
 /// </summary>
 public sealed class InteractiveBootstrapService(
     StartupFlowCoordinator startupFlowCoordinator,
@@ -41,8 +40,6 @@ public sealed class InteractiveBootstrapService(
         // rather than degrading to MAF's generic default instructions.
         var harnessPrompt = await promptConfigBuilder.LoadHarnessAsync(ct).ConfigureAwait(false);
 
-        var model = discovery.ConfigManager.Current.Effective.Model ?? string.Empty;
-
         HydrateAppStateFromConfig();
 
         await discovery.CommandRegistry.RefreshDynamicCommandsAsync(discovery.DynamicCommandSources, ct)
@@ -61,7 +58,7 @@ public sealed class InteractiveBootstrapService(
         return new InteractiveSession(
             session.ConversationRunner, systemPrompt, session.SessionManager,
             modeController,
-            null, slashCommands, model, harnessPrompt);
+            null, slashCommands, harnessPrompt);
     }
 
     private void HydrateAppStateFromConfig()

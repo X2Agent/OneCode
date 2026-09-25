@@ -21,7 +21,6 @@ public sealed partial class QuestionWizard
             question.Description,
             viewWidth);
 
-        // 根据题型渲染不同UI
         switch (question.Type)
         {
             case QuestionType.SingleChoice:
@@ -39,10 +38,8 @@ public sealed partial class QuestionWizard
                 break;
         }
 
-        // 空行
         lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
 
-        // 导航提示
         RenderNavigationHints(lines, question);
 
         return lines;
@@ -108,7 +105,6 @@ public sealed partial class QuestionWizard
             }));
         }
 
-        // 显示已选数量提示
         if (_selectedMultipleOptions.Count > 0)
         {
             lines.Add(FormattedLine.FromSegments(new[]

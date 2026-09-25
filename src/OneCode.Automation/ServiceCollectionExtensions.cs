@@ -34,10 +34,10 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddCronTools(this IServiceCollection services)
     {
-        // Deferred 层：cron 工具低频但高风险，不自动加载，仅通过 ToolSearch 显式激活
+        // Deferred 层：cron 工具低频，但 create/delete 会留下自治执行的定时任务，不自动加载，仅通过 ToolSearch 显式激活
         services.AddToolInstance("Cron", (CronTool tool) =>
                 Microsoft.Extensions.AI.AIFunctionFactory.Create(tool.ExecuteAsync, name: "Cron"),
-            ToolRisk.Safe,
+            ToolRisk.Destructive,
             searchHint: "manage scheduled cron jobs (create/list/delete/pause/resume)",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["cron", "schedule"]);
         return services;

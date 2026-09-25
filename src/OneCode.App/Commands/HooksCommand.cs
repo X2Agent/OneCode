@@ -47,12 +47,13 @@ public sealed class HooksCommand : Command
     private string BuildOverview()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Hooks: lifecycle hook system");
+        sb.AppendLine("Hooks: agent interception points");
         sb.AppendLine();
 
         var persistent = _hookRegistry.GetAll();
 
         sb.AppendLine(CultureInfo.InvariantCulture, $"  Persistent hooks: {persistent.Count}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Config generation: {_hookRegistry.Generation}");
         sb.AppendLine();
 
         var trusted = _policyService.IsCurrentWorkspaceTrusted();
@@ -96,10 +97,10 @@ public sealed class HooksCommand : Command
             foreach (var sourceGroup in groups)
             {
                 sb.AppendLine(CultureInfo.InvariantCulture, $"{sourceGroup.Key} hooks:");
-                foreach (var eventGroup in sourceGroup.GroupBy(h => h.Event))
+                foreach (var pointGroup in sourceGroup.GroupBy(h => HookInterceptionPoints.ToWireName(h.Point)))
                 {
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"  {eventGroup.Key}:");
-                    foreach (var h in eventGroup.OrderBy(x => x.Priority))
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  {pointGroup.Key}:");
+                    foreach (var h in pointGroup.OrderBy(x => x.Priority))
                     {
                         sb.AppendLine(CultureInfo.InvariantCulture,
                             $"   [{h.Priority,3}] {h.ExecutorType,-10} {h.Name}");
@@ -120,9 +121,9 @@ public sealed class HooksCommand : Command
     private static string BuildEventList()
     {
         var sb = new StringBuilder();
-        sb.AppendLine(CultureInfo.InvariantCulture, $"Available hook events ({HookEventMetadataRegistry.All.Count}):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Available hook interception points ({HookPointMetadataRegistry.All.Count}):");
         sb.AppendLine();
-        foreach (var meta in HookEventMetadataRegistry.All.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var meta in HookPointMetadataRegistry.All.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
         {
             sb.Append(CultureInfo.InvariantCulture, $"  {meta.Name,-25} {meta.Description}");
             if (meta.Matcher is { } mm)

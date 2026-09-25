@@ -25,7 +25,7 @@ public sealed class HookExecutionService : IHookExecutionService
         _policyService = policyService ?? throw new ArgumentNullException(nameof(policyService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        // 同类型重复注册时首个生效（与旧 keyed 注入的 FirstOrDefault 语义一致）
+        // 同类型重复注册时首个生效
         _executors = executors
             .GroupBy(e => e.Type)
             .ToDictionary(g => g.Key, g => g.First());
@@ -42,7 +42,7 @@ public sealed class HookExecutionService : IHookExecutionService
             return new AggregatedHookResult();
         }
 
-        var hooks = _hookRegistry.GetMatchesForEvent(payload.Event, actualMatcherValue).ToList();
+        var hooks = _hookRegistry.GetMatchesForPoint(payload.Point, actualMatcherValue).ToList();
         if (hooks.Count == 0)
             return new AggregatedHookResult();
 
@@ -51,10 +51,15 @@ public sealed class HookExecutionService : IHookExecutionService
         return await ExecuteAndAggregateAsync(hooks, payload, ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public bool HasActiveHooks(HookInterceptionPoint point, string? actualMatcherValue = null) =>
+        _policyService.IsCurrentWorkspaceTrusted()
+        && _hookRegistry.GetMatchesForPoint(point, actualMatcherValue).Any();
+
     /// <summary>
     /// 串行执行并聚合结果。<c>once</c> hook 仅在<strong>成功执行</strong>后注销——
     /// 异常 / 取消 / 执行器缺失视为未完成，保留待下次触发；
-    /// Blocking（成功送达阻断裁决，如 Stop 阻断触发纠偏续跑）同样移除，防止无限循环。
+    /// Blocking（成功送达阻断裁决）同样移除，防止同一拦截点反复触发造成无限循环。
     /// </summary>
     private async Task<AggregatedHookResult> ExecuteAndAggregateAsync(
         List<HookRegistration> hooks,

@@ -58,8 +58,8 @@ public static class OneCodeToolMiddleware
     }
 
     /// <summary>
-    /// Default Layer 0 invariants. Mirrors <c>AgentPipelineBuilder.CreateDefaultSafetyInvariants</c>;
-    /// both hosts must stay aligned.
+    /// Default Layer 0 invariants. Sole definition: <c>AgentPipelineBuilder</c> calls this method, so the
+    /// pipeline and the AutoDream host cannot drift apart.
     /// </summary>
     internal static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(string workingDirectory) =>
     [

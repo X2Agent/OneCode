@@ -43,19 +43,22 @@ public sealed class AgentPipelineBuilderTests
             ?? new Dictionary<string, AdditionalWorkingDirectory>();
 
         var boxed = CheckPermissionMethod.Invoke(
-            null, new object[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, ct });
+            null, new object?[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, null, ct });
         return ((ValueTask<object>)boxed!).AsTask();
     }
 
     private static FunctionInvocationContext CreateContext(
         string toolName,
-        IDictionary<string, object?>? args = null)
+        IDictionary<string, object?>? args = null,
+        bool withApprovalBoundary = false)
     {
         var function = Substitute.For<AIFunction>();
         function.Name.Returns(toolName);
         return new FunctionInvocationContext
         {
-            Function = function,
+            // 走审批协议的 Ask 必须以 ApprovalRequiredAIFunction 标记为前提（中间件 fail-closed 断言），
+            // 这里用真实标记类型包装替身工具，而不是靠替身伪造 GetService 结果。
+            Function = withApprovalBoundary ? new ApprovalRequiredAIFunction(function) : function,
             Arguments = new AIFunctionArguments(
                 (args ?? new Dictionary<string, object?>())
                     .ToDictionary(kv => kv.Key, kv => kv.Value)),
@@ -153,7 +156,7 @@ public sealed class AgentPipelineBuilderTests
             .Which.Content.Should().Be("Tool 'Write' denied: not allowed");
     }
 
-    // Test 4: Ask + EnableToolApproval:true → 放行到 next（MAF ToolApprovalAgent 接管）
+    // Test 4: Ask + EnableToolApproval:true + 带审批标记 → 放行到 next（MAF ToolApprovalAgent 接管）
     [Fact]
     public async Task CheckPermission_AskDecision_PassesThroughToToolApprovalAgent()
     {
@@ -166,7 +169,7 @@ public sealed class AgentPipelineBuilderTests
                 Arg.Any<CancellationToken>())
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
-        var ctx = CreateContext("Write");
+        var ctx = CreateContext("Write", withApprovalBoundary: true);
         var options = BuildOptions(checker: checker);
         var holder = new FlagHolder();
 
@@ -175,11 +178,11 @@ public sealed class AgentPipelineBuilderTests
             (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
             ct);
 
-        holder.Value.Should().BeTrue("Ask + EnableToolApproval → 放行到 next（ToolApprovalAgent 接管）");
+        holder.Value.Should().BeTrue("Ask + 带标记 + EnableToolApproval → 放行到 next（ToolApprovalAgent 接管）");
         result.Should().Be("tool-result");
     }
 
-    // Test 5: Ask → 放行到 next（由 MAF ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）
+    // Test 5: Ask（无 broker，标记工具） → 放行到 next（由 MAF ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）
     [Fact]
     public async Task CheckPermission_AskDecision_WithoutBroker_PassesThrough()
     {
@@ -192,7 +195,7 @@ public sealed class AgentPipelineBuilderTests
                 Arg.Any<CancellationToken>())
             .Returns(PermissionCheckResult.Ask("confirm?"));
 
-        var ctx = CreateContext("Write");
+        var ctx = CreateContext("Write", withApprovalBoundary: true);
         var options = BuildOptions(checker: checker);
         var holder = new FlagHolder();
 
@@ -202,8 +205,35 @@ public sealed class AgentPipelineBuilderTests
             ct);
 
         holder.Value.Should().BeTrue(
-            "Ask → 放行到 next（ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）");
+            "Ask + 带标记 → 放行到 next（ToolApprovalAgent + AutoApprovalRules 接管，不再 inline Deny）");
         result.Should().Be("tool-result");
+    }
+
+    // Test 5b: Ask + EnableToolApproval + 未标记工具 → fail-closed 拒绝（放行等于把 Ask 静默降级为 Allow）
+    [Fact]
+    public async Task CheckPermission_AskDecision_WithoutApprovalMarker_IsRefused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var checker = Substitute.For<IPermissionChecker>();
+        checker.CheckAsync(
+                Arg.Any<string>(),
+                Arg.Any<JsonElement>(),
+                Arg.Any<ToolPermissionContext>(),
+                Arg.Any<CancellationToken>())
+            .Returns(PermissionCheckResult.Ask("confirm?"));
+
+        var ctx = CreateContext("some_unmarked_tool");
+        var options = BuildOptions(checker: checker);
+        var holder = new FlagHolder();
+
+        var result = await InvokeCheckPermissionAsync(
+            options, ctx,
+            (_, _) => { holder.Value = true; return new ValueTask<object>("tool-result"); },
+            ct);
+
+        holder.Value.Should().BeFalse("未标记工具不带审批边界，绝不能放行执行");
+        result.Should().BeOfType<ToolResult>()
+            .Which.Content.Should().Contain("is not part of the approval protocol");
     }
 
     // Test 8: fail-safe — EnableToolApproval:false + Ask + 无审批通道 → fail-safe Deny（防止 fail-open）

@@ -12,6 +12,12 @@ internal sealed class GoalSubGoalJudge(
     IChatClient chatClient,
     IPromptManager promptManager)
 {
+    /// <summary>完成标记。与 <see cref="MoreMarker"/> 互不为子串，歧义判定可二分。</summary>
+    internal const string DoneMarker = "VERDICT: DONE";
+
+    /// <summary>未完成标记。歧义时优先于 <see cref="DoneMarker"/>，与 MAF <c>AIJudgeLoopEvaluator</c> 一致。</summary>
+    internal const string MoreMarker = "VERDICT: MORE";
+
     private readonly IChatClient _chatClient = chatClient;
     private readonly IPromptManager _promptManager = promptManager;
 
@@ -20,6 +26,11 @@ internal sealed class GoalSubGoalJudge(
     /// 解析 "VERDICT: DONE" / "VERDICT: MORE" 标记，提取反馈供下一轮重试使用。
     /// 无 marker 时视为未完成（MORE wins），使用整个响应作为反馈。
     /// </summary>
+    /// <remarks>
+    /// 判定规则与 MAF <c>AIJudgeLoopEvaluator</c> 对齐：<c>!MORE &amp;&amp; DONE</c>，
+    /// 即判定歧义（双标记并存 / 无标记 / 格式漂移）时 MORE 胜出、循环继续。
+    /// 反向规则（见到 DONE 即判完成）会把未完成的子目标静默放行为已完成。
+    /// </remarks>
     public async Task<(bool Completed, string? Feedback, long InputTokens, long OutputTokens)> EvaluateSubGoalAsync(
         SubGoalEvidence evidence,
         GoalItem goal,
@@ -59,16 +70,19 @@ internal sealed class GoalSubGoalJudge(
         var inputTokens = (long)(response.Usage?.InputTokenCount ?? 0);
         var outputTokens = (long)(response.Usage?.OutputTokenCount ?? 0);
 
-        if (verdict.Contains("VERDICT: DONE", StringComparison.OrdinalIgnoreCase))
-            return (true, null, inputTokens, outputTokens);
+        // MORE 优先：判定歧义时保持循环，而不是放行未完成的子目标。
+        var moreIdx = verdict.IndexOf(MoreMarker, StringComparison.OrdinalIgnoreCase);
+        if (moreIdx >= 0)
+        {
+            // 提取 "VERDICT: MORE" 之后的反馈内容。
+            var moreFeedback = verdict[(moreIdx + MoreMarker.Length)..].Trim();
+            return (false, string.IsNullOrWhiteSpace(moreFeedback) ? verdict.Trim() : moreFeedback, inputTokens, outputTokens);
+        }
 
-        // 提取 "VERDICT: MORE" 之后的反馈内容；无 marker 时使用整个响应作为反馈
-        var moreIdx = verdict.IndexOf("VERDICT: MORE", StringComparison.OrdinalIgnoreCase);
-        var feedback = moreIdx >= 0
-            ? verdict[(moreIdx + "VERDICT: MORE".Length)..].Trim()
-            : verdict.Trim();
-
-        return (false, feedback, inputTokens, outputTokens);
+        // 无 MORE 且含 DONE 才判完成；无标记时视为未完成，整体响应作为反馈。
+        return verdict.Contains(DoneMarker, StringComparison.OrdinalIgnoreCase)
+            ? (true, null, inputTokens, outputTokens)
+            : (false, verdict.Trim(), inputTokens, outputTokens);
     }
 
     public async Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
@@ -111,7 +125,9 @@ internal sealed class GoalSubGoalJudge(
             new ChatOptions { MaxOutputTokens = 1024 },
             ct).ConfigureAwait(false);
         var verdict = response.Text ?? string.Empty;
-        var passed = verdict.Contains("VERDICT: DONE", StringComparison.OrdinalIgnoreCase);
+        // 与子目标判定同一规则：MORE 优先，歧义时保持"未通过"。
+        var passed = verdict.Contains(DoneMarker, StringComparison.OrdinalIgnoreCase)
+            && !verdict.Contains(MoreMarker, StringComparison.OrdinalIgnoreCase);
         return (
             passed,
             passed ? "Final AI semantic review returned DONE." : verdict.Trim(),

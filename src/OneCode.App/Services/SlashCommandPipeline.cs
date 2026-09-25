@@ -11,6 +11,9 @@ public abstract record CommandDispatchResult
 
     /// <summary>Command requests resuming a durable workflow — route directly to the workflow resume stream.</summary>
     public sealed record ResumeWorkflow(string SessionId, WorkflowResumeKind Kind) : CommandDispatchResult;
+
+    /// <summary>Command requests running a bounded deterministic loop — route to the loop stream.</summary>
+    public sealed record Loop(string Task, string? CheckCommand, int MaxIterations) : CommandDispatchResult;
 }
 
 /// <summary>
@@ -19,8 +22,7 @@ public abstract record CommandDispatchResult
 /// plus the exit-requested flag consulted by the TUI lifecycle.
 /// </summary>
 /// <remarks>
-/// Extracted from <see cref="InteractiveModeExecutor"/> to keep that class
-/// focused on orchestration. The <see cref="CommandState"/> property is shared
+/// The <see cref="CommandState"/> property is shared
 /// with <see cref="TuiHostConfigurator"/> (for session-UI refresh wiring).
 /// </remarks>
 public sealed class SlashCommandPipeline(
@@ -53,6 +55,9 @@ public sealed class SlashCommandPipeline(
 
         if (result is CommandResult.ResumeWorkflowResult rw)
             return new CommandDispatchResult.ResumeWorkflow(rw.SessionId, rw.Kind);
+
+        if (result is CommandResult.LoopResult loop)
+            return new CommandDispatchResult.Loop(loop.Task, loop.CheckCommand, loop.MaxIterations);
 
         _cmdState.CacheResult(result);
         return null;

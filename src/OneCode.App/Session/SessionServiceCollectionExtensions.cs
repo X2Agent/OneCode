@@ -40,7 +40,6 @@ public static class SessionServiceCollectionExtensions
             var logger = sp.GetRequiredService<ILogger<SessionManager>>();
             var sessionOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<SessionOptions>>().Value;
             return new SessionManager(store, logger, sessionOptions.InitialWorkingDirectory,
-                hookExecutionService: sp.GetRequiredService<IHookExecutionService>(),
                 shellExecutorCleanup: sp.GetRequiredService<IShellExecutorCleanup>(),
                 tokenUsageTracker: sp.GetRequiredService<Services.Observability.ITokenUsageTracker>(),
                 sessionIdHolder: sp.GetRequiredService<SessionIdHolder>(),
@@ -48,6 +47,7 @@ public static class SessionServiceCollectionExtensions
         });
         services.AddSingleton<ISessionManager>(sp => sp.GetRequiredService<SessionManager>());
         services.AddSingleton<ISessionConversationAccess>(sp => sp.GetRequiredService<SessionManager>());
+        services.AddSingleton<ISessionChatHistoryReader>(sp => sp.GetRequiredService<SessionManager>());
         services.AddSingleton<ISessionWorkingDirectory>(sp => sp.GetRequiredService<SessionManager>());
 
         return services;

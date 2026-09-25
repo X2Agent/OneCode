@@ -1,3 +1,4 @@
+using OneCode.Core.Coordinator;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Models;
 
@@ -21,6 +22,12 @@ public sealed partial class OneCodeToplevel : Window
     private Func<CancellationToken, Task<bool>>? _showSettingsOverlayAsync;
     private Func<CancellationToken, Task<string>>? _applySettingsAsync;
     private Func<CancellationToken, Task<string?>>? _showMcpConfigAsync;
+    /// <summary>
+    /// 会话级全放行委托——审批弹窗选择「本次对话全部允许」时调用。
+    /// 由 TuiHostConfigurator 注入：翻转 PermissionModeProvider 运行时覆盖到
+    /// BypassPermissions（不写配置，重启后恢复）。
+    /// </summary>
+    private Action? _applySessionAllowAll;
 
     private CancellationTokenSource _queryCts = new();
     private bool _isQueryRunning;
@@ -74,7 +81,7 @@ public sealed partial class OneCodeToplevel : Window
         var keyContextManager = ctx.KeyContextManager ?? new KeybindingContextManager();
         var toolNameProvider = ctx.GetToolNames ?? (() => []);
 
-        _shell = new ReplShell(app, ctx.Version, ctx.Model, ctx.SshHost, ctx.SlashCommands,
+        _shell = new ReplShell(app, ctx.Version, ctx.GetModel(), ctx.SshHost, ctx.SlashCommands,
             modeController, keyResolver, keyContextManager, ctx.Clipboard, ctx.GetSessionUserPrompts,
             toolNameProvider, gitHelper: ctx.GitHelper);
         _transcriptPresenter = new TranscriptEventPresenter(_shell.Transcript);
@@ -83,19 +90,19 @@ public sealed partial class OneCodeToplevel : Window
         _shell.ChatInput.InterruptRequested += OnInterruptRequested;
 
         // Wire multimodal support check and notifier for image paste rejection.
-        _shell.ChatInput.IsMultimodalSupported = () => _ctx.ModelCatalog.SupportsAttachment(_ctx.Model);
+        _shell.ChatInput.IsMultimodalSupported = () => _ctx.ModelCatalog.SupportsAttachment(_ctx.GetModel());
         _shell.ChatInput.ImagePipeline = _ctx.ImagePipeline;
         _shell.ChatInput.ImagePasteRejected += () =>
         {
             Invoke(() => _shell.Transcript.AddError(
-                $"The current model ({_ctx.Model}) does not support image attachments. " +
+                $"The current model ({_ctx.GetModel()}) does not support image attachments. " +
                 "Switch to a multimodal model (e.g., claude-sonnet-4) to use images."));
         };
 
         // Ctrl+Shift+T — TEAM 模式下循环切换已注册团队
         _shell.ChatInput.CycleTeamRequested += OnCycleTeamRequested;
 
-        _maxContextTokens = ModelContextDefaults.Resolve(ctx.Model, ctx.ModelCatalog);
+        _maxContextTokens = ModelContextDefaults.Resolve(ctx.GetModel(), ctx.ModelCatalog);
         _shell.SessionContextBar.SetContextUsage(_maxContextTokens, 0);
 
         Add(_shell);
@@ -222,6 +229,17 @@ public sealed partial class OneCodeToplevel : Window
         {
             _shell.ShowPlanCard(title, steps, phase, markdown, documentPath);
         });
+    }
+
+    /// <summary>
+    /// Internally invoked when the backend publishes a fresh todo-list snapshot
+    /// (Harness <c>TodoProvider</c> session state). Dispatches onto the UI thread:
+    /// the snapshot is read on the agent-run thread after each run completes.
+    /// An empty list hides the strip.
+    /// </summary>
+    internal void ShowTodos(IReadOnlyList<TodoListItem> items)
+    {
+        _app.Invoke(() => _shell.ShowTodoPanel(items));
     }
 
     /// <summary>
@@ -367,10 +385,7 @@ public sealed partial class OneCodeToplevel : Window
     {
         ClearConversationView();
         _shell.Transcript.LoadConversation(conversation);
-        _shell.AgentStatusBar.SetModel(conversation.Model);
-
-        _maxContextTokens = ModelContextDefaults.Resolve(conversation.Model);
-        _shell.SessionContextBar.SetContextUsage(_maxContextTokens, 0);
+        ApplyRuntimeModel(conversation.Model, currentContextTokens: 0);
     }
 
     /// <summary>
@@ -393,6 +408,7 @@ public sealed partial class OneCodeToplevel : Window
 
         _shell.ClearPlan();
         _shell.ClearTeamRun();
+        _shell.ClearTodoPanel();
 
         _shell.FocusChatInput();
     }
@@ -400,17 +416,31 @@ public sealed partial class OneCodeToplevel : Window
     public void UpdateRuntimeState(string? model = null, string? effort = null)
     {
         if (model != null)
-        {
-            _shell.AgentStatusBar.SetModel(model);
-            _shell.UpdateHeader(model);
+            ApplyRuntimeModel(model, _lastRoundInputTokens);
 
-            // 模型变更时重新解析上下文窗口
-            _maxContextTokens = ModelContextDefaults.Resolve(model);
-            _shell.SessionContextBar.SetContextUsage(_maxContextTokens, _lastRoundInputTokens);
-
-        }
         _shell.FocusChatInput();
     }
+
+    /// <summary>
+    /// 模型名 → 状态栏 + 上下文窗口上限的唯一写入入口。
+    /// 两处必须同帧更新：只推状态栏，上下文进度条仍按旧模型的窗口计算。
+    /// </summary>
+    private void ApplyRuntimeModel(string? model, int currentContextTokens)
+    {
+        if (string.IsNullOrEmpty(model)) return;
+
+        _shell.UpdateHeader(model);
+        _maxContextTokens = ModelContextDefaults.Resolve(model, _ctx.ModelCatalog);
+        _shell.SessionContextBar.SetContextUsage(_maxContextTokens, currentContextTokens);
+    }
+
+    /// <summary>
+    /// 命令执行完毕后把状态栏模型名对齐到运行时真相源（必须由 UI 线程调用）。
+    /// <c>/model</c>、<c>/config set … model</c> 只更新 AppState 与配置文件，
+    /// 不触碰 TUI——不在命令返回后回读，状态栏会一直停在启动时那份模型名。
+    /// </summary>
+    private void SyncRuntimeModel() =>
+        ApplyRuntimeModel(_ctx.GetModel(), _lastRoundInputTokens);
 
     // Query loop and event dispatch live in OneCodeToplevel.Query.cs and OneCodeToplevel.Events.cs
 

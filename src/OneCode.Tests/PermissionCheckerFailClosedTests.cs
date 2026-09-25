@@ -42,7 +42,7 @@ public sealed class PermissionCheckerFailClosedTests
             ?? new Dictionary<string, AdditionalWorkingDirectory>();
 
         var boxed = CheckPermissionMethod.Invoke(
-            null, new object[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, ct });
+            null, new object?[] { options, rulesBySource, additionalWorkingDirectories, ctx, next, null, ct });
         return ((ValueTask<object>)boxed!).AsTask();
     }
 

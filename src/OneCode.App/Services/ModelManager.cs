@@ -47,9 +47,7 @@ public sealed class ModelManager : IModelManager
             return;
         }
 
-        var isAnthropic = string.IsNullOrEmpty(configProvider)
-            || configProvider.Equals(CoreConstants.ModelProviders.Anthropic, StringComparison.OrdinalIgnoreCase);
-        var providerId = isAnthropic ? CoreConstants.ModelProviders.Anthropic : CoreConstants.ModelProviders.OpenAI;
+        var providerId = ResolveProviderId(configProvider);
 
         var fastModelName = configFastModel;
 
@@ -70,8 +68,8 @@ public sealed class ModelManager : IModelManager
 
     private void AddModel(string providerId, string modelName)
     {
-        // ContextWindow 不再在此快照——由 Resolve 实时委托 IModelCatalog 读取，
-        // 确保 catalog 热刷新后 ModelManager 返回的 ContextWindow 始终最新。
+        // ContextWindow 不再在此快照——由 ResolveMetadata 实时解析（本地 Ollama 取
+        // ollamaContextWindow，其余 provider 委托 IModelCatalog），确保热刷新后始终最新。
         // MaxOutputTokens 在 models.dev 数据中不直接提供，使用保守默认值；
         // 实际限制由 API 在运行时强制，此处仅用于 UI 提示和预算估算。
         _models[modelName] = new ModelInfo(
@@ -146,28 +144,70 @@ public sealed class ModelManager : IModelManager
         lock (_modelsLock)
         {
             if (_models.TryGetValue(modelRef, out var model))
-                return MergeWithCatalog(model);
+                return ResolveMetadata(model);
 
             if (_aliases.TryGetValue(modelRef, out var resolved)
                 && _models.TryGetValue(resolved, out var aliased))
-                return MergeWithCatalog(aliased);
+                return ResolveMetadata(aliased);
 
             return null;
         }
     }
 
     /// <summary>
-    /// 从 <see cref="IModelCatalog"/> 实时填充 ContextWindow。
-    /// catalog 热刷新后，模型将自动获得最新值。
+    /// 实时解析 ContextWindow，永不返回 0。
+    ///
+    /// <para>本地 Ollama 是例外分支：其窗口由我们下发的 <c>num_ctx</c>（<c>ollamaContextWindow</c>）决定，
+    /// 也就是服务端真正强制的窗口；models.dev 不覆盖本地模型，catalog 值与之无关，故无条件优先。
+    /// 宁可低估（压缩提前触发）也不可高估（服务端静默丢弃最旧消息）。</para>
+    ///
+    /// <para>其余 provider 走 <see cref="IModelCatalog"/>（catalog 热刷新后自动获得最新值），
+    /// 未命中时回落到 <see cref="ModelContextDefaults.DefaultContextWindow"/>——与
+    /// <c>TokenBudget.GetMaxContextTokens</c> 的既有回落口径一致。返回 0 会让压缩装配把 0
+    /// 当作有效窗口传入严格校验并直接失败。</para>
     /// </summary>
-    private ModelInfo MergeWithCatalog(ModelInfo model)
+    private ModelInfo ResolveMetadata(ModelInfo model)
     {
+        if (IsLocalOllama)
+            return model with { ContextWindow = ResolveLocalContextWindow() };
+
         if (model.ContextWindow > 0) return model;
 
         var liveWindow = _modelCatalog.GetContextWindow(model.Id);
         if (liveWindow > 0)
             return model with { ContextWindow = liveWindow };
-        return model;
+        return model with { ContextWindow = ModelContextDefaults.DefaultContextWindow };
+    }
+
+    /// <summary>当前 provider 是否为本地 Ollama 部署（精确匹配，与 <c>num_ctx</c> 的注入条件一致）。</summary>
+    private bool IsLocalOllama => string.Equals(
+        _configManager.Current.Effective.Provider,
+        CoreConstants.ModelProviders.Ollama,
+        StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>本地窗口真相源：下发的 <c>num_ctx</c>；未配置（≤ 0）时回落到保守默认值。</summary>
+    private int ResolveLocalContextWindow()
+    {
+        var configured = _configManager.Current.Effective.OllamaContextWindow;
+        return configured > 0 ? configured : ModelContextDefaults.DefaultContextWindow;
+    }
+
+    /// <summary>
+    /// provider 配置 → API 协议标识（<see cref="ModelInfo.ProviderId"/>）。
+    /// 空值与 anthropic 均视为 Anthropic（历史语义）；ollama 必须保留为 "ollama"，
+    /// 否则工具结果序列化会走 OpenAI 的 JSON 分支，与本地模型返回 Markdown 的设计相反。
+    /// </summary>
+    private static string ResolveProviderId(string? configProvider)
+    {
+        if (string.IsNullOrEmpty(configProvider)
+            || configProvider.Equals(CoreConstants.ModelProviders.Anthropic, StringComparison.OrdinalIgnoreCase))
+        {
+            return CoreConstants.ModelProviders.Anthropic;
+        }
+
+        return configProvider.Equals(CoreConstants.ModelProviders.Ollama, StringComparison.OrdinalIgnoreCase)
+            ? CoreConstants.ModelProviders.Ollama
+            : CoreConstants.ModelProviders.OpenAI;
     }
 
     /// <summary>
@@ -205,14 +245,7 @@ public sealed class ModelManager : IModelManager
             if (_models.ContainsKey(modelName))
                 return;
 
-            var configProvider = _configManager.Current.Effective.Provider;
-            var isAnthropic = string.IsNullOrEmpty(configProvider)
-                || configProvider.Equals(CoreConstants.ModelProviders.Anthropic, StringComparison.OrdinalIgnoreCase);
-            var providerId = isAnthropic
-                ? CoreConstants.ModelProviders.Anthropic
-                : CoreConstants.ModelProviders.OpenAI;
-
-            AddModel(providerId, modelName);
+            AddModel(ResolveProviderId(_configManager.Current.Effective.Provider), modelName);
             _aliases["fast"] = modelName;
         }
     }

@@ -13,10 +13,6 @@ namespace OneCode.App.Services.BuildMode;
 /// <summary>
 /// Encapsulates Build Run gate logic: controlled build attempts, terminal-reason
 /// resolution, cancelled-run persistence, and plan-run completion.
-///
-/// Extracted from ChatService to isolate the Build/Plan workflow concern from
-/// the streaming event loop. ChatService delegates to this class instead of
-/// holding 9 build/plan-related dependencies directly.
 /// </summary>
 public sealed class BuildRunGate
 {

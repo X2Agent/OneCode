@@ -2,7 +2,6 @@ using System.Diagnostics;
 using OneCode.App.Commands;
 using OneCode.Core.Commands;
 using OneCode.Core.Domain;
-using OneCode.Core.Hooks;
 using OneCode.Core.Tools;
 using OneCode.App.Services.Observability;
 using OneCode.App.Tools;
@@ -34,7 +33,6 @@ public sealed class SessionFeatureE2ETests : IDisposable
             _store,
             NullLogger<SessionManager>.Instance,
             _tempDir,
-            hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: _shellManager,
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),
@@ -57,7 +55,6 @@ public sealed class SessionFeatureE2ETests : IDisposable
         // Simulate new process: reload from disk
         var store2 = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
         var manager2 = new SessionManager(store2, NullLogger<SessionManager>.Instance, _tempDir,
-            hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),

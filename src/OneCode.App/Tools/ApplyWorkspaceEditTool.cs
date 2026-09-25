@@ -294,7 +294,6 @@ public sealed class ApplyWorkspaceEditTool
             var prefix = startLineText[..Math.Min(edit.StartChar, startLineText.Length)];
             var suffix = endLineText[Math.Min(edit.EndChar, endLineText.Length)..];
 
-            // Build the replacement: prefix + newText + suffix.
             // newText comes from the LSP server which uses LF per spec; we keep it as-is
             // (no normalization needed) and rely on string.Join to expand at the end.
             var replacement = prefix + edit.NewText + suffix;

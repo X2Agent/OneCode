@@ -12,7 +12,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 类别 | 说明 | 数量 |
 |---|---|---|
-| `Builtin` | 内置通用命令（配置、模式、工具等） | 22 |
+| `Builtin` | 内置通用命令（配置、模式、工具等） | 23 |
 | `Session` | 会话管理（会话、记忆、检查点、导出、队列等） | 11 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
@@ -36,6 +36,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
   | `CommandResult.Prompt(prompt, tools?)` | 交给 LLM 处理 |
   | `CommandResult.Error(msg)` | 错误提示（红色） |
   | `CommandResult.Exit()` | 退出应用 |
+  | `CommandResult.ResumeWorkflow(sessionId, kind)` | 恢复中断的 Goal/Team 工作流（`/resume`；TUI dispatch 直接驱动 resume 流，不经 LLM 管线） |
+  | `CommandResult.Loop(task, checkCommand, maxIterations)` | 启动有界迭代循环（`/loop`；TUI dispatch 驱动 LoopAgent） |
 
 - **隐藏命令**：`IsHidden = true` 的命令不会出现在 `/help` 列表中。
 - **即时命令**：`Immediate = true` 的命令绕过 query 队列立即执行（如 `/session`）。
@@ -104,7 +106,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` / `ls` | 列出所有配置及来源、生效模式 |
+| 无参数 / `list` / `ls` | 列出所有配置及来源、生效模式（TUI 中裸命令打开设置 overlay） |
 | `get <key>` | 获取指定配置值 |
 | `set <scope> <key> <value>` | 在指定作用域写入配置值 |
 | `remove <scope> <key>` | 移除指定作用域的配置覆盖 |
@@ -159,11 +161,11 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 模式 | 触发条件 | 行为 |
 |---|---|---|
 | 项目内省 | 无 URL | 扫描前端文件（`.html`/`.css`/`.vue`/`.tsx`/`.jsx`/`.svelte` 等）、检测 CSS 框架（Tailwind/UnoCSS/MUI/Ant Design 等）、收集项目上下文，交给 LLM 生成项目特定的 `DESIGN.md` |
-| 网站克隆 | 带 URL | 用 Playwright MCP（如已连接 `mcp__playwright__*`）截图 + 提取计算样式；否则用 `WebFetch` 抓取页面结构，交给 LLM 克隆视觉设计 |
+| 网站克隆 | 带 URL | 用 Playwright MCP 截图 + 提取计算样式（`browser_navigate` / `browser_take_screenshot` / `browser_evaluate`），交给 LLM 克隆视觉设计。未连接时先自动连接内置 `playwright` 服务器；仍不可用则直接报错并提示 `/mcp connect playwright`（纯抓取拿不到截图与计算样式，不退回 `WebFetch`） |
 | 静态模板 | `--no-llm` 或无 API Key | 跳过 LLM，直接生成包含默认 design token 的模板（颜色、排版、间距、组件、阴影、设计准则） |
 
 > ProgressMessage：`initializing DESIGN.md`。
-> 允许工具：`Read(*)`、`Glob(*)`、`Grep(*)`、`WebFetch(*)`、`mcp__playwright__*`（可选）、`Write(DESIGN.md)`。
+> 允许工具：`Read(*)`、`Glob(*)`、`Grep(*)`、`WebFetch(*)`、`mcp__playwright__*`、`Write(<输出路径>)`（默认 `DESIGN.md`）。
 > Prompt 来源：`prompts/system/design-init.prompt`（可通过 `.onecode/prompts/system/design-init.prompt` 覆盖）。
 > 如 `DESIGN.md` 已存在且未指定 `--force`，命令将拒绝覆盖并提示使用 `--force`。
 
@@ -171,7 +173,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /exit
 
-退出 Code Assistant。
+退出 OneCode。
 
 **用法**：
 
@@ -237,7 +239,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /hooks
 
-查看已注册的 hooks、策略状态和生命周期事件。
+查看已注册的 hooks、策略状态和拦截点清单。
 
 **用法**：
 
@@ -249,10 +251,10 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 | 概览（持久 hook 数 / 会话 hook 数 / 异步待处理数 / 策略状态） |
+| 无参数 | 概览（持久 hook 数 / 配置代次 / 工作区信任状态 / 配置文件路径 / 各 hooks.json 最近一次加载诊断） |
 | `list` / `ls` | 完整 hook 列表（按 source 分组：Managed / User / Project / Plugin） |
-| `events` | 可用 hook 事件列表 |
-| `status` | Hook 策略状态 |
+| `events` | 可用拦截点列表（含 matcher 字段） |
+| `status` | Hook 策略状态（工作区信任） |
 
 > **更多详情**：Hook 子系统的完整设计与使用方式参见 [Hook 模块文档](./hooks.md)。
 
@@ -292,20 +294,59 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 **用法**：
 
 ```
-/keybindings [list|validate|open|reset]
+/keybindings [list|open|reset]
 ```
 
 **参数**：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 | 创建 / 打开 `keybindings.json` 编辑（首次会生成模板并写入 JSON Schema） |
-| `list` | 列出默认键位绑定 |
-| `validate` | 校验 `keybindings.json` 格式与必填字段 |
-| `open` / `edit` | 在编辑器中打开 |
+| 无参数 | 查看当前生效绑定（默认 + 用户覆盖；TUI 中弹 overlay） |
+| `list` | 列出当前生效绑定（默认 + 用户覆盖，自定义项标注 ★custom） |
+| `open` | 在编辑器中打开（首次会生成模板并写入 JSON Schema） |
 | `reset` | 重置为默认键位绑定（丢弃所有自定义） |
 
 > 元数据：`Immediate = true`。
+
+---
+
+### /loop
+
+反复执行任务，直到确定性检查通过或达到硬上限。
+
+**用法**：
+
+```
+/loop <任务> [--check "<命令>"] [--max <次数>]
+```
+
+**参数**：
+
+| 参数 | 说明 |
+|---|---|
+| `<任务>` | 要反复执行的任务描述；每轮以 fresh context 原样重放 |
+| `--check "<命令>"` | 确定性检查命令，**退出码 0 即为本轮通过**；输出与退出码会注入下一轮反馈 |
+| `--max <次数>` | 调用 agent 的硬上限；缺省取配置 `loop.maxIterations`（默认 3） |
+
+**行为**：由 MAF `LoopAgent` + `DelegateLoopEvaluator` 驱动。每轮是一次完整 agent run（含工具调用），
+评估器只认确定性证据——先看 `--check` 命令退出码，未提供时退回构建/测试验证提供者。
+**两者都不可用时 fail-closed**：循环不可能通过，跑满上限后判失败并回滚本轮全部改动。
+未通过时，上一轮实际输出 + 真实失败输出会作为反馈注入下一轮（fresh context 下 agent 对上一轮零记忆）。
+
+**权限门禁**：循环是自主执行体，只在自主权限模式（`goalAuto` / `dontAsk` / `auto` / `bypassPermissions`）
+下可用；交互审批模式下命令直接报错，而不是替用户放权。
+
+**与 GOAL 模式的分工**：GOAL 用 LLM judge 判定"语义上是否达成目标"，配套规划、隔离工作区与三级预算；
+`/loop` 只认退出码 / 编译 / 测试这类确定性判据，因此不需要那些机制。边界见 [代理循环边界](adr/0010-agent-loop-boundaries.md)。
+
+**示例**：
+
+```
+/loop 修复登录页的样式回归 --check "npm test -- --run login" --max 5
+```
+
+> 上限语义对齐 MAF `LoopAgentOptions.MaxIterations`：它限制的是 **agent 调用次数**，且达到上限时先停后判，
+> 因此 `--max 3` = 3 次调用 + 最多 2 次完整"检查 → 重试"。
 
 ---
 
@@ -358,12 +399,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /permissions
 
-管理工具执行权限模式。
+管理工具执行权限模式（BUILD 模式的工作模式权限档位）。
 
 **用法**：
 
 ```
-/permissions [mode]（仅 BUILD 模式下可见可用）
+/permissions [mode] [--session]
 ```
 
 **参数**：
@@ -371,15 +412,18 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 值 | 别名 | 说明 |
 |---|---|---|
 | `default` | — | 默认模式，敏感操作需用户确认 |
-| `plan` | — | 计划模式，只读分析 |
 | `auto` | — | YOLO 自动分类模式 |
 | `acceptedits` | `accept-edits` / `accept_edits` | 文件写入自动放行 |
-| `bypasspermissions` | `bypass-permissions` / `bypass_permissions` / `bypass` | 跳过所有权限检查 |
+| `bypasspermissions` | `bypass-permissions` / `bypass_permissions` / `bypass` | 跳过所有权限检查（Layer 0 安全不变量仍生效） |
 | `dontask` | `dont-ask` / `dont_ask` | 直接拒绝危险操作 |
 
-无参数时显示当前模式和可用模式。
+无参数时显示当前生效模式、持久化配置值与可用模式。
 
-> **✅ 运行时立即生效**：`/permissions` 会更新 `PermissionModeProvider`（Agent 管道实际读取的鉴权源），同步 `AppState`，并将 `permissionMode` 写入配置文件。
+**`--session`（别名 `--once`）**：仅当前对话生效、**不写入配置文件**——重启 OneCode 后恢复持久档位。典型用法：`/permissions bypass --session` 在不污染后续会话的前提下，让本次对话自动执行所有操作。
+
+> **工作模式不是权限档位**：`plan` / `team` / `goalAuto` 是工作模式（PLAN/TEAM/GOAL）派生的权限策略，由 `WorkingModeBridge` 在模式切换时自动设置。`/permissions plan` 一类写法会造成「权限轴与模式轴不一致的半状态」（plan 白名单生效但 SubmitPlan 被拒），已被显式拒绝——切换工作模式请用 Tab 或 Alt+1..4。
+
+> **✅ 运行时立即生效**：`/permissions` 会更新 `PermissionModeProvider`（Agent 管道实际读取的鉴权源），并在未加 `--session` 时将 `permissionMode` 写入用户级配置文件。
 
 ---
 
@@ -399,7 +443,6 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 |---|---|
 | 无参数 / `list` / `ls` | 列出 bundled + 自定义 skills |
 | `show <name>` 或 `<name>` | 显示 skill 内容（预览） |
-| ~~`run <name>`~~ | 已移除；请改用 `/<skillname> [args]` |
 
 ---
 
@@ -459,14 +502,14 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 **用法**：
 
 ```
-/upgrade [--apply|-y] [--check|-c]
+/upgrade [--apply|-y|--yes]
 ```
 
 **参数**：
 
 | 参数 | 说明 |
 |---|---|
-| 无参数 / `--check` / `-c` | 只检查 GitHub 最新 release 版本，不执行升级 |
+| 无参数 | 只检查 GitHub 最新 release 版本，不执行升级 |
 | `--apply` / `-y` / `--yes` | 执行自动升级 |
 
 ---
@@ -533,12 +576,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /checkpoint
 
-管理命名会话检查点（保存 / 列表 / 恢复 / 删除）以及恢复中断的 Goal/Team 任务。
+管理命名会话检查点（保存 / 列表 / 恢复 / 删除）。恢复中断的 Goal/Team 工作流用 `/resume`。
 
 **用法**：
 
 ```
-/checkpoint save [name] | list | restore [name] | delete [name] | resume [sessionId]
+/checkpoint save [name] | list | restore [name] | delete [name]
 ```
 
 **参数**：
@@ -549,10 +592,9 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `list` | 列出所有检查点 |
 | `restore [name]` | 恢复到检查点（删除之后的消息，默认最后一个） |
 | `delete <name>` | 删除检查点 |
-| `resume [sessionId]` | 从中断点继续 Goal/Team 任务执行；不带参数时列出所有可恢复的会话 |
 
 > 会话级 checkpoint（`save`/`list`/`restore`/`delete`）持久化到 session JSONL。
-> 工作流级 checkpoint（`resume`）为 InMemory，仅进程内有效，适用于 Goal/Team 执行被 Ctrl+C 中断后恢复。
+> Goal/Team 工作流的中断恢复不在此命令——用 `/resume`（跨进程持久，见下节）。
 
 ---
 
@@ -590,12 +632,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /find
 
-在会话记录中搜索关键词并滚动到匹配位置。
+在会话记录中搜索关键词 / 正则并滚动到匹配位置。
 
 **用法**：
 
 ```
-/find <keyword>
+/find <keyword> | -r <正则> | next
 ```
 
 **参数**：
@@ -603,6 +645,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `keyword` | 位置参数 | 是 | 搜索关键词 |
+| `-r <正则>` | 旗标 | 否 | 按正则表达式搜索，如 `/find -r "TODO\(#\d+\)"` |
+| `next` | keyword 特殊值 | 否 | 跳到当前匹配的下一处 |
 
 > 别名：`search`。TUI 路径由 `OneCodeToplevel` 拦截并滚动到匹配行；非 TUI 宿主仅提示在交互式 TUI 中使用。
 > 元数据：`Immediate = true`。
@@ -704,7 +748,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 |---|---|---|---|
 | `sessionId` | 位置参数 | 否 | 要恢复的 Goal/Team 运行 ID；省略时列出全部可恢复项 |
 
-> 与 `/checkpoint resume` 不同：本命令针对跨进程持久的工作流聚合（GoalRun/TeamRun + Durable Workflow Host），
+> 与 `/checkpoint`（会话内消息快照）不同：本命令针对跨进程持久的工作流聚合（GoalRun/TeamRun + Durable Workflow Host），
 > 不依赖活跃会话；返回 `CommandResult.ResumeWorkflowResult`，由 TUI dispatch 层直接调用对应工作流的 resume 流。
 > 元数据：`Immediate = true`。
 
@@ -747,7 +791,6 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `new [name]` | 创建新会话（当前会话转入后台） |
 | `switch <session-id>` | 切换会话 |
 | `close <session-id>` | 关闭会话 |
-| ~~`info`~~ | 已迁至 `/status`（仍接受并提示迁移） |
 
 > 元数据：`Immediate = true`。
 
@@ -813,7 +856,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ## Skill 类别命令
 
-> 9 个内置技能（`/batch`、`/debug`、`/loop` 等）通过 `SkillCommandSource` 动态加载，不在此处逐一列举。详见 [docs/skills.md](skills.md)。
+> 8 个内置技能（`/batch`、`/debug`、`/stuck`、`/verify`、`/simplify`、`/skillify`、`/remember`、`/verify-content`）通过 `SkillCommandSource` 动态加载，不在此处逐一列举。详见 [docs/skills.md](skills.md)。
 
 ### /install
 
@@ -844,7 +887,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 - `git://github.com/user/skill-repo.git`
 - `git@github.com:user/skill-repo.git`（SSH）
 
-**skill 内容识别**：克隆后会从仓库根目录（或 `skills/` 子目录）查找 `SKILL.md` 或任意 `.md` 文件作为 skill 内容。仓库名（去除 `.git` 后缀）作为 skill 名称。
+**skill 内容识别**：克隆后按 仓库根目录 → `skills/` 子目录 → 任意单一含 `.md` 的子目录 的顺序，取第一个含 `SKILL.md` 或任意 `.md` 文件的目录作为 skill 内容。仓库名（去除 `.git` 后缀）作为 skill 名称。
 
 > `--list` / `list` 参数会提示使用 `/skills list`。
 
@@ -865,7 +908,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 子命令 | 说明 |
 |---|---|
 | 无参数 / `list` / `ls` | 列出已配置和已连接的 MCP 服务器（TUI 中无参数会打开工具白名单配置页，`list` 仍为文本列表）。启动连接失败的服务器在列表中直接给出失败原因与重试指引 |
-| `get <name>` | 查看服务器详情（已连接时列出 tools） |
+| `get <name>` | 查看服务器详情（已连接时列出 tools；`env` 值以 `***` 打码防泄露） |
 | `tools <name>` | 列出服务器的全部方法及勾选状态（✓ 会暴露给模型 / ✗ 被白名单过滤），需已连接 |
 | `search <query>` | 从官方 MCP 注册表搜索 MCP 服务器（服务端搜索 `search` + `version=latest`，单次请求，免认证）。结果带 `[1]`…`[n]` 编号，可直接用 `/mcp install <编号>` 安装；remote 条目没有本地包，需改用 `/mcp add`。官方 search 端点较慢（实测 18~26s 返回），执行期间状态栏显示 spinner 与"searching MCP registry"忙碌标签，请耐心等待 |
 | `install <target>` | 从官方 MCP 注册表安装 MCP 服务器为本地 stdio，支持三种目标形式：完整限定名（`io.github.user/server`）、search 结果编号（`/mcp install 2`，引用最近一次 `/mcp search` 的编号列表）、短名模糊匹配（`/mcp install weather`——按 server name 子串匹配，唯一命中自动安装，多命中返回候选列表再按编号选择）。编号安装仍会拉取最新元数据，不存在缓存过期问题。安装后默认立即连接验证并在结果中给出失败原因（`--no-connect` 跳过）；支持 `--name`、`--scope` |
@@ -877,6 +920,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `disable <name>` | 禁用服务器 |
 | `enable-tool <name> <pattern>` | 把方法（支持 `*` 通配符）加入该服务器的白名单，写回配置并热生效（不断开连接） |
 | `disable-tool <name> <pattern>` | 从白名单移除方法；白名单未配置时先物化为全部方法再移除目标；目标仅被某个通配符条目覆盖时（如 `browser_*` 盖住 `browser_click`），把该通配符条目物化为具体方法并剔除目标，避免禁用被静默吞掉 |
+
+> **`install` 包类型映射**：npm → `npx -y <identifier>`；pypi → `uvx <identifier>`；oci → `docker run -i --rm <identifier>`；nuget / mcpb 暂无本地安装映射，按提示改用 `/mcp add` 手动配置。
 
 **工具白名单**：每台服务器在 `.mcp.json` 条目上支持 `tools` 字段——`null`（缺省）暴露全部方法，`[]` 连接但不暴露任何方法，非空数组为白名单（条目支持 `*` 通配符，大小写不敏感；`browser_*`、`*_screenshot`）。过滤发生在连接层（`McpConnectionManager.LoadAgentToolsAsync`），`/mcp:{server}` 动态命令、ToolCatalog、GOAL/TEAM 编排因此天然只暴露选中的方法。注意：白名单为静态配置，服务器端新增的方法不会自动暴露（用 `/mcp tools <name>` 可见全部方法）。内置服务器（如 playwright）不在 `.mcp.json` 中落盘时，方法级配置不持久化——先在配置文件中同名声明该服务器。
 
@@ -1004,12 +1049,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /review
 
-AI 代码审查，支持严重级别、聚焦领域与结构化输出。
+AI 代码审查，支持严重级别、聚焦领域与结构化报告。
 
 **用法**：
 
 ```
-/review [--staged|--all|--base <ref>] [--severity critical|warning|all] [--focus security|crashes|performance|style] [--output json|text] [--no-edit] [--blame] [file-path]
+/review [--staged|--all|--base <ref>] [--severity critical|warning|all] [--focus security|crashes|performance|style] [--no-edit] [--blame] [file-path]
 ```
 
 **参数**：
@@ -1021,7 +1066,6 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 | `--base <ref>` | 对比指定分支 / commit |
 | `--severity <critical\|warning\|all>` | 过滤输出严重级别（默认 all） |
 | `--focus <security\|crashes\|performance\|style>` | 聚焦审查领域（默认全面审查） |
-| `--output <json\|text>` | 输出格式（text 默认，json 适合 CI） |
 | `--no-edit` | 只报告不修复 |
 | `--blame` | 附加 git blame 上下文 |
 | `file-path` | 位置参数，限制到指定文件 / 目录 |
@@ -1036,9 +1080,17 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 | `performance` | N+1 查询、不必要分配、阻塞 I/O、算法复杂度、锁竞争 | `prompts/system/review-performance.prompt` |
 | `style` | 命名、一致性、可读性、重复代码、封装、可测试性 | `prompts/system/review-style.prompt` |
 
+**附加上下文（自动注入 prompt，无需旗标）**：
+
+| 机制 | 行为 |
+|---|---|
+| 增量 review 缓存 | 对比最近 5 个 commit，已 review 过的在上下文中标注；缓存仅在 prompt 流成功完成后落盘（取消 / 失败不记录） |
+| LSP 诊断 | 变更文件的 Error / Warning 级诊断注入 prompt（上限 200 条，每文件 20 条） |
+| 项目规则 | 提取仓库根（或 `.github/`）`AGENTS.md` 中 review / 代码质量 / 规范相关章节 |
+| `--blame` 上限 | 最多 5 个文件、每文件 50 行 blame 条目，避免 prompt 膨胀 |
+
 > ProgressMessage：`reviewing code`。
 > 所有 prompt 均可通过 `.onecode/prompts/system/` 覆盖。
-> 原 `/security` 命令已合并为 `/review --focus security`。
 
 ---
 
@@ -1065,8 +1117,8 @@ AI 代码审查，支持严重级别、聚焦领域与结构化输出。
 
 ## 汇总统计
 
-- **总命令数**：44 个
-- **隐藏命令**：`/gc-stats`
+- **总命令数**：45 个
+- **隐藏命令**：`/gc-stats`；动态命令 `/mcp:<server>`（每服务器一条，由 `McpCommandSource` 生成）同样默认隐藏
 - **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`、`/new`、`/close`、`/resume`、`/keybindings`
 - **带别名的命令**：
 

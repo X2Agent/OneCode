@@ -50,7 +50,7 @@ public enum PlanCardPhase
 /// 通过 Conversation.Metadata 持久化 Phase 字段是必要补充。
 ///
 /// <para>
-/// 参考 <c>AgentSessionStore.cs</c> 持久化 MAF AgentSession 的模式：
+/// 参考 <c>AgentSessionPersistence.cs</c> 持久化 MAF AgentSession 的模式：
 /// 序列化为 JSON 字符串存入 Metadata，反序列化时兼容 JsonElement 形态。
 /// </para>
 /// </remarks>

@@ -21,7 +21,9 @@
 注册日志会输出 advisory 建议改用 parallel-dag（见 `TeamConfigLoader.BuildAdvisories`）。
 
 > **实现说明**：ParallelDag 的"静态扇出/扇入"是**产品语义描述**，实现为按 `AssigneeRole` 选**单成员** +
-> MAF `SequentialWorkflowBuilder`，**不是** MAF Concurrent 真并行扇出。请勿将两者视为等价替换。
+> MAF `WorkflowBuilder` 手工链式绑定（`AIAgent.BindAsExecutor`）——**不是** MAF Concurrent 真并行扇出。
+> 未用 `SequentialWorkflowBuilder` 是因为它硬编码 `AIAgentHostOptions`，无法开启事件处理所需的
+> `EmitAgentResponseEvents`。请勿将两者视为等价替换。
 > 决策见 [ADR 0007 §2](./adr/0007-maf-integration-boundaries.md)。
 
 **模式不可运行期覆盖**：编排模式是团队定义的固定属性（`TeamRun.EffectiveMode` 持久化

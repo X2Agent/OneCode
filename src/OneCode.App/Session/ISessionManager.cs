@@ -8,7 +8,7 @@ namespace OneCode.App.Session;
 /// New consumers should prefer <see cref="ISessionConversationAccess"/> or
 /// <see cref="ISessionWorkingDirectory"/> when those suffice.
 /// </summary>
-public interface ISessionManager : ISessionConversationAccess, ISessionWorkingDirectory, IAsyncDisposable
+public interface ISessionManager : ISessionConversationAccess, ISessionChatHistoryReader, ISessionWorkingDirectory, IAsyncDisposable
 {
     IReadOnlyList<BackgroundSession> BackgroundSessions { get; }
     int BackgroundSessionCount { get; }
@@ -20,7 +20,6 @@ public interface ISessionManager : ISessionConversationAccess, ISessionWorkingDi
     Task AppendAssistantMessageAsync(SessionId conversationId, string content, TokenUsage? usage = null, IReadOnlyList<ToolUseBlock>? toolCalls = null, CancellationToken ct = default);
     Task AppendCompletedToolBatchesAsync(SessionId conversationId, IReadOnlyList<CompletedToolBatch> batches, CancellationToken ct = default);
     IReadOnlyList<ChatMessage> GetForegroundChatHistory();
-    IReadOnlyList<ChatMessage> GetChatHistory(SessionId conversationId);
 
     Task SaveAsync(CancellationToken ct = default);
     Task PersistTranscriptAsync(CancellationToken ct = default);

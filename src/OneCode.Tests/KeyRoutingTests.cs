@@ -24,7 +24,7 @@ public sealed class KeyRoutingTests
 
         shell.ShowInlineSelector(selector);
         var linesWhenShown = shell.Transcript.MessageView.TotalLines;
-        linesWhenShown.Should().BeGreaterThan(0);
+        linesWhenShown.Should().BeGreaterThanOrEqualTo(2, "选择器至少渲染标题与选项行");
 
         shell.HandleInteractionKey(Terminal.Gui.Input.Key.CursorDown).Should().BeTrue();
         selector.SelectedIndex.Should().Be(1);
@@ -97,7 +97,7 @@ public sealed class KeyRoutingTests
 
         shell.Transcript.MessageView.TotalLines.Should().Be(0);
         shell.ChatInput.IsQuestionMode.Should().BeFalse();
-        linesWhenShown.Should().BeGreaterThan(0);
+        linesWhenShown.Should().BeGreaterThanOrEqualTo(2, "向导至少渲染标题与题目行");
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class KeyRoutingTests
         var selectorResult = await selector.ResultTask;
         selectorResult.IsDismissed.Should().BeTrue();
         wizard.ResultTask.IsCompleted.Should().BeFalse();
-        shell.Transcript.MessageView.TotalLines.Should().BeGreaterThan(0);
+        shell.Transcript.MessageView.TotalLines.Should().BeGreaterThanOrEqualTo(2, "向导替换选择器后交互区域仍有内容");
 
         // Down 只作用于向导，不再落到已替换的选择器
         selector.SelectedIndex.Should().Be(0);

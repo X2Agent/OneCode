@@ -35,8 +35,8 @@ public static class HookServiceCollectionExtensions
         services.AddSingleton<NotificationProviderDefinitionLoader>();
         services.AddSingleton<NotificationProviderRegistry>();
 
-        // A7：宿主停止时兜底补发 SessionEnd（reason=other）
-        services.AddHostedService<SessionEndHookService>();
+        // 宿主停止时兜底关闭前台会话（reason=other；不再触发 hook）
+        services.AddHostedService<HostStopSessionCloseService>();
 
         services.AddSingleton<HookExecutionService>();
         services.AddSingleton<IHookExecutionService>(sp => sp.GetRequiredService<HookExecutionService>());

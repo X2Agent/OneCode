@@ -284,8 +284,6 @@ public sealed class McpClient : IMcpClient
         }
     }
 
-    // Disposal
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed)

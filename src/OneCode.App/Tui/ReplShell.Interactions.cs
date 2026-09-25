@@ -1,13 +1,11 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// InlineSelector and QuestionWizard lifecycle management extracted from ReplShell.
 /// Manages the show/dismiss/refresh cycle for inline selector overlays (permission prompts)
 /// and multi-question interactive wizards within the conversation view.
 ///
 /// This partial also implements <see cref="IInteractionSession"/>: interaction keys are
-/// routed here from ChatInputView (and the ReplShell.OnKeyDown fallback), replacing the
-/// former loose forwarding events and the triplicated wizard/selector dispatch logic.
+/// routed here from ChatInputView (and the ReplShell.OnKeyDown fallback).
 /// Interaction lines live in a MessageListView tail region — line counts are tracked by
 /// the view, not by hand-rolled bookkeeping fields.
 /// </summary>

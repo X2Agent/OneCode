@@ -1,7 +1,6 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Thinking, tool-call, and Build event rendering extracted from ChatTranscriptView.
 /// Manages inline thinking expand/collapse, tool start/done lines, streaming notices,
 /// BuildRun status panels, mode progress, and file-change diff blocks during streaming.
 /// </summary>

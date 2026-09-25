@@ -44,6 +44,8 @@ public static class Constants
         public const string GoalMaxTotalTokens = "goal.maxTotalTokens";
         /// <summary>Goal 模式：墙钟上限小时数（≤0 表示不限制）。</summary>
         public const string GoalMaxWallClockHours = "goal.maxWallClockHours";
+        /// <summary>Loop（/loop 运行时循环）：单次循环调用 inner agent 的硬上限。</summary>
+        public const string LoopMaxIterations = "loop.maxIterations";
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";

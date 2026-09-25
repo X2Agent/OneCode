@@ -24,9 +24,12 @@ public sealed class TokenBreakdownEstimatorTests
 
         var breakdown = sut.Estimate(systemPrompt, tools, messages, actualInputTokens: null);
 
-        breakdown.SystemPrompt.Should().BeGreaterThan(0);
-        breakdown.ToolsAndSkills.Should().BeGreaterThan(0);
-        breakdown.Messages.Should().BeGreaterThan(0);
+        // 58 个 ASCII 字符 → ceil(58 / 4) = 15。
+        breakdown.SystemPrompt.Should().Be(15);
+        // 无 schema 的工具退化为 name + description 估算：ceil(4 / 4) + ceil(11 / 4) = 4。
+        breakdown.ToolsAndSkills.Should().Be(4);
+        // "Hello, can you help me?" 23 字符 → 6，"Of course! What do you need?" 28 字符 → 7。
+        breakdown.Messages.Should().Be(13);
         breakdown.Other.Should().Be(0); // 无 actualInputTokens 时 Other=0
         breakdown.TotalEstimated.Should().Be(
             breakdown.SystemPrompt + breakdown.ToolsAndSkills + breakdown.Messages);
@@ -41,8 +44,6 @@ public sealed class TokenBreakdownEstimatorTests
 
         var breakdown = sut.Estimate(systemPrompt, tools: null, messages, actualInputTokens: 1000);
 
-        // Other = 1000 - system - messages，应为正数
-        breakdown.Other.Should().BeGreaterThan(0);
         breakdown.TotalEstimated.Should().Be(1000); // 等于 actualInputTokens
         breakdown.Other.Should().Be(1000 - breakdown.SystemPrompt - breakdown.Messages);
     }
@@ -85,8 +86,9 @@ public sealed class TokenBreakdownEstimatorTests
         var multiToolBreakdown = sut.Estimate(null, tools, null);
         var singleToolBreakdown = sut.Estimate(null, new[] { tools[0] }, null);
 
-        // 包含 schema 的工具 token 数应 > 0
-        singleToolBreakdown.ToolsAndSkills.Should().BeGreaterThan(0);
+        // 单个工具（含 schema）必须产生有限的开销：若实现改为序列化整个 AIFunction
+        // 对象，token 数会显著膨胀并突破上界；若 schema 未被纳入估算则会低于下界。
+        singleToolBreakdown.ToolsAndSkills.Should().BeInRange(20, 60);
         // 多个工具的 token 数应大于单个工具
         multiToolBreakdown.ToolsAndSkills.Should().BeGreaterThan(singleToolBreakdown.ToolsAndSkills);
     }

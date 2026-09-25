@@ -60,7 +60,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ]
             }
@@ -79,7 +79,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ]
             }
@@ -88,18 +88,17 @@ public sealed class HookConfigHotReloaderTests : IDisposable
 
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ],
-              "Stop": [
-                { "matcher": "Completed", "hooks": [ { "type": "command", "command": "echo v2" } ] }
+              "output": [
+                { "hooks": [ { "type": "command", "command": "echo v2" } ] }
               ]
             }
             """);
 
         WaitUntil(() => _registry.GetAll().Count == 2, "热重载应在防抖窗口后重建出 2 个 hook");
-        _registry.GetMatchesForEvent(HookEvent.Stop, "Completed").Should().ContainSingle();
-    }
+        _registry.GetMatchesForPoint(HookInterceptionPoint.Output, "Completed").Should().ContainSingle();    }
 
     // 热重载：last-good 保护
 
@@ -108,7 +107,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ]
             }
@@ -130,7 +129,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ]
             }
@@ -139,7 +138,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
         _registry.Register(new HookRegistration
         {
             Name = "my-plugin:audit",
-            Event = HookEvent.PreToolUse,
+            Point = HookInterceptionPoint.PreToolCall,
             Matcher = "Bash",
             ExecutorType = HookType.Command,
             TimeoutMs = 5000,
@@ -148,7 +147,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
 
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] },
                 { "matcher": "*", "hooks": [ { "type": "command", "command": "echo v2" } ] }
               ]
@@ -166,7 +165,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     {
         WriteHooksJson("""
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo v1" } ] }
               ]
             }

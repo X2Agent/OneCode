@@ -1,6 +1,7 @@
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Middleware.Contracts;
 using OneCode.Infrastructure.Agent.RunMiddleware;
+using OneCode.Infrastructure.Ai;
 using OneCode.Core.Tokens;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
@@ -64,6 +65,15 @@ public sealed record ChatClientAgentBuildOptions
     public string? HarnessInstructions { get; init; }
 
     public IReadOnlyList<AIContextProvider>? AgentContextProviders { get; init; }
+
+    /// <summary>
+    /// MAF chat history contract. Null keeps the framework default
+    /// (<c>InMemoryChatHistoryProvider</c>), which is correct for single-turn paths
+    /// (Team members, forked agents, Goal sub-goals).
+    /// The interactive Main path supplies <c>TranscriptChatHistoryProvider</c> so multi-turn
+    /// history flows through the framework contract instead of host-injected request messages.
+    /// </summary>
+    public Microsoft.Agents.AI.ChatHistoryProvider? ChatHistoryProvider { get; init; }
 }
 
 public sealed record AgentPipelineOptions
@@ -175,9 +185,14 @@ public sealed record AgentPipelineOptions
 
 public static class AgentPipelineBuilder
 {
-    public static AgentPipelineHandle BuildChatClientAgent(ChatClientAgentBuildOptions options)
+    public static AgentPipelineHandle BuildHarnessAgent(ChatClientAgentBuildOptions options)
     {
-        var chatClient = options.ChatClient;
+        // 模型拦截点装饰器必须包在 Harness 之外侧、FunctionInvokingChatClient 之下侧：
+        // pre/post_model_call 在模型调用边界做纯审计（不支持 deny），流式交付零缓冲，
+        // 无匹配 hook 时仅透传（HasActiveHooks 守卫，不构造 payload）。
+        var chatClient = options.PipelineOptions.HookExecutionService is not null
+            ? new ModelCallHookDecorator(options.ChatClient, options.PipelineOptions.HookExecutionService)
+            : options.ChatClient;
 
         var harnessToolApproval = options.PipelineOptions.EnableToolApproval
             ? new ToolApprovalAgentOptions
@@ -193,13 +208,26 @@ public static class AgentPipelineBuilder
             : null;
 
         // The approval boundary is an opt-in marker on each tool, not something the framework infers
-        // from a permission decision. Applying it here — the single funnel for Main / forked / Team
-        // assembly — keeps one policy source (ToolMetadataRegistry.ApprovalMode) and prevents the
-        // paths from drifting. Skipped when this path has no approval machinery, because an
-        // unresolvable approval request would otherwise block every call in the batch.
+        // from a permission decision. Applying it here keeps one policy source
+        // (ToolMetadataRegistry.ApprovalMode) across Main / forked / Team assembly. Tools that providers
+        // inject afterwards (Harness todo list / working memory) are not in this list yet — they are
+        // marked per request by ToolApprovalMarkingContextProvider. Skipped when this path has no
+        // approval machinery, because an unresolvable approval request would otherwise block every
+        // call in the batch.
         var markedTools = options.PipelineOptions.EnableToolApproval
             ? ToolApprovalMarker.Apply(options.ChatOptions.Tools, options.ToolMetadata)
             : options.ChatOptions.Tools;
+
+        // Declare the provider-injected tools in the product registry whenever their providers are
+        // mounted, so their approval boundary is an explicit decision rather than the fallback
+        // "unregistered name ⇒ Destructive/Always" accidentally being right.
+        if (options.ToolMetadata is { } toolMetadata)
+        {
+            HarnessProviderTools.RegisterMetadata(
+                toolMetadata,
+                options.PipelineOptions.EnableTodo,
+                options.PipelineOptions.EnableFileMemory);
+        }
 
         var chatOptions = options.ChatOptions.Clone();
         chatOptions.Tools = markedTools;
@@ -208,12 +236,10 @@ public static class AgentPipelineBuilder
         {
             Name = options.Name,
             ChatOptions = chatOptions,
-            AIContextProviders = options.AgentContextProviders,
-            // W5-B: MAF core package (1.21.0) still ships InMemory only — official file-backed
-            // ChatHistoryProviders (CosmosNoSql / Valkey) live in separate packages.
-            // Interactive multi-turn history is Session transcript → Messages; InMemory is
-            // cleared after mafSession restore when Messages are present (see AgentSessionStore W5-A).
-            ChatHistoryProvider = new InMemoryChatHistoryProvider(),
+            AIContextProviders = BuildContextProviders(options),
+            // Main hands in TranscriptChatHistoryProvider (session transcript bridge);
+            // single-turn paths (Team members / forked / Goal sub-goals) keep the InMemory default.
+            ChatHistoryProvider = options.ChatHistoryProvider ?? new InMemoryChatHistoryProvider(),
             ToolApprovalAgentOptions = harnessToolApproval,
             DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
             // P1: same numeric source as middleware MaxToolCalls (iteration rounds ≈ tool-call budget).
@@ -250,6 +276,25 @@ public static class AgentPipelineBuilder
             options.ServiceProvider);
 
         return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider, harnessToolApproval is not null);
+    }
+
+    /// <summary>
+    /// Builds the context provider list handed to Harness, appending the runtime approval boundary last.
+    /// </summary>
+    /// <remarks>
+    /// Order is the contract here: Harness appends this list after its own providers (todo list / working
+    /// memory / skills), and <c>ChatClientAgent</c> threads the accumulated context through each provider in
+    /// order, letting a provider replace the tool list. Only the final provider sees the tools Harness
+    /// injected, which is exactly what the approval marker needs. The appended provider is stateless and
+    /// holds nothing disposable, so it needs no tracking in the pipeline handle.
+    /// </remarks>
+    private static IReadOnlyList<AIContextProvider>? BuildContextProviders(ChatClientAgentBuildOptions options)
+    {
+        if (!options.PipelineOptions.EnableToolApproval || options.ToolMetadata is not { } metadata)
+            return options.AgentContextProviders;
+
+        IReadOnlyList<AIContextProvider> existing = options.AgentContextProviders ?? [];
+        return [.. existing, new ToolApprovalMarkingContextProvider(metadata)];
     }
 
     public static AgentPipelineHandle Build(
@@ -294,7 +339,7 @@ public static class AgentPipelineBuilder
         // Agent Run 级中间件（最内层 Run 中间件）：PromptTooLong 恢复
         // MAF 最佳实践：PromptTooLong 是模型推理阶段的异常，应在 Run middleware 层拦截，
         // 而非在 Runner 层重建 pipeline。中间件包裹 innerAgent.RunAsync，catch 异常后
-        // fire hooks + 截断消息历史 + 重试。注册为 agent-level（对所有 run 生效），
+        // 截断消息历史 + 重试。注册为 agent-level（对所有 run 生效），
         // Main/Worker/Team/Goal 路径自动获得恢复能力。
         //
         // 层次顺序：BudgetGuard → UsageTracking → PromptTooLongRecovery → [function calling]
@@ -303,7 +348,6 @@ public static class AgentPipelineBuilder
         // 被 PromptTooLongRecovery 内部捕获，不影响 UsageTracking。
         {
             var (ptlRun, ptlStream) = PromptTooLongRecoveryRunMiddleware.Create(
-                options.HookExecutionService,
                 loggerFactory.CreateLogger("PromptTooLongRecoveryRunMiddleware"));
             builder = builder.Use(ptlRun, ptlStream);
         }
@@ -336,7 +380,8 @@ public static class AgentPipelineBuilder
                     options, loggerFactory.CreateLogger("ToolCallEventMiddleware")));
         }
 
-        builder = builder.Use(PermissionAndLimitMiddleware.Create(options, metrics));
+        builder = builder.Use(PermissionAndLimitMiddleware.Create(
+            options, metrics, loggerFactory.CreateLogger("PermissionAndLimitMiddleware")));
 
         if (options.EnableStateMachine)
         {

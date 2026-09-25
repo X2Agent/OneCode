@@ -16,7 +16,8 @@ public sealed class HookResultAggregatorTests
 
         aggregated.Should().NotBeNull();
         aggregated.Message.Should().BeNull();
-        aggregated.UpdatedInput.Should().BeNull();
+        aggregated.BlockingErrors.Should().BeNull();
+        aggregated.AdditionalContexts.Should().BeNull();
     }
 
     [Fact]
@@ -25,13 +26,13 @@ public sealed class HookResultAggregatorTests
         var result = new HookResult
         {
             Message = "Message 1",
-            UpdatedInput = new Dictionary<string, object> { ["key"] = "value" },
+            AdditionalContext = "ctx-1",
         };
 
         var aggregated = HookResultAggregator.Aggregate(new[] { result });
 
         aggregated.Message.Should().Be("Message 1");
-        aggregated.UpdatedInput.Should().ContainKey("key");
+        aggregated.AdditionalContexts.Should().ContainSingle().Which.Should().Be("ctx-1");
     }
 
     [Fact]
@@ -47,38 +48,46 @@ public sealed class HookResultAggregatorTests
     }
 
     [Fact]
-    public void Aggregate_MultipleResults_MergesUpdatedInput()
+    public void Aggregate_SystemMessage_UsedWhenMessageAbsent()
     {
-        var result1 = new HookResult
-        {
-            UpdatedInput = new Dictionary<string, object> { ["key1"] = "value1" }
-        };
-        var result2 = new HookResult
-        {
-            UpdatedInput = new Dictionary<string, object> { ["key2"] = "value2" }
-        };
+        var result = new HookResult { SystemMessage = "system-only" };
 
-        var aggregated = HookResultAggregator.Aggregate(new[] { result1, result2 });
+        var aggregated = HookResultAggregator.Aggregate(new[] { result });
 
-        aggregated.UpdatedInput.Should().ContainKey("key2");
-        aggregated.UpdatedInput!["key2"].Should().Be("value2");
+        aggregated.Message.Should().Be("system-only");
     }
 
     [Fact]
-    public void Aggregate_MultipleResults_LaterInputOverwritesEarlier()
+    public void Aggregate_MultipleResults_MergesAdditionalContextsInExecutionOrder()
     {
-        var result1 = new HookResult
-        {
-            UpdatedInput = new Dictionary<string, object> { ["key"] = "value1" }
-        };
-        var result2 = new HookResult
-        {
-            UpdatedInput = new Dictionary<string, object> { ["key"] = "value2" }
-        };
+        var result1 = new HookResult { AdditionalContext = "ctx-1" };
+        var result2 = new HookResult { AdditionalContext = "ctx-2" };
 
         var aggregated = HookResultAggregator.Aggregate(new[] { result1, result2 });
 
-        aggregated.UpdatedInput!["key"].Should().Be("value2");
+        aggregated.AdditionalContexts.Should().ContainInOrder("ctx-1", "ctx-2");
+    }
+
+    [Fact]
+    public void Aggregate_BlockingErrors_AreCollectedInExecutionOrder()
+    {
+        var result1 = new HookResult { BlockingError = new HookBlockingError("deny-1", "cmd-1") };
+        var result2 = new HookResult { BlockingError = new HookBlockingError("deny-2", "cmd-2") };
+
+        var aggregated = HookResultAggregator.Aggregate(new[] { result1, result2 });
+
+        aggregated.BlockingErrors.Should().HaveCount(2);
+        aggregated.BlockingErrors!.Select(b => b.Error).Should().Equal("deny-1", "deny-2");
+    }
+
+    [Fact]
+    public void Aggregate_SingleBlockingError_YieldsDeny()
+    {
+        var result = new HookResult { BlockingError = new HookBlockingError("forbidden", "cmd") };
+
+        var aggregated = HookResultAggregator.Aggregate(new[] { result });
+
+        aggregated.BlockingErrors.Should().ContainSingle(b => b.Error == "forbidden");
     }
 
     [Fact]
@@ -90,26 +99,5 @@ public sealed class HookResultAggregatorTests
         var aggregated = HookResultAggregator.Aggregate(new HookResult?[] { result1, null, result2 });
 
         aggregated.Message.Should().Be("Msg2"); // last-write-wins
-    }
-
-    [Fact]
-    public void Aggregate_ResultWithNullFields_SkipsNullFields()
-    {
-        var result1 = new HookResult
-        {
-            Message = "Msg1",
-            UpdatedInput = null,
-        };
-        var result2 = new HookResult
-        {
-            Message = null,
-            UpdatedInput = new Dictionary<string, object> { ["key"] = "value" },
-        };
-
-        var aggregated = HookResultAggregator.Aggregate(new[] { result1, result2 });
-
-        // Message: last non-null wins (Msg1 kept because result2.Message is null)
-        aggregated.Message.Should().Be("Msg1");
-        aggregated.UpdatedInput.Should().ContainKey("key");
     }
 }

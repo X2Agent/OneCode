@@ -364,7 +364,9 @@ public sealed class MemoryEntryStoreTests : IDisposable
 
     /// <summary>
     /// Manual entries are exempt from automatic eviction even when they are the oldest and
-    /// least-recalled — they express explicit user intent.
+    /// least-recalled — they express explicit user intent. The key deliberately carries no
+    /// <c>manual:</c> prefix so that only <see cref="MemoryEntry.Source"/> can be the reason
+    /// the entry survives (a prefixed key would mask a broken Source check).
     /// </summary>
     [Fact]
     public async Task PruneAsync_NeverEvictsManualEntries_EvenWhenOldestAndNeverHit()
@@ -374,7 +376,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
         {
             new()
             {
-                Key = "manual:user-pinned",
+                Key = "fact:user-edited",
                 Value = "user authored long ago, never recalled",
                 Source = "manual",
                 Category = "manual",
@@ -402,7 +404,8 @@ public sealed class MemoryEntryStoreTests : IDisposable
         await _store.PruneAsync(MemoryScope.Project, default);
 
         var loaded = await _store.LoadAsync(MemoryScope.Project, default);
-        loaded.Should().Contain(e => e.Key == "manual:user-pinned");
+        loaded.Should().Contain(e => e.Key == "fact:user-edited", "source=manual entries are never auto-evicted");
+        loaded.Should().HaveCount(MemoryEntryStore.MaxEntries, "manual entries still consume capacity");
     }
 
     // Usage feedback

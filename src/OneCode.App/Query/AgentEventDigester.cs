@@ -5,7 +5,6 @@ namespace OneCode.App.Query;
 
 /// <summary>
 /// Stateless helpers for digesting MAF agent streaming events into TUI QueryEvents.
-/// Extracted from ChatService to isolate the event-mapping concern.
 ///
 /// All methods are pure functions — no instance state, no side effects.
 /// The optional <see cref="ILogger"/> is used for debug-level failure logging only.

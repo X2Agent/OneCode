@@ -50,6 +50,7 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, HooksCommand>();
         s.AddSingleton<ICommand, InitCommand>();
         s.AddSingleton<ICommand, KeybindingsCommand>();
+        s.AddSingleton<ICommand, LoopCommand>();
         s.AddSingleton<ICommand, LspCommand>();
         s.AddSingleton<ICommand, ModelCommand>();
         s.AddSingleton<ICommand, PermissionsCommand>();

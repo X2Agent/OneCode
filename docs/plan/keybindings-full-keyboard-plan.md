@@ -145,7 +145,7 @@
 | 1.3 | `SidebarViewBase` 新增公开滚动方法 `ScrollBy(int lines)` / `ScrollPage(int pages)`（内部转发 `_content`） | `SidebarViewBase.cs` | 单测：调用后 `ScrollOffset` 变化 |
 | 1.4 | `ReplShell` 订阅事件，路由到可见侧边栏；无可见侧边栏时静默吞键 | `ReplShell.cs` | 单测：Plan 可见时 Alt+Down 生效，不可见时不抛异常 |
 | 1.5 | `ReplShell.Keyboard.cs` 兜底分支处理 `sidebar:*`（焦点不在输入框时） | `ReplShell.Keyboard.cs` | 单测：非聚焦态 Alt+PgDn 生效 |
-| 1.6 | Schema 自动包含新动作（`AllActions` 驱动，无额外工作，验证即可） | `KeybindingSchema.cs` | `/keybindings validate` 通过 |
+| 1.6 | Schema 自动包含新动作（`AllActions` 驱动，无额外工作，验证即可） | `KeybindingSchema.cs` | `/keybindings list` 无验证警告 |
 
 ### 阶段二：折叠块键盘交互
 
@@ -169,7 +169,7 @@
 
 | # | 任务 | 文件 | 验收 |
 |---|---|---|---|
-| 4.1 | `app:cyclePane` 动作注册（Global，F6） | `KeybindingDefaults.cs` | validate 通过 |
+| 4.1 | `app:cyclePane` 动作注册（Global，F6） | `KeybindingDefaults.cs` | `/keybindings list` 无验证警告 |
 | 4.2 | `SidebarViewBase` 支持聚焦态：临时 `CanFocus` 切换或焦点代理视图；标题栏反色提示 | `SidebarViewBase.cs` | 手动：F6 后标题栏出现 `[活动窗格]` 提示 |
 | 4.3 | `ReplShell` 维护窗格状态机：F6 轮转、Esc/可打印字符切回（字符追加输入框） | `ReplShell.Keyboard.cs` | 手动：F6 → ↑↓ 漫游 → 打字直接回输入框 |
 | 4.4 | 侧边栏聚焦时 `MessageListView.OnKeyDown` 原生滚动生效（已实现，验证即可） | `MessageListView.cs:446` | 手动：聚焦态 PgUp/PgDn/Home/End 全部可用 |
@@ -198,7 +198,7 @@
 - [ ] **行内搜索**：`Ctrl+F` 呼出搜索条 → 输入关键词即时高亮 → `Enter`/`Shift+Enter` 前后跳转 → `Esc` 关闭
 - [ ] **Diff 审查**：`/diff` → `↑↓/J/K/PgUp/PgDn/Home/End` 浏览 → `Esc` 逐层关闭 overlay
 - [ ] **审批选择器**：权限提示弹出后 `↑↓` 选择、`Enter` 确认、`Esc` 拒绝
-- [ ] **配置链路**：`/keybindings validate` 通过；`/keybindings list` 列出全部新动作及中文描述
+- [ ] **配置链路**：`/keybindings list` 无验证警告，列出全部新动作及中文描述
 - [ ] **回归**：`dotnet build` 无新增警告；`dotnet test` 全部通过
 
 ---

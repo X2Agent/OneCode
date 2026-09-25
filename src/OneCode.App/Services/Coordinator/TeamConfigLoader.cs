@@ -6,8 +6,6 @@ using OneCode.Infrastructure.Config;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
-/// Config loader extracted from TeamOrchestrationService.
-///
 /// 职责：团队配置的发现与解析，以及从 <see cref="AgentTemplateConfig"/> 构建 <see cref="TeamConfig"/>。
 ///
 /// 统一 YAML 格式，移除 JSON 加载路径（team.json）。

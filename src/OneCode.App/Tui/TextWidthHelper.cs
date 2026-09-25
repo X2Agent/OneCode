@@ -272,7 +272,6 @@ public static class TextWidthHelper
             {
                 char c = paragraph[i];
 
-                // Handle surrogate pairs
                 if (char.IsHighSurrogate(c) && i + 1 < paragraph.Length && char.IsLowSurrogate(paragraph[i + 1]))
                 {
                     int charWidth = 2;

@@ -49,7 +49,7 @@ public enum RunTerminalReason
 /// </summary>
 public static class RunTerminalReasonMap
 {
-    /// <summary>GoalRunState → 终结原因（原 OrchestrationStreamService 内联映射）。</summary>
+    /// <summary>GoalRunState → 终结原因。</summary>
     public static RunTerminalReason FromGoalState(OneCode.Core.Goals.GoalRunState state) => state switch
     {
         OneCode.Core.Goals.GoalRunState.Completed => RunTerminalReason.Completed,
@@ -61,9 +61,8 @@ public static class RunTerminalReasonMap
     };
 
     /// <summary>
-    /// TeamRunStatus → 终结原因（原 OrchestrationStreamService 内联映射）。
-    /// <paramref name="hasError"/> 对应非终态但携带错误的状态（原 <c>{ Error: not null }</c> 分支，
-    /// 优先级位于 Failed/RolledBack 之后、兜底 Completed 之前）。
+    /// TeamRunStatus → 终结原因。<paramref name="hasError"/> 对应非终态但携带错误的状态，
+    /// 优先级位于 Failed/RolledBack 之后、兜底 Completed 之前。
     /// </summary>
     public static RunTerminalReason FromTeamStatus(OneCode.Core.Coordinator.TeamRunStatus status, bool hasError = false) => status switch
     {

@@ -36,7 +36,9 @@ public sealed class MessageClonerTests
         var assistantClone = (AssistantMessage)clone;
         assistantClone.Id.Should().Be(original.Id);
         assistantClone.Content.Should().NotBeSameAs(original.Content);
-        assistantClone.Content.Should().HaveCount(1);
+        assistantClone.Content.Should().ContainSingle()
+            .Which.Should().BeOfType<TextBlock>()
+            .Which.Text.Should().Be("Response");
     }
 
     [Fact]

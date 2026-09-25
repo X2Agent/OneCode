@@ -27,6 +27,20 @@ public sealed record ModeBudgetSettings
     /// <summary>墙钟上限小时数（<c>goal.maxWallClockHours</c>，默认 2.0；≤0 表示不限制）。</summary>
     public double MaxWallClockHours { get; init; } = 2.0;
 
+    /// <summary>
+    /// <c>/loop</c> 运行时循环调用 inner agent 的硬上限（<c>loop.maxIterations</c>，默认 3）。
+    /// 对应 <c>LoopAgentOptions.MaxIterations</c>，评估器无法突破。
+    /// 配置值被夹在 1..<see cref="MaxLoopIterationsUpperBound"/>。
+    /// </summary>
+    public int MaxLoopIterations { get; init; } = 3;
+
+    /// <summary>
+    /// <c>loop.maxIterations</c> 与 <c>/loop --max</c> 的硬上界，取 GOAL 单子目标重试上限（20）。
+    /// 二者语义相同（"同一目标重试几次"），而每轮都是一次完整自主 agent run（单轮默认上限 100 次
+    /// 工具调用）——无界放大会把一次误输入变成上万次无人值守执行。
+    /// </summary>
+    public const int MaxLoopIterationsUpperBound = 20;
+
     /// <summary>墙钟上限；未配置（≤0）表示不限制。</summary>
     public TimeSpan? MaxWallClock => MaxWallClockHours > 0 ? TimeSpan.FromHours(MaxWallClockHours) : null;
 
@@ -49,5 +63,9 @@ public sealed record ModeBudgetSettings
         MaxTurnsPerSubGoal = settings.Get(CoreConstants.ConfigKeys.GoalMaxTurnsPerSubGoal, 50),
         MaxTotalTokens = settings.Get(CoreConstants.ConfigKeys.GoalMaxTotalTokens, 200_000L),
         MaxWallClockHours = settings.Get(CoreConstants.ConfigKeys.GoalMaxWallClockHours, 2.0),
+        MaxLoopIterations = Math.Clamp(
+            settings.Get(CoreConstants.ConfigKeys.LoopMaxIterations, 3),
+            1,
+            MaxLoopIterationsUpperBound),
     };
 }

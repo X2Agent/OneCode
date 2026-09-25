@@ -26,11 +26,9 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 |--------|---------|--------|---------|--------|
 | 结构化条目记忆 | 永久（含 TTL / 按命中次数淘汰） | 用户级 / 项目级 | `MEMORY.md` 结构化条目 | 用户手动 + AutoDream 自动 |
 
-> **记忆治理与演进方向**（淘汰策略、冲突消解、SQLite 触发条件、为何不用 MAF `FileMemoryProvider` 替换长期记忆）见 [记忆模块架构设计 §11](./adr/0004-memory-module-design.md#11-记忆治理与演进方向)。会话工作记忆已改用原生 `FileMemoryProvider`，归属见 [ADR 0007](./adr/0007-maf-integration-boundaries.md)。
+> **记忆治理与演进方向**（淘汰策略、冲突消解、SQLite 触发条件、为何不用 MAF `FileMemoryProvider` 替换长期记忆）见 [记忆模块架构设计 §11](./adr/0004-memory-module-design.md#11-记忆治理与演进方向)。
 
-> **架构演进**：旧版本的"键值记忆存储（KV Store）"子系统已移除，所有结构化记忆统一存入 `MEMORY.md`。详见 [记忆模块架构设计](./adr/0004-memory-module-design.md#1-统一结构化条目存储)。
->
-> **会话记忆子系统已移除**（`SessionMemoryService` / `SessionMemoryContextProvider`）：它与结构化条目记忆语义重叠，且与压缩子系统（`App/Services/Compact/`）职责重复。其“从会话中提炼信息”的能力由 AutoDream 承担。理由见 [记忆模块架构设计 §6](./adr/0004-memory-module-design.md#6-会话记忆已移除)。
+> **会话工作记忆**不属本模块：它由原生 MAF `FileMemoryProvider` 承载，落在 `{cwd}/.onecode/agent-file-memory/`，是 AutoDream 整合的首选数据源，归属见 [ADR 0007](./adr/0007-maf-integration-boundaries.md)。
 >
 > Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemorySearchProviderFactory`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
 
@@ -115,7 +113,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 - 相关性检索基于 token 匹配评分，Top 6 注入 prompt
 - **分词与工具检索共用 `OneCode.Core/Text/TextTokenizer`**：拉丁词按大小写边界切分并去复数后缀，CJK 按二字滑窗切分（单字保留 unigram）。两条检索路径各写一套分词会导致同一中文查询一边召回、一边为空
 - **索引与检索都有字符总预算**：常驻索引 4,000 字符（每轮注入，条目数不等于 token 上限），单次 `search_memories` 结果 12,000 字符（超出部分显式报告省略）
-- **Project 条目优先于 User 条目**呈现，自动条目带 `(project)` / `(global)` 作用域标注
+- **Project 条目优先于 User 条目**呈现，每条条目都带 `(project)` / `(global)` 作用域标注
 
 **谁会写入**：
 - 用户通过 `/memory add` 手动添加（`source=manual`，永不过期）
@@ -127,6 +125,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 
 **核心特性**：
 - 默认开启，四重门控防止频繁触发（启用检查 ≥ 时间门控 ≥ 6 小时 ≥ 扫描节流 10 分钟 ≥ 新会话数 ≥ 3）
+- 数据源首选会话工作记忆（`{cwd}/.onecode/agent-file-memory/` 中自上次整合后被改动的文件，最多 20 个），再以 `~/.onecode/events/*.jsonl` 的会话事件做补充
 - 增量变更 JSON 格式（`upsert` / `delete`），单次最多 50 条
 - 输出经 `SanitizeKey` / `SanitizeValue` 清洗，防 `MEMORY.md` 结构注入
 - 跨进程锁保护（`autodream.lock`），僵尸锁 2 小时可抢占
@@ -196,10 +195,9 @@ AutoDream 默认开启，无需配置。用户正常使用积累会话后，后�
 |--------|--------|---------|
 | 结构化条目记忆 | 用户级（全局） | `~/.onecode/memory/MEMORY.md` |
 | 结构化条目记忆 | 项目级 | `{cwd}/.onecode/memory/MEMORY.md` |
-| AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（lock、时间戳文件） |
-| 会话事件（AutoDream 数据源） | 用户级 | `~/.onecode/events/{sessionId}.jsonl` |
-
-> **已移除**：旧版本的 `~/.onecode/memory-store/` 与 `{cwd}/.onecode/memory-store/`（KV Store）目录不再使用。
+| AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（`autodream.lock`、`last_consolidated_at`、`last_session_scan_at`） |
+| 会话工作记忆（AutoDream 首选数据源） | 项目级 | `{cwd}/.onecode/agent-file-memory/` |
+| 会话事件（AutoDream 补充数据源） | 用户级 | `~/.onecode/events/{sessionId}.jsonl` |
 
 ---
 

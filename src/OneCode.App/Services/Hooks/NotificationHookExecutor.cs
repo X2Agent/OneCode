@@ -7,7 +7,7 @@ namespace OneCode.App.Services.Hooks;
 ///
 /// 渠道解析经 <see cref="NotificationProviderRegistry"/>：声明式定义（notification-providers.json）
 /// 优先，编译型 INotificationProvider 兜底，同名声明式胜出。
-/// 模板插值：支持 {{Field}} 语法替换 HookPayload 字段（如 {{Event}} / {{UserMessage}}），
+/// 模板插值：支持 {{Field}} 语法替换 HookPayload 字段（如 {{Point}} / {{UserMessage}}），
 /// 由 <see cref="HookTemplateRenderer"/> 统一实现。
 /// </summary>
 public sealed class NotificationHookExecutor : IHookExecutor
@@ -65,7 +65,7 @@ public sealed class NotificationHookExecutor : IHookExecutor
         {
             Text = messageText,
             Title = config.StatusMessage,
-            Event = payload.Event.ToString(),
+            Event = HookInterceptionPoints.ToWireName(payload.Point),
             Timestamp = payload.Timestamp,
         };
 

@@ -33,8 +33,8 @@ public sealed class HookExecutionServiceTests
     public async Task FireAsync_WorkspaceNotTrusted_ReturnsEmptyAndDoesNotInvokeExecutors()
     {
         var (sut, registry, executor) = CreateSut(trusted: false);
-        registry.Register(MakeRegistration("h1", HookEvent.PreToolUse, "Bash"));
-        var payload = MakePayload(HookEvent.PreToolUse, "Bash");
+        registry.Register(MakeRegistration("h1", HookInterceptionPoint.PreToolCall, "Bash"));
+        var payload = MakePayload(HookInterceptionPoint.PreToolCall, "Bash");
 
         var result = await sut.FireAsync(payload, actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
 
@@ -49,8 +49,8 @@ public sealed class HookExecutionServiceTests
     public async Task FireAsync_NoMatchingHooks_ReturnsEmpty()
     {
         var (sut, registry, executor) = CreateSut(trusted: true);
-        registry.Register(MakeRegistration("h1", HookEvent.PreToolUse, "Bash"));
-        var payload = MakePayload(HookEvent.PreToolUse, "Read");
+        registry.Register(MakeRegistration("h1", HookInterceptionPoint.PreToolCall, "Bash"));
+        var payload = MakePayload(HookInterceptionPoint.PreToolCall, "Read");
 
         var result = await sut.FireAsync(payload, actualMatcherValue: "Read", ct: TestContext.Current.CancellationToken);
 
@@ -76,11 +76,11 @@ public sealed class HookExecutionServiceTests
             .Returns(_ => { callOrder.Add("high"); return new HookResult { AdditionalContext = "ctx-high" }; });
 
         var registry = new HookRegistry(new GlobHookMatcher());
-        registry.Register(MakeRegistration("low-typed", HookEvent.PreToolUse, "Bash", priority: 200, type: HookType.Notification));
-        registry.Register(MakeRegistration("high-typed", HookEvent.PreToolUse, "Bash", priority: 50, type: HookType.Command));
+        registry.Register(MakeRegistration("low-typed", HookInterceptionPoint.PreToolCall, "Bash", priority: 200, type: HookType.Notification));
+        registry.Register(MakeRegistration("high-typed", HookInterceptionPoint.PreToolCall, "Bash", priority: 50, type: HookType.Command));
         var sut = CreateSutWith(registry, trusted: true, executors: [executorLow, executorHigh]);
 
-        var result = await sut.FireAsync(MakePayload(HookEvent.PreToolUse, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
+        var result = await sut.FireAsync(MakePayload(HookInterceptionPoint.PreToolCall, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
 
         callOrder.Should().Equal(["high", "low"], "priority 升序：50 应先于 200 执行");
         result.AdditionalContexts.Should().NotBeNull();
@@ -93,10 +93,10 @@ public sealed class HookExecutionServiceTests
     public async Task FireAsync_OnceHook_IsRemovedAfterExecution()
     {
         var (sut, registry, executor) = CreateSut(trusted: true);
-        registry.Register(MakeRegistration("ephemeral", HookEvent.PreToolUse, "Bash", once: true));
+        registry.Register(MakeRegistration("ephemeral", HookInterceptionPoint.PreToolCall, "Bash", once: true));
         executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
             .Returns(new HookResult { Message = "once" });
-        var payload = MakePayload(HookEvent.PreToolUse, "Bash");
+        var payload = MakePayload(HookInterceptionPoint.PreToolCall, "Bash");
 
         await sut.FireAsync(payload, actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
         registry.GetAll().Should().BeEmpty("Once hook 执行后应自动注销");
@@ -123,11 +123,11 @@ public sealed class HookExecutionServiceTests
         healthy.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
             .Returns(new HookResult { AdditionalContext = "healthy" });
 
-        registry.Register(MakeRegistration("thrower", HookEvent.PreToolUse, "Bash", priority: 50, type: HookType.Command));
-        registry.Register(MakeRegistration("healthy", HookEvent.PreToolUse, "Bash", priority: 200, type: HookType.Notification));
+        registry.Register(MakeRegistration("thrower", HookInterceptionPoint.PreToolCall, "Bash", priority: 50, type: HookType.Command));
+        registry.Register(MakeRegistration("healthy", HookInterceptionPoint.PreToolCall, "Bash", priority: 200, type: HookType.Notification));
 
         var sut2 = CreateSutWith(registry, trusted: true, executors: [throwing, healthy]);
-        var result = await sut2.FireAsync(MakePayload(HookEvent.PreToolUse, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
+        var result = await sut2.FireAsync(MakePayload(HookInterceptionPoint.PreToolCall, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
 
         // 异常被吞掉，healthy hook 仍执行
         await healthy.Received(1).ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>());
@@ -140,7 +140,7 @@ public sealed class HookExecutionServiceTests
     public async Task FireAsync_BlockingResult_IsAggregatedIntoBlockingErrors()
     {
         var (sut, registry, executor) = CreateSut(trusted: true);
-        registry.Register(MakeRegistration("blocker", HookEvent.PreToolUse, "Bash"));
+        registry.Register(MakeRegistration("blocker", HookInterceptionPoint.PreToolCall, "Bash"));
         executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
             .Returns(new HookResult
             {
@@ -148,10 +148,41 @@ public sealed class HookExecutionServiceTests
                 BlockingError = new HookBlockingError("forbidden by policy", "cmd"),
             });
 
-        var result = await sut.FireAsync(MakePayload(HookEvent.PreToolUse, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
+        var result = await sut.FireAsync(MakePayload(HookInterceptionPoint.PreToolCall, "Bash"), actualMatcherValue: "Bash", ct: TestContext.Current.CancellationToken);
 
         result.BlockingErrors.Should().NotBeNull();
         result.BlockingErrors!.Should().ContainSingle(b => b.Error == "forbidden by policy");
+    }
+
+    // HasActiveHooks 与 FireAsync 前置过滤同源
+
+    [Fact]
+    public void HasActiveHooks_MatchingHookInTrustedWorkspace_ReturnsTrue()
+    {
+        var (sut, registry, _) = CreateSut(trusted: true);
+        registry.Register(MakeRegistration("h1", HookInterceptionPoint.PreModelCall, "gpt-*"));
+
+        sut.HasActiveHooks(HookInterceptionPoint.PreModelCall, "gpt-5").Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasActiveHooks_NoMatchingHook_ReturnsFalse()
+    {
+        var (sut, registry, _) = CreateSut(trusted: true);
+        registry.Register(MakeRegistration("h1", HookInterceptionPoint.PreModelCall, "gpt-*"));
+
+        sut.HasActiveHooks(HookInterceptionPoint.PreModelCall, "claude-4").Should().BeFalse();
+        sut.HasActiveHooks(HookInterceptionPoint.PostModelCall, "gpt-5").Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasActiveHooks_WorkspaceNotTrusted_ReturnsFalse()
+    {
+        var (sut, registry, _) = CreateSut(trusted: false);
+        registry.Register(MakeRegistration("h1", HookInterceptionPoint.PreModelCall, "gpt-*"));
+
+        sut.HasActiveHooks(HookInterceptionPoint.PreModelCall, "gpt-5").Should().BeFalse(
+            "工作区不受信任时 FireAsync 会跳过执行，HasActiveHooks 必须同源返回 false");
     }
 
     // Once 语义：仅在成功执行后注销（A4 修复）
@@ -160,7 +191,7 @@ public sealed class HookExecutionServiceTests
     public async Task FireAsync_OnceHookWithBlockingResult_IsRemovedAfterExecution()
     {
         var (sut, registry, executor) = CreateSut(trusted: true);
-        registry.Register(MakeRegistration("once-blocker", HookEvent.Stop, "Completed", once: true));
+        registry.Register(MakeRegistration("once-blocker", HookInterceptionPoint.Output, "Completed", once: true));
         executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
             .Returns(new HookResult
             {
@@ -168,21 +199,21 @@ public sealed class HookExecutionServiceTests
                 BlockingError = new HookBlockingError("must continue", "hook"),
             });
 
-        var result = await sut.FireAsync(MakePayload(HookEvent.Stop, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
+        var result = await sut.FireAsync(MakePayload(HookInterceptionPoint.Output, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
 
         result.BlockingErrors.Should().NotBeNull();
-        registry.GetAll().Should().BeEmpty("Once hook 送达阻断裁决后应注销，防止 Stop 阻断无限循环");
+        registry.GetAll().Should().BeEmpty("Once hook 送达阻断裁决后应注销，防止同一拦截点无限循环触发");
     }
 
     [Fact]
     public async Task FireAsync_OnceHookWithExecutorException_IsKeptForRetry()
     {
         var (sut, registry, executor) = CreateSut(trusted: true);
-        registry.Register(MakeRegistration("once-flaky", HookEvent.Stop, "Completed", once: true));
+        registry.Register(MakeRegistration("once-flaky", HookInterceptionPoint.Output, "Completed", once: true));
         executor.ExecuteAsync(Arg.Any<HookPayload>(), Arg.Any<HookConfig>(), Arg.Any<CancellationToken>())
             .Throws(new InvalidOperationException("boom"));
 
-        await sut.FireAsync(MakePayload(HookEvent.Stop, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
+        await sut.FireAsync(MakePayload(HookInterceptionPoint.Output, ""), actualMatcherValue: "Completed", ct: TestContext.Current.CancellationToken);
 
         registry.GetAll().Should().ContainSingle("执行异常视为未完成，once hook 应保留待下次触发");
     }
@@ -226,14 +257,14 @@ public sealed class HookExecutionServiceTests
 
     private static HookRegistration MakeRegistration(
         string name,
-        HookEvent @event,
+        HookInterceptionPoint point,
         string matcher,
         int priority = 100,
         bool once = false,
         HookType type = HookType.Command) => new()
         {
             Name = name,
-            Event = @event,
+            Point = point,
             Matcher = matcher,
             Priority = priority,
             Once = once,
@@ -242,9 +273,9 @@ public sealed class HookExecutionServiceTests
             Config = new HookConfig(),
         };
 
-    private static HookPayload MakePayload(HookEvent @event, string toolName) => new()
+    private static HookPayload MakePayload(HookInterceptionPoint point, string toolName) => new()
     {
-        Event = @event,
+        Point = point,
         ToolName = toolName,
         SessionId = "test-session",
     };

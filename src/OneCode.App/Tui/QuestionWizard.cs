@@ -13,7 +13,6 @@ public sealed partial class QuestionWizard
     private int _selectedOptionIndex;
     private readonly TaskCompletionSource<WizardResult> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // 多选题的选中状态
     private readonly HashSet<int> _selectedMultipleOptions = new();
 
     public QuestionWizard(string title, IReadOnlyList<WizardQuestion> questions, int startIndex = 0)
@@ -146,7 +145,6 @@ public sealed partial class QuestionWizard
 
         if (kb == Key.Space || kb == Key.Enter)
         {
-            // 切换当前选项的选中状态
             if (_selectedMultipleOptions.Contains(_selectedOptionIndex))
                 _selectedMultipleOptions.Remove(_selectedOptionIndex);
             else
@@ -190,7 +188,6 @@ public sealed partial class QuestionWizard
                 if (idx < question.Options.Count)
                     question.MultipleAnswers.Add(question.Options[idx]);
             }
-            // 同时保存为逗号分隔的字符串
             question.Answer = string.Join(", ", question.MultipleAnswers);
         }
     }
@@ -252,12 +249,10 @@ public sealed partial class QuestionWizard
 
         if (question.IsChoiceType && question.Options != null)
         {
-            // 如果已有答案，选中对应选项
             if (!string.IsNullOrEmpty(question.Answer))
             {
                 if (question.Type == QuestionType.MultipleChoice)
                 {
-                    // 多选题：恢复选中状态
                     for (var i = 0; i < question.Options.Count; i++)
                     {
                         if (question.MultipleAnswers.Contains(question.Options[i]))
@@ -275,7 +270,6 @@ public sealed partial class QuestionWizard
 
     public void FinishWizard()
     {
-        // 确保当前问题有答案
         var currentQuestion = CurrentQuestion;
         if (currentQuestion.Type == QuestionType.MultipleChoice)
         {

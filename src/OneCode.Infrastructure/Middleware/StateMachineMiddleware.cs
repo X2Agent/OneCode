@@ -18,7 +18,8 @@ namespace OneCode.Infrastructure.Middleware;
 /// - 当 enableStrikeGuidance=true 时，在失败后注入递进式修复指导
 ///   （Strike 1→重试提示, Strike 2→聚焦修复, Strike 3→Blocked）。
 /// - Plan 模式的只读约束由权限层（PlanModePermissionStrategy）负责，不在此重复。
-/// - 工具调用时序观测不在此重复实现：Harness 默认启用 OpenTelemetry。
+/// - 工具调用时序观测不在此重复实现：框架侧有 span 埋点，但产品未注册 OpenTelemetry
+///   订阅者（`src/` 内无 `AddSource` / `TracerProvider`），当前 span 全部为 `null`、不可观测。
 /// </summary>
 public static class StateMachineMiddleware
 {

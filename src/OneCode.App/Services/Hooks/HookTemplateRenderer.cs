@@ -7,7 +7,7 @@ namespace OneCode.App.Services.Hooks;
 ///
 /// 支持的字段（与 <see cref="OneCode.Core.Hooks.HookPayload"/> 字段一一对应）：
 /// <list type="bullet">
-///   <item><c>Event</c> — Hook 事件类型字符串</item>
+///   <item><c>Point</c> — 拦截点线格式名（input / pre_model_call / ...）</item>
 ///   <item><c>SessionId</c> — 会话 ID</item>
 ///   <item><c>Cwd</c> — 当前工作目录</item>
 ///   <item><c>ToolName</c> — 触发 Hook 的工具名</item>
@@ -34,7 +34,7 @@ internal static partial class HookTemplateRenderer
             var field = match.Groups[1].Value;
             return field switch
             {
-                "Event" => payload.Event.ToString(),
+                "Point" => HookInterceptionPoints.ToWireName(payload.Point),
                 "SessionId" => payload.SessionId ?? string.Empty,
                 "Cwd" => payload.Cwd ?? string.Empty,
                 "ToolName" => payload.ToolName ?? string.Empty,

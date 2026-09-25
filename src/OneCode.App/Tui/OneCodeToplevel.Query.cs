@@ -130,8 +130,54 @@ public sealed partial class OneCodeToplevel
         }
     }
 
-    private async Task RunQueryAsync(string userText, IReadOnlyList<string>? imagePaths, CancellationToken ct)
+    /// <summary>
+    /// Runs a bounded deterministic loop (<c>/loop</c>): streams per-iteration progress and
+    /// verification results without going through the LLM query pipeline.
+    /// </summary>
+    private async Task RunLoopAsync(
+        OneCode.App.Services.CommandDispatchResult.Loop request, CancellationToken ct)
     {
+        Invoke(() =>
+        {
+            _shell.Transcript.BeginStreaming();
+            _shell.ChatInput.SetBusy(true);
+            _shell.SetAgentBusy(true, "运行迭代循环…");
+        });
+
+        try
+        {
+            await foreach (var evt in _ctx.StreamLoop!(
+                request.Task, request.CheckCommand, request.MaxIterations, ct).ConfigureAwait(false))
+            {
+                var snapshot = evt;
+                Invoke(() => DispatchEvent(snapshot));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Invoke(EndQueryAfterCancellation);
+        }
+        catch (Exception ex)
+        {
+            Invoke(() =>
+            {
+                _shell.Transcript.EndStreaming();
+                _shell.Transcript.AddError(ex.Message);
+            });
+        }
+        finally
+        {
+            Invoke(() =>
+            {
+                _shell.Transcript.EndStreaming();
+                _shell.ChatInput.SetBusy(false);
+                _shell.SetAgentBusy(false);
+                _shell.FocusChatInput();
+            });
+        }
+    }
+
+    private async Task RunQueryAsync(string userText, IReadOnlyList<string>? imagePaths, CancellationToken ct)    {
         try
         {
             await _ctx.CreateSession(ct).ConfigureAwait(false);

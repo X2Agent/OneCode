@@ -9,7 +9,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup Label="Microsoft Extensions (.NET 10)">
-    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.21.0-preview.260911.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.22.0-preview.260918.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
@@ -20,9 +20,6 @@
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageVersion Include="OllamaSharp" Version="5.4.30" />
-  </ItemGroup>
-  <ItemGroup Label="System Libraries">
-    <PackageVersion Include="System.CommandLine" Version="2.0.10" />
   </ItemGroup>
   <ItemGroup Label="API / Protocol">
     <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
@@ -44,9 +41,9 @@
     <PackageVersion Include="Anthropic" Version="12.40.0" />
   </ItemGroup>
   <ItemGroup Label="Agent Framework">
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.21.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.21.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Harness" Version="1.21.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.22.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.22.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Harness" Version="1.22.0" />
     <!--
       Workflows.Declarative 评估结论：
       该包要求 ResponseAgentProvider（Azure AI Foundry），与本地 IChatClient 架构不兼容。
@@ -54,8 +51,8 @@
       Microsoft.Agents.AI.Workflows 仍被 TeamOrchestrationService 使用（GroupChat/Magentic）。
     -->
     <!-- Mcp：MCP 工具 → AIFunction 桥接 + 2026-07-28 Tasks extension（long-running 工具）透明处理 -->
-    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.21.0-alpha.260911.1" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.21.0-preview.260911.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.22.0-alpha.260918.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.22.0-preview.260918.1" />
     <PackageVersion Include="Hyperlight.HyperlightSandbox.Api" Version="0.6.0" />
   </ItemGroup>
   <ItemGroup Label="Tooling">

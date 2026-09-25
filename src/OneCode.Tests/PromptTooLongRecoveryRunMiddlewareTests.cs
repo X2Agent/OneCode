@@ -128,13 +128,13 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             => throw new NotImplementedException();
     }
 
-    private static IHookExecutionService CreateHookService(List<HookEvent>? capturedEvents = null)
+    private static IHookExecutionService CreateHookService(List<HookInterceptionPoint>? capturedPoints = null)
     {
         var hookService = Substitute.For<IHookExecutionService>();
         hookService.FireAsync(Arg.Any<HookPayload>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
-                capturedEvents?.Add(ci.Arg<HookPayload>().Event);
+                capturedPoints?.Add(ci.Arg<HookPayload>().Point);
                 return new AggregatedHookResult();
             });
         return hookService;
@@ -146,9 +146,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
     public async Task RunAsync_NoException_PassThrough()
     {
         var agent = new ThrowingStubAgent(CreateResponse("result"), new PromptTooLongException("test"));
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        var response = await runFunc([], null, null, agent, CancellationToken.None);
+        var response = await runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("result");
         agent.CallCount.Should().Be(1);
@@ -162,9 +162,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new PromptTooLongException("too long"),
             0); // throw on first call only
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        var response = await runFunc([], null, null, agent, CancellationToken.None);
+        var response = await runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("recovered");
         agent.CallCount.Should().Be(2); // first failed, second succeeded
@@ -178,9 +178,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new HttpRequestException("Error: prompt is too long for model"),
             0);
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        var response = await runFunc([], null, null, agent, CancellationToken.None);
+        var response = await runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
         response.Text.Should().Be("recovered");
         agent.CallCount.Should().Be(2);
@@ -194,9 +194,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new PromptTooLongException("always too long"),
             0, 1, 2, 3); // throw on all calls including final
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, null, maxAttempts: 2);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, maxAttempts: 2);
 
-        var act = () => runFunc([], null, null, agent, CancellationToken.None);
+        var act = () => runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<PromptTooLongException>();
         agent.CallCount.Should().Be(2); // 2 attempts (maxAttempts=2), last one's exception propagates
@@ -210,9 +210,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new InvalidOperationException("unrelated error"),
             0);
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        var act = () => runFunc([], null, null, agent, CancellationToken.None);
+        var act = () => runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         agent.CallCount.Should().Be(1); // no retry for non-PromptTooLong
@@ -228,9 +228,9 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             0);
 
         var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(
-            null, null, maxAttempts: 3, keepLastMessages: 6);
+            logger: null, maxAttempts: 3, keepLastMessages: 6);
 
-        await runFunc(messages, null, null, agent, CancellationToken.None);
+        await runFunc(messages, null, null, agent, TestContext.Current.CancellationToken);
 
         // First call: original 21 messages
         // Second call (retry): truncated — 1 system + 6 user = 7 messages
@@ -242,39 +242,56 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
     }
 
     [Fact]
-    public async Task RunAsync_HooksFired_PreCompactThenPostCompact()
+    public async Task RunAsync_HooksNotFired_CompactLeftHookProtocol()
     {
-        var firedEvents = new List<HookEvent>();
-        var hookService = CreateHookService(firedEvents);
+        // 压缩不再属于 Hook 拦截范围（协议无 compact 节点）：恢复路径只截断 + 重试。
+        var firedPoints = new List<HookInterceptionPoint>();
+        var hookService = CreateHookService(firedPoints);
         var agent = new ThrowingStubAgent(
             CreateResponse("recovered"),
             new PromptTooLongException("too long"),
             0);
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(hookService, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        await runFunc([], null, null, agent, CancellationToken.None);
+        await runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
-        firedEvents.Should().HaveCount(2);
-        firedEvents[0].Should().Be(HookEvent.PreCompact);
-        firedEvents[1].Should().Be(HookEvent.PostCompact);
+        var response = await runFunc([], null, null, agent, TestContext.Current.CancellationToken).ConfigureAwait(false);
+        response.Text.Should().Be("recovered");
+        firedPoints.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_RetriesWithoutHookService_WhenRecoveryNeeded()
+    {
+        var agent = new ThrowingStubAgent(
+            CreateResponse("recovered"),
+            new PromptTooLongException("too long"),
+            0);
+
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
+
+        var response = await runFunc([], null, null, agent, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        response.Text.Should().Be("recovered");
+        agent.CallCount.Should().Be(2, "PromptTooLong 后应截断并重试一次");
     }
 
     [Fact]
     public async Task RunAsync_NoHooks_WhenNoException()
     {
-        var firedEvents = new List<HookEvent>();
-        var hookService = CreateHookService(firedEvents);
+        var firedPoints = new List<HookInterceptionPoint>();
+        var hookService = CreateHookService(firedPoints);
         var agent = new ThrowingStubAgent(
             CreateResponse("result"),
             new PromptTooLongException("test"),
             1); // won't throw on first call
 
-        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(hookService, null);
+        var (runFunc, _) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        await runFunc([], null, null, agent, CancellationToken.None);
+        await runFunc([], null, null, agent, TestContext.Current.CancellationToken);
 
-        firedEvents.Should().BeEmpty();
+        firedPoints.Should().BeEmpty();
     }
 
     // Streaming (RunStreamingAsync)
@@ -284,10 +301,10 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
     {
         var stream = new[] { CreateUpdate("chunk1"), CreateUpdate("chunk2") }.ToAsyncEnumerable();
         var agent = new ThrowingStubAgent(stream, new PromptTooLongException("test"));
-        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
         var results = new List<string>();
-        await foreach (var update in streamFunc([], null, null, agent, CancellationToken.None))
+        await foreach (var update in streamFunc([], null, null, agent, TestContext.Current.CancellationToken))
         {
             if (update.Text is { } text)
                 results.Add(text);
@@ -306,10 +323,10 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new PromptTooLongException("too long"),
             0); // throw on first call, succeed on retry
 
-        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null, null);
+        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
         var results = new List<string>();
-        await foreach (var update in streamFunc([], null, null, agent, CancellationToken.None))
+        await foreach (var update in streamFunc([], null, null, agent, TestContext.Current.CancellationToken))
         {
             if (update.Text is { } text)
                 results.Add(text);
@@ -328,11 +345,11 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
             new PromptTooLongException("always too long"),
             0, 1, 2, 3);
 
-        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null, null, maxAttempts: 2);
+        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null, maxAttempts: 2);
 
         var act = async () =>
         {
-            await foreach (var _ in streamFunc([], null, null, agent, CancellationToken.None)) { }
+            await foreach (var _ in streamFunc([], null, null, agent, TestContext.Current.CancellationToken)) { }
         };
 
         await act.Should().ThrowAsync<PromptTooLongException>();
@@ -340,23 +357,24 @@ public sealed class PromptTooLongRecoveryRunMiddlewareTests
     }
 
     [Fact]
-    public async Task RunStreamingAsync_HooksFired_OnRecovery()
+    public async Task RunStreamingAsync_RetriesWithoutHookService_OnRecovery()
     {
-        var firedEvents = new List<HookEvent>();
-        var hookService = CreateHookService(firedEvents);
+        var firedPoints = new List<HookInterceptionPoint>();
+        var hookService = CreateHookService(firedPoints);
         var stream = new[] { CreateUpdate("recovered") }.ToAsyncEnumerable();
         var agent = new ThrowingStubAgent(
             stream,
             new PromptTooLongException("too long"),
             0);
 
-        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(hookService, null);
+        var (_, streamFunc) = PromptTooLongRecoveryRunMiddleware.Create(null);
 
-        await foreach (var _ in streamFunc([], null, null, agent, CancellationToken.None)) { }
+        var updates = new List<AgentResponseUpdate>();
+        await foreach (var u in streamFunc([], null, null, agent, TestContext.Current.CancellationToken))
+            updates.Add(u);
 
-        firedEvents.Should().HaveCount(2);
-        firedEvents[0].Should().Be(HookEvent.PreCompact);
-        firedEvents[1].Should().Be(HookEvent.PostCompact);
+        updates.Should().ContainSingle();
+        firedPoints.Should().BeEmpty();
     }
 
     // TruncateMessages unit tests

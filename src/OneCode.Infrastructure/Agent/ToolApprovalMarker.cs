@@ -17,16 +17,18 @@ namespace OneCode.Infrastructure.Agent;
 /// <c>Ask</c> as a pass-through to the approval layer — which then has nothing to approve.
 /// </para>
 /// <para>
-/// <b>Where it runs.</b> Only at pipeline build time, and only when the path actually has approval
-/// machinery (<c>EnableToolApproval</c>). Marking tools on a path with no <c>ToolApprovalAgent</c> and
-/// no interactive bridge would make the framework convert every function call in the batch into an
-/// unresolvable approval request.
+/// <b>Where it runs.</b> At pipeline build time for the tools the product catalog hands to the agent,
+/// and once more per request through <see cref="ToolApprovalMarkingContextProvider"/> for tools the
+/// framework's context providers inject after that point (Harness todo list / working memory). Both
+/// calls are gated on the path actually having approval machinery (<c>EnableToolApproval</c>): marking
+/// tools on a path with no <c>ToolApprovalAgent</c> and no interactive bridge would make the framework
+/// convert every function call in the batch into an unresolvable approval request.
 /// </para>
 /// <para>
 /// <b>Idempotent.</b> Tools that already carry the marker are left alone, so provider-supplied tools
-/// (skills, file access, shell executors) are not double-wrapped. MAF's auto-approval rules match by
-/// tool <i>name</i>, so double wrapping would not be detected by name alone — the marker lookup is the
-/// only reliable check.
+/// (skills, file access, shell executors) are not double-wrapped, and the build-time pass is not
+/// repeated by the per-request pass. MAF's auto-approval rules match by tool <i>name</i>, so double
+/// wrapping would not be detected by name alone — the marker lookup is the only reliable check.
 /// </para>
 /// </remarks>
 public static class ToolApprovalMarker
@@ -64,5 +66,27 @@ public static class ToolApprovalMarker
         }
 
         return marked ?? tools;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="tools"/> with approval-boundary markers applied, materializing the
+    /// sequence first when the caller cannot supply a list.
+    /// </summary>
+    /// <param name="tools">Tools to mark. Non-function tools pass through untouched.</param>
+    /// <param name="metadata">Registry that owns the product <c>ApprovalMode</c> for each tool name.</param>
+    /// <returns>
+    /// The same sequence when nothing was wrapped, otherwise a list containing the marked tools.
+    /// </returns>
+    /// <remarks>
+    /// The per-request path sees the tool list as an <see cref="IEnumerable{T}"/> that may be a lazy
+    /// framework sequence, while the build-time path assigns straight into <c>ChatOptions.Tools</c> and
+    /// keeps the allocation-free list overload.
+    /// </remarks>
+    public static IEnumerable<AITool>? Apply(IEnumerable<AITool>? tools, ToolMetadataRegistry? metadata)
+    {
+        if (tools is null || metadata is null)
+            return tools;
+
+        return Apply(tools as IList<AITool> ?? tools.ToList(), metadata);
     }
 }

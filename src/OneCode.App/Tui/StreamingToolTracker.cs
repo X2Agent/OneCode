@@ -1,8 +1,7 @@
 namespace OneCode.App.Tui;
 
-// 流式工具调用跟踪——从 ChatTranscriptView 提取。
-// 封装 ToolId → 行索引 + 开始时间的映射，以及去重守卫（跨 ContinueStreaming 的重复 ToolDone）。
-// 行列表的增删仍由 ChatTranscriptView 负责；本类仅管理匹配状态。
+// 流式工具调用跟踪：封装 ToolId → 行索引 + 开始时间的映射，以及去重守卫
+// （跨 ContinueStreaming 的重复 ToolDone）。行列表增删仍由 ChatTranscriptView 负责。
 
 internal sealed class StreamingToolTracker
 {

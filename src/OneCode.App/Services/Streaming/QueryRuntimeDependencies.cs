@@ -10,7 +10,8 @@ namespace OneCode.App.Services.Streaming;
 public sealed record QueryOrchestrationDependencies(
     OrchestrationStreamService OrchestrationStream,
     ITeamOrchestrationService TeamOrchestration,
-    AutoCompactService AutoCompact);
+    AutoCompactService AutoCompact,
+    Services.Loop.IIterativeLoopService IterativeLoop);
 
 /// <summary>App-state / config surfaces for query streaming.</summary>
 public sealed record QueryRuntimeDependencies(

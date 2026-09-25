@@ -23,5 +23,4 @@ public sealed record InteractiveSession(
     WorkingModeController ModeController,
     string? SshHost,
     IReadOnlyList<SlashCommandEntry> SlashCommands,
-    string Model,
     string HarnessPrompt);

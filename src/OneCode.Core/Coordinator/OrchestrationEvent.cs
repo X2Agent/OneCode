@@ -103,4 +103,19 @@ public abstract record OrchestrationEvent
     /// 流式管道（StreamingSession）解信封为流内 BuildRunStateEvent（QueryEvent 契约不变）。
     /// </summary>
     public sealed record BuildStateProjectionChanged(BuildRun Run) : OrchestrationEvent;
+
+    /// <summary>
+    /// Agent 待办清单快照（事件通道统一）：Harness <c>TodoProvider</c> 的每会话状态
+    /// 在每次 agent run 结束时由 <c>TodoProjectionService</c> 经统一领域事件总线发射。
+    /// 权威源是 provider 的 <c>GetAllTodosAsync</c> 全量快照，不是工具调用增量重建
+    /// （增量重建要自行复刻 add/complete/remove 的幂等语义，漏事件即漂移）。
+    /// 空列表 = 当前会话没有待办，消费方应隐藏面板。
+    /// </summary>
+    public sealed record TodoProjectionChanged(IReadOnlyList<TodoListItem> Items) : OrchestrationEvent;
 }
+
+/// <summary>
+/// 待办清单条目投影——与 MAF <c>TodoItem</c> 解耦：Core 不引用 MAF 类型，
+/// TUI 只需要展示字段。
+/// </summary>
+public sealed record TodoListItem(int Id, string Title, string? Description, bool IsComplete);

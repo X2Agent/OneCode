@@ -8,11 +8,12 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 ## 技能来源与加载
 
-技能有**三个来源**，按优先级合并后通过 `SkillCommandSource`（`IDynamicCommandSource`）注册为动态斜杠命令：
+技能有**四个来源**，按优先级合并后通过 `SkillCommandSource`（`IDynamicCommandSource`）注册为动态斜杠命令：
 
 | 来源 | 路径 | 作用域 |
 |---|---|---|
 | **内置技能** | `BundledSkills.cs` 硬编码 | 所有用户共享，随版本发布 |
+| **打包技能目录** | `{AppContext.BaseDirectory}/skills/` | 随安装目录分发，所有用户共享 |
 | **用户技能** | `~/{候选目录}/skills/` | 当前用户全局，跨项目共享 |
 | **项目技能** | `<项目>/{候选目录}/skills/` | 当前项目，团队共享 |
 
@@ -36,8 +37,8 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 > 因此由 `AgentContextProviderLease` 在 run 结束后（含取消、异常、流提前结束）统一释放。
 > DI 单例不实现 `IDisposable`，不会被误释放。
 
-> **脚本执行边界**：`SubprocessScriptRunner` 有 2 分钟超时、30,000 字符输出上限（超出标注截断）、
-> 非零退出码返回错误结果、取消时 `Kill(entireProcessTree: true)`。审批通过不等于沙箱——
+> **脚本执行边界**：`SubprocessScriptRunner` 有 2 分钟超时、30,000 字符 stdout 上限（失败时 stderr 上限
+> 2,000 字符，超出均标注截断）、非零退出码返回错误结果、取消时 `Kill(entireProcessTree: true)`。审批通过不等于沙箱——
 > 子进程与 Agent 本身有相同的文件系统与网络权限。
 
 ---
@@ -48,16 +49,28 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 | 占位符 | 替换规则 | 示例 |
 |---|---|---|
-| `$ARGUMENTS` | 替换为全部参数拼接（`/skill-name foo bar` → `foo bar`） | `/remember 新工具必须 sealed + AddTool 注册` |
-| `{xxx}` | **命名占位符**：从 prompt 中推断参数名（`ArgumentNames`），按位置映射 `args[i]`；技能只有一个（或零个）命名占位符时，该占位符吸收全部拼接参数；未匹配到值的占位符保持原样留给 LLM 理解 | `/batch 修复登录页样式` → `{instruction}` 被替换为 `修复登录页样式` |
+| `$ARGUMENTS` | 替换为全部参数拼接（`/skill-name foo bar` → `foo bar`） | `/remember 新工具必须 sealed + AddToolInstance 注册` |
+| `{xxx}` | **命名占位符**：`xxx` 与 `ArgumentNames` 中的名字比对后按位置映射 `args[i]`；技能只有一个（或零个）命名占位符时，该占位符吸收全部拼接参数；未匹配到值的占位符保持原样留给 LLM 理解 | `/batch 修复登录页样式` → `{instruction}` 被替换为 `修复登录页样式` |
 
-> **注意**：多占位符技能按位置映射（如 `/loop` 的 `{task}` ← 第 1 个参数、`{expected}` ← 第 2 个参数）；参数不足时对应占位符替换为空字符串；占位符名不在参数名列表中时保持原样。
+> **注意**：多占位符技能按位置映射（如 `/batch` 的 `{instruction}` ← 第 1 个参数）；参数不足时对应占位符替换为空字符串；占位符名不在参数名列表中时保持原样。
+
+> **`ArgumentNames` 的来源**：内置技能由 `SkillCatalog` 从 prompt 中提取 `{xxx}` 的出现顺序；文件技能
+> 只有在 frontmatter 声明了 `argument-names` 时才有名，否则视为「零个命名占位符」——该技能里的每个
+> `{xxx}` 都会被整体参数替换。
 
 ---
 
-## 内置技能清单（9 个）
+## 内置技能清单（8 个）
 
 以下技能随 OneCode 发布，定义在 `src/OneCode.Core/Skills/BundledSkills.cs`。
+
+> **`/loop` 已不再是技能**：它改为 `LoopCommand`（代码命令），由 MAF `LoopAgent` 驱动有界确定性循环。
+> 原因与边界见 [代理循环边界](./adr/0010-agent-loop-boundaries.md)——提示词版循环没有强制上限、没有可判定证据，
+> 与 GOAL 的子目标循环职责重叠。用法见 [commands.md: /loop](./commands.md#loop)。
+>
+> **同名遮蔽**：`CommandRegistry.Find` 按注册顺序取首个匹配，内置命令先于动态技能注册。
+> 因此用户/项目级名为 `loop` 的技能不再可达（这与 `/review`、`/commit` 等内置名一向如此）。
+> 需要自定义循环行为的用户请改名技能，或用 `loop.maxIterations` / `--max` / `--check` 调整内置行为。
 
 ### /batch
 
@@ -96,24 +109,6 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 **作用**：引导 LLM 按六步调试法工作：复现 → 隔离 → 假设 → 测试假设 → 修复 → 验证修复。
 
 **占位符**：`{issue}`（运行时替换：吸收全部参数）
-
----
-
-### /loop
-
-迭代执行直到结果匹配目标。
-
-**用法**：
-
-```
-/loop <task>
-```
-
-**作用**：引导 LLM 反复执行任务并与期望输出对比，不正确则分析修正后重试，直到正确或达到最大迭代次数。
-
-**占位符**：`{task}` + `{expected}`（运行时按位置替换：第 1/2 个参数）
-
-> 适用于需要"生成 → 验证 → 修正"循环的场景，如生成匹配特定格式的输出。
 
 ---
 
@@ -178,12 +173,12 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 **用法**：
 
 ```
-/skillify <skill-name>
+/skillify
 ```
 
-**作用**：分析对话历史中的重复模式或工作流，在 `.onecode/skills/<skill-name>.md` 生成一个新技能文件，包含 YAML frontmatter（`name`、`description`、`argument-hint`）+ 可执行指令体 + `$ARGUMENTS` 占位符。
+**作用**：分析对话历史中的重复模式或工作流，在 `.onecode/skills/<skill-name>.md` 生成一个新技能文件，包含 YAML frontmatter（`name`、`description`、`argument-hint`）+ 可执行指令体 + `$ARGUMENTS` 占位符（占位符写进**生成出来的**技能，而非 `skillify` 自身）。
 
-**占位符**：`$ARGUMENTS`（被运行时替换）
+**参数**：不接受参数——`skillify` 的 prompt 不含占位符，命令后跟的文本不会被注入；新技能名由 LLM 生成时决定。
 
 > 生成后该技能立即可用，通过 `/skills` 可验证，通过 `/<skill-name>` 可调用。
 
@@ -211,7 +206,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 > | 用途 | 项目规范、团队共享规则 | 可检索事实/偏好 |
 > | 注入 | Project Context | Memory 索引 + `search_memories` |
 >
-> 示例：`/remember 新工具必须 sealed 并用 AddTool 注册` → AGENTS.md；  
+> 示例：`/remember 新工具必须 sealed 并用 AddToolInstance 注册` → AGENTS.md；  
 > `/memory add 这个仓库 OAuth 用 DPAPI` → MEMORY.md。
 
 ---
@@ -243,17 +238,30 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 ```
 # 结构一：单文件
 ~/.onecode/skills/
-  └── my-skill.md          # 文件名即技能名
+  └── my-skill.md          # 未声明 name 时，文件名即技能名
 
 # 结构二：目录
 ~/.onecode/skills/
   └── my-skill/
-      └── SKILL.md          # 目录名即技能名
+      └── SKILL.md          # 未声明 name 时，目录名即技能名
 ```
+
+### YAML frontmatter（可选）
+
+以 `---` 开头的 frontmatter 块按**连字符命名**解析，未知键忽略；YAML 非法则整个文件不加载：
+
+| 键 | 作用 | 缺省 |
+|---|---|---|
+| `name` | 技能名（即斜杠命令名） | 目录名（`SKILL.md`）/ 文件名（单文件） |
+| `description` | `/skills` 列表中的描述 | 文件体第一个非空行去掉前导 `#` 与空格 |
+| `argument-hint` | 参数提示（补全用） | 无 |
+| `argument-names` | 命名占位符 `{xxx}` 的参数名顺序 | 空（见[参数占位符](#参数占位符)） |
+| `user-invocable` | `false` 时不注册为斜杠命令 | `true` |
+| `disable-model-invocation` | 模型侧调用开关 | `false` |
 
 ### Markdown 内容
 
-技能文件的第一行 `#` 标题会被提取为技能描述（显示在 `/skills` 列表中）。文件体即为 prompt 模板，支持 `$ARGUMENTS` 占位符：
+未声明 frontmatter `description` 时，文件体第一个非空行去掉前导 `#` 会被提取为技能描述（显示在 `/skills` 列表中）。文件体即为 prompt 模板，支持 `$ARGUMENTS` 与 `{xxx}` 占位符：
 
 ```markdown
 # My Custom Skill
@@ -290,12 +298,10 @@ $ARGUMENTS
 
 | 方式 | 说明 |
 |---|---|
-| `/skills` | 列出所有可用技能（内置 + 用户 + 项目），显示名称和一行描述 |
+| `/skills` | 列出所有可用技能（内置 + 打包目录 + 用户 + 项目），显示名称和一行描述 |
 | `/skills list` | 同上 |
 | `/skills show <name>` 或 `/skills <name>` | 查看指定技能的详情（预览，不执行） |
 | `/<skill-name> <args>` | **执行**技能的唯一入口（斜杠补全支持 Tab） |
-
-> `/skills run` 已移除，避免与 `/<skill-name>` 双路径重复。
 
 > 技能通过 `SkillCommandSource` 动态加载，不需要在 `CommandServiceCollectionExtensions.cs` 中注册。新增或删除内置技能时，修改 `BundledSkills.cs` 的 `LoadBundledSkills()` 方法；新增自定义技能时，放入对应目录即可，无需改动代码。
 
@@ -310,7 +316,7 @@ BundledSkills.All (静态字典)
     ↓
 SkillCommandSource.LoadCommandsAsync()   →  生成 SkillProxyCommand（动态斜杠命令）
     ↓
-AgentSkillsProviderFactory               →  注入到 Agent context（LLM 可见技能列表）
+SkillProviderFactory                     →  注入到 Agent context（LLM 可见技能列表）
     ↓
 SkillsCommand                             →  /skills 命令，列出所有技能
 ```

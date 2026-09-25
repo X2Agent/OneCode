@@ -138,6 +138,7 @@ public static class SettingDescriptors
             ["goal.maxTurnsPerSubGoal"] = new("goal.maxTurnsPerSubGoal", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 50),
             ["goal.maxTotalTokens"] = new("goal.maxTotalTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: 200_000L),
             ["goal.maxWallClockHours"] = new("goal.maxWallClockHours", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: 2.0),
+            ["loop.maxIterations"] = new("loop.maxIterations", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 3),
         };
 
     public static IEnumerable<SettingDescriptor> All => Items.Values;

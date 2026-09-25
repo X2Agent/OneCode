@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.Core.Coordinator;
 using OneCode.App.Services.Agent;
@@ -110,7 +109,7 @@ internal sealed class TeamApprovalWorkflowCompiler
             writer.WriteEndObject();
         }
 
-        return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+        return WorkflowDefinitionHash.Compute(stream.ToArray());
     }
 }
 

@@ -23,6 +23,16 @@ public sealed partial class OneCodeToplevel
     }
 
     /// <summary>
+    /// 配置会话级全放行委托：审批弹窗选择「本次对话全部允许」时调用。
+    /// 由 TuiHostConfigurator 注入（翻转 PermissionModeProvider 运行时覆盖到
+    /// BypassPermissions，不写配置）；未注入时仅记录会话提示，不改权限状态。
+    /// </summary>
+    public void ConfigureSessionPermissionEscalation(Action applySessionAllowAll)
+    {
+        _applySessionAllowAll = applySessionAllowAll;
+    }
+
+    /// <summary>
     /// 配置 MCP 配置页弹层委托。<paramref name="showMcpConfigAsync"/> 返回保存摘要
     /// （用户取消时为 null）；未配置时 /mcp 退回 /mcp list 文本输出。
     /// </summary>
@@ -43,6 +53,8 @@ public sealed partial class OneCodeToplevel
             {
                 options.Add(new("allow", "允许执行 (仅本次)", request.Message));
                 options.Add(new("always", "始终允许此工具 (不再提示)"));
+                if (request.AllowSessionEscalation)
+                    options.Add(new("session-all", "本次对话全部允许 (所有工具不再提示)"));
             }
             options.Add(new("deny", "拒绝", request.AllowApprovals ? null : request.Message));
             var selector = new InlineSelector(request.Title, options);
@@ -51,19 +63,30 @@ public sealed partial class OneCodeToplevel
             {
                 _app.Invoke(() =>
                 {
-                    _shell.DismissInlineSelector();
-                    if (t.IsCompletedSuccessfully)
+                    // Fail-closed：收尾路径自己抛异常时也必须回传拒绝。
+                    // 这个 lambda 的结果无人观察，异常一旦逸出，tcs 永不完成 ——
+                    // 用户按下的那一次审批会变成整轮查询永久卡死，比误拒更糟。
+                    try
                     {
-                        var result = t.Result;
-                        var decision = result.SelectedId switch
+                        _shell.DismissInlineSelector();
+                        if (t.IsCompletedSuccessfully)
                         {
-                            "allow" => new PermissionPromptResult(PermissionPromptDecision.Allow),
-                            "always" => new PermissionPromptResult(PermissionPromptDecision.AllowAlways),
-                            _ => new PermissionPromptResult(PermissionPromptDecision.Deny),
-                        };
-                        tcs.TrySetResult(decision);
+                            var result = t.Result;
+                            var decision = result.SelectedId switch
+                            {
+                                "allow" => new PermissionPromptResult(PermissionPromptDecision.Allow),
+                                "always" => new PermissionPromptResult(PermissionPromptDecision.AllowAlways),
+                                "session-all" => new PermissionPromptResult(PermissionPromptDecision.AllowAllConversation),
+                                _ => new PermissionPromptResult(PermissionPromptDecision.Deny),
+                            };
+                            tcs.TrySetResult(decision);
+                        }
+                        else
+                        {
+                            tcs.TrySetResult(new PermissionPromptResult(PermissionPromptDecision.Deny));
+                        }
                     }
-                    else
+                    catch (Exception)
                     {
                         tcs.TrySetResult(new PermissionPromptResult(PermissionPromptDecision.Deny));
                     }

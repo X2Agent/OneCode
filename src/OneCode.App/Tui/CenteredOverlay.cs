@@ -110,7 +110,6 @@ public abstract class CenteredOverlay : View
         var border = new Attribute(borderColor, TuiPalette.BgCard);
         var bg = new Attribute(TuiPalette.FgMuted, TuiPalette.BgCard);
 
-        // Fill background
         for (var row = 0; row < h; row++)
         {
             Move(0, row);
@@ -132,7 +131,6 @@ public abstract class CenteredOverlay : View
         AddStr(new string(TuiGlyphs.BorderHorizontal[0], Math.Max(0, w - 2)));
         if (w > 1) { Move(w - 1, h - 1); AddStr(TuiGlyphs.BorderBottomRight); }
 
-        // Side borders
         for (var row = 1; row < h - 1; row++)
         {
             Move(0, row);

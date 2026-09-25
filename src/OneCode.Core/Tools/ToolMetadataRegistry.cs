@@ -23,9 +23,11 @@ public enum ToolLoadPolicy
 /// 由权限中间件消费，决定 Plan Mode / AcceptEdits Mode 下的行为。
 /// </summary>
 /// <remarks>
-/// Safe 与 ReadOnly 的审批行为一致（均为 ToolApprovalMode.Never），
-/// 区别仅在语义分类：Safe 表示不访问任何数据（交互/编排类，如 Task、AskUserQuestion、Sleep）；
+/// 审批边界由 <see cref="ToolPolicyDefaults.ForRisk"/> 从本级别派生：ReadOnly 无边界（Never），
+/// Destructive 恒有边界（Always），Dynamic 与 Safe 带边界但按运行时决策（Conditional）。
+/// Safe 与 ReadOnly 的区别是语义分类：Safe 表示不访问任何数据（交互/编排类，如 Task、AskUserQuestion、Sleep）；
 /// ReadOnly 表示只读数据访问（读文件、搜索、网络读取，如 Read、Grep、LS、WebFetch）。
+/// 两者边界不同源于放行依据：只读是权限层无条件 Allow，Safe 则要经规则评估，无匹配即 Ask。
 /// </remarks>
 public enum ToolRisk
 {

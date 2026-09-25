@@ -1,7 +1,7 @@
 # 记忆模块架构设计
 
 **状态**: Accepted
-**日期**: 2026-07-17（§8 决策补充于 2026-08-15；§11 治理与演进补充于 2026-09-16）
+**日期**: 2026-07-17
 **关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)、
 [MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)
 
@@ -123,7 +123,7 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 **Query 分词**：共用 `OneCode.Core/Text/TextTokenizer`——拉丁词按大小写边界切分并去复数后缀（`FindReferences` → `find` / `reference` / `references` / `findreferences`），CJK 按二字滑窗切分（单字保留 unigram）。再过滤 ≥ 2 字符与中英文停用词（`the`/`and`/`继续`/`实现`/`需要` 等）。
 
-> **设计决策（2026-09-18 修订）**：旧实现用 `[\p{L}\p{N}_-]{2,}` 取连续串，但 `\p{L}` 匹配 CJK——中文整句会被切成**单个 token**，语料侧同样如此，导致任何中文查询召回**恒为空**。评测（`MemoryRecallEvaluationTests`）首轮即失败并暴露此缺陷。现与 `ToolRetrievalIndex` 共用同一分词器：两条检索路径规则不一致时，同一查询会在 ToolSearch 命中、在 `search_memories` 为空。
+**分词器共用**：检索与 `ToolRetrievalIndex` 共用同一分词器——两条检索路径规则若不一致，同一查询会在 ToolSearch 命中、在 `search_memories` 为空。**不能**改用 `[\p{L}\p{N}_-]{2,}` 这类连续串匹配：`\p{L}` 匹配 CJK，中文整句会被切成单个 token（语料侧同样如此），导致中文查询召回恒为空（`MemoryRecallEvaluationTests` 覆盖此回归）。
 
 **评分**（`MemoryService.Score`）：
 
@@ -136,20 +136,20 @@ Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 
 **选取**：评分 > 0 的条目按分数降序 → `UpdatedAt` 降序，最多取 6 条（`MaxRelevantMemories`）。
 
-**输出预算**：`MaxRelevantMemories = 6` 只限条数，6 条完整正文可任意大。`MaxSearchResultChars = 12_000` 限制单次检索总字符数，超出部分显式报告省略。常驻索引另有 `MaxIndexChars = 4_000`——索引**每轮**注入，条目数不等于 token 上限。
+**输出预算**：`MaxRelevantMemories = 6` 只限条数，6 条完整正文可任意大。`MaxResultChars = 12_000`（`MemorySearchProviderFactory.cs:51`）限制单次检索总字符数，超出部分显式报告省略。常驻索引另有 `MaxIndexChars = 4_000`——索引**每轮**注入，条目数不等于 token 上限。
 
 > **设计决策**：不使用"年龄桶加成"。评分应反映"相关性"而非"新旧"，且 `UpdatedAt` 降序作为次要排序键已隐含新鲜度偏好。
 
 ### 5. System Prompt 注入策略
 
-`MemoryService.LoadMemoryPromptAsync(cwd)` 构建注入段落，由 `PromptConfigBuilder` 填入 `{{memory_section}}` 占位符。
+`MemoryService.LoadMemoryPromptAsync()` 构建注入段落，由 `PromptComposer` 填入 `{{memory_section}}` 占位符（`Services/PromptComposer.cs`）。
 
 | 注入方式 | 触发时机 | 内容 |
 |---------|---------|------|
 | 摘要索引常驻 | 每次构建 system prompt | 全部 manual 条目 + auto 条目前 8 条，每条 Key + Value 首行（截断 80 字符） |
 | 按需检索 | LLM 调用 `search_memories` 工具 | 评分 Top 6 条目，返回完整 Value |
 
-段落结构：
+段落结构（`LoadMemoryPromptAsync` 只产出以下三段；早期按 query 拼入的相关段落已移除，见下方注记）：
 
 ```markdown
 ## Memory
@@ -163,10 +163,6 @@ Memories are stored per-scope: user-level (global) and project-level (current wo
 - `[fact]` Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
 - ... and 3 more (use search_memories tool to retrieve)
 
-### Relevant memories for this request
-#### fact:build-command (project)
-Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
-
 _Use the `search_memories` tool to retrieve full memory content._
 ```
 
@@ -175,8 +171,7 @@ _Use the `search_memories` tool to retrieve full memory content._
 - `search_memories` 返回完整 Value（Top 6），作为 LLM 主动深入检索的渠道
 
 > 早期设计曾在构建 prompt 时按已知 `query` 拼入 Top 6 相关条目（`LoadMemoryPromptAsync` 的 `memoryQuery` 参数）。
-> 实测两个调用点（`InteractiveBootstrapService` / `CronJobExecutor`）均传 `null`，该分支从未生效。
-> 已移除（2026-09-15）。
+> 实测两个调用点（`InteractiveBootstrapService` / `CronJobExecutor`）均传 `null`，该分支从未生效，已移除。
 
 ### 5.1 用户手写条目（`manual`）的保护边界
 
@@ -295,12 +290,14 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 |------|---------|------|
 | 1 | MAF `AgentSkillsProvider`（`SkillProviderFactory` 构建） | `Skills` |
 | 2 | `search_memories`（`MemorySearchProviderFactory` → MAF `TextSearchProvider`） | `MemorySearch` |
-| 3 | Harness `FileMemoryProvider`（会话工作记忆，按 profile 启用） | `FileMemory` |
-| 4 | `DesignContextProvider` | `DesignContext` |
-| 5 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
-| 6 | `ShellEnvironmentProvider` | `ShellEnvironment`（且前台会话存在 shell executor） |
-| 7 | `CodeActProvider` | `CodeAct` |
+| 3 | `DesignContextProvider` | `DesignContext` |
+| 4 | `LspDiagnosticContextProvider` | `LspDiagnostics` |
+| 5 | `ShellEnvironmentProvider` | `ShellEnvironment`（且前台会话存在 shell executor） |
+| 6 | `CodeActProvider` | `CodeAct` |
 
+> **归属说明**：Harness `FileMemoryProvider`（会话工作记忆）**不由本 builder 构建**——
+> 归 Harness 装配，开关在 `AgentPipelineBuilder.DisableFileMemory`（见 §11.7 与 [MAF 集成边界](./0007-maf-integration-boundaries.md) 能力归属表）。
+>
 > 注入顺序 = `AgentCapability` 枚举声明顺序，保证同一 profile 的 provider 顺序恒定。
 > 原 `TaskContextProvider` 已删除：普通清单由 Harness `todos_*` 承担，宿主执行记录仍归 `ITaskService`。
 > 各 profile 的能力差异见 `PipelineProfileBehavior.For`（以「全集减去若干能力」形式表达）。
@@ -310,7 +307,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 
 ### 11. 记忆治理与演进方向
 
-> 本节补充于 2026-09-16。§1–§10 回答「记忆模块**长什么样**」（结构），本节回答「记忆模块**如何变好**」（治理）。
+> §1–§10 回答「记忆模块**长什么样**」（结构），本节回答「记忆模块**如何变好**」（治理）。
 
 结构正确不等于模块会变好。记忆模块的核心风险是随时间**膨胀、矛盾、不准确**——这是结构无法解决的，
 需要**治理**。2026-09-15 至 09-16 的一轮重构中确认了两个问题：
@@ -339,7 +336,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 > 再由 `AutoDreamService.ApplyConsolidationChangesAsync` 做校验、清洗、截断、配额。
 > 缺口在于缺少**冲突消解**这一环（§11.3）。
 
-#### 11.2 使用反馈驱动的淘汰（✅ 已实施 2026-09-16）
+#### 11.2 使用反馈驱动的淘汰（✅ 已实施）
 
 **决策**：淘汰按**使用价值**而非时间，顺序为：
 
@@ -408,7 +405,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
    → 当前"upsert 覆盖同 Key"实为**碰运气**：key 撞对了才更新，撞不对就新增一条平行记忆。
    这解释了为何"异 key 但内容矛盾"无法被自动解决。
 2. **已有记忆索引的注入方式必须是 `AIContextProvider`，而非拼进 prompt 模板**。
-   `HarnessAgentOptions.AIContextProviders` 是 MAF 的既有扩展点（ADR 0007 §4），
+   `HarnessAgentOptions.AIContextProviders` 是 MAF 的既有扩展点（见 MAF 集成边界），
    而 `AutoDreamService.RunConsolidationAgentAsync` 是**唯一没设它**的 agent 构建点。
    MAF 自身 `FileMemoryProvider` 注入记忆索引走的正是这条路径。任务指令留在 prompt 文件，
    运行期数据走 provider —— 两者不应混在同一个模板里。
@@ -461,7 +458,7 @@ MAF `AIContextProvider.StoreAIContextAsync` 在 exchange 结束时被调用，�
 
 **预留方式**：先做 `IMemoryIndex` 抽取，不引入任何新依赖。
 
-#### 11.6 召回评测与中文分词（2026-09-18）
+#### 11.6 召回评测与中文分词
 
 评测样本冻结在 `src/OneCode.Tests/MemoryRecallEvaluationTests.cs`（10 条中英混合语料 + 6 个中文查询 +
 5 个代码术语查询 + 2 个负样本），分词规则本身由 `TextTokenizerTests.cs` 锁定。
@@ -486,13 +483,12 @@ MAF `AIContextProvider.StoreAIContextAsync` 在 exchange 结束时被调用，�
 
 #### 11.7 不引入 MAF `FileMemoryProvider` 替换长期记忆（重申 §1 决策并补论证）
 
-> **范围限定（2026-09-18 补充）**：本节结论**只针对长期记忆（Memdir / `MEMORY.md`）**——
-> 不用 `FileMemoryProvider` 替换它。会话工作记忆是**另一个领域**，确实已改用原生
-> `FileMemoryProvider`（仅 Main 启用，见 [ADR 0007](./0007-maf-integration-boundaries.md) 的能力归属表）。
-> 两者分目录共存：Memdir 管跨会话知识，`FileMemoryProvider` 管当前会话工作产物。
-> 不得据本节断言「OneCode 不使用 `FileMemoryProvider`」。
+本节结论**只针对长期记忆（Memdir / `MEMORY.md`）**——不用 `FileMemoryProvider` 替换它。会话工作记忆是
+**另一个领域**，已改用原生 `FileMemoryProvider`（仅 Main 启用，见 [MAF 集成边界](./0007-maf-integration-boundaries.md)
+的能力归属表）。两者分目录共存：Memdir 管跨会话知识，`FileMemoryProvider` 管当前会话工作产物。
+不得据本节断言「OneCode 不使用 `FileMemoryProvider`」。
 
-MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**不适合替换长期记忆**：
+`FileMemoryProvider` 已 stable，但**不适合替换长期记忆**：
 
 | 维度 | `FileMemoryProvider` | OneCode 需求 |
 |---|---|---|
@@ -522,9 +518,9 @@ MAF 1.21.0 的 `FileMemoryProvider` 已 stable，但**不适合替换长期记�
 
 #### 11.8 验证状态与已知覆盖缺口
 
-> 本节补充于 2026-09-16，记录 §11.2 落地后的**验证边界**——哪些结论已被守卫测试保护、哪些仍是缺口。
+> 本节记录 §11.2 落地后的**验证边界**——哪些结论已被守卫测试保护、哪些仍是缺口。
 > 过程证据（缺陷复现、逐阶段清单、实测数字）原属 `docs/plan/memory-module-refactor-plan.md`，
-> 该文档已按 [ADR 0007](./0007-maf-integration-boundaries.md) 处理计划文档的先例删除（结论入 ADR，引用已迁移）。
+> 该文档已按 [MAF 集成边界](./0007-maf-integration-boundaries.md) 处理计划文档的先例删除（结论入决策记录，引用已迁移）。
 
 | # | 项 | 状态 | 守卫手段 |
 |---|---|---|---|

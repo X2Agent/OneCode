@@ -19,7 +19,7 @@ namespace OneCode.App.Services.Streaming;
 /// <see cref="OrchestrationEvent"/> streams into <see cref="TuiEvent"/> streams.
 /// </summary>
 /// <remarks>
-/// Extracted from <see cref="InteractiveModeExecutor"/>. The shared skeleton
+/// The shared skeleton
 /// <see cref="StreamOrchestrationAsync"/> eliminates the duplicated
 /// channel-create / background-task / drain pattern between Goal and Team.
 /// Channels are unbounded because <c>OrchestrationEventSink</c> is a sync

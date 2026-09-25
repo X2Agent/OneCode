@@ -1,13 +1,17 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using OneCode.App.Commands;
 using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.Core.Build;
+using OneCode.Core.Config;
 using OneCode.Core.Domain;
+using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
+using OneCode.Tests.TestSupport;
 
 namespace OneCode.Tests;
 
@@ -783,6 +787,46 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// 回归防护：计划批准发生在会话中途，<c>/model</c> 切换后的 BuildRun 必须使用
+    /// 运行时模型（AppState 会话覆盖优先），而不是启动时写入会话的那份配置快照。
+    /// </summary>
+    [Fact]
+    public async Task Dispatcher_StartBuild_UsesRuntimeModelNotConfiguredStartupSnapshot()
+    {
+        var sessionId = SessionId.NewId();
+        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
+        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
+        workflowService.ClaimExecutionAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<PlanWorkflowId>(),
+                Arg.Any<long>(),
+                Arg.Any<CancellationToken>())
+            .Returns(workflow);
+        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
+        workflowService.RegisterStartAttemptAsync(
+                Arg.Any<RegisterPlanStartAttemptCommand>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PlanTransitionResult(workflow with
+            {
+                StartAttempt = 1,
+                Version = workflow.Version + 1,
+            }));
+        var runner = Substitute.For<IConversationRunner>();
+        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
+            .Returns(EmptyQueryEvents());
+        var session = CreateInteractiveSession(Substitute.For<ISessionManager>(), runner);
+        var appState = Substitute.For<IAppStateAccessor>();
+        appState.Current.Returns(new AppState { MainLoopModel = "switched-model" });
+        var sut = CreateDispatcher(workflowService, CreateModelManager("startup-model"), appState);
+
+        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
+
+        runner.Received(1).StreamWorkflowRunAsync(
+            Arg.Is<WorkflowRunRequest>(request => request.ModelId == "switched-model"),
+            TestContext.Current.CancellationToken);
+    }
+
     [Fact]
     public async Task Dispatcher_ResumeBuild_DoesNotEmitSecondBuildRunStartedEvent()
     {
@@ -1260,12 +1304,25 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         };
 
     private static PlanAgentRunDispatcher CreateDispatcher(
-        IPlanWorkflowApplicationService workflowService)
+        IPlanWorkflowApplicationService workflowService,
+        IModelManager? modelManager = null,
+        IAppStateAccessor? appState = null)
         => new(
             workflowService,
             new PlanCardPublisher(new OrchestrationEventBus()),
             new TuiInteractionBridge(),
+            modelManager ?? CreateModelManager("test-model"),
+            // 真实访问器：其 Current 恒非 null（默认 AppState 的 MainLoopModel 为 null → 回退配置模型）。
+            // 不用 Substitute.For<IAppStateAccessor>() 作默认值——NSubstitute 无法为密封 record
+            // 返回类型的只读属性生成非 null 默认值，未配置的 Current 会返回 null。
+            appState ?? new AppStateAccessor(),
             NullLogger<PlanAgentRunDispatcher>.Instance);
+
+    /// <summary>配置了主模型的管理器；未显式给定会话覆盖时它就是运行时模型。</summary>
+    private static ModelManager CreateModelManager(string configuredModel)
+        => new(
+            TestConfigManager.Create(new AppSettings { Model = configuredModel }),
+            Substitute.For<IModelCatalog>());
 
     private static InteractiveSession CreateInteractiveSession(
         ISessionManager sessionManager,
@@ -1277,7 +1334,6 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             new WorkingModeController(),
             SshHost: null,
             SlashCommands: [],
-            Model: "test-model",
             HarnessPrompt: "harness");
 
     private static async IAsyncEnumerable<QueryEvent> EmptyQueryEvents()

@@ -66,7 +66,6 @@ public static class WelcomeRenderer
 
         body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
 
-        // version
         var verText = $"v{info.Version}";
         var verPad = new string(' ', Math.Max(0, (viewWidth - TextWidthHelper.GetDisplayWidth(verText)) / 2));
         body.Add(FormattedLine.Plain($"{verPad}{verText}", TuiPalette.FgMuted));

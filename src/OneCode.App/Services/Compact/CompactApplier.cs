@@ -4,9 +4,6 @@ namespace OneCode.App.Services.Compact;
 /// Applies the result of a compact run to the <see cref="Conversation"/>:
 /// replaces the message history with the boundary marker + summary, restores the
 /// protected tail, and trims duplicate system markers left over from previous compactions.
-///
-/// Extracted from <see cref="CompactService"/> so message-mutation concerns are
-/// isolated from orchestration and prompt construction.
 /// </summary>
 public sealed class CompactApplier
 {

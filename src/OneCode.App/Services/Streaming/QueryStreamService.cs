@@ -1,5 +1,6 @@
 using OneCode.Core.Config;
 using OneCode.App.Services.Compact;
+using OneCode.App.Services.Loop;
 using OneCode.App.Tui;
 using OneCode.Core.Models;
 using System.Runtime.CompilerServices;
@@ -13,7 +14,7 @@ namespace OneCode.App.Services.Streaming;
 /// pipeline so the user sees the same UX as a regular query.
 /// </summary>
 /// <remarks>
-/// Extracted from <see cref="InteractiveModeExecutor"/>. GOAL/TEAM streaming is
+/// GOAL/TEAM streaming is
 /// delegated to <see cref="OrchestrationStreamService"/>; Normal and
 /// command-prompt streaming talk to <see cref="InteractiveSession.ConversationRunner"/>
 /// directly while draining file-change events and generating next-prompt
@@ -32,6 +33,8 @@ public sealed class QueryStreamService(
     private OrchestrationStreamService orchestrationStreamService => orchestration.OrchestrationStream;
     private AutoCompactService autoCompactService => orchestration.AutoCompact;
     private OneCode.Core.Coordinator.ITeamOrchestrationService teamOrchestrationService => orchestration.TeamOrchestration;
+    /// <summary><c>/loop</c> 有界确定性循环后端。</summary>
+    private Services.Loop.IIterativeLoopService iterativeLoop => orchestration.IterativeLoop;
     /// <summary>
     /// Main streaming entry point: logs the user message, resolves the current
     /// model, and dispatches to Normal/Goal/Team streams based on WorkingMode.
@@ -167,6 +170,39 @@ public sealed class QueryStreamService(
 
         await foreach (var evt in StreamChatCoreAsync(
             session, prompt, augmentedSystemPrompt, currentModelId, imagePaths: null, ct).ConfigureAwait(false))
+            yield return evt;
+    }
+
+    /// <summary>
+    /// Runs a bounded deterministic loop (<c>/loop</c>). Called directly by the TUI dispatch layer
+    /// when <see cref="CommandResult.LoopResult"/> is returned, bypassing the LLM query pipeline.
+    /// </summary>
+    public async IAsyncEnumerable<TuiEvent> StreamLoopAsync(
+        InteractiveSession session,
+        string task,
+        string? checkCommand,
+        int maxIterations,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (BuildConfigMissingMessage(configManager) is { } configError)
+        {
+            yield return new TuiError(configError);
+            yield break;
+        }
+
+        var conversation = session.SessionManager.ForegroundConversation
+            ?? throw new InvalidOperationException("Loop run requires an active conversation.");
+        var currentModelId = modelManager.GetMainModel(appStateAccessor.Current.MainLoopModel).Id;
+
+        await foreach (var evt in iterativeLoop.RunAsync(
+            session.SystemPrompt,
+            new LoopRunRequest(task, checkCommand, maxIterations),
+            currentModelId,
+            imagePaths: null,
+            ct).ConfigureAwait(false))
+            yield return evt;
+
+        await foreach (var evt in EmitAutoCompactIfNeededAsync(conversation, session.SystemPrompt, ct).ConfigureAwait(false))
             yield return evt;
     }
 

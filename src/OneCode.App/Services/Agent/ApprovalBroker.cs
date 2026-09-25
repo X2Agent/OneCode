@@ -14,6 +14,15 @@ public sealed class ApprovalBroker : IApprovalBroker
     private readonly Func<ApprovalRequest, CancellationToken, Task<ApprovalDecision>> _request;
     private readonly ILogger<ApprovalBroker>? _logger;
 
+    /// <summary>
+    /// 会话级全放行标志（0/1）。用户在审批弹窗选择「本次对话全部允许」后由
+    /// <see cref="ForQuery"/> 的请求委托置位；<see cref="RequestAsync"/> 派发前读取，
+    /// 命中即自动放行本 run 的后续审批（当前调用本身的批准由 MainAgentRunner 完成）。
+    /// run 的权限模式在管道装配时已固化，故此标志只在当前 run 内生效；
+    /// 跨 run 的会话级放行由 PermissionModeProvider 运行时覆盖（BypassPermissions）承担。
+    /// </summary>
+    private int _allowAllForRun;
+
     private ApprovalBroker(
         Func<ApprovalRequest, CancellationToken, Task<ApprovalDecision>> request,
         ILogger<ApprovalBroker>? logger = null)
@@ -27,6 +36,13 @@ public sealed class ApprovalBroker : IApprovalBroker
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (Volatile.Read(ref _allowAllForRun) != 0)
+        {
+            _logger?.LogInformation(
+                "Auto-approving tool {Tool} — user allowed all tool calls for this conversation",
+                request.ToolName);
+            return Task.FromResult(ApprovalDecision.AllowOnce);
+        }
         return RequestCoreAsync(request, ct);
     }
 
@@ -41,7 +57,10 @@ public sealed class ApprovalBroker : IApprovalBroker
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        return new ApprovalBroker(async (request, ct) =>
+        // 实例在闭包构造完成后才可引用，故先用局部变量持有；请求委托收到
+        // AllowAllConversation 决策时置位 run 级全放行标志。
+        ApprovalBroker? broker = null;
+        broker = new ApprovalBroker(async (request, ct) =>
         {
             if (onPermissionPrompt is not null)
             {
@@ -67,8 +86,12 @@ public sealed class ApprovalBroker : IApprovalBroker
                 request.Reason);
 
             await writer.WriteAsync(evt, ct).ConfigureAwait(false);
-            return await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
+            var decision = await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
+            if (decision == ApprovalDecision.AllowAllConversation)
+                Volatile.Write(ref broker!._allowAllForRun, 1);
+            return decision;
         }, logger);
+        return broker;
     }
 
     /// <summary>

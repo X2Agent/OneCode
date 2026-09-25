@@ -43,8 +43,7 @@ Automation 层是系统的**后台调度与启动加载层**，承载所有以 `
 | `Terminal.Gui` | UI 框架 | App/Tui |
 | `Microsoft.Extensions.AI` / `IChatClient` | AI 调用属于 App 业务编排 | App |
 | `Anthropic` / `Microsoft.Agents.AI.*` / `Hyperlight.*` | AI SDK 属于 Infrastructure | Infrastructure |
-| `System.CommandLine` | CLI 解析属于 Cli/App | Cli |
-
+  
 ### 反向依赖处理
 
 Automation 需要调用 App 层运行时（如 Cron 触发后要把 prompt 交给会话执行）时，**必须**通过以下方式，禁止 ProjectReference：

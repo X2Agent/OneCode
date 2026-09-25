@@ -15,19 +15,19 @@ namespace OneCode.App.Services.Compact;
 ///   <b>不修改持久化的消息历史</b>，只压缩发给模型的消息。用户无感知。</description></item>
 ///   <item><description><b>本类</b>（App 层）：用户显式 /compact 命令触发的深度压缩——
 ///   发送完整对话历史给模型生成摘要，然后<b>替换持久化消息历史</b>为压缩边界标记 + 摘要内容。
-///   适用于用户主动管理长对话上下文。MAF 没有"替换持久化历史"和"Pre/PostCompact hooks"能力，
-///   本类补充这些项目特有需求。</description></item>
+///   适用于用户主动管理长对话上下文。MAF 没有"替换持久化历史"能力，本类补充这一项目特有需求。
+///   压缩不在 Hook 拦截范围内（协议无 compact 节点），策略控制由
+///   <c>docs/hooks.md</c> 声明的 6 个拦截点承担。</description></item>
 /// </list>
 /// </para>
 ///
 /// <para><b>职责</b>：thin orchestrator，具体逻辑委派给 <see cref="CompactPromptBuilder"/>、
-/// <see cref="CompactApplier"/>。PreCompact/PostCompact hook 调度内联在本类中。
-/// <see cref="GetBudgetStatus"/> 同时供 <see cref="AutoCompactService"/> 用于 70% 告警检查。</para>
+/// <see cref="CompactApplier"/>。<see cref="GetBudgetStatus"/> 同时供 <see cref="AutoCompactService"/>
+/// 用于 70% 告警检查。</para>
 /// </summary>
 public sealed class CompactService(
     IChatClient chatClient,
     ILogger<CompactService> logger,
-    IHookExecutionService hooks,
     CompactSessionDependencies session,
     CompactPromptBuilder promptBuilder,
     CompactApplier applier)
@@ -50,7 +50,6 @@ public sealed class CompactService(
         string? customInstructions = null,
         int? fromMessageIndex = null,
         int? upToMessageIndex = null,
-        string trigger = HookTriggers.Auto,
         CancellationToken ct = default)
     {
         session ??= sessionAccess.ForegroundConversation;
@@ -59,9 +58,6 @@ public sealed class CompactService(
             logger.LogWarning("CompactAsync: no active conversation");
             return null;
         }
-
-        // PreCompact hooks (TS: executePreCompactHooks)
-        await FirePreCompactAsync(session, trigger, ct).ConfigureAwait(false);
 
         var messages = session.Messages;
 
@@ -141,41 +137,10 @@ public sealed class CompactService(
 
         await sessionManager.SaveAsync(ct);
 
-        await FirePostCompactAsync(session, formattedSummary, trigger, ct).ConfigureAwait(false);
-
         logger.LogInformation(
             "Compact complete: {Before} messages → {After} messages",
             messages.Count, session.Messages.Count);
 
         return formattedSummary;
-    }
-
-    /// <summary>
-    /// Fires the <see cref="HookEvent.PreCompact"/> hook.
-    /// </summary>
-    private async Task FirePreCompactAsync(Conversation session, string trigger, CancellationToken ct)
-    {
-        await hooks.FireAsync(new HookPayload
-        {
-            Event = HookEvent.PreCompact,
-            SessionId = session.Id,
-            Cwd = session.WorkingDirectory,
-            Trigger = trigger,
-        }, actualMatcherValue: trigger, ct: ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Fires the <see cref="HookEvent.PostCompact"/> hook with the produced summary.
-    /// </summary>
-    private async Task FirePostCompactAsync(Conversation session, string summary, string trigger, CancellationToken ct)
-    {
-        await hooks.FireAsync(new HookPayload
-        {
-            Event = HookEvent.PostCompact,
-            SessionId = session.Id,
-            Cwd = session.WorkingDirectory,
-            ToolResponse = summary,
-            Trigger = trigger,
-        }, actualMatcherValue: trigger, ct: ct).ConfigureAwait(false);
     }
 }

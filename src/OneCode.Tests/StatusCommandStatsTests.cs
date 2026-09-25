@@ -7,7 +7,6 @@ using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Commands;
 using OneCode.Core.Domain;
-using OneCode.Core.Hooks;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.GoalMode;
 using OneCode.Core.Goals;
@@ -153,7 +152,6 @@ public sealed class StatusCommandStatsTests
             store,
             NullLogger<SessionManager>.Instance,
             Path.GetTempPath(),
-            hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),

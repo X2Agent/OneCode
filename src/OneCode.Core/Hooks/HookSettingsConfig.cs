@@ -26,8 +26,6 @@ public sealed class HookConfig
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
-    // 公共字段
-
     [JsonPropertyName("timeout")]
     public int? TimeoutMs { get; init; }
 
@@ -45,9 +43,6 @@ public sealed class HookConfig
     [JsonPropertyName("command")]
     public string? Command { get; init; }
 
-    [JsonPropertyName("shell")]
-    public string? Shell { get; init; }
-
     // Notification 类型字段
 
     /// <summary>通知渠道 Provider 名称：feishu / wechat_work（未来可扩展 dingtalk / slack 等）</summary>
@@ -62,7 +57,7 @@ public sealed class HookConfig
     [JsonPropertyName("secret")]
     public string? Secret { get; init; }
 
-    /// <summary>消息内容模板，支持 {{field}} 插值（如 {{Event}} / {{UserMessage}} / {{Timestamp}}）</summary>
+    /// <summary>消息内容模板，支持 {{field}} 插值（如 {{Point}} / {{UserMessage}} / {{Timestamp}}）</summary>
     [JsonPropertyName("message")]
     public string? Message { get; init; }
 

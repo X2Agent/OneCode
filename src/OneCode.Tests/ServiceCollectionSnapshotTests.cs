@@ -16,6 +16,7 @@ using OneCode.App.Services.Context;
 using OneCode.App.Services.Cron;
 using OneCode.App.Services.Hooks;
 using OneCode.App.Services.Lsp;
+using OneCode.App.Services.Loop;
 using OneCode.App.Services.Mcp;
 using OneCode.App.Services.Memory;
 using OneCode.App.Services.Observability;
@@ -86,7 +87,7 @@ public sealed class ServiceCollectionSnapshotTests
 
         hostedTypeNames.Should().Equal(
             "SkillFilesWatcher",             // RegisterSkillServices：技能目录变更通知（UI 刷新）
-            "SessionEndHookService",         // Hook 子系统：宿主停止时兜底补发 SessionEnd
+            "HostStopSessionCloseService",   // Hook 子系统：宿主停止时兜底关闭前台会话
             "YoloRuleStoreLoader",           // Permission 子系统：Yolo 规则加载
             "CronSchedulerService",          // Cron：定时任务调度
             "ModelCatalogRefreshService",    // 模型目录：定时刷新
@@ -163,6 +164,7 @@ public sealed class ServiceCollectionSnapshotTests
             .AddSetupServices()
             .AddAgentRuntimeServices()
             .AddGoalServices()
+            .AddLoopServices()
             .AddToolServices()
             .AddMemoryServices()
             .AddCompactServices()

@@ -31,7 +31,8 @@ public sealed class HyperlightCodeActServiceTests
 
         var provider = service.TryCreateProvider(Path.GetTempPath());
 
-        provider.Should().NotBeNull();
+        // 运行时可用时必须真正启用沙箱（返回具体 provider），而不是静默降级为 null。
+        provider.Should().BeOfType<HyperlightCodeActProvider>();
     }
 
     [Fact]

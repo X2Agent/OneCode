@@ -17,7 +17,7 @@ public sealed class MemoryCommand(
 {
     public override string Name => "memory";
     public override string Description =>
-        "Manage searchable memory (MEMORY.md + session facts). For project rules use /remember → AGENTS.md";
+        "Manage searchable memory (MEMORY.md). For project rules use /remember → AGENTS.md";
     public override CommandCategory Category => CommandCategory.Session;
     public override string? ArgumentHint => "[list|add|remove|clear|autodream]";
 

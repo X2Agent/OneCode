@@ -9,24 +9,22 @@ using OneCode.Core.Hooks;
 namespace OneCode.Tests;
 
 /// <summary>
-/// A7：SessionEnd 退出覆盖——CloseAsync(reason) 将 reason 作为 matcher 值触发 SessionEnd。
+/// 会话退出覆盖：CloseAsync(reason) 仍按原因收尾，但 SessionEnd 已退出 Hook 协议
+/// （产品会话生命周期不是 agent execution seam），此处只验证状态与持久化行为。
 /// </summary>
 public sealed class SessionEndReasonTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly SessionManager _manager;
-    private readonly IHookExecutionService _hooks;
 
     public SessionEndReasonTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionEndReasonTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _hooks = Substitute.For<IHookExecutionService>();
         _manager = new SessionManager(
             new EventSourcedSessionStore(new FileSessionEventStore(_tempDir)),
             NullLogger<SessionManager>.Instance,
             _tempDir,
-            hookExecutionService: _hooks,
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),
@@ -34,60 +32,51 @@ public sealed class SessionEndReasonTests : IDisposable
     }
 
     [Fact]
-    public async Task CloseAsync_WithoutReason_FiresSessionEndWithClose()
+    public async Task CloseAsync_WithoutReason_MarksConversationCompleted()
     {
         var ct = TestContext.Current.CancellationToken;
-        await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
 
         await _manager.CloseAsync(ct);
 
-        await _hooks.Received(1).FireAsync(
-            Arg.Is<HookPayload>(p => p.Event == HookEvent.SessionEnd),
-            Arg.Is<string?>(m => m == SessionEndReason.Close),
-            Arg.Any<CancellationToken>());
+        conversation.Status.Should().Be(ConversationStatus.Completed);
+        _manager.CurrentSessionId.Should().BeNull();
     }
 
     [Fact]
-    public async Task CloseAsync_WithPromptInputExit_FiresSessionEndWithReason()
+    public async Task CloseAsync_WithPromptInputExit_MarksConversationCompleted()
     {
         var ct = TestContext.Current.CancellationToken;
-        await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
 
         await _manager.CloseAsync(SessionEndReason.PromptInputExit, ct);
 
-        await _hooks.Received(1).FireAsync(
-            Arg.Is<HookPayload>(p => p.Event == HookEvent.SessionEnd),
-            Arg.Is<string?>(m => m == SessionEndReason.PromptInputExit),
-            Arg.Any<CancellationToken>());
+        conversation.Status.Should().Be(ConversationStatus.Completed);
+        _manager.CurrentSessionId.Should().BeNull();
     }
 
     [Fact]
-    public async Task DisposeAsync_FiresSessionEndWithOtherAsFallback()
+    public async Task DisposeAsync_MarksConversationCompletedAsFallback()
     {
         var ct = TestContext.Current.CancellationToken;
-        await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
 
         await _manager.DisposeAsync();
 
-        await _hooks.Received(1).FireAsync(
-            Arg.Is<HookPayload>(p => p.Event == HookEvent.SessionEnd),
-            Arg.Is<string?>(m => m == SessionEndReason.Other),
-            Arg.Any<CancellationToken>());
+        conversation.Status.Should().Be(ConversationStatus.Completed);
+        _manager.CurrentSessionId.Should().BeNull();
     }
 
     [Fact]
     public async Task CloseAsync_Twice_SecondIsNoOp()
     {
         var ct = TestContext.Current.CancellationToken;
-        await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir, "model-a"), ct);
 
         await _manager.CloseAsync(SessionEndReason.PromptInputExit, ct);
         await _manager.CloseAsync(SessionEndReason.Other, ct);
 
-        await _hooks.Received(1).FireAsync(
-            Arg.Is<HookPayload>(p => p.Event == HookEvent.SessionEnd),
-            Arg.Any<string?>(),
-            Arg.Any<CancellationToken>());
+        conversation.Status.Should().Be(ConversationStatus.Completed);
     }
 
     public void Dispose()

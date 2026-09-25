@@ -33,7 +33,6 @@ Core 是整个系统的契约层，其依赖纯洁性决定了架构的健康度
 | `Serilog` / `NLog` 等日志实现 | 具体实现，客户端单机程序用 `Microsoft.Extensions.Logging` 即可 | Infrastructure（注：当前项目已移除 Serilog 依赖） |
 | `YamlDotNet` | 具体实现 | Infrastructure |
 | `Microsoft.Extensions.Http` | 具体实现 | Infrastructure |
-| `System.CommandLine` | CLI 框架 | Cli |
 | `Terminal.Gui` | UI 框架 | App |
 | `ModelContextProtocol` | 协议实现 | Infrastructure |
 | `Microsoft.ML.Tokenizers` | 计算实现 | Infrastructure |

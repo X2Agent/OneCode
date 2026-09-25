@@ -11,6 +11,8 @@ namespace OneCode.App.Tui;
 /// │  (sidebar auto-shrinks the chat width  │  (auto, ≤45col│  when a plan
 /// │   when a plan exists; Ctrl+G toggles)  │   Ctrl+G)     │   exists)
 /// │                                        │               │
+/// ├─ TodoStrip ─────────────────────────────────────────────┤  0–6 rows
+/// │  ◆ 待办 (2/5) ✓ #1 …  ○ #3 …                (隐藏时 0)  │  (todos_* snapshot)
 /// ├─ AgentStatusBar ───────────────────────────────────────┤  1 row
 /// │  ⠋ 思考中 · Opus · 🔒 Sandbox                  BUILD   │
 /// ├─ ChatInputView ────────────────────────────────────────┤  2–6 rows
@@ -20,6 +22,8 @@ namespace OneCode.App.Tui;
 ///
 /// 注意：<c>StatusBarTopGap</c> / <c>ChatInputContextGap</c> 已置 0（见 <see cref="TuiSpacing"/>），
 /// 图中不再有额外空行；输入区高度按 <c>Clamp(H/6, 2, 6)</c> 动态伸缩。
+/// <see cref="TodoStripView"/> 显示时从内容区借行（对话列宽度不变），
+/// 空快照整体隐藏——见 <c>ReplShell.TodoPanel.cs</c>。
 /// </summary>
 public sealed partial class ReplShell : View
 {
@@ -41,6 +45,9 @@ public sealed partial class ReplShell : View
     private readonly FrameView _completionOverlay;
     private SidebarViewBase? _sidebarHiddenForWidth;
     private bool _completionVisible;
+
+    // 待办横条（输入框上方全宽状态带）当前占用行数；0 = 隐藏。见 ReplShell.TodoPanel.cs。
+    private int _todoStripRows;
 
     private int _lastShellWidth = -1;
     private int _lastShellHeight = -1;
@@ -192,9 +199,18 @@ public sealed partial class ReplShell : View
         _completionOverlay = _chatInput.CompletionFrame;
         _chatInput.CompletionStateChanged += OnCompletionStateChanged;
 
+        // 待办横条（agent todos_* 清单快照）：空快照时不可见、不占行；
+        // 显示时从内容区底部借行，对话列宽度不变。见 ReplShell.TodoPanel.cs。
+        _todoStrip = new TodoStripView
+        {
+            X = 0,
+            Width = Dim.Fill(),
+            Visible = false,
+        };
+
         // assembly — no welcome view; thinking renders as a clickable
         // summary inside ChatTranscriptView, not a separate top panel.
-        Add(_contentZone, _agentStatusBar, _chatInput, _sessionContextBar, _overlayHost);
+        Add(_contentZone, _todoStrip, _agentStatusBar, _chatInput, _sessionContextBar, _overlayHost);
 
         Width = Dim.Fill();
         Height = Dim.Fill();

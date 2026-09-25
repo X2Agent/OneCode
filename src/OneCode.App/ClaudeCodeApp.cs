@@ -16,6 +16,7 @@ using OneCode.App.Services.Context;
 using OneCode.App.Services.Cron;
 using OneCode.App.Services.Hooks;
 using OneCode.App.Services.Lsp;
+using OneCode.App.Services.Loop;
 using OneCode.App.Services.Memory;
 using OneCode.App.Services.Mcp;
 using OneCode.App.Services.Observability;
@@ -86,6 +87,7 @@ public sealed class OneCodeApp : IAsyncDisposable
             .AddSetupServices()
             .AddAgentRuntimeServices()
             .AddGoalServices()
+            .AddLoopServices()
             .AddToolServices()
             .AddMemoryServices()
             .AddCompactServices()

@@ -61,11 +61,19 @@ public abstract record CommandResult
     /// </summary>
     public sealed record ResumeWorkflowResult(string SessionId, WorkflowResumeKind Kind) : CommandResult;
 
+    /// <summary>
+    /// Runs a bounded, deterministic verification loop (see <c>/loop</c>).
+    /// 载荷保持原语：Task 为待迭代任务，CheckCommand 为确定性检查命令（空则走验证提供者），
+    /// MaxIterations 为硬上限。dispatch 层路由到循环流，绕过 LLM query 管线。
+    /// </summary>
+    public sealed record LoopResult(string Task, string? CheckCommand, int MaxIterations) : CommandResult;
+
     public static CommandResult Text(string value) => new TextResult(value);
     public static CommandResult Exit() => new ExitResult();
     public static CommandResult Prompt(string content, string[]? allowedTools = null) => new PromptResult(content, allowedTools);
     public static CommandResult Error(string message) => new ErrorResult(message);
     public static CommandResult ResumeWorkflow(string sessionId, WorkflowResumeKind kind) => new ResumeWorkflowResult(sessionId, kind);
+    public static CommandResult Loop(string task, string? checkCommand, int maxIterations) => new LoopResult(task, checkCommand, maxIterations);
 }
 
 /// <summary>

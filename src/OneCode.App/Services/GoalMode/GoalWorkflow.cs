@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.Core.Goals;
 
@@ -97,7 +95,7 @@ public sealed class GoalWorkflowCompiler
     }
 
     public static string ComputeTextHash(string value)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+        => WorkflowDefinitionHash.ComputeText(value);
 
     public static string ComputeToolCapabilityHash(IEnumerable<string> toolNames)
         => ComputeTextHash(JsonSerializer.Serialize(toolNames
@@ -134,11 +132,9 @@ public sealed class GoalWorkflowCompiler
             toolCapabilityHash,
             // Checkpoint 序列化契约纳入恢复凭据（S-06）：序列化配置变化必须改变 Hash，
             // 使 Registry 校验 fail-closed，避免用旧 checkpoint 以新契约反序列化。
-            serializerOptions = serializerOptions is null
-                ? "default"
-                : JsonSerializer.Serialize(serializerOptions),
+            serializerOptions = WorkflowDefinitionHash.DescribeSerializerOptions(serializerOptions),
         });
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+        return WorkflowDefinitionHash.ComputeText(canonical);
     }
 }
 

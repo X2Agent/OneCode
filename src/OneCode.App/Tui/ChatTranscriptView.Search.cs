@@ -25,12 +25,10 @@ public sealed partial class ChatTranscriptView
             return (0, -1);
         }
 
-        // 找到 startFrom 之后的第一个匹配
         var idx = matches.FindIndex(m => m >= startFrom);
-        if (idx < 0) idx = 0; // 回绕到第一个
+        if (idx < 0) idx = 0;
         var targetLine = matches[idx];
 
-        // 高亮所有匹配行中的关键词
         _messageView.SetSearchHighlight(query, matches);
         _messageView.ScrollToLine(targetLine);
 
@@ -55,7 +53,7 @@ public sealed partial class ChatTranscriptView
         }
 
         var idx = matches.FindIndex(m => m >= startFrom);
-        if (idx < 0) idx = 0; // 回绕到第一个
+        if (idx < 0) idx = 0;
         var targetLine = matches[idx];
 
         _messageView.SetSearchHighlight(pattern, matches, compiledRegex: regex);
@@ -84,7 +82,6 @@ public sealed partial class ChatTranscriptView
         if (matches.Count == 0)
             return (0, -1);
 
-        // 跳到下一个匹配（回绕到第一个）
         var nextIdx = (_lastSearchMatchIdx + 1) % matches.Count;
         var targetLine = matches[nextIdx];
         _messageView.SetSearchHighlight(

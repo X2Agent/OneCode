@@ -8,9 +8,6 @@ namespace OneCode.App.Services.Compact;
 /// <summary>
 /// Builds the system prompt, chat messages, and chat options used to invoke the
 /// summarisation model during a compact run.
-///
-/// Extracted from <see cref="CompactService"/> to keep prompt construction concerns
-/// in one place and out of the orchestration flow.
 /// </summary>
 public sealed class CompactPromptBuilder
 {

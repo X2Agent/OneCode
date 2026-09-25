@@ -246,7 +246,6 @@ public sealed class AggregateApprovalGateTests : IDisposable
             new WorkingModeController(),
             SshHost: null,
             SlashCommands: [],
-            Model: "test-model",
             HarnessPrompt: "harness");
 
     private static SubmitPlanCommand CreateSubmitCommand(SessionId sessionId, string runId)

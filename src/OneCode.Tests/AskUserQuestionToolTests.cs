@@ -203,7 +203,7 @@ public sealed class AskUserQuestionToolTests
             new TuiSessionServices(),
             new TuiDiagnosticServices(),
             new TuiRuntimeServices(
-                Model: "test",
+                GetModel: () => "test",
                 ModelCatalog: new ModelCatalogStore(),
                 EmitEvent: emitEvent),
             new TuiLaunchOptions(

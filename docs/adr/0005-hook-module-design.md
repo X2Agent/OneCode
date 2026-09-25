@@ -22,39 +22,38 @@ OneCode 需要一个生命周期钩子（Hook）子系统，让用户在 Agent �
 
 ## 决策
 
-### 1. 事件收敛到 11 种真实有外部消费价值的事件
+### 1. 拦截点收敛为 6 个开放点
 
-**决策**：`HookEvent` 枚举仅保留真实有外部脚本消费场景的事件（§1 初步收敛为 10 种，后补 `GoalStageInvoke`，当前 11 种）。
+**决策**：`HookInterceptionPoint` 只保留 6 个与 AGENT-HOOKS-0.1 对齐的开放拦截点，另有两个内部点不对用户 DSL 开放。
 
 ```csharp
-public enum HookEvent
+public enum HookInterceptionPoint
 {
-    PreToolUse,        // 工具执行前（可阻断）
-    PostToolUse,       // 工具执行后
-    Notification,      // 通知发送时
-    UserPromptSubmit,  // 用户提交 prompt 后
-    SessionStart,      // 会话启动
-    Stop,              // AI 响应结束前（可阻断）
-    StopFailure,       // API 错误导致 turn 结束
-    PreCompact,        // 对话压缩前
-    PostCompact,       // 对话压缩后
-    SessionEnd,        // 会话结束
+    Input,          // 外部输入进入 agent run 前（无 matcher）
+    PreModelCall,   // 模型请求前（matcher: model_id）
+    PostModelCall,  // 模型完整响应后（matcher: model_id）
+    PreToolCall,    // 工具执行前（可阻断；matcher: tool_name）
+    PostToolCall,   // 工具执行后（matcher: tool_name）
+    Output,         // 最终响应交付调用方前（无 matcher）
+
+    AgentStartup,   // 内部：agent run 开始，不开放
+    AgentShutdown,  // 内部：agent run 结束，不开放
 }
 ```
 
 **理由**：
-- 移除 `PreAgentRun` / `PostAgentRun`：与 `SessionStart` / `Stop` 语义重叠，外部脚本无法区分
-- 移除 `SubagentStop`：子 Agent 停止事件无外部消费价值，内部通过 `OrchestrationEventSink` 流式处理
-- 移除 `PreToolApproval`：审批逻辑由 `PermissionMiddleware` 统一处理（见 [Permission vs ToolApproval vs Filter](./0001-permission-vs-toolapproval-vs-filter.md)）
-- 保留 `StopFailure`：API 错误（rate_limit / auth_failed / billing 等）需要外部告警
+- 6 个开放点覆盖 agent 的四类策略边界（输入 / 模型调用 / 工具调用 / 输出），与 AGENT-HOOKS-0.1 协议一致且**不再扩展**
+- 会话生命周期、Stop 纠偏、压缩、Goal 编排、权限通知与异常告警不由 Hook 承载：这些属宿主职责，暴露给外部脚本只会造成职责重叠
+- `AgentStartup` / `AgentShutdown` 表达 agent run 边界，与产品会话边界不等价，故仅内部使用
+- `PreToolCall` 保留阻断语义（fail-closed）：安全策略需要在工具执行前拒绝
 
-**事件元数据**：`HookEventMetadataRegistry` 为每种事件声明 matcher 字段名与可选值，用于 UI 展示和文档生成：
+**拦截点元数据**：`HookPointMetadataRegistry` 为每个拦截点声明 matcher 字段名与可选值，用于 UI 展示和文档生成：
 
 ```csharp
-[HookEvent.PreToolUse] = new(
-    "工具执行前",
-    "在工具调用执行前触发，可通过 exit code 2 阻止工具执行",
-    new MatcherMetadata("tool_name", ["Bash", "Write", "Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task"]));
+[HookInterceptionPoint.PreToolCall] = new(
+    "工具真正执行前",
+    "在工具调用执行前触发。deny 使本次工具调用以错误载荷返回、批次循环继续（不中断整轮）",
+    new MatcherMetadata("tool_name", ["Bash", "Edit", "Write", "Read", "Grep", "Glob", "Task", "todos_*", "mcp.*"]));
 ```
 
 ### 2. 执行器收敛到 3 种真实使用的类型
@@ -72,7 +71,7 @@ public enum HookType
 
 **理由**：
 - **移除 `PromptHookExecutor`**：向 LLM 注入提示应由 `AIContextProvider` 统一处理，不应通过 Hook 机制旁路。Hook 是"外部副作用"语义，不应污染 LLM 上下文
-- **移除 `AgentHookExecutor`**：启动子 Agent 应由 `ForkedAgentRunner` / `GoalAgentRunner` 显式调度，Hook 触发子 Agent 会导致执行图不可预测
+- **移除 `AgentHookExecutor`**：启动子 Agent 应由 `ForkedAgentRunner` / `GoalSubGoalLoop` 显式调度，Hook 触发子 Agent 会导致执行图不可预测
 - **移除 `AsyncHookExecutor` 与 `IAsyncHookRegistry`**：异步 hook 队列的实际使用场景极少，且跨进程队列增加系统复杂度。所有 hook 统一为同步串行执行（带超时），结果聚合后一次性返回
 
 **Http 与 Notification 的边界**：
@@ -104,58 +103,58 @@ public interface INotificationProvider
 }
 ```
 
-**DI 注册模式**：
+**DI 注册与分发**：
 
 ```csharp
-// 执行器：按 HookType Keyed Services 分发
-services.AddKeyedSingleton<IHookExecutor, CommandHookExecutor>(HookType.Command);
-services.AddKeyedSingleton<IHookExecutor, NotificationHookExecutor>(HookType.Notification);
-services.AddKeyedSingleton<IHookExecutor, HttpHookExecutor>(HookType.Http);
+// 执行器：普通注册；构造函数注入 IEnumerable<IHookExecutor> 后按 Type 自建分发字典
+services.AddSingleton<IHookExecutor, CommandHookExecutor>();
+services.AddSingleton<IHookExecutor, NotificationHookExecutor>();
+services.AddSingleton<IHookExecutor, HttpHookExecutor>();
 
 // 通知渠道：按 Provider Name 分发（IEnumerable<INotificationProvider> 注入）
 services.AddSingleton<INotificationProvider, FeishuNotificationProvider>();
 services.AddSingleton<INotificationProvider, WeChatWorkNotificationProvider>();
 ```
 
-**分发逻辑**：
-
 ```csharp
-// HookExecutionService 构造函数：按键控服务显式注入三类执行器
 public HookExecutionService(
     HookRegistry hookRegistry,
-    [FromKeyedServices(HookType.Command)] IHookExecutor commandExecutor,
-    [FromKeyedServices(HookType.Notification)] IHookExecutor notificationExecutor,
-    [FromKeyedServices(HookType.Http)] IHookExecutor httpExecutor,
-    ...)
+    IEnumerable<IHookExecutor> executors,
+    HookPolicyService policyService,
+    ILogger<HookExecutionService> logger)
+{
+    // 同类型重复注册时首个生效
+    _executors = executors.GroupBy(e => e.Type).ToDictionary(g => g.Key, g => g.First());
+}
 
 // NotificationHookExecutor 构造函数内：
 _providers = providers?.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 ```
 
 **理由**：
-- 新增执行器类型只需实现 `IHookExecutor` + Keyed DI 注册，`HookExecutionService` 通过 `HookType` 键控注入自动分发
+- 新增执行器类型只需实现 `IHookExecutor` + 一行注册，`HookExecutionService` 按 `Type` 自建字典分发，无需修改本类
 - 新增通知渠道只需实现 `INotificationProvider` + DI 注册，`NotificationHookExecutor` 通过 `Name` 字典查找
-- Keyed Services（.NET 8+）让"一种 HookType 一个执行器"的多实现注册无需 `IEnumerable<IHookExecutor>` + GroupBy 去重
+- 执行器分发保持"一个 `HookType` 一个执行器"，无需键控注入机制
 
 ### 4. Registry 二维索引 + Glob 匹配
 
-**决策**：`HookRegistry` 按 `(HookEvent, MatcherPattern)` 二维索引，`GlobHookMatcher` 实现 Glob 风格通配符匹配。
+**决策**：`HookRegistry` 按 `(HookInterceptionPoint, MatcherPattern)` 二维索引，`GlobHookMatcher` 实现 Glob 风格通配符匹配。
 
 ```csharp
 public sealed class HookRegistry
 {
-    private readonly Dictionary<HookEvent, List<MatcherGroup>> _matcherIndex = new();
+    private readonly Dictionary<HookInterceptionPoint, List<MatcherGroup>> _matcherIndex = new();
 
     public void Register(HookRegistration hook)
     {
-        // 按 Event 查找或创建 MatcherGroup
+        // 按 Point 查找或创建 MatcherGroup
         // 按 MatcherPattern（大小写不敏感）查找或创建分组
         // 将 hook 追加到分组的 Hooks 列表
     }
 
-    public IReadOnlyList<HookRegistration> GetMatchesForEvent(HookEvent @event, string? matcherValue)
+    public IReadOnlyList<HookRegistration> GetMatchesForPoint(HookInterceptionPoint point, string? matcherValue)
     {
-        // O(1) 事件查找 → 遍历该事件下的 MatcherGroup
+        // O(1) 拦截点查找 → 遍历该点下的 MatcherGroup
         // 对每个 group，用 GlobHookMatcher.Matches(pattern, matcherValue) 过滤
     }
 }
@@ -185,7 +184,7 @@ public sealed class HookRegistry
 ```csharp
 // HookExecutionService.FireAsync 流程：
 // 1. 策略前置检查（工作区不可信 → 返回空结果）
-// 2. _hookRegistry.GetMatchesForEvent(payload.Event, actualMatcherValue)
+// 2. _hookRegistry.GetMatchesForPoint(payload.Point, actualMatcherValue)
 // 3. hooks.Sort((a, b) => a.Priority.CompareTo(b.Priority))
 // 4. 串行执行：foreach (hook in hooks) { results.Add(await ExecuteSingleHookAsync(hook, payload, ct)); }
 // 5. HookResultAggregator.Aggregate(results)
@@ -196,10 +195,9 @@ public sealed class HookRegistry
 
 | 字段类型 | 聚合策略 | 理由 |
 |---------|---------|------|
-| 布尔字段（`PreventContinuation`） | OR | 任一 hook 请求阻止即应生效 |
 | 列表字段（`BlockingErrors` / `AdditionalContexts`） | 累加 | 所有阻断错误和额外上下文都应保留 |
 | 字符串字段（`Message` / `SystemMessage`） | last-write-wins | 后执行的 hook 可覆盖前者的消息 |
-| `UpdatedInput` | last-write-wins | 后执行的 hook 可修改工具输入 |
+| 结果字段（`Outcome` / `BlockingError`） | 任一阻断即生效 | 见 `HookResultAggregator.Aggregate` |
 
 **理由**：
 - 串行执行保证 hook 之间的顺序依赖（如审计 hook 需在通知 hook 之前执行）
@@ -207,7 +205,7 @@ public sealed class HookRegistry
 - 聚合策略保证多个 hook 的结果可合并为单一决策，调用方无需感知 hook 数量
 - 异常隔离：单个 hook 执行器异常被吞掉记 Warning，不影响其他 hook 执行
 
-### 6. 配置独立文件 + 新旧格式兼容
+### 6. 配置独立文件
 
 **决策**：Hook 定义从 `settings.json` 中剥离，存放在独立的 `hooks.json` 文件中；策略开关保留在 `settings.json`。
 
@@ -223,7 +221,7 @@ public sealed class HookRegistry
 - `hooks.json` 可被 Git 跟踪（项目级）或单独备份（用户级），不与敏感的 `settings.json`（可能含 API key）混在一起
 - 工作区是否允许执行 Hook 由 `HookPolicyService` 基于统一配置快照中的 `trustedDirectories` 判断
 
-**格式说明**：`HookSettingsLoader.ParseEventHooks` 仅解析 matcher-group 格式（数组元素即 `HookMatcherGroup`，元素内含 `matcher` 与 `hooks`）；无 `hooks` 字段的元素会被跳过。
+**格式**：`HookSettingsLoader.ParseEventHooks` 仅解析 matcher-group 格式（数组元素即 `HookMatcherGroup`，内含 `matcher` 与 `hooks`）——分组用于表达"同一 matcher 下多个 hook"；无 `hooks` 字段的元素会被跳过。
 
 ```csharp
 var group = JsonSerializer.Deserialize<HookMatcherGroup>(item.GetRawText(), JsonOptions);
@@ -231,11 +229,9 @@ if (group is not null && group.Hooks.Count > 0)
     groups.Add(group);
 ```
 
-**理由**：旧格式平铺无法表达"同一 matcher 下多个 hook"的分组语义，新格式通过 `HookMatcherGroup` 显式分组。早期版本的平铺兼容分支已移除，迁移到分组格式即可。
-
 ### 7. 优先级范围约定
 
-**决策**：`Priority` 字段按范围划分来源，`HookConfigBootstrapper.BootstrapFromDirectory` 根据配置目录推导基础优先级。
+**决策**：`Priority` 字段按范围划分来源，`HookConfigBootstrapper.Bootstrap` 经 private `BuildFromDirectory(configDir, basePriority)` 根据配置目录推导基础优先级（User 目录 100 / Project 目录 200）。
 
 | 优先级范围 | 来源 | 说明 |
 |-----------|------|------|
@@ -274,7 +270,7 @@ public interface IHookExecutionService
 // PreToolUse hook（fail-closed：异常时拒绝工具执行）
 if (options.HookExecutionService is not null && ctx.Function is not null)
 {
-    var prePayload = new HookPayload { Event = HookEvent.PreToolUse, ToolName = ctx.Function.Name, ... };
+    var prePayload = new HookPayload { Point = HookInterceptionPoint.PreToolCall, ToolName = ctx.Function.Name, ... };
     AggregatedHookResult? hookResult;
     try
     {
@@ -299,7 +295,7 @@ var result = await next(ctx, ct);
 // PostToolUse hook（fail-soft：异常仅记 Warning，保留工具结果）
 if (options.HookExecutionService is not null && ctx.Function is not null)
 {
-    var postPayload = new HookPayload { Event = HookEvent.PostToolUse, ToolName = ctx.Function.Name, ... };
+    var postPayload = new HookPayload { Point = HookInterceptionPoint.PostToolCall, ToolName = ctx.Function.Name, ... };
     try { await options.HookExecutionService.FireAsync(postPayload, actualMatcherValue: ctx.Function.Name, ct: ct); }
     catch (OperationCanceledException) { throw; }  // OCE 透传
     catch (Exception ex) { logger.LogWarning(ex, "PostToolUse hook threw; tool result preserved"); }
@@ -361,7 +357,7 @@ public bool IsCurrentWorkspaceTrusted()
 
 ### 11. Webhook 通知基类复用
 
-**决策**：飞书 / 企业微信 / 钉钉等 Webhook 类通知渠道共享 `WebhookNotificationProviderBase` 基类，子类只需重写 4 个抽象成员。
+**决策**：飞书 / 企业微信 / 钉钉等 Webhook 类通知渠道共享 `WebhookNotificationProviderBase` 基类，子类只需重写 6 个抽象成员（基类 5 个 protected 成员 + 公共 `Name`）。
 
 ```csharp
 public abstract class WebhookNotificationProviderBase(HttpClient httpClient, ILogger? logger = null) : INotificationProvider
@@ -416,7 +412,7 @@ public sealed class FeishuNotificationProvider(HttpClient httpClient, ILogger<Fe
 - 飞书 / 企业微信 / 钉钉等渠道的 Webhook 流程高度一致（POST JSON + 签名 URL + 响应解析），仅在 payload 字段名、签名算法、响应字段名上有差异
 - 基类统一实现 HTTP POST、签名 URL 构造、异常处理、状态码处理、响应解析，子类只需声明差异点
 - `ComputeHmacSha256Base64` 辅助方法避免 HMAC 样板代码重复
-- 新增渠道（如钉钉）只需实现 5 个抽象成员，无需重复 HTTP/签名/解析逻辑
+- 新增渠道（如钉钉）只需实现 6 个抽象成员，无需重复 HTTP/签名/解析逻辑
 
 ### 12. 模板插值统一语义
 
@@ -426,7 +422,7 @@ public sealed class FeishuNotificationProvider(HttpClient httpClient, ILogger<Fe
 
 | 字段 | 说明 |
 |------|------|
-| `{{Event}}` | 事件名称 |
+| `{{Point}}` | 拦截点名称 |
 | `{{SessionId}}` | 会话 ID |
 | `{{Cwd}}` | 当前工作目录 |
 | `{{ToolName}}` | 工具名称 |
@@ -443,14 +439,14 @@ public sealed class FeishuNotificationProvider(HttpClient httpClient, ILogger<Fe
 **实现**（共享 `HookTemplateRenderer.Render`，两个执行器调用同一实现）：
 
 ```csharp
-internal static string RenderTemplate(string template, HookPayload payload)
+internal static string Render(string template, HookPayload payload)
 {
     return TemplatePattern().Replace(template, match =>
     {
         var field = match.Groups[1].Value;
         return field switch
         {
-            "Event" => payload.Event.ToString(),
+            "Point" => HookInterceptionPoints.ToWireName(payload.Point),
             "SessionId" => payload.SessionId ?? string.Empty,
             "Cwd" => payload.Cwd ?? string.Empty,
             "ToolName" => payload.ToolName ?? string.Empty,
@@ -470,7 +466,7 @@ internal static string RenderTemplate(string template, HookPayload payload)
 - `{{Field}}` 语法比 `${field}` / `$field` 更显式，避免与 shell 变量混淆
 - 使用 `[GeneratedRegex]` 源生成器编译正则，避免运行时编译开销
 
-> **设计决策**（2026-08-14 修订）：`RenderTemplate` 已提取为共享的 `HookTemplateRenderer`（同程序集 `internal` 静态类，`HttpHookExecutor`/`NotificationHookExecutor` 共用）。原"两个执行器各留一份副本、提取会增加跨模块依赖"的表述不成立——两个执行器本就在同一程序集内，不存在跨模块依赖；字段集若未来分化（如 Http 需要支持 `{{Headers}}` 复合字段），再按执行器拆分。
+两个执行器共享 `HookTemplateRenderer`（同程序集 `internal` 静态类）；字段集若未来分化（如 Http 需要 `{{Headers}}` 复合字段），再按执行器拆分。
 
 ### 13. 使用 JSON Source Generator
 
@@ -531,8 +527,8 @@ public static IServiceCollection AddHookServices(this IServiceCollection service
     services.AddSingleton<NotificationProviderDefinitionLoader>();
     services.AddSingleton<NotificationProviderRegistry>();
 
-    // 宿主停止时兜底补发 SessionEnd（reason=other）
-    services.AddHostedService<SessionEndHookService>();
+    // 宿主停止时兜底关闭前台会话（reason=other；不再触发 hook）
+    services.AddHostedService<HostStopSessionCloseService>();
 
     // 执行服务（接口 + 实现都注册，支持 Infrastructure 层通过接口注入）
     services.AddSingleton<HookExecutionService>();
@@ -544,23 +540,38 @@ public static IServiceCollection AddHookServices(this IServiceCollection service
 }
 ```
 
-> `AddHookServices` 由组合根 `OneCodeApp.Create` 显式调用。
-> 原 `ServiceCollectionExtensions.Business.cs`（`RegisterHookSubsystem`）已解散，内容迁至 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs`；
-> `RegistrationOwnershipTests` 守卫禁止复活旧桶。
+`AddHookServices` 由组合根 `OneCodeApp.Create` 显式调用；`RegistrationOwnershipTests` 守卫注册归属。
 
 **`HttpClient` 注册模式**：
 - 通知 Provider 通过 `AddHttpClient<T>` 注册，享受 `IHttpClientFactory` 的连接池、超时、重试策略
 - `HttpHookExecutor` 通过 `IHttpClientFactory.CreateClient("HookHttp")` 获取命名 HttpClient，与通知 Provider 的 HttpClient 隔离
 
+### 15. 与 MAF AgentHooks 的关系（终判：不迁移）
+
+**决策**：保留自研 Hook 引擎，不接入 `Microsoft.Agents.AI.AgentHooks`。`hooks.json` DSL 与 6 开放拦截点契约保持不变。
+
+**理由**：
+
+- **装配互斥（硬冲突）**：主链路 `AgentPipelineBuilder` 创建 `HarnessAgent`，其自行装配 `FunctionInvokingChatClient` 并以 `UseProvidedChatClientAsIs = true` 创建内部 agent；MAF 的 `AsAIAgentWithAgentHooks` 工厂以"不可分割整体"装配三层，且对这两种形态均显式拒绝（loud fail）；三缝装饰器为 `internal` 且不支持嵌套
+- **依赖代价**：`Microsoft.Agents.AI.AgentHooks` 依赖外部 `ResponsibleAI.AgentHooks`（仅 `0.1.0-alpha.5`），带反射 STJ wire 编解码且 `IsAotCompatible=false`
+
+**重评触发条件**（任一满足时重开评估）：
+
+1. MAF 暴露可与 `HarnessAgent`（`UseProvidedChatClientAsIs` + 已含 `FunctionInvokingChatClient`）组合的缝级公开入口，或解除上述装配限制
+2. OneCode 放弃 `HarnessAgent` 主链路装配形态
+3. `ResponsibleAI.AgentHooks` GA 且版本与 OneCode 引用的 `Microsoft.Agents.AI*` 对齐
+
+**预期落差**：即便将来可迁移，也是语义收紧（官方 fail-closed + transform 写回 + 历史持久门控），非等价替换；OneCode 侧无对应实现的能力清单见 [hooks.md §4 边界](../hooks.md#4-拦截点清单与边界)（transform 写回、`evaluate_only`、统一审计流均未建）。
+
 ## 影响
 
-- **事件模型简化**：从 20+ 种事件收敛为 11 种（§1 决策时点为 10 种，后补 `GoalStageInvoke`），每种都有明确的外部消费场景，降低维护成本
-- **执行器模型简化**：从 6+ 种执行器收敛为 3 种（Command / Notification / Http），移除与工具调用语义重叠的 Prompt / Agent 类型
-- **异步 Hook 移除**：移除 `IAsyncHookRegistry` / `AsyncHookRegistryCleanupService` / `SessionHookStore`，所有 hook 统一为同步串行执行，简化系统模型
+- **拦截点模型明确**：6 个开放拦截点对齐 AGENT-HOOKS-0.1，每个点都有明确的外部消费场景
+- **执行器模型收敛为 3 种**：Command / Notification / Http，不含与工具调用语义重叠的 Prompt / Agent 类型
+- **执行模型简单**：所有 hook 同步串行执行（带超时），无异步队列
 - **配置分离**：Hook 定义独立到 `hooks.json`，便于审计与版本管理
 - **分层架构清晰**：`IHookExecutionService` 接口下沉到 Core 层，Infrastructure 层通过接口注入，避免反向依赖 App 层
 - **安全边界明确**：工作区信任 + Pre-hook fail-closed 双层防护，防止恶意仓库通过 hook 执行任意命令
-- **扩展点明确**：新增执行器类型只需实现 `IHookExecutor` + 一行 `AddSingleton<IHookExecutor, X>()`；新增通知渠道只需实现 `INotificationProvider` + DI 注册；新增生命周期事件只需扩展枚举 + 业务模块触发
+- **扩展点明确**：新增执行器类型只需实现 `IHookExecutor` + 一行 `AddSingleton<IHookExecutor, X>()`；新增通知渠道只需实现 `INotificationProvider` + DI 注册；新增拦截点只需扩展枚举 + 业务模块触发
 
 ## 扩展指南
 
@@ -579,23 +590,23 @@ public static IServiceCollection AddHookServices(this IServiceCollection service
 3. 在 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs` 的 `AddHookServices` 追加 `services.AddSingleton<INotificationProvider, YourProvider>()` 和 `services.AddHttpClient<YourProvider>()`
 4. 在 `hooks.json` 中通过 `"provider": "your_provider_name"` 使用
 
-### 新增生命周期事件
+### 新增拦截点
 
-1. 扩展 `HookEvent` 枚举（`OneCode.Core/Hooks/HookEvent.cs`）
-2. 在 `HookEventMetadataRegistry.All` 添加事件元数据（Summary / Description / MatcherMetadata）
+1. 扩展拦截点枚举（`OneCode.Core/Hooks/HookInterceptionPoint.cs`）
+2. 在 `HookPointMetadataRegistry.All` 添加拦截点元数据（DisplayName / Description / MatcherMetadata）
 3. 在业务模块注入 `IHookExecutionService` 并调用 `FireAsync`：
    ```csharp
    await _hooks.FireAsync(new HookPayload
    {
-       Event = HookEvent.YourEvent,
+       Point = HookInterceptionPoint.YourPoint,
        SessionId = sessionId,
        Cwd = workingDirectory,
    }, actualMatcherValue: "some_matcher_value", ct: ct);
    ```
-4. 更新 `/hooks events` 命令输出（自动从 `HookEventMetadataRegistry` 生成，无需改代码）
+4. 更新 `/hooks events` 命令输出（自动从 `HookPointMetadataRegistry` 生成，无需改代码）
 
 ### 新增模板插值字段
 
 1. 在 `HookPayload` 添加字段（`OneCode.Core/Hooks/HookPayload.cs`）
-2. 在 `HttpHookExecutor.RenderTemplate` 和 `NotificationHookExecutor.RenderTemplate` 的 switch 表达式添加对应分支
+2. 在共享的 `HookTemplateRenderer.Render`（`src/OneCode.App/Services/Hooks/HookTemplateRenderer.cs`）的 switch 表达式添加对应分支
 3. 在 [hooks.md §模板插值字段](../hooks.md#8-模板插值字段) 文档中补充字段说明

@@ -15,7 +15,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Git/` | Git 操作（blame 解析 + GitHub 托管提供者） |
 | `Config/` | 配置解析与持久化 |
 | `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
-| `Agent/` | Agent 沙箱服务（HyperlightCodeActService）、Agent 状态管理（MAF `AgentSessionStateBag`，见 `SessionStateExtensions.cs`） |
+| `Agent/` | **MAF 管道装配层**：Agent 构建与中间件栈（`AgentPipelineBuilder`）、Harness 产品化默认值（`OneCodeHarnessDefaults` / `PipelineProfile`）、上下文压缩策略（`CompactionPipelineBuilder` / `GuardedSummarizationCompactionStrategy`）、工具审批标记与自动批准规则（`ToolApprovalMarker` 装配期标记 + `ToolApprovalMarkingContextProvider` 请求期标记 provider + `HarnessProviderTools` provider 工具名单/元数据/按名放行规则 + `AutoApprovalRulesFactory`）、Run 级中间件（`RunMiddleware/`：BudgetGuard / PromptTooLongRecovery / UsageTracking）、会话状态扩展（`SessionStateExtensions`）、Hyperlight 代码执行服务（`HyperlightCodeActService`）、SSH shell（`SshShellExecutor`） |
 | `Abstractions/` | 内部 Infrastructure 接口（仅 Infrastructure 内部使用） |
 | `Remote/` | 远程 Agent 通信 |
 
@@ -47,7 +47,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `System.ClientModel` | AI 客户端模型基类 |
 | `Anthropic` | Anthropic API SDK（`ChatClientFactory` 内部使用，App 层不直接引用） |
 | `Microsoft.Extensions.AI.OpenAI` | OpenAI 兼容客户端 SDK（`ChatClientFactory` 内部使用） |
-| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架（实验性 API，需 `#pragma warning disable MAAI001`；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension） |
+| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Harness` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架 1.22.0（实验性 API 的诊断 ID `MAAI001` 由 `src/Directory.Build.props` 的全局 `NoWarn` 统一抑制；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension；Harness 提供 `HarnessAgent` 装配） |
 | `Microsoft.Agents.AI.Hyperlight` + `Hyperlight.HyperlightSandbox.Api` + `Hyperlight.HyperlightSandbox.Guest.Python` | Hyperlight 沙箱（`HyperlightCodeActService` 内部使用） |
 
 ### 禁止的依赖
@@ -55,7 +55,6 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | 禁止项 | 原因 | 正确位置 |
 |--------|------|---------|
 | `Terminal.Gui` | UI 框架属于 App 层 | App/Tui |
-| `System.CommandLine` | CLI 解析属于 Cli/App 层 | Cli |
 | `OneCode.App` | 反向依赖，破坏分层 | -- |
 | 直接实例化 `HttpClient` | 绕过 DI 连接池 | 注入 `IHttpClientFactory` |
 

@@ -127,7 +127,6 @@ public static class FileIgnore
                 return false;
         }
 
-        // Check each path segment against the folder block-list.
         var parts = relativePath.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
         foreach (var part in parts)
         {

@@ -105,7 +105,6 @@ internal static partial class MarkdownRenderer
             }
         }
 
-        // Bottom border
         var bottomDashes = new string(TuiGlyphs.BorderHorizontal[0], innerWidth + 2);
         var bottomText = $"  {TuiGlyphs.BorderBottomLeft}{bottomDashes}{TuiGlyphs.BorderBottomRight}";
         lines.Add(new ConvLine(LineRole.System, bottomText,

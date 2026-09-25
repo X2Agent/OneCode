@@ -8,10 +8,10 @@ using OneCode.Core.Lsp;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="LspTool"/> — covers server-status gating, server
-/// auto-resolution fallback, action routing (definition/declaration/diagnostics/rename/etc.),
-/// capability gating, the 1-based → 0-based line/column conversion, and default-newName
-/// handling.
+/// Unit tests for <see cref="LspTool"/> — covers server-status gating, action→LSP method
+/// routing with response pass-through, server auto-resolution fallback, capability gating,
+/// completion projection/truncation, the 1-based → 0-based line/column conversion, and
+/// default-newName handling.
 /// </summary>
 public sealed class LspToolTests
 {
@@ -30,8 +30,6 @@ public sealed class LspToolTests
     private static LanguagePackRegistry CreatePackRegistry() =>
         new(NullLogger<LanguagePackRegistry>.Instance);
 
-    // Server-status gating
-
     [Fact]
     public async Task ExecuteLspAsync_NoServersRunning_ReturnsErrorJson()
     {
@@ -46,8 +44,6 @@ public sealed class LspToolTests
         result.Content.Should().Contain("No LSP servers running");
     }
 
-    // Action routing
-
     [Fact]
     public async Task ExecuteLspAsync_UnknownAction_ReturnsErrorJson()
     {
@@ -57,8 +53,7 @@ public sealed class LspToolTests
 
         var result = await sut.ExecuteLspAsync("notARealAction", "test.cs", server: "test-server", ct: ct);
 
-        // Unknown action is returned as a Success result with an "error" field in the
-        // JSON payload (the tool wraps it via ToolResult.Success), so IsError is false.
+        // Unknown action is reported inside a Success payload (an "error" field), not as IsError.
         result.IsError.Should().BeFalse();
         result.Content.Should().Contain("Unknown LSP action: notARealAction");
         // No LSP request should have been dispatched for an unknown action.
@@ -66,160 +61,98 @@ public sealed class LspToolTests
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task ExecuteLspAsync_DefinitionAction_CallsTextDocumentDefinition()
+    // Action routing: every action must dispatch to its own LSP method, and the server
+    // response must reach the caller unchanged. Action names are deliberately mixed-case
+    // to lock the case-insensitive lookup.
+
+    [Theory]
+    [InlineData("definition", "textDocument/definition")]
+    [InlineData("declaration", "textDocument/declaration")]
+    [InlineData("typeDefinition", "textDocument/typeDefinition")]
+    [InlineData("implementation", "textDocument/implementation")]
+    [InlineData("references", "textDocument/references")]
+    [InlineData("hover", "textDocument/hover")]
+    [InlineData("documentHighlight", "textDocument/documentHighlight")]
+    [InlineData("symbols", "textDocument/documentSymbol")]
+    [InlineData("codeAction", "textDocument/codeAction")]
+    [InlineData("formatting", "textDocument/formatting")]
+    [InlineData("signatureHelp", "textDocument/signatureHelp")]
+    public async Task ExecuteLspAsync_Action_DispatchesExpectedMethodAndPassesResponseThrough(string action, string expectedMethod)
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = CreateManagerWithServer();
+        using var responseDoc = JsonDocument.Parse("""{"payload":"from-server"}""");
+        manager.SendRequestAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<JsonElement?>(responseDoc.RootElement.Clone()));
         var sut = new LspTool(manager, CreatePackRegistry());
 
-        var result = await sut.ExecuteLspAsync("definition", "test.cs", line: 5, column: 10, server: "test-server", ct: ct);
+        var result = await sut.ExecuteLspAsync(action, "test.cs", line: 5, column: 10, server: "test-server", ct: ct);
 
-        // Business assertion: the default structure for a null server response is returned.
-        result.Content.Should().Contain("locations");
-        // Routing assertion: the correct LSP method was dispatched.
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("from-server", "the server response must pass through unchanged");
         await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/definition", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
+            "test-server", expectedMethod, Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
     }
 
+    // Completion: the raw LSP items are projected to compact entries and truncated.
+
     [Fact]
-    public async Task ExecuteLspAsync_DeclarationAction_CallsTextDocumentDeclaration()
+    public async Task ExecuteLspAsync_CompletionAction_ProjectsCompactItemsAndReportsTotal()
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("declaration", "test.cs", line: 5, column: 10, server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("locations");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/declaration", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_DocumentHighlightAction_CallsDocumentHighlight()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("documentHighlight", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("highlights");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/documentHighlight", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_ReferencesAction_CallsTextDocumentReferences()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("references", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("references");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/references", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_HoverAction_CallsTextDocumentHover()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("hover", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("contents");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/hover", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_SymbolsAction_CallsDocumentSymbol()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("symbols", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("symbols");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/documentSymbol", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_CompletionAction_CallsCompletion()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
+        using var responseDoc = JsonDocument.Parse(
+            """[{"label":"FirstSymbol","kind":3,"detail":"int","documentation":"dropped"},{"label":"SecondSymbol","kind":6}]""");
+        manager.SendRequestAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<JsonElement?>(responseDoc.RootElement.Clone()));
         var sut = new LspTool(manager, CreatePackRegistry());
 
         var result = await sut.ExecuteLspAsync("completion", "test.cs", server: "test-server", ct: ct);
 
-        result.Content.Should().Contain("items");
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("\"total\":2");
+        result.Content.Should().Contain("\"returned\":2");
+        result.Content.Should().Contain("FirstSymbol");
+        result.Content.Should().Contain("SecondSymbol");
+        // Editor-only noise is projected away to keep the payload small for the agent.
+        result.Content.Should().NotContain("dropped");
         await manager.Received(1).SendRequestAsync(
             "test-server", "textDocument/completion", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ExecuteLspAsync_CodeAction_CallsCodeAction()
+    public async Task ExecuteLspAsync_CompletionAction_TruncatesToMaxItems()
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = CreateManagerWithServer();
+        var itemsJson = "[" + string.Join(",", Enumerable.Range(0, 30).Select(i => $$"""{"label":"item{{i}}"}""")) + "]";
+        using var responseDoc = JsonDocument.Parse(itemsJson);
+        manager.SendRequestAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<JsonElement?>(responseDoc.RootElement.Clone()));
         var sut = new LspTool(manager, CreatePackRegistry());
 
-        var result = await sut.ExecuteLspAsync("codeAction", "test.cs", server: "test-server", ct: ct);
+        var result = await sut.ExecuteLspAsync("completion", "test.cs", server: "test-server", ct: ct);
 
-        result.Content.Should().Contain("actions");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/codeAction", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
+        result.Content.Should().Contain("\"total\":30");
+        result.Content.Should().Contain("\"returned\":25");
+        result.Content.Should().Contain("item24");
+        result.Content.Should().NotContain("item25");
     }
 
     [Fact]
-    public async Task ExecuteLspAsync_FormattingAction_CallsFormatting()
+    public async Task ExecuteLspAsync_ExecuteCommandAction_PassesServerOutputThrough()
     {
         var ct = TestContext.Current.CancellationToken;
         var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("formatting", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("edits");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/formatting", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ExecuteLspAsync_SignatureHelpAction_CallsSignatureHelp()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
-        var sut = new LspTool(manager, CreatePackRegistry());
-
-        var result = await sut.ExecuteLspAsync("signatureHelp", "test.cs", server: "test-server", ct: ct);
-
-        result.Content.Should().Contain("signatures");
-        await manager.Received(1).SendRequestAsync(
-            "test-server", "textDocument/signatureHelp", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
-    }
-
-    // Phase 3: executeCommand / hierarchy / semanticTokens / inlayHint
-
-    [Fact]
-    public async Task ExecuteLspAsync_ExecuteCommandAction_CallsWorkspaceExecuteCommand()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var manager = CreateManagerWithServer();
+        using var responseDoc = JsonDocument.Parse("""{"output":"command-output"}""");
+        manager.SendRequestAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<JsonElement?>(responseDoc.RootElement.Clone()));
         var sut = new LspTool(manager, CreatePackRegistry());
 
         var result = await sut.ExecuteLspAsync("executeCommand", file: "", server: "test-server", query: "my.command", ct: ct);
 
-        result.Content.Should().Contain("result");
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("command-output", "the command result must reach the caller");
         await manager.Received(1).SendRequestAsync(
             "test-server", "workspace/executeCommand", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
     }
@@ -359,14 +292,17 @@ public sealed class LspToolTests
         {
             new() { Name = "fallback-server", IsRunning = true, IsInitialized = true },
         });
+        using var responseDoc = JsonDocument.Parse("""{"payload":"fallback-response"}""");
         manager.SendRequestAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<JsonElement?>(null));
+            .Returns(Task.FromResult<JsonElement?>(responseDoc.RootElement.Clone()));
         var sut = new LspTool(manager, CreatePackRegistry());
 
-        await sut.ExecuteLspAsync("definition", "file.unknownext", ct: ct);
+        var result = await sut.ExecuteLspAsync("definition", "file.unknownext", ct: ct);
 
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("fallback-response");
         await manager.Received(1).SendRequestAsync(
-            "fallback-server", Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
+            "fallback-server", "textDocument/definition", Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
     }
 
     // Exception handling

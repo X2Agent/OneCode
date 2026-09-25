@@ -17,6 +17,11 @@ namespace OneCode.App.Services.Compact;
 /// 消息被替换后继续使用旧状态会让模型重新看到已被压缩掉的内容。因此这些键必须丢弃，
 /// 由 provider 在下次调用时按新历史重建。
 /// </para>
+/// <para>
+/// 失效范围不止 <c>stateBag</c>：会话**根**上的本地历史哨兵
+/// <c>_agent_local_chat_history</c> 也必须剔除，否则 <c>CompactionProvider</c> 会把它当作
+/// 「服务端托管历史」而永久跳过压缩——被剪掉的压缩索引也就永远不会重建（详见该类内该常量的说明）。
+/// </para>
 /// </remarks>
 public static class MafSessionInvalidator
 {
@@ -57,6 +62,32 @@ public static class MafSessionInvalidator
     /// 仅用于在失效时清除遗留状态，不再有写入方。
     /// </summary>
     private const string LegacyCompactionStateKey = "compaction";
+
+    /// <summary>
+    /// 会话根属性名，<c>ChatClientAgentSession.ConversationId</c> 的序列化键。
+    /// </summary>
+    private const string ConversationIdPropertyName = "conversationId";
+
+    /// <summary>
+    /// 框架「本地历史」哨兵值。镜像 MAF 内部的
+    /// <c>PerServiceCallChatHistoryPersistingChatClient.LocalHistoryConversationId</c>（internal，产品侧取不到）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>HarnessAgent</c> 强制 per-service-call 历史持久化，该装饰器在第一次服务调用后把哨兵写入
+    /// <c>ChatClientAgentSession.ConversationId</c>（序列化在会话**根**上，不在 <c>stateBag</c> 里）。
+    /// </para>
+    /// <para>
+    /// <b>为什么失效时必须一并丢弃</b>：<c>CompactionProvider</c> 把「<c>ConversationId</c> 非空」解读为
+    /// 「历史由远端服务托管」并整个跳过压缩。保留哨兵会让 compact 之后的会话**永久**失去自动压缩——
+    /// 上面刚剪掉的压缩索引也就永远不会被 provider 按新历史重建，与本类「定向失效后由 provider 重建」的
+    /// 意图直接矛盾。<c>ConversationId</c> 的 setter 是 internal 且拒绝空值，产品侧只能从持久化快照里剔除。
+    /// </para>
+    /// <para>
+    /// 行为由 <c>HarnessCompactionActivationTests</c> 守卫（含「去掉装饰器后每次服务调用都压缩」的反证）。
+    /// </para>
+    /// </remarks>
+    private const string LocalHistorySentinel = "_agent_local_chat_history";
 
     /// <summary>
     /// Invalidates the MAF runtime without changing transcript history. Use this when
@@ -157,6 +188,15 @@ public static class MafSessionInvalidator
         var prunedSession = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (var property in sessionElement.EnumerateObject())
         {
+            // 哨兵必须一并剔除，否则压缩在 compact 之后永久失效（见 LocalHistorySentinel 的说明）。
+            // 只剔除哨兵本身：真·远端 ConversationId 代表服务端托管的历史，丢弃它会切断续跑。
+            if (property.Name == ConversationIdPropertyName
+                && property.Value.ValueKind == JsonValueKind.String
+                && string.Equals(property.Value.GetString(), LocalHistorySentinel, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             prunedSession[property.Name] = property.Name == "stateBag"
                 ? JsonSerializer.SerializeToElement(retained)
                 : property.Value.Clone();

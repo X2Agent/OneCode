@@ -223,6 +223,12 @@ public sealed record TuiApprovalRequest(
 {
     /// <summary>用于回传用户决策的 TaskCompletionSource。</summary>
     public TaskCompletionSource<OneCode.Core.Permissions.ApprovalDecision> ResponseSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// 是否提供「本次对话全部允许」升级档。Main 路径默认 true；
+    /// Team 工作流审批桥置 false——成员策略固定 PermissionMode.Team，桥只做单次批准。
+    /// </summary>
+    public bool AllowSessionEscalation { get; init; } = true;
 }
 
 /// <summary>

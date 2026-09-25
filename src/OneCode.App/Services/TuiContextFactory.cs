@@ -71,6 +71,7 @@ public sealed class TuiContextFactory(
             TryResolvePromptCommand: (text, token) => streaming.SlashCommands.TryResolvePromptCommandAsync(session, text, token),
             StreamCommandPrompt: (prompt, tools, token) => streaming.QueryStream.StreamCommandPromptAsync(session, prompt, tools, token),
             StreamResumeWorkflow: (sessionId, kind, token) => streaming.QueryStream.StreamResumeWorkflowAsync(session, sessionId, kind, token),
+            StreamLoop: (task, check, max, token) => streaming.QueryStream.StreamLoopAsync(session, task, check, max, token),
             InputQueue: streaming.InputQueue,
             ReplayCurrentBuildRun: async token =>
             {
@@ -136,7 +137,7 @@ public sealed class TuiContextFactory(
             });
 
         var runtime = new TuiRuntimeServices(
-            Model: session.Model,
+            GetModel: () => ResolveRuntimeModelId(catalog),
             ModelCatalog: catalog.ModelCatalog,
             ModeController: session.ModeController,
             KeyResolver: keyResolver,
@@ -157,5 +158,25 @@ public sealed class TuiContextFactory(
             InitialPrompt: initialPrompt);
 
         return new TuiContext(query, sessionServices, diagnostics, runtime, options);
+    }
+
+    /// <summary>
+    /// 运行时模型名（状态栏、多模态门控、上下文窗口的唯一来源）。
+    /// 优先级与查询派工一致——<see cref="OneCode.Core.Domain.AppState.MainLoopModel"/>
+    /// 会话覆盖 &gt; 配置有效值；命中的引用再经
+    /// <see cref="OneCode.Core.Models.IModelManager.Resolve(string)"/> 归一化别名
+    /// （<c>default</c> / <c>fast</c>）。
+    /// 未配置任何模型时返回空串：显示层不得因缺少配置抛异常，缺配置由查询路径报错。
+    /// </summary>
+    internal static string ResolveRuntimeModelId(TuiCatalogDependencies catalog)
+    {
+        var sessionOverride = catalog.AppState.Current.MainLoopModel;
+        var modelRef = string.IsNullOrEmpty(sessionOverride)
+            ? catalog.ConfigManager.Current.Effective.Model
+            : sessionOverride;
+        if (string.IsNullOrEmpty(modelRef))
+            return string.Empty;
+
+        return catalog.ModelManager.Resolve(modelRef)?.Id ?? modelRef;
     }
 }

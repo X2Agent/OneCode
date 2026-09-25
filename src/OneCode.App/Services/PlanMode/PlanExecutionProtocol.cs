@@ -24,7 +24,20 @@ public static class PlanExecutionProtocol
     public const string ContextProtocolLine =
         $"Execute exactly this approved snapshot. Use {PlanToolNames.UpdateStep} for progress; " +
         "verification starts automatically once all steps are terminal, then call " +
-        $"{PlanToolNames.CompleteVerification} with concrete evidence.";
+        $"{PlanToolNames.CompleteVerification} with concrete evidence. " +
+        ChecklistOwnershipLine;
+
+    /// <summary>
+    /// 清单分工句。批准计划步骤是本 run 唯一的权威执行跟踪器；<c>todos_*</c>
+    /// （Harness TodoProvider，每轮注入清单消息）只是模型自有 checklist，仅用于
+    /// 单步内部的可选拆解。没有这句存在两种失败模式：模型把计划步骤镜像进
+    /// <c>todos_*</c>（双重记账、两处漂移），或只用 <c>todos_*</c> 跟踪而漏报
+    /// 步骤状态（执行结束未推进工作流，触发 <c>ExecutionClosureMissing</c>）。
+    /// </summary>
+    public const string ChecklistOwnershipLine =
+        "The approved plan steps tracked through the plan execution tools are the authoritative " +
+        "checklist for this run; the todos_* tools are only for your own optional breakdown of " +
+        "work inside a single step.";
 
     /// <summary>执行上下文（Turn 2+ 续跑）短句。</summary>
     public const string ContinueLine =
@@ -39,5 +52,6 @@ public static class PlanExecutionProtocol
         2. When all steps are completed or explicitly skipped, the workflow automatically enters Verifying.
         3. Run the required build/tests/checks, then call {PlanToolNames.CompleteVerification} with command output as evidence.
         4. Do not claim completion unless {PlanToolNames.CompleteVerification} returns a completed workflow.
+        5. {ChecklistOwnershipLine}
         """;
 }

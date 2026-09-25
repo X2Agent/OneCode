@@ -20,7 +20,11 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<AgentPipelineAssembly>();
         services.AddSingleton<SubAgentPipelineFactory>();
         services.AddSingleton<CompactionStrategyFactory>();
-        services.AddSingleton<AgentSessionStore>();
+        services.AddSingleton<AgentSessionPersistence>();
+
+        // 待办清单投影（Harness TodoProvider 会话状态 → 统一事件总线 → TUI 横条）。
+        // 与 PlanCardPublisher 同构：App 层发射器 + TUI 宿主订阅。
+        services.AddSingleton<TodoProjectionService>();
 
         services.AddSingleton<MainAgentRunner>();
         services.AddSingleton<IMainAgentRunner>(sp => sp.GetRequiredService<MainAgentRunner>());

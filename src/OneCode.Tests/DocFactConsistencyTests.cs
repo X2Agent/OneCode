@@ -69,6 +69,36 @@ public sealed class DocFactConsistencyTests
                 $"{doc} 引用了不存在的 API '{ghostApi}'——请改为真实入口（见 Core/Tools/ToolRegistrationExtensions.cs）");
         }
     }
+    /// <summary>
+    /// 文件名不得冒充类型名：文件 <c>RetryOnOverloadMiddleware.cs</c> 的真实类型是
+    /// <c>RetryOnOverloadChatClient</c>。文档以裸 token 引用前者会被读者当作类型使用，
+    /// 因此除非后跟 <c>.cs</c>（即明确谈文件），否则不得出现。
+    /// </summary>
+    /// <remarks>
+    /// 判据：反引号包裹的 `RetryOnOverloadMiddleware` 且不紧跟 <c>.cs</c> 即违规。
+    /// 言及文件名的合法写法：`RetryOnOverloadMiddleware.cs`（后跟 <c>.cs</c>，本测试放行）。
+    /// </remarks>
+    [Fact]
+    public void Docs_DoNotUseFileNameAsTypeName()
+    {
+        var fileNameAsType = new Regex(@"`RetryOnOverloadMiddleware`(?!\\.cs)", RegexOptions.Compiled);
+        var violations = new List<string>();
+
+        foreach (var doc in AllDocsWithPathReferences())
+        {
+            var text = File.ReadAllText(RepoPath(doc));
+            foreach (Match match in fileNameAsType.Matches(text))
+            {
+                var line = text[..match.Index].Count(c => c == '\n') + 1;
+                violations.Add($"{doc}:{line} 引用了不存在的类型「RetryOnOverloadMiddleware」——真实类型是 RetryOnOverloadChatClient，文件名是 RetryOnOverloadMiddleware.cs");
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "文件名不得冒充类型名；幽灵类名会长期滞留并误导后续改动。"
+            + (violations.Count > 0 ? Environment.NewLine + string.Join(Environment.NewLine, violations) : ""));
+    }
+
 
     /// <summary>
     /// <c>AddTool&lt;T&gt;</c> 是幽灵 API（唯一入口是 <c>AddToolInstance&lt;T&gt;</c>）。
@@ -283,15 +313,14 @@ public sealed class DocFactConsistencyTests
     }
 
     /// <summary>
-    /// 钩子事件数 = <c>HookEvent</c> 枚举成员数。
+    /// 开放拦截点数 = <c>HookInterceptionPoints.Open</c> 数量。
     /// </summary>
     [Fact]
-    public void Docs_HookEventCountMatchesEnum()
+    public void Docs_HookInterceptionPointCountMatchesOpenPoints()
     {
-        var count = Enum.GetValues<HookEvent>().Length;
+        var count = HookInterceptionPoints.Open.Count;
 
-        AssertDeclaredCount(HooksDocFile, @"(\d+) 种生命周期事件", count, "钩子事件数");
-        AssertDeclaredCount(HooksDocFile, @"HookEvent` \| (\d+) 种生命周期事件枚举", count, "钩子事件数");
+        AssertDeclaredCount(HooksDocFile, @"(\d+) 种拦截点", count, "拦截点数");
     }
 
     /// <summary>
@@ -385,7 +414,7 @@ public sealed class DocFactConsistencyTests
         CompactThresholdsDocFile,
     ];
 
-    /// <summary>含路径引用的文档——含 docs/ 与 ADR（ADR 的扩展示例同样是施工图）。</summary>
+    /// <summary>含路径引用的文档——含 docs/、ADR 与子代理/模式文档（ADR 的扩展示例同样是施工图）。</summary>
     private static IReadOnlyList<string> AllDocsWithPathReferences() =>
     [
         .. OperativeDocs(),
@@ -393,6 +422,15 @@ public sealed class DocFactConsistencyTests
         "docs/adr/0004-memory-module-design.md",
         "docs/adr/0005-hook-module-design.md",
         "docs/adr/0007-maf-integration-boundaries.md",
+        "docs/adr/0001-permission-vs-toolapproval-vs-filter.md",
+        "docs/adr/0002-declarative-workflow-assessment.md",
+        "docs/adr/0006-query-stream-state-object.md",
+        "docs/adr/0008-structured-output-text-fallback.md",
+        "docs/adr/0009-background-responses-assessment.md",
+        "docs/adr/0010-agent-loop-boundaries.md",
+        "docs/adr/0011-background-agents-delegation-boundary.md",
+        "docs/sub-agents.md",
+        "docs/team-modes.md",
         "docs/background-services.md",
         "docs/compact-thresholds.md",
         "docs/hooks.md",

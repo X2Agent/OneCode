@@ -159,7 +159,6 @@ public sealed class SessionContextBar : View
         var w = Viewport.Width;
         if (w <= 0) return false;
 
-        // Clear line
         Move(0, 0);
         SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
         AddStr(new string(' ', w));

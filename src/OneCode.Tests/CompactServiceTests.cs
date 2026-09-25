@@ -5,7 +5,6 @@ using NSubstitute;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
-using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
 
@@ -138,7 +137,6 @@ public sealed class CompactServiceTests
 
         var store = Substitute.For<ISessionStore>();
         var sessionManager = new SessionManager(store, Substitute.For<ILogger<SessionManager>>(), Environment.CurrentDirectory,
-            hookExecutionService: Substitute.For<OneCode.Core.Hooks.IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<OneCode.App.Tools.IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),
@@ -151,7 +149,6 @@ public sealed class CompactServiceTests
             """));
 
         var sut = new CompactService(client, logger,
-            Substitute.For<IHookExecutionService>(),
             new CompactSessionDependencies(
                 sessionManager,
                 sessionManager,

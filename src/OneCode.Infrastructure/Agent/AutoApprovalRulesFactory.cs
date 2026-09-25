@@ -8,11 +8,22 @@ namespace OneCode.Infrastructure.Agent;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>One policy source.</b> When an <see cref="IPermissionChecker"/> is supplied the rule delegates to it,
-/// so the auto-approval decision and the execution-time permission decision come from the same code path.
-/// Computing them independently (the checker for execution, <see cref="PermissionProfiles.Check"/> for
-/// auto-approval) let the two disagree: the checker's Auto-mode YOLO rules could allow a call that the
-/// auto-approval rule then failed to recognize, or vice versa.
+/// <b>One policy source for product tools.</b> When an <see cref="IPermissionChecker"/> is supplied the rule
+/// delegates to it, so the auto-approval decision and the execution-time permission decision come from the
+/// same code path. Computing them independently (the checker for execution,
+/// <see cref="PermissionProfiles.Check"/> for auto-approval) let the two disagree: the checker's Auto-mode
+/// YOLO rules could allow a call that the auto-approval rule then failed to recognize, or vice versa.
+/// </para>
+/// <para>
+/// <b>Provider-injected tools are the exception.</b> Tools that never pass through the permission layer — MAF
+/// skills read resources, the Harness todo list and working memory — auto-approve by a name-based rule
+/// instead, because no permission decision exists to mirror: their call sites are inside the framework's own
+/// context providers. They are deliberately silent; prompting for the model's own session bookkeeping on
+/// every turn would make approvals unusable.
+/// </para>
+/// <para>
+/// <b>MAF ORs the rules.</b> Any single rule returning true auto-approves, so rule order carries no meaning
+/// and the two rule kinds cannot shadow each other.
 /// </para>
 /// <para>
 /// The <see cref="PermissionProfiles.Check"/> overload remains for callers that have no checker
@@ -57,6 +68,11 @@ public static class AutoApprovalRulesFactory
             // MAF skills read-only tools (load_skill / read_skill_resource) auto-approve;
             // they are an AIContextProvider path, not OneCode PermissionChecker.
             AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule,
+
+            // MAF todo list / working memory tools. Same reason: provider-injected, so the permission
+            // checker never sees them, and they are agent-owned session state rather than user workspace
+            // access. The rule matches by name and is inert when those providers are not mounted.
+            HarnessProviderTools.AutoApprovalRule,
 
             permissionChecker is null
                 ? CreateFromProfiles(mode, permContext)

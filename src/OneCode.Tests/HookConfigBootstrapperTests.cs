@@ -42,7 +42,7 @@ public sealed class HookConfigBootstrapperTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_configDir, "hooks.json"), """
             {
-              "PreToolUse": [
+              "pre_tool_call": [
                 { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo hi" } ] }
               ]
             }

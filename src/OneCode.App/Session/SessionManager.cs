@@ -12,7 +12,6 @@ public sealed class SessionManager : ISessionManager
 {
     private readonly ISessionStore _store;
     private readonly ILogger<SessionManager> _logger;
-    private readonly IHookExecutionService _hookExecutionService;
     private readonly IShellExecutorCleanup _shellExecutorCleanup;
     private readonly ITokenUsageTracker _tokenUsageTracker;
     private readonly SessionIdHolder _sessionIdHolder;
@@ -52,7 +51,6 @@ public sealed class SessionManager : ISessionManager
         ISessionStore store,
         ILogger<SessionManager> logger,
         string workingDirectory,
-        IHookExecutionService hookExecutionService,
         IShellExecutorCleanup shellExecutorCleanup,
         ITokenUsageTracker tokenUsageTracker,
         SessionIdHolder sessionIdHolder,
@@ -61,7 +59,6 @@ public sealed class SessionManager : ISessionManager
         _store = store;
         _logger = logger;
         _workingDirectory = workingDirectory;
-        _hookExecutionService = hookExecutionService;
         _shellExecutorCleanup = shellExecutorCleanup;
         _tokenUsageTracker = tokenUsageTracker;
         _sessionIdHolder = sessionIdHolder;
@@ -112,8 +109,6 @@ public sealed class SessionManager : ISessionManager
         _logger.LogInformation(
             "Created conversation {Id} '{Name}' with model {Model}",
             conversation.Id, conversation.Name, conversation.Model);
-
-        await FireHookAsync(HookEvent.SessionStart, "startup", conversation.Id, ct);
 
         return conversation;
     }
@@ -394,8 +389,6 @@ public sealed class SessionManager : ISessionManager
             "Resumed conversation {Id} with {Count} messages",
             conversation.Id, conversation.Messages.Count);
 
-        await FireHookAsync(HookEvent.SessionStart, "resume", conversation.Id, ct);
-
         return conversation;
     }
 
@@ -424,12 +417,12 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Close the current conversation (async — fires SessionEnd hook and clears session cache).
+    /// Close the current conversation (async — clears session cache).
     /// Also invoked by <see cref="DisposeAsync"/> at shutdown (idempotent: no-op when no foreground conversation).
     /// </summary>
     public Task CloseAsync(CancellationToken ct = default) => CloseAsync(SessionEndReason.Close, ct);
 
-    /// <summary>关闭前台会话并以 <paramref name="reason"/> 作为 SessionEnd 的 matcher 值触发。</summary>
+    /// <summary>关闭前台会话；<paramref name="reason"/> 仅供日志与产品状态使用。</summary>
     public async Task CloseAsync(string reason, CancellationToken ct = default)
     {
         if (ForegroundConversation == null)
@@ -445,8 +438,6 @@ public sealed class SessionManager : ISessionManager
             "Closed conversation {Id} - total usage: {Usage}",
             ForegroundConversation.Id, ForegroundConversation.TotalUsage);
 
-        await FireHookAsync(HookEvent.SessionEnd, reason, sessionId, ct);
-
         RemoveBackgroundSession(ForegroundConversation.Id);
         await _shellExecutorCleanup.ReleaseAsync(ForegroundConversation.Id).ConfigureAwait(false);
         _sessionToolSetManager.Remove(sessionId.Value);
@@ -458,7 +449,7 @@ public sealed class SessionManager : ISessionManager
     {
         try
         {
-            // 兜底 reason=other：宿主停止路径由 SessionEndHookService 先行关闭（幂等），此处覆盖未启停宿主的释放路径
+            // 兜底 reason=other：宿主停止路径由 HostStopSessionCloseService 先行关闭（幂等），此处覆盖未启停宿主的释放路径
             await CloseAsync(SessionEndReason.Other, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -557,7 +548,6 @@ public sealed class SessionManager : ISessionManager
             ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
             _tokenUsageTracker.Reset();
             await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false);
-            await FireHookAsync(HookEvent.SessionStart, "switch", ForegroundConversation.Id, ct);
             return ForegroundConversation;
         }
 
@@ -628,17 +618,5 @@ public sealed class SessionManager : ISessionManager
         _logger.LogDebug(
             "Persisted transcript for conversation {Id} ({Count} messages)",
             ForegroundConversation.Id, ForegroundConversation.Messages.Count);
-    }
-
-    private async Task FireHookAsync(HookEvent @event, string source, SessionId sessionId, CancellationToken ct = default)
-    {
-        var payload = new HookPayload
-        {
-            Event = @event,
-            SessionId = sessionId,
-            Cwd = _workingDirectory,
-        };
-
-        await _hookExecutionService.FireAsync(payload, actualMatcherValue: source, ct: ct);
     }
 }

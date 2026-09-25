@@ -10,8 +10,6 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
-/// Agent factory extracted from TeamOrchestrationService.
-///
 /// 职责：为 Team 成员构建 MAF <see cref="AIAgent"/>，包括：
 ///   - 角色 prompt 解析（YAML 内联 → system/{role}.prompt → 兜底）
 ///   - 工具集装配（toolsAccessor fallback → ToolCatalog → AllowedTools 过滤）
@@ -114,7 +112,7 @@ internal sealed class TeamAgentFactory(
             AllowedTools = effectiveAllowedTools,
         });
 
-        return AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
+        return AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
             ChatClient = instrumentedClient,
             Name = member.AgentId,

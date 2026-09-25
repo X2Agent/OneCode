@@ -264,24 +264,15 @@ public sealed class AutoDreamService : BackgroundService
     // Agent 执行
 
     /// <summary>
-    /// 使用 MAF HarnessAgent 执行记忆整合。
-    /// 模型：fastModel → 主 model（无需单独配置）。
-    /// 工具：仅 Read/Glob/Grep（只读，扫描会话目录）。
-    /// 输出：增量变更 JSON 数组，由 <see cref="ApplyConsolidationChangesAsync"/> 解析后合并写入 MEMORY.md。
+    /// Consolidation-agent 的 <see cref="HarnessAgentOptions"/>。提为 internal 出厂方法，
+    /// 使守卫测试无需运行 Agent 即可断言 provider 挂载决策。
     /// </summary>
-    private async Task<(long InputTokens, long OutputTokens, int EntriesWritten)> RunConsolidationAgentAsync(
-        string prompt, CancellationToken ct)
+    internal static HarnessAgentOptions BuildConsolidationAgentOptions(
+        string modelId,
+        IReadOnlyList<AITool> tools,
+        int maxOutputTokens,
+        int maxToolCalls)
     {
-        // 模型：fastModel（轻量任务用）→ 主 model（未配置 fastModel 时回退）
-        var modelId = _modelManager.GetFastModel().Id;
-
-        var allTools = _toolCatalog.Tools;
-        var allowedSet = new HashSet<string>(AllowedTools, StringComparer.OrdinalIgnoreCase);
-        var tools = allTools
-            .Where(t => allowedSet.Contains(t.Name))
-            .Cast<AITool>()
-            .ToList();
-
         var agentOptions = new HarnessAgentOptions
         {
             Name = "autodream",
@@ -298,13 +289,51 @@ public sealed class AutoDreamService : BackgroundService
             ChatOptions = new ChatOptions
             {
                 ModelId = modelId,
-                MaxOutputTokens = MaxOutputTokens,
-                Tools = tools.Count > 0 ? tools : null,
+                MaxOutputTokens = maxOutputTokens,
+                Tools = tools.Count > 0 ? tools.ToList() : null,
                 ToolMode = tools.Count > 0 ? ChatToolMode.Auto : null,
             },
-            MaximumIterationsPerRequest = MaxToolCalls,
+            MaximumIterationsPerRequest = maxToolCalls,
+            // AutoDream 绕过 PipelineProfile 自建 options——按 profile 决定的 Todo/FileMemory
+            // 能力决策到不了这条路径，而 Harness 对两者默认挂载。该路径的设计是"轻量模型 +
+            // 固定整合提示词 + 只读工具白名单 + 单次无连续会话的 run"，每会话待办清单和工作
+            // 记忆写面都与它无关（provider 注入的工具也不受 ChatOptions 白名单约束）。
+            // 公共 ApplyProductOptOuts 按契约必须保持 profile 无关（它一关，profile 决策就不可达），
+            // 所以在这里显式做出本路径的决策。
+            DisableTodoProvider = true,
+            DisableFileMemory = true,
         };
         OneCodeHarnessDefaults.ApplyProductOptOuts(agentOptions);
+        return agentOptions;
+    }
+
+    /// <summary>
+    /// 使用 MAF HarnessAgent 执行记忆整合。
+    /// 模型：fastModel → 主 model（无需单独配置）。
+    /// 工具：仅 Read/Glob/Grep（只读，扫描会话目录）。
+    /// 输出：增量变更 JSON 数组，由 <see cref="ApplyConsolidationChangesAsync"/> 解析后合并写入 MEMORY.md。
+    ///
+    /// <para><b>为何不设 ResponseFormat（结构化输出）</b>：本 Agent 带 Read/Glob/Grep 工具循环与
+    /// 会话，schema 约束会作用于循环内每条助手消息——模型无法在工具调用之间自由叙述，与现有行为
+    /// 有实质差异（GoalDecomposer / ClarificationQuestionGenerator 的直连调用没有这个问题，已采用
+    /// "结构化请求 + 文本降级"策略）。且输出侧已有 <see cref="AutoDreamOutputSanitizer"/>
+    /// 消毒、50 条配额与"记 Warning 返回 0"的完整降级链，schema 增益有限。故维持 prompt-only
+    ///（整合提示词内嵌 JSON 数组契约）+ ExtractJsonArray 容错提取。</para>
+    /// </summary>
+    private async Task<(long InputTokens, long OutputTokens, int EntriesWritten)> RunConsolidationAgentAsync(
+        string prompt, CancellationToken ct)
+    {
+        // 模型：fastModel（轻量任务用）→ 主 model（未配置 fastModel 时回退）
+        var modelId = _modelManager.GetFastModel().Id;
+
+        var allTools = _toolCatalog.Tools;
+        var allowedSet = new HashSet<string>(AllowedTools, StringComparer.OrdinalIgnoreCase);
+        var tools = allTools
+            .Where(t => allowedSet.Contains(t.Name))
+            .Cast<AITool>()
+            .ToList();
+
+        var agentOptions = BuildConsolidationAgentOptions(modelId, tools, MaxOutputTokens, MaxToolCalls);
 
         var agent = new HarnessAgent(_chatClient, agentOptions, _loggerFactory);
 

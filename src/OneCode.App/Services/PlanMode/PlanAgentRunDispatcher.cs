@@ -1,6 +1,7 @@
 using OneCode.App.Query;
 using OneCode.App.Services.Compact;
 using OneCode.App.Tui;
+using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
@@ -26,6 +27,8 @@ public sealed class PlanAgentRunDispatcher(
     IPlanWorkflowApplicationService workflowService,
     PlanCardPublisher publisher,
     TuiInteractionBridge tui,
+    IModelManager modelManager,
+    IAppStateAccessor appState,
     ILogger<PlanAgentRunDispatcher> logger)
     : IPlanAgentRunDispatcher
 {
@@ -207,12 +210,17 @@ public sealed class PlanAgentRunDispatcher(
                 approvedSnapshot.Revision,
                 approvedSnapshot.ContentHash));
 
+            // 模型取运行时真相源（AppState 会话覆盖 > 配置有效值），与普通查询派工
+            // （QueryStreamService）同源：计划批准发生在会话中途，/model 切换后
+            // 这条 BuildRun 必须用新模型，不得使用会话启动时的快照。
+            var modelId = modelManager.GetMainModel(appState.Current.MainLoopModel).Id;
+
             var request = new WorkflowRunRequest(
                 runId,
                 current.SessionId,
                 BuildInstruction(approvedSnapshot, runId, current.State),
                 session.SystemPrompt,
-                session.Model,
+                modelId,
                 WorkingMode.Build,
                 session.SessionManager.WorkingDirectory,
                 approvedSnapshot.Project(),

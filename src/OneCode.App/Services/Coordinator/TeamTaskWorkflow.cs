@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Coordinator;
@@ -374,13 +373,11 @@ internal sealed class TeamTaskWorkflowCompiler
             writer.WriteString("contract", "TeamTaskOutcome:v1");
             writer.WriteString(
                 "serializerOptions",
-                serializerOptions is null
-                    ? "default"
-                    : JsonSerializer.Serialize(serializerOptions));
+                WorkflowDefinitionHash.DescribeSerializerOptions(serializerOptions));
             writer.WriteEndObject();
         }
 
-        return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+        return WorkflowDefinitionHash.Compute(stream.ToArray());
     }
 
     internal static string NormalizeId(string id)

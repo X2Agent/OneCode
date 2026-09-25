@@ -38,6 +38,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 /config remove <user|project|session> <key>
 ```
 
+`list` 可写作 `ls`；`set <scope> <key> <value>` 中 `value` 之后的参数会以空格拼回一个值。
 `remove` 删除指定作用域中的覆盖值，使该键恢复继承下一级配置。旧的无作用域 `/config set <key> <value>` 语法不再支持。
 
 在交互式 TUI 中执行 `/config` 会打开设置弹窗：底部提供“保存”和“取消”按钮，也可使用 `Ctrl+S` 保存、`Esc` 取消。API Key 使用单个掩码输入框显示当前有效值；内容不变时不会重复写入，修改后替换当前作用域密钥，清空后保存则删除当前作用域密钥并恢复继承。其他配置如需恢复继承，使用显式 `/config remove <scope> <key>`，不在常规设置表单中提供任意键删除入口。
@@ -46,8 +47,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 
 | 类型 | 配置项 | 语义 |
 |---|---|---|
-| 立即生效 | `showThinking`、信任/额外目录 | 保存后立即更新当前进程 |
-| 下次操作生效 | `model`、`fastModel`、思考参数、`maxTurns`、通知 | 不影响正在执行的请求，下一次操作读取新快照 |
+| 立即生效 | `showThinking`、`trustedDirectories`、`allowedDirectories`、`hasTrustAccepted` | 保存后立即更新当前进程 |
+| 下次操作生效 | `model`、`fastModel`、`permissionMode`、思考参数、`maxTurns`、`maxBudgetTokens`、`webSearchProvider`、通知、`autodream.*`、`goal.*` | 不影响正在执行的请求，下一次操作读取新快照 |
 | 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow` | `IChatClient` 构造时固化，重启后应用 |
 
 ---
@@ -95,8 +96,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 值 | 说明 |
 |---|---|
 | `default` | 默认模式，所有敏感操作需用户确认 |
-| `bypassPermissions` | 跳过所有权限检查（危险，仅限可信环境） |
-| `plan` | 计划模式，只读分析，不执行任何写操作 |
+| `bypassPermissions` | 跳过所有权限检查（危险，仅限可信环境；Layer 0 安全不变量仍生效） |
+| `plan` | 持久化"启动即 PLAN 工作模式"：交互启动时经 WorkingModeBridge 进入完整计划工作流 |
 | `auto` | YOLO 自动分类模式，启用 LLM 安全分类器自动判断 |
 | `acceptEdits` | 文件写入 + 常规 Shell 自动放行 |
 | `dontAsk` | 不询问，直接拒绝危险操作 |
@@ -104,8 +105,11 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `team` | 供 TEAM 模式使用：多 Agent 协作，危险命令走事件审批 |
 
 > `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述 8 个成员均可手写；
-> 未识别的值会回落为 `default`。`goalAuto` / `team` 通常由 GOAL、TEAM 模式在运行期自动派生（`/permissions` 命令的别名表只列出前 6 个，
-> 因为后两个属于模式内派生值），但手动写入同样生效。
+> 未识别的值会回落为 `default`。`goalAuto` / `team` 是 GOAL、TEAM 工作模式在运行期派生的内部值——
+> 手写在交互启动时会被 `WorkingModeBridge.SyncInitialState` 覆盖为 BUILD 默认档，因此只应作为派生结果出现。
+> **会话级一次性配置请用 `/permissions <mode> --session`**（别名 `--once`；只设运行时覆盖、不写本键），
+> 例如 `/permissions bypass --session` 仅在本次对话全放行；`plan` / `team` / `goalAuto`
+> 不是 `/permissions` 的合法参数（那是工作模式，用 Tab / Alt+1..4 切换）。
 
 ### 会话约束（Conversation）
 
@@ -146,6 +150,12 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 |---|---|---|---|
 | `ollamaContextWindow` | `int` | `32768` | Ollama 请求的 `num_ctx` 上下文窗口；重启后生效 |
 
+> **本地模型的窗口真相源**：models.dev 不覆盖本地 Ollama 模型，因此该值同时决定三件事——下发给服务端的
+> `num_ctx`（服务端真正强制的窗口）、上下文预算，以及自动压缩阈值。catalog 中同名字符串对本地模型无效。
+> 只对 `provider: "ollama"` 生效：云端 provider（包括 OpenRouter 上托管的小模型）仍以 models.dev 为准，
+> 本项不参与其窗口解析。用本地部署跑大模型时把该值调大，即可同时恢复窗口与预算
+> （`num_ctx` 随重启生效，预算侧跟随配置快照）。
+
 ### Goal 模式预算
 
 | 键 | 类型 | 默认值 | 作用 |
@@ -157,6 +167,16 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 
 > **≤0 语义**：`goal.maxTotalTokens` / `goal.maxWallClockHours` 配 0 或负值时归一为“不限制”（`ModeBudgetSettings.TotalTokenLimit` / `MaxWallClock`）；Stage 4b 引入统一预算配置之前该配置会因除零被立即判定为预算耗尽。
 
+### `/loop` 循环预算
+
+| 键 | 类型 | 默认值 | 作用 |
+|---|---|---|---|
+| `loop.maxIterations` | `int` | `3` | `/loop` 单次循环调用 agent 的硬上限，取值被夹在 `1..20`；`/loop --max <n>` 可逐次覆盖 |
+
+> 上限语义与 MAF `LoopAgentOptions.MaxIterations` 一致：限制的是 **agent 调用次数**，达到上限时先停后判，
+> 因此 3 = 3 次调用 + 最多 2 次完整“检查 → 重试”。评估器无法突破该上限。缺省值刻意低于框架默认的 10——
+> 每轮是一次完整 agent run，成本远高于一次工具调用。详见 [/loop](commands.md#loop) 与 [代理循环边界](adr/0010-agent-loop-boundaries.md)。
+
 磁盘格式使用嵌套对象，例如：
 
 ```json
@@ -166,6 +186,9 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
     "maxTurnsPerSubGoal": 50,
     "maxTotalTokens": 200000,
     "maxWallClockHours": 2.0
+  },
+  "loop": {
+    "maxIterations": 5
   }
 }
 ```
@@ -202,7 +225,7 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 
 ## 环境变量
 
-以下环境变量以 `ONECODE_` 前缀加载，会覆盖 `settings.json` 中的对应值：
+以下环境变量映射到配置键并覆盖 `settings.json` 中的对应值（除 `TAVILY_API_KEY` 外均带 `ONECODE_` 前缀）：
 
 | 环境变量 | 覆盖的配置键 |
 |---|---|
@@ -243,7 +266,7 @@ Hook **定义**存放在独立文件中，不在 `settings.json` 内：
 
 ```json
 {
-  "preToolUse": [
+  "pre_tool_call": [
     {
       "matcher": "Edit",
       "hooks": [
@@ -251,7 +274,7 @@ Hook **定义**存放在独立文件中，不在 `settings.json` 内：
       ]
     }
   ],
-  "postToolUse": [
+  "post_tool_call": [
     {
       "matcher": "Bash",
       "hooks": [
@@ -264,7 +287,7 @@ Hook **定义**存放在独立文件中，不在 `settings.json` 内：
 
 Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置。通过 `/hooks` 命令可查看已注册 Hook 和当前工作区信任状态。
 
-> **更多详情**：Hook 子系统的完整设计、事件清单、执行器类型、扩展指南参见 [Hook 模块文档](./hooks.md)，架构决策与实现细节参见 [Hook 模块架构设计](./adr/0005-hook-module-design.md)。
+> **更多详情**：Hook 子系统的完整设计、拦截点清单、执行器类型、扩展指南参见 [Hook 模块文档](./hooks.md)，架构决策与实现细节参见 [Hook 模块架构设计](./adr/0005-hook-module-design.md)。
 
 ---
 
@@ -310,11 +333,11 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 
 | 配置键 | 常量定义 | 消费位置 |
 |---|---|---|
-| `apiKey` | `ConfigKeys.ApiKey` | `AppSettings.ApiKey`、`ReadApiConfig` |
-| `baseUrl` | `ConfigKeys.BaseUrl` | `AppSettings.BaseUrl`、`ReadApiConfig` |
-| `provider` | `ConfigKeys.Provider` | `AppSettings.Provider`、`ReadApiConfig` |
+| `apiKey` | `ConfigKeys.ApiKey` | `AppSettings.ApiKey`、`TuiHostConfigurator` |
+| `baseUrl` | `ConfigKeys.BaseUrl` | `AppSettings.BaseUrl`、`TuiHostConfigurator` |
+| `provider` | `ConfigKeys.Provider` | `AppSettings.Provider`、`TuiHostConfigurator` |
 | `model` | `ConfigKeys.Model` | `AppSettings.Model`、`ModelManager.GetMainModel` |
-| `fastModel` | `ConfigKeys.FastModel` | `ModelManager.GetFastModel`、`ReadApiConfig`、`FastModelCommand` |
+| `fastModel` | `ConfigKeys.FastModel` | `ModelManager.GetFastModel`、`FastModelCommand`、`TuiHostConfigurator`、`SettingsOverlay` |
 | `permissionMode` | `ConfigKeys.PermissionMode` | `AppSettings.PermissionMode` |
 | `trustedDirectories` | —（字面量） | `AppSettings.TrustedDirectories`（全局） |
 | `allowedDirectories` | —（字面量） | `AppSettings.AllowedDirectories`（项目级覆盖全局） |
@@ -323,11 +346,14 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `maxBudgetTokens` | `ConfigKeys.MaxBudgetTokens` | `AppSettings.MaxBudgetTokens` |
 | `webSearchProvider` | `ConfigKeys.WebSearchProvider` | `AppSettings.WebSearchProvider` |
 | `webSearchApiKeys.tavily` | `ConfigKeys.TavilyApiKey` | `AppSettings.TavilyApiKey` |
-| `effortValue` | —（字面量） | `InteractiveModeExecutor`、`EffortCommand`、`TuiHostConfigurator`、`ThinkingParamsResolver`（经 `AppState`） |
+| `effortValue` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`ConfigCommand`、`StatusCommand`、`TuiHostConfigurator`、`ThinkingParamsResolver`（经 `AppState`） |
 | `thinkingEnabled` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
 | `showThinking` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
 | `nextPromptSuggesterEnabled` | `ConfigKeys.NextPromptSuggesterEnabled` | `AppSettings.NextPromptSuggesterEnabled` |
-| `autodream.*` | —（点路径） | `AutoDreamService` |
-| `goal.*` | —（点路径） | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService` 调用） |
+| `notificationsEnabled` | `ConfigKeys.NotificationsEnabled` | `AppSettings.NotificationsEnabled` |
+| `ollamaContextWindow` | `ConfigKeys.OllamaContextWindow` | `AppSettings.OllamaContextWindow` |
+| `autodream.*` | —（字面量） | `AutoDreamService` |
+| `goal.*` | `ConfigKeys.GoalMax*` | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService`、`LoopCommand` 调用） |
+| `loop.maxIterations` | `ConfigKeys.LoopMaxIterations` | `ModeBudgetSettings.FromSettings`（`/loop`）；可经 `settings.json`、`/config set`、`/loop --max` 设置，超上限由 `ModeBudgetSettings.MaxLoopIterationsUpperBound` 夹取 |
 
 > **配置元数据真相源**：`src/OneCode.Core/Config/ConfigModels.cs` 中的 `SettingDescriptors`。新增配置项时必须同时声明生效模式、密钥属性和项目作用域权限，并更新本文档。

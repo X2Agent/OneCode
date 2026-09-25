@@ -35,7 +35,6 @@ internal static class FetchSafetyPolicy
             host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Try to parse host as IP address (covers both IPv4 and IPv6)
         if (IPAddress.TryParse(host, out var ipAddress))
         {
             // Block any private/loopback/link-local IP address

@@ -24,16 +24,8 @@ public sealed class SkillsCommand(SkillCatalog catalog) : Command
             return CommandResult.Text(await ShowSkillAsync(args[1], ct).ConfigureAwait(false));
 
         // Bare /skills <name> → show (matches docs/skills.md discovery table).
-        if (args.Length == 1 && args[0] is not ("list" or "ls" or "show" or "run"))
+        if (args.Length == 1 && args[0] is not ("list" or "ls" or "show"))
             return CommandResult.Text(await ShowSkillAsync(args[0], ct).ConfigureAwait(false));
-
-        if (args[0] == "run")
-        {
-            var skillName = args.Length > 1 ? args[1] : "<name>";
-            return CommandResult.Error(
-                $"'/skills run' was removed. Execute skills directly: /{skillName} [args]\n" +
-                "Use /skills list to browse, /skills show <name> to preview.");
-        }
 
         return CommandResult.Error("Usage: /skills [list|show <name>] — run a skill with /<skillname>");
     }

@@ -76,15 +76,11 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                         4.0 * Math.Pow(2, attempt),
                         120.0);
 
-                    if (args.Outcome.Exception is ClientResultException cre)
+                    if (GetServerRetryAfter(args.Outcome.Exception) is { } retryAfter)
                     {
-                        var retryAfter = GetRetryAfterDelay(cre);
-                        if (retryAfter.HasValue)
-                        {
-                            // 取 Retry-After 与指数退避的最大值，确保不因服务端过小的建议值跳过退避
-                            var delay = TimeSpan.FromSeconds(Math.Max(retryAfter.Value.TotalSeconds, exponentialSeconds));
-                            return ValueTask.FromResult<TimeSpan?>(delay);
-                        }
+                        // 取 Retry-After 与指数退避的最大值，确保不因服务端过小的建议值跳过退避
+                        var delay = TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
+                        return ValueTask.FromResult<TimeSpan?>(delay);
                     }
                     return ValueTask.FromResult<TimeSpan?>(null);
                 },
@@ -254,19 +250,49 @@ public sealed class RetryOnOverloadChatClient : IChatClient
         return null;
     }
 
+    /// <summary>取服务端 Retry-After：掩码错误体异常由 Handler 从响应头读出挂载，
+    /// ClientResultException 走原始响应头。</summary>
+    private TimeSpan? GetServerRetryAfter(Exception? ex)
+    {
+        switch (ex)
+        {
+            case UpstreamProviderErrorException { RetryAfter: { } retryAfter }:
+                return retryAfter;
+
+            case ClientResultException cre:
+                try
+                {
+                    var response = cre.GetRawResponse();
+                    if (response is null) return null;
+                    foreach (var header in response.Headers)
+                    {
+                        if (header.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase)
+                            && int.TryParse(header.Value, out var seconds))
+                        {
+                            return TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
+                        }
+                    }
+                }
+                catch (Exception ex2)
+                {
+                    _logger?.LogDebug(ex2, "Failed to parse Retry-After header from rate-limit response");
+                }
+                return null;
+
+            default:
+                return null;
+        }
+    }
+
     private TimeSpan GetRetryDelay(Exception ex, int attempt)
     {
         var exponentialSeconds = Math.Min(
             4.0 * Math.Pow(2, attempt),
             120.0);
 
-        if (ex is ClientResultException cre)
+        if (GetServerRetryAfter(ex) is { } retryAfter)
         {
-            var retryAfter = GetRetryAfterDelay(cre);
-            if (retryAfter.HasValue)
-            {
-                return TimeSpan.FromSeconds(Math.Max(retryAfter.Value.TotalSeconds, exponentialSeconds));
-            }
+            return TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
         }
 
         return TimeSpan.FromSeconds(exponentialSeconds);

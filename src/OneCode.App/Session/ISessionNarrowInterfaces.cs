@@ -1,3 +1,5 @@
+using Microsoft.Extensions.AI;
+
 namespace OneCode.App.Session;
 
 /// <summary>
@@ -8,6 +10,15 @@ public interface ISessionConversationAccess
 {
     Conversation? ForegroundConversation { get; }
     Conversation? GetConversation(SessionId conversationId);
+}
+
+/// <summary>
+/// Session chat history read access — the narrow surface the MAF chat history bridge needs
+/// (<c>TranscriptChatHistoryProvider</c>). Implemented by <see cref="SessionManager"/>.
+/// </summary>
+public interface ISessionChatHistoryReader
+{
+    IReadOnlyList<ChatMessage> GetChatHistory(SessionId conversationId);
 }
 
 /// <summary>

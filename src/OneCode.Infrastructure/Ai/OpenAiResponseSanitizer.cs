@@ -31,11 +31,20 @@ internal static partial class OpenAiResponseSanitizer
         }
     }
 
-    /// <summary>提取响应体中的显式错误对象（{"error":{...}}），辅助字段折叠进 message。</summary>
-    internal static bool TryExtractUpstreamError(string payload, out string message, out string? code)
+    /// <summary>
+    /// 提取响应体中的显式错误对象（{"error":{...}}），辅助字段折叠进 message。
+    /// <paramref name="errorType"/> 取 OpenRouter 规范类型码（随 skin 在
+    /// <c>error.metadata.error_type</c> 或 <c>error.error_type</c>），供按类型判定瞬时性。
+    /// </summary>
+    internal static bool TryExtractUpstreamError(
+        string payload,
+        out string message,
+        out string? code,
+        out string? errorType)
     {
         message = string.Empty;
         code = null;
+        errorType = null;
 
         if (!payload.Contains("""error""", StringComparison.Ordinal))
             return false;
@@ -54,6 +63,13 @@ internal static partial class OpenAiResponseSanitizer
                 return false;
             }
 
+            // OpenRouter 类型码位置随 skin 漂移：Chat Completions 在 metadata 下，
+            // Anthropic skin 平铺在 error 上。
+            errorType = ReadString(error, "error_type")
+                ?? ReadProperty(error, "metadata", "error_type");
+
+            string? raw = null;
+
             switch (error.ValueKind)
             {
                 case JsonValueKind.String:
@@ -70,13 +86,17 @@ internal static partial class OpenAiResponseSanitizer
                             JsonValueKind.Number => c.GetRawText(),
                             _ => null,
                         };
-                    if (string.IsNullOrWhiteSpace(message)
-                        && error.TryGetProperty("metadata", out var md)
-                        && md.ValueKind == JsonValueKind.Object
-                        && md.TryGetProperty("raw", out var raw)
-                        && raw.ValueKind == JsonValueKind.String)
+                    raw = ReadProperty(error, "metadata", "raw");
+                    var rawClamped = Clamp(raw);
+
+                    // 掩码外壳（OpenRouter 500 类）只保留通用 message，上游原文在
+                    // metadata.raw，通用串无信息量，以 raw 为主消息。
+                    if (IsMaskedMessage(message) && !string.IsNullOrWhiteSpace(raw))
+                        message = rawClamped;
+
+                    if (string.IsNullOrWhiteSpace(message) && raw is not null)
                     {
-                        message = raw.GetString() ?? string.Empty;
+                        message = rawClamped;
                     }
                     break;
 
@@ -90,7 +110,7 @@ internal static partial class OpenAiResponseSanitizer
 
             if (error.ValueKind == JsonValueKind.Object)
             {
-                var details = CollectErrorDetails(error);
+                var details = CollectErrorDetails(error, messageIsRaw: message == Clamp(raw));
                 if (details.Length > 0)
                     message = string.Concat(message, " ", details).Trim();
             }
@@ -103,7 +123,32 @@ internal static partial class OpenAiResponseSanitizer
         }
     }
 
-    private static string CollectErrorDetails(JsonElement error)
+    /// <summary>OpenRouter 掩码外壳的通用 message 串，命中时 raw 优先作主消息。</summary>
+    private static bool IsMaskedMessage(string? message) =>
+        message is not null && (
+            message.Equals("Provider returned error", StringComparison.OrdinalIgnoreCase)
+            || message.Equals("Provider returned an error", StringComparison.OrdinalIgnoreCase)
+            || message.Equals("The provider returned an error", StringComparison.OrdinalIgnoreCase)
+            || message.Equals("An unexpected error occurred", StringComparison.OrdinalIgnoreCase));
+
+    private static string? ReadString(JsonElement parent, string name) =>
+        parent.ValueKind == JsonValueKind.Object
+        && parent.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    /// <summary>按属性路径读字符串，任一环缺失或类型不符返回 null。</summary>
+    private static string? ReadProperty(JsonElement parent, string name, string nested)
+    {
+        if (parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(name, out var element)
+            || element.ValueKind != JsonValueKind.Object)
+            return null;
+        return ReadString(element, nested);
+    }
+
+    private static string CollectErrorDetails(JsonElement error, bool messageIsRaw)
     {
         List<string> parts = [];
 
@@ -126,10 +171,31 @@ internal static partial class OpenAiResponseSanitizer
                 Add("provider_code", providerCode.ValueKind == JsonValueKind.String
                     ? providerCode.GetString()
                     : providerCode.GetRawText());
+
+            Add("provider_name", ReadString(metadata, "provider_name"));
+
+            // moderation 错误带 reasons / flagged_input，指出哪段输入被标记。
+            if (metadata.TryGetProperty("reasons", out var reasons)
+                && reasons.ValueKind == JsonValueKind.Array)
+            {
+                var joined = string.Join(", ", reasons.EnumerateArray()
+                    .Where(static r => r.ValueKind == JsonValueKind.String)
+                    .Select(static r => r.GetString()!));
+                Add("reasons", joined);
+            }
+
+            Add("flagged_input", ReadString(metadata, "flagged_input"));
+
+            if (!messageIsRaw)
+                Add("raw", Clamp(ReadString(metadata, "raw")));
         }
 
         return parts.Count == 0 ? string.Empty : string.Join(" ", parts);
     }
+
+    /// <summary>上游原文可能是一整包 JSON，截断防止错误消息刷屏。</summary>
+    private static string? Clamp(string? value) =>
+        value is null || value.Length <= 512 ? value : string.Concat(value.AsSpan(0, 512), "…(truncated)");
 
     [GeneratedRegex(@"""finish_reason""\s*:\s*""(?<value>[^""]*)""")]
     private static partial Regex FinishReasonRegex();

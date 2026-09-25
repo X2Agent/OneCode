@@ -10,7 +10,7 @@ public sealed class NotificationHookExecutorTests
 {
     private static readonly HookPayload SamplePayload = new()
     {
-        Event = HookEvent.UserPromptSubmit,
+        Point = HookInterceptionPoint.Input,
         SessionId = "sess-123",
         Cwd = "/home/user/project",
         ToolName = "Bash",
@@ -73,14 +73,14 @@ public sealed class NotificationHookExecutorTests
         {
             Provider = "feishu",
             WebhookUrl = "https://example.com/hook",
-            Message = "Hello {{Event}}",
+            Message = "Hello {{Point}}",
         };
 
         var result = await sut.ExecuteAsync(SamplePayload, config, TestContext.Current.CancellationToken);
 
         result.Should().BeNull();
         await provider.Received(1).SendAsync(
-            Arg.Is<NotificationMessage>(m => m.Text == "Hello UserPromptSubmit"),
+            Arg.Is<NotificationMessage>(m => m.Text == "Hello input"),
             "https://example.com/hook",
             Arg.Any<string?>(),
             Arg.Any<CancellationToken>());
@@ -212,7 +212,7 @@ public sealed class NotificationHookExecutorTests
     // 模板渲染
 
     [Theory]
-    [InlineData("{{Event}}", "UserPromptSubmit")]
+    [InlineData("{{Point}}", "input")]
     [InlineData("{{SessionId}}", "sess-123")]
     [InlineData("{{Cwd}}", "/home/user/project")]
     [InlineData("{{ToolName}}", "Bash")]
@@ -235,9 +235,9 @@ public sealed class NotificationHookExecutorTests
     [Fact]
     public void RenderTemplate_MultipleFields_ReplacesAll()
     {
-        var template = "[{{Event}}] {{AgentType}} {{AgentId}}: {{UserMessage}}";
+        var template = "[{{Point}}] {{AgentType}} {{AgentId}}: {{UserMessage}}";
         var rendered = HookTemplateRenderer.Render(template, SamplePayload);
-        rendered.Should().Be("[UserPromptSubmit] coder agent-001: Fix the bug");
+        rendered.Should().Be("[input] coder agent-001: Fix the bug");
     }
 
     [Fact]

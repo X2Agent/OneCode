@@ -4,7 +4,7 @@ using OneCode.Core.Errors;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
-/// Shared TeamRunResult error factory — extracted from <see cref="TeamOrchestrationService"/>.
+/// TeamRunResult 错误工厂。
 /// Emits OrchestrationEvent.Error when a sink is provided.
 /// </summary>
 internal static class TeamRunErrors

@@ -4,7 +4,6 @@ namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
 /// Builds MAF ExternalResponse payloads for Team clarification RequestPort resumes.
-/// Extracted from <see cref="TeamOrchestrationService"/>.
 /// </summary>
 internal static class TeamClarificationResponses
 {

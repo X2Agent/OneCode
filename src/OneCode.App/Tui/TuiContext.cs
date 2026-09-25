@@ -23,6 +23,8 @@ public sealed record TuiQueryServices(
     Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand = null,
     Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt = null,
     Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow = null,
+    /// <summary><c>/loop</c> 有界确定性循环的流式入口。</summary>
+    Func<string, string?, int, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamLoop = null,
     InputQueue? InputQueue = null,
     Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun = null,
     /// <summary>MCP 预连接收尾等待（首条消息前的有界窗口，≤5s）。</summary>
@@ -51,7 +53,9 @@ public sealed record TuiDiagnosticServices(
 
 /// <summary>Runtime collaborators shared by visual components.</summary>
 public sealed record TuiRuntimeServices(
-    string Model,
+    // 运行时模型名的实时取值（状态栏、多模态门控、上下文窗口共用同一来源）：
+    // 模型可被 /model、/config 在会话中改变，故不缓存启动时的字符串快照。
+    Func<string> GetModel,
     IModelCatalog ModelCatalog,
     WorkingModeController? ModeController = null,
     KeybindingResolver? KeyResolver = null,
@@ -96,6 +100,7 @@ public sealed record TuiContext(
     public Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand => Query.TryResolvePromptCommand;
     public Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt => Query.StreamCommandPrompt;
     public Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow => Query.StreamResumeWorkflow;
+    public Func<string, string?, int, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamLoop => Query.StreamLoop;
     public InputQueue? InputQueue => Query.InputQueue;
     public Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun => Query.ReplayCurrentBuildRun;
 
@@ -117,7 +122,7 @@ public sealed record TuiContext(
     public Func<McpConnectionSummary>? GetMcpConnectionSummary => Diagnostics.GetMcpConnectionSummary;
     public Func<CancellationToken, Task>? WaitForMcpPreconnect => Query.WaitForMcpPreconnect;
 
-    public string Model => Runtime.Model;
+    public Func<string> GetModel => Runtime.GetModel;
     public IModelCatalog ModelCatalog => Runtime.ModelCatalog;
     public WorkingModeController? ModeController => Runtime.ModeController;
     public KeybindingResolver? KeyResolver => Runtime.KeyResolver;

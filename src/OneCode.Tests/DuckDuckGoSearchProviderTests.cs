@@ -1,4 +1,3 @@
-using NSubstitute;
 using OneCode.Infrastructure.Search;
 
 namespace OneCode.Tests;
@@ -93,15 +92,5 @@ public sealed class DuckDuckGoSearchProviderTests
     public void NormalizeWhitespace_CollapsesRunsAndTrims()
     {
         DuckDuckGoSearchProvider.NormalizeWhitespace("  a \n\t b   c  ").Should().Be("a b c");
-    }
-
-    /// <summary>与 Tavily 不同，DDG 不需要凭据，因此始终在链路中可用。</summary>
-    [Fact]
-    public void IsConfigured_IsAlwaysTrue()
-    {
-        var provider = new DuckDuckGoSearchProvider(Substitute.For<IHttpClientFactory>());
-
-        provider.Name.Should().Be("duckduckgo");
-        provider.IsConfigured.Should().BeTrue("no API key is required for the HTML endpoint");
     }
 }

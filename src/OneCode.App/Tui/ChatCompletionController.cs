@@ -15,7 +15,6 @@ public sealed record SlashCommandEntry(
 
 /// <summary>
 /// Manages command and file-path completion for <see cref="ChatInputView"/>.
-/// Extracted from ChatInputView to isolate completion state and filtering logic.
 /// 文本度量辅助见 <see cref="CompletionTextMetrics"/>。
 /// </summary>
 internal sealed class ChatCompletionController

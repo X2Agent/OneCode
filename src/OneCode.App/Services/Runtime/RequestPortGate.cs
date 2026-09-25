@@ -8,8 +8,6 @@ namespace OneCode.App.Services.Runtime;
 /// Team 计划审批门（RequestPortGate）：首次调用挂起于 MAF RequestPort，
 /// 经共享澄清交互通道收集用户决策后投递 ExternalResponse 恢复同一执行世代；
 /// 挂起存活于 checkpoint，崩溃后可从持久化门恢复。
-/// 原逻辑收敛自 <c>TeamOrchestrationService.Gates.RunApprovalGateAsync</c>（
-/// 控制面提取——审批机制按模式自持、不强行统一）。
 /// internal：依赖 Team 审批工作流宿主（internal）。
 /// </summary>
 internal sealed class RequestPortGate(

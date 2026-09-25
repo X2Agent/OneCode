@@ -83,8 +83,9 @@ dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~
 # 运行单个测试
 dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~PermissionCheckerTests.CheckAsync_BypassPermissions_AlwaysAllows"
 
-# 运行测试并收集覆盖率
-dotnet test src/OneCode.Tests/OneCode.Tests.csproj --collect:"XPlat Code Coverage"
+# 运行测试并收集覆盖率（CI 用同一命令，随后由 scripts/check-coverage.ps1 校验回归下限）
+dotnet test src/OneCode.Tests/OneCode.Tests.csproj --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
+./scripts/check-coverage.ps1 -ResultsDirectory ./artifacts/coverage
 
 # 运行集成测试（需要 API Key）
 dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~IntegrationTests" -- RunConfiguration.TestSessionTimeout=120000
@@ -181,6 +182,9 @@ public class ConversationOptions {
 | 被注释掉的代码 | `// var oldCode = DoSomething();` | 彻底删除，依赖 Git history |
 | 长篇设计文档 | `// 🚀 ARCHITECTURE: This uses a hexagonal... (50行)` | 放入设计文档而非代码中 |
 | **引用易变的文档编号** | `// ADR <编号> Stage <阶段>: …`、`/// （ADR <编号> §<小节> …）` | 指向可被**重排/删除**的 ADR 决策记录，编号一旦失效即成为**悬空引用**（此前曾因删除某条 ADR，一次暴露 66 处此类注释）。改用**纯语义描述**说明设计缘由，不使用 ADR 编号 / Stage 代号 / §小节号（**注释与文档均适用**：.md 标题、`**关联**`字段、交叉链接、各类注释一律禁用 `ADR <编号>` 字样；ADR 文件名中的编号前缀仅作稳定标识保留，不视为文本引用） |
+| **渊源说明** | `// 渲染辅助逻辑——从 ChatTranscriptView 提取`、`/// Extracted from CompactService` | 类头只写**当前职责**；"从哪拆出来/迁移自哪里"由 git history 承载，不写进注释 |
+| **空泛区域标签** | `// Helpers`、`// 公共字段`、`// 依赖`、`// =====` | 删除。**例外**：700+ 行文件里承担**导航语义**的功能块标签（如 `// 状态持久化`）可保留，但不得是 `// Helpers` 这类无信息量的词 |
+| **时效性注记** | `//（2026-09-22 复核）`、`// 此前是 X，现为 Y`、段落末尾的"现状更新 / 勘误表" | 直接把正文改成**当前状态**。同一处保留新旧两版说法，读者会读到互相矛盾的说明；变更历史由 git 与 changelog 承载 |
 
 #### 2.3 方法级注释（XML doc）
 
@@ -244,7 +248,10 @@ if (!string.IsNullOrEmpty(assistantText))
 3. 是否有「回文注释」（复述代码）？→ 删除
 4. 是否有注释掉的代码块？→ 删除
 5. 是否在任何**注释或文档**（代码注释、.md 标题、`**关联**`字段、交叉链接、README/overview 引用）里使用了具体 **ADR 编号 / Stage 代号 / §小节号**？→ **禁用**，改用纯语义描述（ADR 文档会被重排/删除，编号易失效；ADR 文件名编号前缀仅作稳定标识保留）
-6. 注释是否在代码变更后依然准确？→ 验证或更新
+6. 是否有"从 X 提取/迁出/拆分"这类渊源说明？→ 删除，只写当前职责
+7. 是否有 `// Helpers`、`// 公共字段` 这类空泛区域标签？→ 删除（长文件中的导航性标签除外）
+8. 是否留下"（YYYY-MM-DD 复核）"、"此前是 X / 旧实现"这类时效性注记，或文档末尾的"现状更新 / 勘误表"？→ 删除，正文直接写当前状态
+9. 注释是否在代码变更后依然准确？→ 验证或更新
 
 ### 3. 异步编程
 
@@ -452,7 +459,7 @@ services.AddHttpClient("anthropic")
 | 弹性/重试 | `Microsoft.Extensions.Http.Resilience` (Polly) | 官方 Polly 集成，零额外依赖 | 自己写重试循环 |
 | JSON 序列化 | `System.Text.Json` | BCL 内置，高性能 | Newtonsoft.Json（除非有特殊需要） |
 | YAML 解析 | `YamlDotNet` | 最成熟的 .NET YAML 库 | 自定义 YAML 解析器 |
-| MCP 协议 | `ModelContextProtocol` v2.1.0（官方 SDK） | 官方支持，活跃维护 | 自实现 MCP 协议 |
+| MCP 协议 | `ModelContextProtocol` v2.2.0（官方 SDK） | 官方支持，活跃维护 | 自实现 MCP 协议 |
 | 全屏 TUI | `Terminal.Gui` v2.4+ | 实例化 IApplication 模型 + Scheme 主题 + Command/KeyBindings 输入架构；唯一的交互式 UI 框架 | `Spectre.Console`（命令式 `LiveDisplay` 无法模拟组件树，已下线）、手动 ANSI 转义码 |
 | Glob 匹配 | `Microsoft.Extensions.FileSystemGlobbing` | 官方内置，零依赖 | 自写 glob |
 | Markdown 渲染 | `Markdig` | 最完整的 .NET Markdown 实现 | 手写 MD 解析 |
@@ -461,7 +468,7 @@ services.AddHttpClient("anthropic")
 | 内存缓存 | `Microsoft.Extensions.Caching.Memory` | 官方内置，支持过期策略 | 自定义字典缓存 |
 | DI 容器 | `Microsoft.Extensions.DependencyInjection` | 官方标准，与 .NET 生态完全集成 | Autofac/Castle/自建 |
 | LSP 客户端 | 自实现 JSON-RPC（LspClient） | 轻量化实现，无需额外依赖 | -- |
-| 命令行解析 | `System.CommandLine` | 官方库，支持自动补全和帮助生成 | 自写 args 解析 |
+| 命令行解析 | 自写 args 解析（`CliWorkingDirectory` / `CliModeDetector`） | 入口只有 `--cwd` 与 `--version` 两个选项，无需解析框架 | 为两个选项引入解析库 |
 | 密钥存储 | Windows DPAPI / `SecretService`（Linux） | OS 级安全存储，跨平台 | 明文文件/环境变量 |
 
 ---
@@ -632,20 +639,21 @@ var chatOptions = new ChatOptions
 
 #### 中间件（Function Invocation Middleware）
 
-项目当前使用 MAF 原生的 **委托式 Function Calling Middleware**（`agent.AsBuilder().Use(delegate)`），通过 `AgentPipelineBuilder` 统一构建中间件管道。这是 MAF 标准 API，**不是**自定义实现。
+项目使用 MAF 原生的 **委托式中间件**，通过 `AgentPipelineBuilder` 统一构建，分两级：
 
-MAF 同时提供 `IFunctionInvocationFilter` 接口作为类型化的函数调用拦截机制。两种方式的对比：
-
-| 机制 | API | 适用场景 |
+| 级别 | API | 适用场景 |
 |------|-----|---------|
-| 委托式中间件 | `agent.AsBuilder().Use(Func<AIAgent, FunctionInvocationContext, ...>)` | 管道组合（当前项目主模式）：审计、权限、状态机、事务等需要顺序编排的中间件 |
-| `IFunctionInvocationFilter` | DI 注册 `IFunctionInvocationFilter` 实现 | 单一关注点的独立拦截器：日志、指标采集等无管道依赖的 Filter |
+| Agent Run 级 | `agent.AsBuilder().Use(Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, …, CancellationToken, Task>)` | 预算短路、Usage 追踪、PromptTooLong 恢复等 run 级观测 |
+| 工具调用级 | `agent.AsBuilder().Use(Func<AIAgent, FunctionInvocationContext, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>, CancellationToken, ValueTask<object?>>)` | 审计、权限、状态机、事务等需要顺序编排的工具中间件 |
+
+两者都是 MAF 标准 API，**不是**自定义实现。
+
+**MAF 未提供类型化的函数调用 Filter 接口**：`IFunctionInvocationFilter` 在 MAF 1.22 / Microsoft.Extensions.AI 10.10.0 中均不存在（结论见 [docs/adr/0001-permission-vs-toolapproval-vs-filter.md](../docs/adr/0001-permission-vs-toolapproval-vs-filter.md)），所有拦截都必须走 `.Use()`。
 
 **约定：**
-- `AgentPipelineBuilder` 中的管道式中间件是主拦截路径，新增管道级中间件继续使用 `.Use()` 委托模式
-- 如需添加**无管道位置依赖**的独立拦截器（如全局指标采集），可实现 `IFunctionInvocationFilter` 并通过 DI 注册
-- **禁止**在同一关注点上同时注册 `.Use()` 中间件和 `IFunctionInvocationFilter`，避免双重拦截
-- 新增 Filter 必须在 PR 中说明为何不适合纳入 `AgentPipelineBuilder` 管道
+- `AgentPipelineBuilder` 中的 `.Use()` 管道是**唯一**拦截路径，新增中间件继续使用 `.Use()` 委托模式
+- **禁止**在同一关注点上既注册 `.Use()` 中间件、又用 `IChatClient` 装饰器重复拦截，避免双重拦截
+- 新增中间件必须在 PR 中说明其在管道中的位置依赖（注册顺序即嵌套顺序，先注册者更外层）
 
 ---
 
@@ -853,7 +861,7 @@ public sealed class SomeGodService  // 流式查询 + token 恢复 + 消息压�
 
 - 避免在核心逻辑中使用 `switch` 判断类型/模式来决定行为
 - 新增行为应通过添加新类（策略/提供者/处理器）实现，而非修改现有类
-- 使用策略模式、工厂模式或 `IToolProvider` 发现机制替代新的硬编码注册；历史集中注册路径只做兼容维护
+- 使用策略模式、工厂模式或 `ToolRegistration` + `ToolCatalog` 声明式注册替代新的硬编码注册；历史集中注册路径只做兼容维护
 
 ```csharp
 // ✅ 正确：声明式权限配置表（PermissionProfiles）

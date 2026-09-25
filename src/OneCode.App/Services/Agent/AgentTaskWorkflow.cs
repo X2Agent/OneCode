@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
@@ -315,7 +314,7 @@ public sealed class AgentTaskWorkflowCompiler(IAgentRunner runner, ILogger<Agent
             writer.WriteEndObject();
         }
 
-        return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+        return WorkflowDefinitionHash.Compute(stream.ToArray());
     }
 
     private static void WriteToolNames(Utf8JsonWriter writer, string propertyName, IEnumerable<string?>? toolNames)

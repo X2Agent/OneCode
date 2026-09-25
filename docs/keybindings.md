@@ -43,7 +43,7 @@
 ~/.onecode/keybindings.json
 ```
 
-首次运行 `/keybindings` 命令会自动生成模板文件，包含全部默认绑定。
+配置文件不存在时沿用默认绑定；要生成模板文件（含全部默认绑定与 Schema 引用）并编辑，使用 `/keybindings open`。
 
 ### 文件格式
 
@@ -72,10 +72,9 @@
 
 | 方式 | 说明 |
 |---|---|
-| `/keybindings` | 打开配置文件编辑器，自动生成模板（若不存在） |
-| `/keybindings list` | 列出全部生效快捷键（按键 → 动作 + 功能说明） |
-| `/keybindings validate` | 校验配置文件格式与合法性 |
-| `/keybindings open` / `/keybindings edit` | 在默认编辑器中打开配置文件 |
+| `/keybindings` | 查看当前生效绑定（默认 + 用户覆盖；TUI 中弹 overlay） |
+| `/keybindings list` | 列出全部生效快捷键（按键 → 动作 + 功能说明，自定义项标注 ★custom；加载时的验证警告展示在末尾） |
+| `/keybindings open` | 在默认编辑器中打开配置文件（首次自动生成模板与 JSON Schema） |
 | `/keybindings reset` | 重置为默认绑定，丢弃所有自定义配置 |
 
 ### 覆盖规则
@@ -152,7 +151,7 @@
 | `Ctrl+V` | `chat:paste` | 智能粘贴（图片/路径/大文本折叠） |
 | `Shift+Up` / `Ctrl+PgUp` | `chat:scrollUp` | 对话区向上滚动（行级，3行） |
 | `Shift+Down` / `Ctrl+PgDn` | `chat:scrollDown` | 对话区向下滚动（行级，3行） |
-| `PageUp` / `Ctrl+U` | `chat:pageUp` | 对话区向上翻页（Ctrl+U 跨终端 100% 兼容） |
+| `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Shift+Tab` | `chat:cycleTeam` | TEAM 模式下循环切换已注册团队（编排模式由团队 team.yaml 固定声明） |
 | `Alt+1` .. `Alt+4` | `app:modeBuild/Plan/Team/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |
@@ -212,7 +211,7 @@
 
 | 按键 | 行为 | 处理位置 |
 |---|---|---|
-| `Tab` | 补全激活时接受/循环建议（已迁移为 `autocomplete:accept`）；空输入时接受占位建议；其他情况切换工作模式 | `ChatInputView.Keys.cs` |
+| `Tab` | 空输入时接受占位建议；其他情况切换工作模式（补全激活时 `Autocomplete` 上下文接管为 `autocomplete:accept`） | `ChatInputView.Keys.cs` |
 | `Ctrl+Right` / `Ctrl+Left` | 占位建议可见时循环切换建议 | `ChatInputView.Keys.cs` |
 | `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch |
 | `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch |
@@ -222,6 +221,8 @@
 ## 保留快捷键
 
 以下快捷键不可重新绑定，配置文件中绑定这些键会产生验证警告。
+
+「终端保留」仅在非 Windows 平台计入（Windows 控制台不发送 SIGTSTP/SIGQUIT，这些键可正常绑定）；「macOS 系统保留」仅在 macOS 计入。
 
 ### 硬编码保留
 
@@ -335,25 +336,16 @@
 
 | 问题 | 原因 | 解决方案 |
 |---|---|---|
-| 修改后快捷键未生效 | JSON 格式错误 | 运行 `/keybindings validate` 检查 |
+| 修改后快捷键未生效 | JSON 格式错误 | 运行 `/keybindings list`，查看输出末尾的验证警告 |
 | 配置文件被忽略 | 缺少 `bindings` 数组 | 确保顶层有 `"bindings": [...]` |
 | 绑定到保留键无效 | 保留键被硬编码 | 查看上方「保留快捷键」章节 |
 | 和弦序列无响应 | 超过 1000ms 超时 | 连续按键时缩短间隔 |
 | Shift+Enter 无效 | 终端不支持 kitty 协议 | 使用 `Alt+Enter` 作为换行备用 |
 
-### 验证命令
+### 验证方式
 
-```
-/keybindings validate
-```
-
-输出示例：
-
-```
-✓ Valid keybindings file
-  Binding blocks: 2
-  Total bindings: 5
-```
+配置文件在每次加载与热重载时由 `KeybindingLoader` 自动校验（重复绑定、保留键、无效上下文/动作），
+警告直接展示在 `/keybindings list` 输出的末尾，无单独校验命令。
 
 ---
 

@@ -6,7 +6,7 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
-/// W3-A: CompleteExecution verification / delivery / rollback extracted from TeamRunApplicationService.
+/// CompleteExecution 的验证 / 交付 / 回滚。
 /// </summary>
 internal sealed class TeamRunFinalizer(
     ITeamRunStore store,

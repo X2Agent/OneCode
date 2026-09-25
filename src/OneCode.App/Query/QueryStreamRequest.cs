@@ -23,7 +23,11 @@ internal sealed record QueryStreamRequest(
     string UserPrompt,
     bool IsMultimodal,
     ChatMessage? LastUserMessage,
-    IReadOnlyList<ChatMessage>? HistoryMessages,
+    /// <summary>
+    /// 本轮附加输入消息（如 input hook 的 AdditionalContexts），位于 <see cref="UserPrompt"/> 之前。
+    /// 多轮历史不在此字段——由 <c>TranscriptChatHistoryProvider</c> 经 MAF 契约提供。
+    /// </summary>
+    IReadOnlyList<ChatMessage>? RunInputMessages,
     bool IncludeNextPrompt,
     IReadOnlyList<AIFunction> LocalTools,
     string AgentRunId,

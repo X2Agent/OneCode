@@ -98,7 +98,6 @@ internal static class CompletionTextMetrics
             lines.Add(text[pos..end].TrimEnd());
             pos = end;
 
-            // 跳过前导空格
             while (pos < text.Length && text[pos] == ' ')
                 pos++;
         }

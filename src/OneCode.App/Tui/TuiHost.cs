@@ -36,37 +36,9 @@ public static class TuiHost
         {
             using var app = Application.Create();
             app.Init();
+            DiagnoseKittyKeyboard(app);
 
-            // Diagnose kitty keyboard protocol support — Terminal.Gui auto-detects
-            // and enables it when the terminal advertises support. With our pre-enable,
-            // detection should succeed on any kitty-capable terminal.
-            var caps = app.Driver?.KittyKeyboardCapabilities;
-            if (caps is { IsSupported: true })
-            {
-                KittyKeyboardSupported = true;
-                Console.Error.WriteLine(
-                    $"[kitty] keyboard protocol supported (flags={caps.Flags}); Shift+Enter should work.");
-            }
-            else
-            {
-                KittyKeyboardSupported = false;
-                Console.Error.WriteLine(
-                    "[kitty] keyboard protocol NOT detected after pre-enable; attempting force-enable...");
-                ForceEnableKittyKeyboard(app.Driver);
-            }
-
-            var toplevel = toplevelFactory(app);
-
-            try
-            {
-                toplevel.ScheduleInitialFocus();
-                app.Run(toplevel);
-                return toplevel.ExitCode;
-            }
-            finally
-            {
-                toplevel.Dispose();
-            }
+            return RunLoop(app, toplevelFactory);
             // app is disposed here (using var) — terminal restored to normal mode.
         }
         finally
@@ -76,6 +48,53 @@ public static class TuiHost
             // is still in alternate-screen mode would be swallowed, so this must run
             // AFTER app.Dispose().
             DisableKittyKeyboard();
+        }
+    }
+
+    /// <summary>
+    /// Run the REPL against a caller-provided <see cref="IApplication"/> without touching the
+    /// terminal: no kitty keyboard escape sequences, no <c>Console.CancelKeyPress</c> hook, and
+    /// no ownership of <paramref name="app"/> (the caller creates, initialises and disposes it).
+    ///
+    /// <c>internal</c> + <c>InternalsVisibleTo</c> so headless tests drive the exact same
+    /// run loop as production instead of reimplementing startup/shutdown ordering.
+    /// </summary>
+    internal static int RunLoop(IApplication app, Func<IApplication, OneCodeToplevel> toplevelFactory)
+    {
+        var toplevel = toplevelFactory(app);
+
+        try
+        {
+            toplevel.ScheduleInitialFocus();
+            app.Run(toplevel);
+            return toplevel.ExitCode;
+        }
+        finally
+        {
+            toplevel.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Diagnose kitty keyboard protocol support — Terminal.Gui auto-detects and enables it when
+    /// the terminal advertises support. With our pre-enable, detection should succeed on any
+    /// kitty-capable terminal.
+    /// </summary>
+    private static void DiagnoseKittyKeyboard(IApplication app)
+    {
+        var caps = app.Driver?.KittyKeyboardCapabilities;
+        if (caps is { IsSupported: true })
+        {
+            KittyKeyboardSupported = true;
+            Console.Error.WriteLine(
+                $"[kitty] keyboard protocol supported (flags={caps.Flags}); Shift+Enter should work.");
+        }
+        else
+        {
+            KittyKeyboardSupported = false;
+            Console.Error.WriteLine(
+                "[kitty] keyboard protocol NOT detected after pre-enable; attempting force-enable...");
+            ForceEnableKittyKeyboard(app.Driver);
         }
     }
 

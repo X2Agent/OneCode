@@ -170,8 +170,8 @@ public sealed partial class OneCodeToplevel
                 break;
 
             // 事件驱动审批请求 — TUI 自主渲染审批组件，通过 ResponseSource 回传决策
-            case TuiApprovalRequest { RequestId: var rid, ToolName: var tn, ToolInput: var ti, ResponseSource: var rs }:
-                _ = HandleApprovalRequestAsync(tn, ti, rs);
+            case TuiApprovalRequest { ToolName: var tn, ToolInput: var ti, ResponseSource: var rs, AllowSessionEscalation: var esc }:
+                _ = HandleApprovalRequestAsync(tn, ti, rs, esc);
                 break;
 
             // LSP 诊断变更 — 刷新状态栏 LSP 指示器（服务器数/错误数/警告数）
@@ -245,15 +245,19 @@ public sealed partial class OneCodeToplevel
     /// <summary>
     /// 异步处理审批请求 — 构造提示文本、显示审批 UI、回传决策。
     /// </summary>
+    /// <param name="allowSessionEscalation">
+    /// 是否提供「本次对话全部允许」升级档（Team 工作流桥为 false）。
+    /// </param>
     private async Task HandleApprovalRequestAsync(
         string toolName,
         string? toolInput,
-        TaskCompletionSource<ApprovalDecision> responseSource)
+        TaskCompletionSource<ApprovalDecision> responseSource,
+        bool allowSessionEscalation)
     {
         try
         {
             var (title, message, allowApprovals) = BuildApprovalPrompt(toolName, toolInput);
-            var request = new PermissionPromptRequest(title, message, allowApprovals);
+            var request = new PermissionPromptRequest(title, message, allowApprovals, allowSessionEscalation);
             var result = await ShowPermissionPromptAsync(request, CancellationToken.None).ConfigureAwait(false);
 
             // Parse failure: AllowApprovals is false — UI only offered Deny, but still map defensively.
@@ -263,8 +267,12 @@ public sealed partial class OneCodeToplevel
                 {
                     PermissionPromptDecision.Allow => ApprovalDecision.AllowOnce,
                     PermissionPromptDecision.AllowAlways => ApprovalDecision.AllowAlways,
+                    PermissionPromptDecision.AllowAllConversation => ApprovalDecision.AllowAllConversation,
                     _ => ApprovalDecision.Deny,
                 };
+
+            if (decision == ApprovalDecision.AllowAllConversation)
+                ApplySessionAllowAll();
 
             responseSource.TrySetResult(decision);
         }
@@ -272,6 +280,18 @@ public sealed partial class OneCodeToplevel
         {
             responseSource.TrySetException(ex);
         }
+    }
+
+    /// <summary>
+    /// 会话级全放行：把 PermissionModeProvider 运行时覆盖切到 BypassPermissions
+    /// （不写配置，重启后恢复），并在会话记录留痕。由 TuiHostConfigurator 注入委托，
+    /// 未配置时（测试/无宿主场景）仅记录提示。
+    /// </summary>
+    private void ApplySessionAllowAll()
+    {
+        _applySessionAllowAll?.Invoke();
+        Invoke(() => _shell.Transcript.AddSystem(
+            "已允许本次对话全部工具调用（不再询问；重启 OneCode 后恢复，/permissions 可随时改回）"));
     }
 
     /// <summary>

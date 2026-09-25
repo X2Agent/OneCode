@@ -44,6 +44,11 @@ public partial class MainAgentRunner
         {
             ApprovalDecision.AllowOnce => request.CreateResponse(true, $"User approved {toolName}"),
             ApprovalDecision.AllowAlways => request.CreateAlwaysApproveToolResponse($"User always-approved {toolName}"),
+            // 本次对话全部允许：仅批准当前调用，不注册 MAF standing rule——
+            // run 内后续调用由 ApprovalBroker 自动放行，跨 run 由 PermissionModeProvider
+            // 运行时覆盖（BypassPermissions，不持久化）生效。
+            ApprovalDecision.AllowAllConversation =>
+                request.CreateResponse(true, "User allowed all tool calls for this conversation."),
             _ => request.CreateResponse(false, "User denied."),
         };
     }

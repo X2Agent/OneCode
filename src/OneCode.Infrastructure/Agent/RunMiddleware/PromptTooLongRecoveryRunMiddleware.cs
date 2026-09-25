@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Domain;
-using OneCode.Core.Hooks;
 using OneCode.Infrastructure.Middleware;
 
 namespace OneCode.Infrastructure.Agent.RunMiddleware;
@@ -20,7 +19,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 ///   <item><b>Agent-level 注册</b>：在 <see cref="AgentPipelineBuilder.Build"/> 中注册，
 ///   对所有 run 生效（Main/Worker/Team/Goal 自动获得恢复能力）。</item>
 ///   <item><b>不重建 pipeline</b>：Run middleware 收到的是已构建的 <c>innerAgent</c>，
-///   无法重建。恢复策略为：fire hooks + 截断消息历史 + 重试，而非切换 CompactionProvider/模型。</item>
+///   无法重建。恢复策略为：截断消息历史 + 重试，而非切换 CompactionProvider/模型。</item>
 /// </list>
 /// </para>
 ///
@@ -28,10 +27,8 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 /// <b>恢复策略</b>：
 /// <list type="number">
 ///   <item>catch <see cref="PromptTooLongException"/> 或 HTTP 413 异常</item>
-///   <item>fire <see cref="HookEvent.PreCompact"/> hook</item>
 ///   <item>截断消息历史：保留 system 消息 + 最近 N 条消息（默认 6）</item>
 ///   <item>retry <c>innerAgent.RunAsync</c> with truncated messages</item>
-///   <item>fire <see cref="HookEvent.PostCompact"/> hook</item>
 /// </list>
 /// 最大重试 3 次，耗尽后抛出 <see cref="PromptTooLongException"/>。
 /// </para>
@@ -53,9 +50,6 @@ public static class PromptTooLongRecoveryRunMiddleware
     /// <summary>
     /// 创建 Agent Run 级中间件的 (runFunc, runStreamingFunc) 委托对。
     /// </summary>
-    /// <param name="hookExecutionService">
-    /// Hook 执行服务（可选）。非 null 时在恢复前后 fire PreCompact/PostCompact hook。
-    /// </param>
     /// <param name="logger">日志器（可选）。</param>
     /// <param name="maxAttempts">最大重试次数（含首次），默认 3。</param>
     /// <param name="keepLastMessages">截断后保留的最近消息数，默认 6。</param>
@@ -64,7 +58,6 @@ public static class PromptTooLongRecoveryRunMiddleware
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, Task<AgentResponse>>,
         Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, AIAgent, CancellationToken, IAsyncEnumerable<AgentResponseUpdate>>
         ) Create(
-            IHookExecutionService? hookExecutionService,
             ILogger? logger,
             int maxAttempts = DefaultMaxAttempts,
             int keepLastMessages = DefaultKeepLastMessages)
@@ -96,13 +89,7 @@ public static class PromptTooLongRecoveryRunMiddleware
                         "PromptTooLong recovery: attempt {Attempt}/{Max}, truncating messages and retrying. Reason: {Reason}",
                         attempt + 1, maxAttempts, ex.Message);
 
-                    await FireHookAsync(hookExecutionService, logger, HookEvent.PreCompact, ct)
-                        .ConfigureAwait(false);
-
                     currentMessages = TruncateMessages(currentMessages, keepLastMessages);
-
-                    await FireHookAsync(hookExecutionService, logger, HookEvent.PostCompact, ct)
-                        .ConfigureAwait(false);
                 }
             }
 
@@ -145,13 +132,7 @@ public static class PromptTooLongRecoveryRunMiddleware
                                 "PromptTooLong streaming recovery: attempt {Attempt}/{Max}, truncating messages and retrying. Reason: {Reason}",
                                 attempt + 1, maxAttempts, ex.Message);
 
-                            await FireHookAsync(hookExecutionService, logger, HookEvent.PreCompact, ct)
-                                .ConfigureAwait(false);
-
                             currentMessages = TruncateMessages(currentMessages, keepLastMessages);
-
-                            await FireHookAsync(hookExecutionService, logger, HookEvent.PostCompact, ct)
-                                .ConfigureAwait(false);
 
                             break; // break out of while, continue to next attempt
                         }
@@ -217,32 +198,5 @@ public static class PromptTooLongRecoveryRunMiddleware
         result.AddRange(remaining.Skip(skipCount));
 
         return result;
-    }
-
-    private static async Task FireHookAsync(
-        IHookExecutionService? hookService,
-        ILogger? logger,
-        HookEvent @event,
-        CancellationToken ct)
-    {
-        if (hookService is null)
-            return;
-
-        var payload = new HookPayload
-        {
-            Event = @event,
-            Cwd = Environment.CurrentDirectory,
-            Trigger = HookTriggers.Auto,
-        };
-
-        try
-        {
-            await hookService.FireAsync(payload, actualMatcherValue: HookTriggers.Auto, ct: ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // Hook 失败不应阻断恢复流程，但必须记录以便诊断
-            logger?.LogWarning(ex, "Hook {Event} failed during PromptTooLong recovery, continuing", @event);
-        }
     }
 }

@@ -1,7 +1,6 @@
 namespace OneCode.App.Tui;
 
-// 滚动状态管理——从 MessageListView 提取。
-// 封装滚动偏移、自动滚动、滚动到底部标记，以及所有滚动操作。
+// 滚动状态管理：封装滚动偏移、自动滚动、滚动到底部标记，以及所有滚动操作。
 // 通过回调与宿主 View 交互（视口高度、行数、滚动事件、重绘请求）。
 
 internal sealed class ScrollState

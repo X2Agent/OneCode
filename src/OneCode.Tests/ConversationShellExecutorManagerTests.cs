@@ -44,11 +44,18 @@ public sealed class ConversationShellExecutorManagerTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ReleaseAsync_UnknownConversation_DoesNotThrow()
+    public async Task ReleaseAsync_UnknownConversation_LeavesManagerUsable()
     {
-        var act = async () => await _sut.ReleaseAsync(new SessionId("unknown-conversation"));
+        var ct = TestContext.Current.CancellationToken;
+        var id = new SessionId("unknown-conversation");
 
-        await act.Should().NotThrowAsync();
+        await _sut.ReleaseAsync(id);
+
+        // Releasing an unknown conversation must be a no-op that leaves the manager usable.
+        _sut.TryGet(id).Should().BeNull();
+        var result = await _sut.ExecuteAsync(id, _workDir, "echo ok", CommandTimeout, ct);
+        result.ExitCode.Should().Be(0);
+        _sut.TryGet(id).Should().NotBeNull();
     }
 
     [Fact]

@@ -61,7 +61,8 @@ public sealed class CloseCommandTests
 
         var result = await command.ExecuteAsync(["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], ct);
 
-        result.Should().BeOfType<CommandResult.TextResult>();
+        result.Should().BeOfType<CommandResult.TextResult>()
+            .Which.Value.Should().Contain("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
         await manager.Received(1).CloseAsync(ct);
         await manager.DidNotReceive().CloseBackgroundSessionAsync(Arg.Any<string>(), ct);
     }

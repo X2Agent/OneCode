@@ -48,8 +48,6 @@ public static class ProtectedPaths
         return false;
     }
 
-    // Windows
-
     private static IReadOnlyList<string> WindowsPaths()
     {
         var profile = PathsHelper.UserHome;
@@ -84,8 +82,6 @@ public static class ProtectedPaths
 
         return paths;
     }
-
-    // macOS
 
     private static IReadOnlyList<string> MacOsPaths()
     {
@@ -128,8 +124,6 @@ public static class ProtectedPaths
 
         return paths;
     }
-
-    // Linux
 
     private static IReadOnlyList<string> LinuxPaths()
     {

@@ -1,6 +1,4 @@
 using System.Collections.Immutable;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Agents.AI.Workflows;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Runtime;
@@ -105,7 +103,7 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Order(StringComparer.OrdinalIgnoreCase).ToArray(),
         };
-        return Hash(JsonSerializer.Serialize(canonical));
+        return WorkflowDefinitionHash.ComputeObject(canonical);
     }
 
     /// <summary>
@@ -140,13 +138,11 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
             executorId = ExecutorId,
             buildRunId = run.Id.ToString(),
             modelId,
-            systemPromptHash = Hash(systemPrompt),
+            systemPromptHash = WorkflowDefinitionHash.ComputeText(systemPrompt),
             toolCapabilityHash,
             // Checkpoint 序列化契约纳入恢复凭据（S-06）：序列化配置变化必须改变 Hash，
             // 使 Registry 校验 fail-closed，避免用旧 checkpoint 以新契约反序列化。
-            serializerOptions = serializerOptions is null
-                ? "default"
-                : JsonSerializer.Serialize(serializerOptions),
+            serializerOptions = WorkflowDefinitionHash.DescribeSerializerOptions(serializerOptions),
             plan = run.Plan is null
                 ? null
                 : new
@@ -183,11 +179,8 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
             workingDirectory = run.WorkingDirectory,
             run.WorkspaceFingerprint,
         };
-        return Hash(JsonSerializer.Serialize(canonical));
+        return WorkflowDefinitionHash.ComputeObject(canonical);
     }
-
-    private static string Hash(string value)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     private sealed class ControlledBuildAttemptExecutor(
         string id,

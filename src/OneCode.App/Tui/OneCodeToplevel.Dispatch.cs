@@ -41,10 +41,11 @@ public sealed partial class OneCodeToplevel
         }
 
         // Check multimodal support before submitting images.
-        if (images.Count > 0 && !_ctx.ModelCatalog.SupportsAttachment(_ctx.Model))
+        var runtimeModel = _ctx.GetModel();
+        if (images.Count > 0 && !_ctx.ModelCatalog.SupportsAttachment(runtimeModel))
         {
             Invoke(() => _shell.Transcript.AddError(
-                $"The current model ({_ctx.Model}) does not support image attachments. " +
+                $"The current model ({runtimeModel}) does not support image attachments. " +
                 "Please switch to a multimodal model (e.g., claude-sonnet-4) or remove the images."));
             return;
         }
@@ -145,6 +146,8 @@ public sealed partial class OneCodeToplevel
                 {
                     _shell.Transcript.AddCommandResult(result);
                     RefreshSessionName();
+                    // /model、/config set … model 只改 AppState/配置，状态栏需回读运行时模型
+                    SyncRuntimeModel();
                 });
         }
         catch (Exception ex)
@@ -323,6 +326,11 @@ public sealed partial class OneCodeToplevel
                             when _ctx.StreamResumeWorkflow is not null:
                             await RunResumeWorkflowAsync(rw.SessionId, rw.Kind, ct).ConfigureAwait(false);
                             return;
+
+                        case OneCode.App.Services.CommandDispatchResult.Loop lp
+                            when _ctx.StreamLoop is not null:
+                            await RunLoopAsync(lp, ct).ConfigureAwait(false);
+                            return;
                     }
                 }
 
@@ -336,6 +344,8 @@ public sealed partial class OneCodeToplevel
                     {
                         _shell.Transcript.AddCommandResult(result);
                         RefreshSessionName();
+                        // /model、/config set … model 只改 AppState/配置，状态栏需回读运行时模型
+                        SyncRuntimeModel();
                     });
 
                     if (_ctx.IsExitRequested?.Invoke() == true)

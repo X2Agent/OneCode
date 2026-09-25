@@ -176,8 +176,6 @@ public sealed class MemoryService : IMemoryService
         return _store.RecordHitsAsync(scope, keys, ct);
     }
 
-    // Internal helpers
-
     private async Task<IReadOnlyList<ScopedEntry>> LoadAllScopedEntriesAsync(CancellationToken ct)
     {
         var userEntries = await _store.LoadAsync(MemoryScope.User, ct).ConfigureAwait(false);

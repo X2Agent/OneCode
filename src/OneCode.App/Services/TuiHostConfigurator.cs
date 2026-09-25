@@ -1,5 +1,6 @@
 using OneCode.Core.Mcp;
 using OneCode.Core.Config;
+using OneCode.Core.Permissions;
 using System.Text;
 using OneCode.App.Commands;
 using OneCode.App.Tui;
@@ -30,7 +31,8 @@ public sealed class TuiHostConfigurator(
     Services.Mcp.McpConfigService mcpConfigService,
     ILogger<TuiHostConfigurator> logger,
     TuiOverlayDependencies overlay,
-    TuiCommandSurfaceDependencies commandSurface)
+    TuiCommandSurfaceDependencies commandSurface,
+    IPermissionModeProvider permissionModes)
 {
     /// <summary>
     /// Runs the TUI host with full overlay wiring. Blocks until the user quits.
@@ -116,17 +118,37 @@ public sealed class TuiHostConfigurator(
 
             overlay.PlanExecutionRecovery.AttachSession(session);
             WirePlanCard(toplevel, session, app);
+            WireTodoPanel(toplevel, app);
             ctx.TrustService?.SetOverlayDelegates(toplevel.PushOverlay, toplevel.PopTopOverlay);
             WireSessionModals(toplevel, session, app);
             WireSessionRefreshCallback(toplevel, session, cmdState, app);
             WireSettingsModal(toplevel, app);
             WireMcpConfigModal(toplevel);
+            WireSessionPermissionEscalation(toplevel);
             WireStartupHints(toplevel, app);
 
             return toplevel;
         });
 
         return exitCode;
+    }
+
+    /// <summary>
+    /// Subscribes the todo-strip projection: <c>TodoProjectionService</c> publishes
+    /// Harness <c>TodoProvider</c> session snapshots onto the unified
+    /// <c>OrchestrationEventBus</c> after each agent run. Same marshalling
+    /// contract as the plan card (handler runs on the emitting thread;
+    /// <see cref="OneCodeToplevel.ShowTodos"/> moves rendering to the UI thread).
+    /// An empty snapshot hides the strip.
+    /// </summary>
+    private void WireTodoPanel(OneCodeToplevel toplevel, IApplication app)
+    {
+        _ = overlay.OrchestrationEvents.Subscribe(evt =>
+        {
+            if (evt is not OrchestrationEvent.TodoProjectionChanged { Items: var items })
+                return;
+            app.Invoke(() => toplevel.ShowTodos(items));
+        });
     }
 
     /// <summary>
@@ -443,6 +465,22 @@ public sealed class TuiHostConfigurator(
                 return null;
 
             return await mcpConfigService.ApplyAsync(result, token).ConfigureAwait(false);
+        });
+    }
+
+    /// <summary>
+    /// 会话级全放行接线：审批弹窗选择「本次对话全部允许」时，把 PermissionModeProvider
+    /// 运行时覆盖切到 BypassPermissions（Permission 层 AllowAll；Layer 0 安全不变量不受影响）。
+    /// 只设运行时覆盖、不写配置——重启后恢复持久档位。
+    /// BypassPermissions 属于 WorkingModeBridge 的 CLI 高级档保护集，模式切换不会静默覆盖它。
+    /// </summary>
+    private void WireSessionPermissionEscalation(OneCodeToplevel toplevel)
+    {
+        toplevel.ConfigureSessionPermissionEscalation(() =>
+        {
+            permissionModes.SetCurrentMode(PermissionMode.BypassPermissions);
+            logger.LogInformation(
+                "Session-scoped allow-all enabled from the approval prompt (BypassPermissions runtime override, not persisted)");
         });
     }
 

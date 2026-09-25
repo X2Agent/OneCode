@@ -4,7 +4,6 @@ namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
 /// Observes orchestration events and merges FileChanged into a FileChange list.
-/// Extracted from <see cref="TeamOrchestrationService"/> so the facade only wires sinks.
 /// Same-file edits (possibly from different members) merge diffs and Contributors.
 /// </summary>
 internal static class TeamFileChangeObserver

@@ -4,7 +4,7 @@ using OneCode.Core.Coordinator;
 namespace OneCode.App.Services.Coordinator;
 
 /// <summary>
-/// W3-A: TaskGraph progress mutations extracted from TeamRunApplicationService.
+/// TeamRun 任务图的进度变更。
 /// </summary>
 internal sealed class TeamTaskProgress(
     ITeamRunStore store,

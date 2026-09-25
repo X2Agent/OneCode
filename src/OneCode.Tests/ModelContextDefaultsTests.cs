@@ -51,8 +51,42 @@ public sealed class ModelContextDefaultsTests
             "快照未命中的模型应走默认值");
     }
 
-    // ModelCatalog 磁盘缓存加载
+    // 输出预留解析：本地小窗口收敛到窗口的 1/4，窗口充足时与固定预留一致。
 
+    [Theory]
+    [InlineData(1_000_000, 8_192)]
+    [InlineData(32_768, 8_192)]
+    [InlineData(8_192, 2_048)]
+    [InlineData(4_096, 1_024)]
+    [InlineData(3, 1)]
+    public void ResolveOutputReservation_CapsToQuarterOfWindow(int contextWindow, int expected)
+    {
+        ModelContextDefaults.ResolveOutputReservation(contextWindow).Should().Be(expected);
+    }
+
+    /// <summary>反证：预留必须严格小于窗口，否则装配会被严格校验拒绝（0 阈值会让压缩永不触发）。</summary>
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(8_192)]
+    public void ResolveOutputReservation_AlwaysLeavesInputBudget(int contextWindow)
+    {
+        var reservation = ModelContextDefaults.ResolveOutputReservation(contextWindow);
+
+        reservation.Should().BeGreaterThan(0);
+        reservation.Should().BeLessThan(contextWindow);
+    }
+
+    /// <summary>窗口未知（≤ 0）时无从收敛，返回期望值本身，由调用方的严格校验兜住非法配置。</summary>
+    [Fact]
+    public void ResolveOutputReservation_UnknownWindow_ReturnsDesired()
+    {
+        ModelContextDefaults.ResolveOutputReservation(0).Should().Be(8_192);
+        ModelContextDefaults.ResolveOutputReservation(-1, desired: 4_096).Should().Be(4_096);
+    }
+
+    // ModelCatalog 磁盘缓存加载
     [Fact]
     public void ModelCatalog_GetContextWindow_PreciseMatch()
     {

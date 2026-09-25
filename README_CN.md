@@ -1,6 +1,6 @@
 # OneCode .NET — 生产级 CLI AI 编程助手
 
-> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.21.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
+> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.22.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
 
 > **免责声明**: 本仓库内容仅用于技术研究和科研爱好者交流学习参考，**严禁任何个人、机构及组织将其用于商业用途、盈利性活动、非法用途及其他未经授权的场景。** 若内容涉及侵犯您的合法权益、知识产权或存在其他侵权问题，请及时联系我们，我们将第一时间核实并予以删除处理。
 
@@ -37,7 +37,7 @@
 | 异步模型 | Task + async/await |
 | 包管理 | NuGet（Central Package Management，版本统一由 `src/Directory.Packages.props` 固定） |
 | 测试框架 | xUnit v3 + NSubstitute + FluentAssertions |
-| Agent 框架 | MAF 1.21.0 (HarnessAgent + 中间件管道) |
+| Agent 框架 | MAF 1.22.0 (HarnessAgent + 中间件管道) |
 | 发布方式 | .NET 自包含单文件 |
 
 > **已知限制**：
@@ -367,13 +367,18 @@ HarnessAgent
 | 模式 | 行为 |
 |------|------|
 | Default | 每次危险操作都询问用户 |
-| Plan | 规划模式，只读不执行 |
+| Plan | 规划模式，只读不执行（PLAN 工作模式自动派生） |
 | Auto | 自动模式（配合 Yolo 分类器） |
 | AcceptEdits | 自动批准文件编辑 |
-| BypassPermissions | 跳过所有权限检查 |
+| BypassPermissions | 跳过所有权限检查（Layer 0 安全不变量仍生效） |
 | DontAsk | 不询问，直接拒绝危险操作 |
 | GoalAuto | GOAL 模式自动派生：自主执行不中断，危险 Shell 直接 Deny |
 | Team | TEAM 模式自动派生：多 Agent 协作，危险命令走事件审批 |
+
+> Plan / GoalAuto / Team 由对应工作模式经 `WorkingModeBridge` 自动派生，`/permissions` 不接受这三个值
+> （会造成权限轴与模式轴不一致的半状态）——切换工作模式用 Tab / Alt+1..4。
+> **会话级一次性配置**：`/permissions bypass --session` 让本次对话自动执行所有操作而不写配置文件；
+> 审批弹窗中也可直接选「本次对话全部允许」。两者都不影响 Layer 0 安全不变量（危险命令 / 敏感路径 / 符号链接越狱）。
 
 **12 层渐进式安全带机制**：核心循环 → 工具调度 → 计划 → 子代理 → 按需知识 → 上下文压缩 → 持久化任务 → 后台任务 → 代理团队 → 团队协议 → 自主代理 → 工作树隔离。
 
@@ -471,11 +476,11 @@ HarnessAgent
 
 ## 斜杠命令
 
-44 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
+45 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
 
-### Builtin 类别命令（22 个）
+### Builtin 类别命令（23 个）
 
-`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/team` `/think` `/upgrade` `/version`
+`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/loop` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/team` `/think` `/upgrade` `/version`
 
 ### Session 类别命令（11 个）
 
@@ -524,9 +529,9 @@ HarnessAgent
 
 | 文档 | 说明 |
 |------|------|
-| [docs/commands.md](docs/commands.md) | 全部 44 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
+| [docs/commands.md](docs/commands.md) | 全部 45 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
 | [docs/settings.md](docs/settings.md) | `settings.json` 全部合法配置项、默认值、优先级与环境变量说明 |
-| [docs/skills.md](docs/skills.md) | 9 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
+| [docs/skills.md](docs/skills.md) | 8 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
 
 ---
 

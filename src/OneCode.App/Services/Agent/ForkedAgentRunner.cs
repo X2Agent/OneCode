@@ -12,10 +12,12 @@ namespace OneCode.App.Services.Agent;
 /// <see cref="PipelineProfile"/> (tool allowlists, Explore/Plan read-only, TaskService via Worker).
 /// </summary>
 /// <remarks>
-/// W6 (plan §16): MAF <c>BackgroundAgentsProvider</c> is a different control plane — it injects
-/// parent-LLM tools (StartTask/Wait/GetResults) over pre-registered named agents. It does <b>not</b>
-/// replace this runner. Do not mount BackgroundAgents on the default Full path alongside AgentTool
-/// (dual dispatch). Keep Harness BackgroundAgents unset.
+/// 与 MAF <c>BackgroundAgentsProvider</c> 的边界已固化为决策记录
+/// [子代理派工边界](../../../docs/adr/0011-background-agents-delegation-boundary.md)：
+/// BackgroundAgents 是另一个控制面——给父 Agent 注入模型侧工具（StartTask/Wait/GetResults），
+/// 不起子代理的决定权归父 LLM。它**不**替代本 runner，也不用作其底层实现
+/// （provider 无编程式起任务入口，公共面只有 GetIncompleteTasks / ReleaseSessionAsync）。
+/// 禁止在默认 Full 路径挂 BackgroundAgents（派工双挂 + 产品闸丢失 + 审批不转发）。
 /// </remarks>
 public sealed class ForkedAgentRunner : IAgentRunner
 {
@@ -114,7 +116,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
                 AllowedTools = parameters.AllowedTools,
             });
 
-            var pipeline = AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
+            var pipeline = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
             {
                 ChatClient = _chatClient,
                 Name = parameters.ForkLabel ?? "sub-agent",

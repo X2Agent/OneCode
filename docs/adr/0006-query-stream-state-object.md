@@ -18,7 +18,7 @@
 ## 后果
 
 - 消化语义可单测：`StreamingSessionTests` 直接对 `Digest` 做表驱动验证，无需网络或 TUI。
-- 门面稳定：`ChatService` 的公共面不随编排内部重构（如后续 partial 拆分、`BuildPreambleRunner`/`ToolAssembler`/`HookDispatcher`/`TranscriptPersistence` 等辅助类的引入）而变化。
+- 门面稳定：`ChatService` 的公共面不随编排内部重构（如已引入的 `BuildPreambleRunner`/`ToolAssembler`/`HookDispatcher`/`TranscriptPersistence` 等辅助类与 partial 拆分）而变化。
 - 组合面收敛：引擎不注册 DI，避免了 8+ 参数服务注册面扩大；新增协作组件均遵循同一组合根模式在引擎内组装。
 
 ## 引用

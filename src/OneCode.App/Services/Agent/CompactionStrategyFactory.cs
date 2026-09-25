@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services.Compact;
 using OneCode.Core.Models;
 using OneCode.Infrastructure.Agent;
+using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Services.Agent;
 
@@ -43,8 +44,11 @@ public sealed class CompactionStrategyFactory
             ? null
             : _modelManager.Resolve(modelId);
 
-        var maxContextWindow = modelInfo?.ContextWindow ?? ModelContextDefaults.Resolve(modelId);
-        var maxOutputTokens = modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 8192;
+        var maxContextWindow = ResolveContextWindow(modelInfo, modelId);
+        var maxOutputTokens = ResolveOutputReservation(
+            modelInfo,
+            maxContextWindow,
+            modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 8192);
         var summarizationPrompt = await _compactPromptBuilder
             .GetSummarizationPromptAsync(ct).ConfigureAwait(false);
         var compactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(
@@ -65,13 +69,35 @@ public sealed class CompactionStrategyFactory
             ? null
             : _modelManager.Resolve(modelId);
 
-        var maxContextWindow = modelInfo?.ContextWindow ?? ModelContextDefaults.Resolve(modelId);
-        var maxOutputTokens = maxOutputTokensOverride
-            ?? (modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 4096);
+        var maxContextWindow = ResolveContextWindow(modelInfo, modelId);
+        var maxOutputTokens = ResolveOutputReservation(
+            modelInfo,
+            maxContextWindow,
+            maxOutputTokensOverride ?? (modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 4096));
         var summarizationPrompt = await _compactPromptBuilder
             .GetSummarizationPromptAsync(ct).ConfigureAwait(false);
 
         return CompactionPipelineBuilder.BuildForWorkerAgent(
             _chatClient, maxContextWindow, maxOutputTokens, summarizationPrompt);
     }
+
+    /// <summary>
+    /// 解析上下文窗口。<c>0</c> 不是「未配置」——必须与 <c>TokenBudget.GetMaxContextTokens</c>
+    /// 同款守卫式读取，否则 0 会被当作有效窗口传给严格校验的 <c>ResolveInputBudget</c>，
+    /// 在管道构建期直接抛错。
+    /// </summary>
+    private static int ResolveContextWindow(ModelInfo? modelInfo, string? modelId)
+        => modelInfo is { ContextWindow: > 0 } mi ? mi.ContextWindow : ModelContextDefaults.Resolve(modelId);
+
+    /// <summary>
+    /// 解析输出预留。<b>仅本地 Ollama</b> 收敛到窗口的 1/4——本地小窗口（4K~8K）装不下固定预留；
+    /// 其余 provider 保持既有取值，本次改动不触碰云端模型的预算。
+    /// </summary>
+    private static int ResolveOutputReservation(ModelInfo? modelInfo, int contextWindow, int desired)
+        => IsLocalOllama(modelInfo)
+            ? ModelContextDefaults.ResolveOutputReservation(contextWindow, desired)
+            : desired;
+
+    private static bool IsLocalOllama(ModelInfo? modelInfo) => string.Equals(
+        modelInfo?.ProviderId, CoreConstants.ModelProviders.Ollama, StringComparison.OrdinalIgnoreCase);
 }

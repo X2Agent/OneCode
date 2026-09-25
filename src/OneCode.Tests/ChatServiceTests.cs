@@ -864,7 +864,7 @@ public sealed class ChatServiceTests
                 Substitute.For<IPermissionChecker>(),
                 new TokenLedger()),
             new CompactionStrategyFactory(chatClient, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
-            new AgentSessionStore(sessionManager, NullLoggerFactory.Instance.CreateLogger<AgentSessionStore>()),
+            new AgentSessionPersistence(sessionManager, sessionManager, NullLoggerFactory.Instance.CreateLogger<AgentSessionPersistence>()),
             chatClient,
             NullLoggerFactory.Instance,
             serviceProvider,

@@ -45,9 +45,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     private readonly GoalSubGoalLoop _loop;
     private readonly GoalSubGoalJudge _judge;
 
-    /// <summary>Backward-compatible alias of <see cref="GoalLoopDefaults.MaxAttemptsPerSubGoal"/>.</summary>
-    public const int MaxAttemptsPerSubGoal = GoalLoopDefaults.MaxAttemptsPerSubGoal;
-
     public GoalSubGoalExecutor(
         IMainAgentRunner mainAgentRunner,
         IChatClient chatClient,

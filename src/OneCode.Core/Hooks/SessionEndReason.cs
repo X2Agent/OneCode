@@ -1,8 +1,9 @@
 namespace OneCode.Core.Hooks;
 
 /// <summary>
-/// SessionEnd 事件的 matcher 值（reason 取值集）。
-/// 与 <see cref="HookEventMetadata"/> 中 SessionEnd 条目及 docs/hooks.md 事件表保持同步。
+/// 会话关闭原因（产品状态值，仅供日志与宿主收尾使用）。
+/// SessionEnd 已不再是 Hook 拦截点（见 <see cref="HookInterceptionPoints"/>），
+/// 本类型不再作为 matcher 值消费。
 /// </summary>
 public static class SessionEndReason
 {

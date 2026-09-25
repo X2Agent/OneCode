@@ -14,16 +14,19 @@ namespace OneCode.Infrastructure.Middleware;
 ///   <item>工具调用计数 + MaxToolCalls 上限（超限时返回当前调用错误结果）</item>
 ///   <item>IsToolAllowed 白名单过滤</item>
 ///   <item>权限检查（Allow/Deny/Ask 路由）</item>
-///   <item>审批路由：Ask → MAF 审批协议（标记工具产生审批请求，绝不静默执行；无通道时 fail-safe Deny）</item>
+///   <item>审批路由：Ask → MAF 审批协议（标记工具产生审批请求，绝不静默执行；无通道或缺标记时 fail-safe 拒绝）</item>
 /// </list>
 /// </summary>
 public static class PermissionAndLimitMiddleware
 {
     /// <summary>创建 MAF 中间件委托。</summary>
+    /// <param name="options">管道选项，提供权限模式、规则来源与工作目录。</param>
+    /// <param name="metrics">管道指标，用于工具调用计数。</param>
+    /// <param name="logger">可选日志：记录审批边界缺失等结构性故障。</param>
     public static Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
             CancellationToken, ValueTask<object?>>
-        Create(AgentPipelineOptions options, AgentPipelineMetrics metrics)
+        Create(AgentPipelineOptions options, AgentPipelineMetrics metrics, ILogger? logger = null)
     {
         // 预分配空集合，避免每次工具调用重复分配（options 字段为 null 时使用）
         var rulesBySource = options.RulesBySource ?? new Dictionary<string, PermissionRuleGroup>();
@@ -57,6 +60,7 @@ public static class PermissionAndLimitMiddleware
                 additionalWorkingDirectories,
                 ctx,
                 ExecuteWithLimitAsync,
+                logger,
                 ct).ConfigureAwait(false);
         };
     }
@@ -71,6 +75,7 @@ public static class PermissionAndLimitMiddleware
         IReadOnlyDictionary<string, AdditionalWorkingDirectory> additionalWorkingDirectories,
         FunctionInvocationContext ctx,
         Func<FunctionInvocationContext, CancellationToken, ValueTask<object>> next,
+        ILogger? logger,
         CancellationToken ct)
     {
         if (options.PermissionChecker is null || ctx.Function is null)
@@ -110,7 +115,22 @@ public static class PermissionAndLimitMiddleware
         if (perm.Decision == PermissionDecision.Ask)
         {
             if (options.EnableToolApproval)
-                return await next(ctx, ct).ConfigureAwait(false);
+            {
+                // 审批协议只对带标记的工具生效：FICC 仅把 ApprovalRequiredAIFunction 的调用换成审批请求，
+                // 其余调用照常执行。这里放行而未标记等于把 Ask 静默降级为 Allow（fail-open），
+                // 因此缺标记时 fail-closed：拒绝执行并记录可诊断日志。
+                // 标记有两个施加点：构建期（产品工具目录）与请求期（provider 注入的工具）。
+                if (ctx.Function.GetService<ApprovalRequiredAIFunction>() is not null)
+                    return await next(ctx, ct).ConfigureAwait(false);
+
+                logger?.LogWarning(
+                    "Tool '{ToolName}' got an Ask decision on an approval-enabled path but carries no ApprovalRequiredAIFunction marker; refusing to execute it.",
+                    ctx.Function.Name);
+
+                return ToolResult.Error(
+                    $"Tool '{ctx.Function.Name}' requires approval but is not part of the approval protocol.",
+                    "Fix the tool's metadata so that an approval boundary is applied to it.");
+            }
 
             // fail-safe Deny：无审批通道时仅返回当前调用的拒绝结果。
             return ToolResult.Error(

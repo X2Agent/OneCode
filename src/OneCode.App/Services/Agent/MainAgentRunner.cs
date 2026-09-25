@@ -22,21 +22,23 @@ public partial class MainAgentRunner : IMainAgentRunner
     private readonly AgentContextPipeline _contextPipeline;
     private readonly AgentPipelineAssembly _pipelineAssembly;
     private readonly CompactionStrategyFactory _compactionBuilder;
-    private readonly AgentSessionStore _sessionStore;
+    private readonly AgentSessionPersistence _sessionStore;
     private readonly IToolProtocolValidator _toolProtocolValidator;
     private readonly IVerificationProvider? _verificationProvider;
+    private readonly TodoProjectionService? _todoProjection;
 
     public MainAgentRunner(
         AgentContextPipeline contextPipeline,
         AgentPipelineAssembly pipelineAssembly,
         CompactionStrategyFactory compactionBuilder,
-        AgentSessionStore sessionStore,
+        AgentSessionPersistence sessionStore,
         IChatClient chatClient,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider,
         Core.Tools.ToolMetadataRegistry toolMetadata,
         IToolProtocolValidator? toolProtocolValidator = null,
-        IVerificationProvider? verificationProvider = null)
+        IVerificationProvider? verificationProvider = null,
+        TodoProjectionService? todoProjection = null)
     {
         _contextPipeline = contextPipeline;
         _pipelineAssembly = pipelineAssembly;
@@ -49,6 +51,7 @@ public partial class MainAgentRunner : IMainAgentRunner
         _toolMetadata = toolMetadata;
         _toolProtocolValidator = toolProtocolValidator ?? new ToolProtocolValidator();
         _verificationProvider = verificationProvider;
+        _todoProjection = todoProjection;
     }
 
     /// <summary>
@@ -163,16 +166,17 @@ public partial class MainAgentRunner : IMainAgentRunner
                 builtAgent,
                 runOptions.ConversationId,
                 ct).ConfigureAwait(false);
-            // W5-A: Session transcript already supplied as options.Messages — do not also
-            // keep restored InMemory chat history (would double-feed multi-turn context).
-            if (runOptions.Messages is { Count: > 0 })
-            {
-                _sessionStore.ClearInMemoryChatHistoryWhenTranscriptOwnsHistory(session);
-            }
             _logger.LogDebug("MainAgentRunner session created, starting agent stream...");
 
-            // MAF owns approval binding and function-call state. The runner only bridges
-            // surfaced requests to the TUI and resumes the same session with the responses.
+            // 待办投影（初始态）：恢复的会话可能带着上一轮留下的待办——先发一次快照，
+            // 即使本轮随后被取消，TUI 也能看到清单。run 的最终快照见工具循环之后。
+            if (_todoProjection is not null)
+                await _todoProjection.PublishAsync(builtAgent, session, ct).ConfigureAwait(false);
+
+            // MAF owns approval binding and function-call state. The runner only bridges surfaced
+            // requests to the TUI and resumes the same session with the responses: ToolApprovalAgent
+            // queues excess unapproved requests, surfaces them one at a time, and executes the tools
+            // only when the host re-enters with responses.
             var currentMessages = chatMessages;
 
             while (true)
@@ -221,17 +225,18 @@ public partial class MainAgentRunner : IMainAgentRunner
                 if (approvalRequests.Count == 0)
                     break;
 
-                // MAF binds these responses to the surfaced tool calls on the next request.
-                var approvalMessages = new List<ChatMessage>();
+                // MAF binds these responses to the surfaced tool calls on the next request, and
+                // ToolApprovalAgent injects the whole batch as ONE user message
+                // (InjectCollectedResponses) — mirror that shape instead of one message per response.
+                var approvalResponses = new List<AIContent>(approvalRequests.Count);
                 foreach (var req in approvalRequests)
                 {
-                    var approvalResponse = await HandleToolApprovalAsync(
+                    approvalResponses.Add(await HandleToolApprovalAsync(
                         req,
                         runOptions.ApprovalBroker!,
-                        ct).ConfigureAwait(false);
-                    approvalMessages.Add(new ChatMessage(ChatRole.User, [approvalResponse]));
+                        ct).ConfigureAwait(false));
                 }
-                currentMessages = approvalMessages;
+                currentMessages = [new ChatMessage(ChatRole.User, approvalResponses)];
             }
 
             await _sessionStore.PersistSessionAsync(
@@ -239,6 +244,12 @@ public partial class MainAgentRunner : IMainAgentRunner
                 session,
                 runOptions.ConversationId,
                 ct).ConfigureAwait(false);
+
+            // 待办投影（最终态）：一次 run（含审批续跑的全部迭代）结束后发布权威快照。
+            // 刷新粒度是"轮"而非工具调用中间——provider 快照不做增量重建，见
+            // TodoProjectionService 注释。
+            if (_todoProjection is not null)
+                await _todoProjection.PublishAsync(builtAgent, session, ct).ConfigureAwait(false);
 
             // Final validation before commit: Build mode may provide a shared transaction
             // whose commit is deferred until the BuildRun final decision is durably persisted.

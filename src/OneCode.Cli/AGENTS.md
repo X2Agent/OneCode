@@ -27,27 +27,19 @@ public static int Main(string[] args)
    └── 实现见 CliWorkingDirectory；目录不存在/缺参时以退出码 2 终止
 
 1. Fast-path 检测（零 DI 加载）
-   └── --version / ps / logs / kill → 直接返回
+   └── --version / -v / -V（且必须是唯一参数）→ 直接返回
+   └── 实现见 CliModeDetector + FastPathDispatcher
 
-2. System.CommandLine 解析
-   └── 参数 → CliInvocation 强类型描述
-   └── --dump-system-prompt → 创建 DI 容器，组装系统 prompt 并打印后退出
-
-3. OneCodeApp 执行
-   └── REPL / auth / mcp / skills
+2. OneCodeApp 执行（默认 FullCli 路径）
+   └── OneCodeApp.Create(args) 构建 DI 容器并启动交互式 TUI（REPL）
+   └── mcp / skills / install / upgrade 等入口都是 TUI slash 命令，不是 CLI 子命令
 ```
 
 - Fast-path 检测在 DI 容器初始化之前执行，不得依赖任何服务（实现见 `CliModeDetector`）
-- `--dump-system-prompt` 需要完整 DI（PromptConfigBuilder / Memory / Context），因此在 FullCli 路径中处理，不走 Fast-path
-- `CliInvocation` 是纯数据 record，不包含逻辑
+- `CliMode` 只有 `FastPathVersion` 与 `FullCli` 两个取值；新增快路径参数必须同时改枚举、
+  `CliModeDetector.Detect` 与 `FastPathDispatcher.DispatchAsync` 三处
+- 入口参数解析是自写的（`CliWorkingDirectory.Parse` / `CliModeDetector.Detect`），不引入解析框架
 - `OneCodeApp` 负责构建 DI 容器并执行
-
-### System.CommandLine 用法
-
-- 使用 `System.CommandLine` v2 API（`RootCommand`、`Option<T>`、`Argument<T>`）
-- 命令定义在 `BuildRootCommand()` 中，保持集中管理
-- 子命令（mcp / skills / update）各自有独立的 `Build*Command()` 方法
-- 所有异步回调必须传递 `CancellationToken`
 
 ---
 

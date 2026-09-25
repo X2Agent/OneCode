@@ -126,7 +126,7 @@ public sealed class HookConfigBootstrapper
             return (new HookFileLoadReport(configDir, load.Status, 0, load.Errors), []);
 
         List<HookRegistration> registrations = [];
-        foreach (var (@event, groups) in load.Hooks)
+        foreach (var (point, groups) in load.Hooks)
         {
             foreach (var group in groups)
             {
@@ -141,17 +141,17 @@ public sealed class HookConfigBootstrapper
                     {
                         _logger.LogWarning(
                             ex,
-                            "Skipping hook with unknown type '{Type}' for event {Event} in {ConfigDir}",
+                            "Skipping hook with unknown type '{Type}' for interception point {Point} in {ConfigDir}",
                             config.Type,
-                            @event,
+                            HookInterceptionPoints.ToWireName(point),
                             configDir);
                         continue;
                     }
 
                     registrations.Add(new HookRegistration
                     {
-                        Name = $"{ConfigNamePrefix}{@event}:{hookType}:{Guid.NewGuid():N}",
-                        Event = @event,
+                        Name = $"{ConfigNamePrefix}{HookInterceptionPoints.ToWireName(point)}:{hookType}:{Guid.NewGuid():N}",
+                        Point = point,
                         Matcher = group.Matcher,
                         Priority = config.Priority ?? basePriority,
                         Once = config.Once,

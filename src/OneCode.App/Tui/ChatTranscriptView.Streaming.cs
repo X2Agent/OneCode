@@ -1,7 +1,6 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Streaming render state machine extracted from ChatTranscriptView.
 /// Manages the live streaming preview lifecycle: begin/continue/end streaming,
 /// token append with debounced rebuild, and final markdown commit.
 /// </summary>

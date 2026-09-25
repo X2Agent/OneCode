@@ -52,7 +52,7 @@ public sealed class KeybindingsCommand(KeybindingLoader keybindingLoader) : Comm
                 return args[0].ToLowerInvariant() switch
                 {
                     "list" => ListEffectiveBindings(),
-                    "open" or "edit" => await OpenInEditorAsync(keybindingsPath, schemaPath, ct),
+                    "open" => await OpenInEditorAsync(keybindingsPath, schemaPath, ct),
                     "reset" => await ResetKeybindings(keybindingsPath, schemaPath, ct),
                     _ => CommandResult.Text($"Unknown keybindings subcommand: {args[0]}\nUse: list, open, or reset")
                 };

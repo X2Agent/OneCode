@@ -7,10 +7,10 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.Infrastructure.Middleware;
 
 /// <summary>
-/// Hook 中间件：在工具执行前后触发 Pre/PostToolUse Hook。
+/// Hook 中间件：在工具执行前后触发 pre_tool_call / post_tool_call 拦截点。
 ///
-/// Pre-hook 返回 BlockingErrors 时阻止工具执行（返回 ToolResult.Error）。
-/// Post-hook 在工具执行完成后触发，不消费 result（仅做通知/审计）。
+/// pre 拦截点返回 deny（BlockingErrors）时阻止工具执行（返回 ToolResult.Error）。
+/// post 拦截点在工具执行完成后触发，不消费 result（仅做通知/审计）。
 ///
 /// 异常处理策略：
 /// 1. Pre-hook 异常 — fail-closed。异常冒泡到 MAF runtime 会导致整轮 agent run 失败，
@@ -38,7 +38,7 @@ public static class HookMiddleware
             {
                 var prePayload = new HookPayload
                 {
-                    Event = HookEvent.PreToolUse,
+                    Point = HookInterceptionPoint.PreToolCall,
                     ToolName = ctx.Function.Name,
                     ToolInput = ctx.Arguments is not null
                         ? JsonSerializer.SerializeToElement(ctx.Arguments)
@@ -61,7 +61,7 @@ public static class HookMiddleware
                 catch (Exception ex)
                 {
                     // Pre-hook 抛异常 → fail-closed，但只失败当前调用。
-                    logger.LogError(ex, "PreToolUse hook threw for tool {ToolName}", ctx.Function.Name);
+                    logger.LogError(ex, "pre_tool_call hook threw for tool {ToolName}", ctx.Function.Name);
                     return ToolResult.Error(
                         $"Tool '{ctx.Function.Name}' blocked: pre-hook execution failed: {ex.Message}");
                 }
@@ -85,7 +85,7 @@ public static class HookMiddleware
 
                 var postPayload = new HookPayload
                 {
-                    Event = HookEvent.PostToolUse,
+                    Point = HookInterceptionPoint.PostToolCall,
                     ToolName = ctx.Function.Name,
                     ToolInput = ctx.Arguments is not null
                         ? JsonSerializer.SerializeToElement(ctx.Arguments)
@@ -111,7 +111,7 @@ public static class HookMiddleware
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex,
-                        "PostToolUse hook threw for tool {ToolName}; tool result preserved",
+                        "post_tool_call hook threw for tool {ToolName}; tool result preserved",
                         ctx.Function.Name);
                 }
             }

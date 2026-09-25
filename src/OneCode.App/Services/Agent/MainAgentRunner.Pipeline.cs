@@ -31,7 +31,7 @@ public partial class MainAgentRunner
         var pipelineOptions = _pipelineAssembly.BuildMainOptions(
             options, transaction, cwd, options.ModelId, providerId);
 
-        var handle = AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
+        var handle = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
             ChatClient = new MaxOutputTokensDecorator(_chatClient),
             Name = "main-agent",
@@ -40,6 +40,10 @@ public partial class MainAgentRunner
             ServiceProvider = _serviceProvider,
             ToolMetadata = _toolMetadata,
             CompactionStrategy = compactionStrategy,
+            // 多轮历史经 MAF chat history 契约（桥接会话转录）提供，不由宿主注入请求消息。
+            ChatHistoryProvider = options.ConversationId is { } conversationId
+                ? _sessionStore.CreateChatHistoryProvider(conversationId)
+                : null,
             HarnessInstructions = options.HarnessInstructions,
             AgentContextProviders = contextProviders,
             PipelineOptions = pipelineOptions,

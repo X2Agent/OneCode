@@ -9,7 +9,7 @@
 - [1. 概述](#1-概述)
 - [2. 设计思路](#2-设计思路)
 - [3. 模块总览](#3-模块总览)
-- [4. 事件清单](#4-事件清单)
+- [4. 拦截点清单与边界](#4-拦截点清单与边界)
 - [5. 执行器类型](#5-执行器类型)
 - [6. 配置文件](#6-配置文件)
 - [7. 使用介绍](#7-使用介绍)
@@ -24,16 +24,19 @@
 
 ## 1. 概述
 
-OneCode 的 Hook 模块是核心扩展机制，允许用户在 Agent 生命周期的关键节点注入自定义逻辑，用于 CI/CD 集成、安全策略、自动化通知、审计日志等场景。
+OneCode 的 Hook 模块是核心扩展机制，允许用户在 Agent 执行的关键**拦截点**注入自定义逻辑，用于 CI/CD 集成、安全策略、自动化通知、审计日志等场景。
 
-模块按"事件 × 执行器"两个维度组织：
+模块按"拦截点 × 执行器"两个维度组织：
 
 | 维度 | 含义 | 取值 |
 |------|------|------|
-| **事件（HookEvent）** | 何时触发 | 11 种生命周期事件（PreToolUse / PostToolUse / Notification / UserPromptSubmit / SessionStart / Stop / StopFailure / PreCompact / PostCompact / SessionEnd / GoalStageInvoke） |
+| **拦截点（HookInterceptionPoint）** | 何时触发 | 6 种拦截点（input / pre_model_call / post_model_call / pre_tool_call / post_tool_call / output） |
 | **执行器（HookType）** | 如何执行 | 3 种执行器（Command / Notification / Http） |
 
 Hook 系统通过 `~/.onecode/hooks.json` 与 `<cwd>/.onecode/hooks.json` 声明式配置，无需修改代码即可扩展。
+
+> **边界**：Hook 是**控制平面**（策略裁决 / 阻断 / 改写），不是遥测平面。会话生命周期、Stop 纠偏、上下文压缩、
+> Goal 编排、权限审批通知与异常收尾由 OneCode 宿主负责，**不属于 Hook 拦截范围**——详见 [§4 边界](#4-拦截点清单与边界)。
 
 ---
 
@@ -43,10 +46,10 @@ Hook 系统通过 `~/.onecode/hooks.json` 与 `<cwd>/.onecode/hooks.json` 声明
 
 1. **声明式配置**：通过 `hooks.json` 描述钩子，无需重新编译或修改源码
 2. **执行器策略模式**：每种 `HookType` 对应一个 `IHookExecutor` 实现，新增执行器只需实现接口 + DI 注册
-3. **事件 × Matcher 二维过滤**：事件决定何时触发，matcher 决定是否匹配（如 `tool_name == "Bash"`）
-4. **优先级串行执行**：同一事件下多个 hook 按 priority 升序串行执行，结果聚合
-5. **安全优先**：工作区不受信任或策略禁用时一律不触发；Pre-hook 异常 fail-closed
-6. **可观测可调试**：`/hooks` 命令实时展示注册项、策略状态与事件清单
+3. **拦截点 × Matcher 二维过滤**：拦截点决定何时触发，matcher 决定是否匹配（如 `tool_name == "Bash"`）
+4. **优先级串行执行**：同一拦截点下多个 hook 按 priority 升序串行执行，结果聚合
+5. **安全优先**：工作区不受信任或策略禁用时一律不触发；pre 类拦截点异常 fail-closed
+6. **可观测可调试**：`/hooks` 命令实时展示注册项、策略状态与拦截点清单
 
 ### 2.2 Hook 的生命周期
 
@@ -59,14 +62,14 @@ OneCode 运行时
   │
   ├─ 配置变更 ──────▶ HookConfigHotReloader（FileSystemWatcher + 500ms 防抖）
   │                   HookConfigBootstrapper.Build 快照 → HookRegistry.ReplaceAll 原子整体交换
-  │                   （解析失败 / 异常时保留上一次有效配置）
+  │                   （解析失败 / 异常时保留上一次有效配置；代次 Generation +1）
   │
-  ├─ 生命周期事件 ──▶ IHookExecutionService.FireAsync(payload)
+  ├─ 拦截点 ────────▶ IHookExecutionService.FireAsync(payload)
   │                   │
   │                   ├─ 策略前置检查（工作区信任）
-  │                   ├─ matcher 过滤（event + matcherValue 两维）
+  │                   ├─ matcher 过滤（拦截点 + matcherValue 两维）
   │                   ├─ priority 升序排序
-  │                   ├─ 串行执行 IHookExecutor
+  │                   ├─ 串行执行 IHookExecutor（全部匹配项都执行）
   │                   ├─ 结果聚合（HookResultAggregator）
   │                   └─ 清理 once hook
   │
@@ -75,14 +78,15 @@ OneCode 运行时
 
 ### 2.3 与 MAF 管道的集成
 
-`PreToolUse` / `PostToolUse` 两个事件通过 `HookMiddleware` 接入 MAF（Microsoft.Agents.AI）函数调用管道：
+`pre_tool_call` / `post_tool_call` 两个拦截点通过 `HookMiddleware` 接入 MAF（Microsoft.Agents.AI）函数调用管道：
 
-| 事件 | 集成点 | 行为 |
+| 拦截点 | 集成点 | 行为 |
 |------|--------|------|
-| `PreToolUse` | `HookMiddleware`（在 `AgentPipelineBuilder` 中 `.Use()` 注册） | 阻断时返回 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性）；异常 fail-closed |
-| `PostToolUse` | 同上（next 之后） | 不消费 result，仅做通知/审计；异常 fail-soft |
+| `pre_model_call` / `post_model_call` | `ModelCallHookDecorator`（`OneCode.Infrastructure/Ai/`，包装 `ChatClient`，位于 `FunctionInvokingChatClient` 下方） | 纯审计：流式交付零缓冲（update 逐条透传，post 审计以旁路副本收集）；无活跃 hook 时跳过 fire |
+| `pre_tool_call` | `HookMiddleware`（在 `AgentPipelineBuilder` 中 `.Use()` 注册） | 阻断时返回 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性）；异常 fail-closed |
+| `post_tool_call` | 同上（next 之后） | 不消费 result，仅做通知/审计；异常 fail-soft |
 
-其他事件（`SessionStart` / `Stop` / `PreCompact` 等）由对应业务模块直接调用 `IHookExecutionService.FireAsync` 触发。
+其余拦截点由 `QueryStreamEngine` 在外部输入（`input`）与最终响应交付（`output`）边界触发。
 
 ---
 
@@ -104,10 +108,10 @@ OneCode 运行时
                                                 ▼
                          ┌─────────────────────────────────────────────┐
                          │             HookRegistry                     │
-                         │   按 (Event, Matcher) 二维索引               │
-                         │   O(1) 事件查找 + Glob 模式匹配              │
+                         │   按 (Point, Matcher) 二维索引              │
+                         │   O(1) 拦截点查找 + Glob 模式匹配           │
                          └──────────────────────┬──────────────────────┘
-                                                │ GetMatchesForEvent
+                                                │ GetMatchesForPoint
                                                 ▼
   ┌──────────────────┐                ┌─────────────────────────────────┐
   │ HookPolicyService│◀──策略检查──── │     HookExecutionService        │
@@ -139,16 +143,15 @@ OneCode 运行时
 
 | 类型 | 职责 |
 |------|------|
-| `HookEvent` | 11 种生命周期事件枚举 |
+| `HookInterceptionPoint` / `HookInterceptionPoints` | 6 + 2 个拦截点枚举与协议词汇（线格式名、matcher 字段、开放范围、旧事件迁移映射） |
 | `HookType` | 3 种执行器类型枚举（Command / Notification / Http） |
 | `HookPayload` | 钩子数据载荷，传递给执行器的完整上下文 |
-| `HookRegistration` | 钩子注册项（Name / Event / Matcher / Priority / Once / ExecutorType / TimeoutMs / Config） |
+| `HookRegistration` | 钩子注册项（Name / Point / Matcher / Priority / Once / ExecutorType / TimeoutMs / Config） |
 | `HookConfig` | 单个 Hook 的配置（公共字段 + 类型特有字段） |
 | `HookMatcherGroup` | 匹配器分组：一个 matcher pattern 下的一组 hook 配置 |
 | `HookResult` / `AggregatedHookResult` | 执行结果 / 聚合结果 |
 | `HookResultAggregator` | 多个 HookResult 合并为单个 AggregatedHookResult |
-| `HookEventMetadata` / `HookEventMetadataRegistry` | 事件元数据与 matcher 语义的权威声明（用于 UI 展示和文档生成） |
-| `HookTriggers` | 压缩类事件触发方式常量（manual / auto，同时作 matcher 值） |
+| `HookPointMetadata` / `HookPointMetadataRegistry` | 拦截点元数据与 matcher 语义的权威声明（用于 UI 展示和文档生成） |
 | `HookTypeParser` | 字符串 → HookType 解析（单一事实源） |
 | `IHookExecutor` | 执行器接口，按 HookType 分发 |
 | `IHookExecutionService` | 执行服务契约（Core 层接口，App 层实现） |
@@ -158,15 +161,14 @@ OneCode 运行时
 
 | 类型 | 职责 |
 |------|------|
-| `HookRegistry` | 钩子注册表，按 (Event, Matcher) 二维索引；`ReplaceAll` 支持热重载原子整体替换 |
+| `HookRegistry` | 钩子注册表，按 (Point, Matcher) 二维索引；`ReplaceAll` 支持热重载原子整体替换并递增 `Generation` |
 | `HookExecutionService` | 执行服务实现，策略前置 + 过滤 + 排序 + 串行执行 + 聚合 |
 | `HookPolicyService` | 策略控制（工作区信任检查：当前目录是否在 `trustedDirectories` 中） |
 | `GlobHookMatcher` | Glob 风格通配符匹配器 |
-| `HookSettingsLoader` | 从独立 `hooks.json` 加载配置（matcher-group 格式；未知事件名警告、JSON 错误含行号） |
+| `HookSettingsLoader` | 从独立 `hooks.json` 加载配置（matcher-group 格式；已迁移 / 不再支持的节点名给出诊断、JSON 错误含行号） |
 | `HookConfigBootstrapper` | 启动加载器 + 快照构建器：`Bootstrap`（启动注册）与 `Build`（纯读取快照，热重载共用），并把各文件加载状态写入诊断 |
 | `HookConfigHotReloader` | 配置热重载器：监视 hooks.json / notification-providers.json 变更，防抖后整体重建注册表（last-good 保护），Dispose 停止监视 |
-| `HookFileLoadDiagnostics`（含 `HookLoadDiagnostics`） | 进程级最近一次 Bootstrap 的各文件加载状态，`/hooks` 概览展示 |
-| `HookStopFailureClassifier` | 异常 → StopFailure 类别映射器（rate_limit / auth_failed / billing / invalid_request / server_error / max_output_tokens / unknown） |
+| `HookLoadDiagnostics`（`HookFileLoadDiagnostics.cs`） | 进程级最近一次 Bootstrap 的各文件加载状态，`/hooks` 概览展示 |
 | `CommandHookExecutor` | Command 类型执行器（CliWrap + stdin JSON + exit code 语义） |
 | `NotificationHookExecutor` | Notification 类型执行器（经 `NotificationProviderRegistry` 渠道解析） |
 | `HttpHookExecutor` | Http 类型执行器（IHttpClientFactory + 模板插值） |
@@ -176,53 +178,70 @@ OneCode 运行时
 | `DeclarativeNotificationProvider` | 声明式渠道唯一引擎类（消息渲染 → 签名 → 请求 → 成功判定） |
 | `FeishuNotificationProvider` | 飞书机器人通知 Provider（编译型） |
 | `WeChatWorkNotificationProvider` | 企业微信群机器人通知 Provider（编译型） |
+| `HookTemplateRenderer` | `{{Field}}` 模板插值渲染器（支持 8 个字段，未知字段保持原样） |
+| `HookSecretExpander` | 敏感字段展开器（`dpapi:` → DPAPI 解密；否则 `${ENV_VAR}` 环境变量） |
+| `HostStopSessionCloseService` | 宿主停止时兜底关闭前台会话的 `IHostedService`（随 `AddHookServices` 注册） |
 | `HookSerializerContext` | JSON Source Generator（高频序列化性能） |
 
 ### 3.3 集成点（`OneCode.Infrastructure/Middleware/`）
 
 | 类型 | 职责 |
 |------|------|
-| `HookMiddleware` | MAF 函数调用管道中间件，触发 PreToolUse / PostToolUse |
+| `HookMiddleware` | MAF 函数调用管道中间件，触发 pre_tool_call / post_tool_call |
 
 业务侧触发点：
 
-| 模块 | 触发的事件 |
+| 模块 | 触发的拦截点 |
 |------|-----------|
-| `SessionManager` | `SessionStart`（startup / resume / switch）、`SessionEnd`（close / prompt_input_exit / other） |
-| `QueryStreamEngine` | `UserPromptSubmit`（进运行循环前，可阻断）、`Stop`（终因作 matcher，exit code 2 触发纠偏续跑）、`StopFailure`（异常类别作 matcher） |
-| `ApprovalBroker.ForQuery` | `Notification`（permission_prompt，TUI 审批请求下发前触发） |
-| `GoalDecomposer` | `GoalStageInvoke`（goal-decomposer / goal-sub-decomposer / goal-replanner） |
-| `CompactService` / `PromptTooLongRecoveryRunMiddleware` | `PreCompact`、`PostCompact`（manual = /compact 命令；auto = 自动压缩与恢复链） |
+| `QueryStreamEngine` | `input`（进运行循环前，可阻断）、`output`（最终响应交付前，可阻断） |
+| `ModelCallHookDecorator`（Infrastructure/Ai，包装 ChatClient） | `pre_model_call` / `post_model_call`（模型调用边界，纯审计） |
+| `HookMiddleware`（Infrastructure） | `pre_tool_call` / `post_tool_call`（MAF 函数调用管道） |
+
+> **不再由 Hook 覆盖的产品能力**（保留宿主实现，非拦截点）：会话启动/结束（`SessionManager`）、
+> Stop 纠偏与预算终结（`QueryStreamEngine`）、上下文压缩（`CompactService` / `PromptTooLongRecoveryRunMiddleware`）、
+> Goal 编排（`GoalDecomposer`）、权限审批通知（`ApprovalBroker`）、异常分类告警（可观测性平面）。
+> 这些路径在 `hooks.json` 中写旧事件名会得到明确诊断，不会被静默忽略。
 
 ---
 
-## 4. 事件清单
+## 4. 拦截点清单与边界
 
-11 种生命周期事件，每种事件有对应的 matcher 字段和可选值（权威声明见 `HookEventMetadataRegistry`）：
+6 种拦截点，每种有对应的 matcher 字段和可选值（权威声明见 `HookPointMetadataRegistry`）：
 
-| 事件 | 触发时机 | matcher 字段 | 可选值 | 可阻断 |
+| 拦截点 | 触发时机 | matcher 字段 | 可选值 | 可阻断 |
 |------|---------|-------------|--------|--------|
-| `PreToolUse` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / TodoWrite / `mcp__*`（MCP 工具名为 `mcp__{server}__{tool}`）等 | ✅ exit code 2 |
-| `PostToolUse` | 工具调用成功执行后 | `tool_name`（glob） | 同上 | ❌ |
-| `Notification` | 权限审批挂起时（TUI 审批请求下发前） | `notification_type` | permission_prompt（idle_prompt / auth_success 未落地） | ❌ |
-| `UserPromptSubmit` | 用户提交 prompt 后、进入运行循环前（纠偏续跑不触发） | 无 matcher | — | ✅ exit code 2（阻断本轮 prompt，不落历史） |
-| `SessionStart` | 会话启动（清空上下文后同样触发） | `source` | startup / resume / switch | ❌ |
-| `Stop` | 主循环终结前（成功或异常收场） | `terminal_reason`（glob） | RunTerminalReason 枚举名（Completed / TurnLimitReached / BudgetExceeded / Cancelled / ValidationFailed / AgentException / PermissionRefused / ClarificationRequired / Blocked） | ✅ exit code 2（纠偏续跑） |
-| `StopFailure` | 运行因未处理异常中断时 | `ErrorCategory`（glob） | rate_limit / auth_failed / billing / invalid_request / server_error / max_output_tokens / unknown | ❌ |
-| `PreCompact` | 对话压缩前 | `trigger` | manual / auto | ❌ |
-| `PostCompact` | 对话压缩后（ToolResponse 携带摘要） | `trigger` | manual / auto | ❌ |
-| `SessionEnd` | 会话结束时（/close 显式关闭、用户输入退出（/exit）或宿主停止兜底） | `reason` | close / prompt_input_exit / other | ❌ |
-| `GoalStageInvoke` | Goal 工作流阶段调用前 | `stage`（glob） | goal-decomposer / goal-sub-decomposer / goal-replanner | ❌ |
+| `input` | 外部输入进入 agent run 前（不写会话历史） | 无 matcher | — | ✅ deny |
+| `pre_model_call` | 一次模型请求发送前 | `model_id`（glob） | 模型标识（如 `gpt-*` / `claude-*`） | ❌（纯审计） |
+| `post_model_call` | 一次模型完整响应返回后（工具调用执行前） | `model_id`（glob） | 同上 | ❌（纯审计） |
+| `pre_tool_call` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / `todos_*`（Harness 待办工具） / `mcp__*`（MCP 工具名为 `mcp__{server}__{tool}`）等 | ✅ deny |
+| `post_tool_call` | 工具调用成功或失败返回后 | `tool_name`（glob） | 同上 | ❌ |
+| `output` | 最终响应交付调用方前 | 无 matcher | — | ✅ deny |
+
+> **model 节点是纯审计语义**：`pre_model_call` / `post_model_call` 的裁决结果（含 exit code 2）被丢弃，
+> 不阻断、不改写模型调用——需要阻断的策略应挂在 `input` / `pre_tool_call` / `output`。
 
 **退出码约定**（Command 类型）：
 
 | 退出码 | 语义 | stdout / stderr 行为 |
 |--------|------|---------------------|
 | `0` | 成功 | stdout 为 JSON 则解析为 `HookResult`；非 JSON 作为 `Message` |
-| `2` | 阻断（仅 PreToolUse / Stop / UserPromptSubmit 生效） | stderr 显示给模型或用户，阻止后续操作 |
+| `2` | 阻断（deny） | stderr 显示给模型或用户，阻止后续操作 |
 | 其他 | 非阻断错误 | stderr 仅显示给用户，不阻止后续操作 |
 
-**Stop 纠偏续跑**：Stop hook 以 exit code 2 阻断终结时，运行以阻断 stderr 文案作为增量 user 消息、在同一 MAF 会话中自动重入（每轮新建流式通道，跨轮聚合文本 / 轮次 / Token 用量并逐轮持久化 transcript）。连续阻断上限 3 次，超限或 durable Build 受控尝试（走 `RunNextAsync` 的尝试链，不支持无感重入）阻断时降级为 TUI 警告并照常终结。纠偏续跑不会再次触发 `UserPromptSubmit`。
+**边界（刻意不做）**：
+
+| 能力 | 归属 | 说明 |
+|------|------|------|
+| 会话启动 / 结束 | `SessionManager` | 产品会话边界 ≠ agent run 边界，不冒充 `agent_startup` / `agent_shutdown` |
+| Stop 纠偏续跑 | `QueryStreamEngine` | `output` deny 直接终结本轮，不重入；纠偏、预算终结由宿主负责 |
+| 上下文压缩 | Harness / `CompactService` | 标准协议无 compact 节点 |
+| Goal 编排 | `GoalDecomposer` | 直连模型路径，不构造 agent 生命周期 |
+| 权限审批通知 | `ApprovalBroker` | 审批平面 ≠ Hook 控制平面 |
+| 异常分类告警 | 可观测性 | 被动遥测，不是策略裁决 |
+| `pre_tool_call` 参数改写（transform） | 未建 | 首期仅裁决契约：deny 走工具错误载荷，不写回工具参数 |
+| `output` 响应改写（transform） | 未建 | `output` deny 直接终结本轮，不写回最终响应内容 |
+| `evaluate_only` 执行模式 | 未建 | 无「只评估不阻断」开关；阻断与否由 exit code 2 裁决 |
+| 统一拦截记录摘要流 | 未建 | 审计由 hook 自身（通知 Provider / 外部命令）落地，无统一的拦截记录摘要流 |
 
 ---
 
@@ -232,26 +251,27 @@ OneCode 运行时
 
 通过 CliWrap 执行外部进程，stdin 传入 JSON 格式的 `HookPayload`。
 
-**配置字段**：
+**配置字段**（`type` / `timeout` / `once` / `priority` / `statusMessage` 是三种执行器类型的公共字段，下面各节不再重复）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| `type` | `string?` | 执行器类型（`command` / `notification` / `http`），省略时按 `command` 处理 |
 | `command` | `string` | **必填**。Shell 命令（Windows: `cmd.exe /c`；Unix: `/bin/sh -c`） |
 | `timeout` | `int?` | 超时毫秒数，默认 5000 |
-| `once` | `bool` | 只执行一次：**成功执行后**自动移除（Blocking 送达阻断裁决同样移除，防 Stop 阻断无限循环）；异常 / 取消 / 执行器缺失视为未完成，保留待下次触发 |
+| `once` | `bool` | 只执行一次：**成功执行后**自动移除（Blocking 送达阻断裁决同样移除，防止同一拦截点被反复触发）；异常 / 取消 / 执行器缺失视为未完成，保留待下次触发 |
 | `priority` | `int?` | 优先级（越小越先执行），默认按配置目录推导 |
-| `statusMessage` | `string?` | 状态展示消息 |
+| `statusMessage` | `string?` | 通知消息标题（仅 Notification 类型消费，见 §5.2）；Command / Http 类型忽略 |
 
 **stdin Payload 示例**（`HookPayload` 的 JSON 序列化）：
 
 ```json
 {
-  "event": "PreToolUse",
+  "point": "PreToolCall",
   "sessionId": "abc123",
   "cwd": "/home/user/project",
   "toolName": "Bash",
   "toolInput": { "command": "rm -rf /" },
-  "timestamp": "2026-07-18T10:00:00Z"
+  "timestamp": "2026-07-18T10:00:00+00:00"
 }
 ```
 
@@ -260,8 +280,15 @@ OneCode 运行时
 ```json
 {
   "message": "展示给用户的消息",
-  "preventContinuation": false,
-  "additionalContext": "注入到 LLM 上下文的额外信息"
+  "additionalContext": "注入到本轮输入的额外信息（仅 input 拦截点消费）"
+}
+```
+
+**阻断**（exit code 2）：
+
+```json
+{
+  "blockingError": { "error": "dangerous command", "command": "check-dangerous.py" }
 }
 ```
 
@@ -286,7 +313,7 @@ OneCode 运行时
 | `webhookUrl` | `string` | **必填**。渠道提供的接入地址 |
 | `secret` | `string?` | 签名密钥（HMAC-SHA256，可选） |
 | `message` | `string` | 消息内容模板，支持 `{{field}}` 插值 |
-| `statusMessage` | `string?` | 消息标题（部分渠道支持） |
+| `statusMessage` | `string?` | 通知消息标题（作为 Provider 的 `Title`；声明式 Provider 模板可用 `{{Title}}` 引用） |
 | `timeout` | `int?` | 超时毫秒数，默认 5000 |
 
 **敏感字段保护（`${ENV_VAR}` / `dpapi:`）**：`webhookUrl` / `secret`（Notification）、`url` / `headers` 值（Http）、声明式定义的 `url` 均支持两种保密形式，运行时由 `HookSecretExpander` 展开（先展开敏感字段，再做 `{{field}}` 模板插值）：
@@ -310,7 +337,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
   "provider": "feishu",
   "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
   "secret": "your-sign-secret",
-  "message": "[OneCode] 事件 {{Event}} 触发于 {{Timestamp}}"
+  "message": "[OneCode] 拦截点 {{Point}} 触发于 {{Timestamp}}"
 }
 ```
 
@@ -336,7 +363,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 | `body` | `string?` | 请求体模板（POST/PUT/PATCH/DELETE 使用），支持 `{{field}}` 插值 |
 | `timeout` | `int?` | 超时毫秒数，默认 5000 |
 
-> **HTTP 韧性（刻意不重试）**：Notification 与 Http 的出站调用**不做自动重试、无熔断**——`timeout`（默认 5s）是单次调用的唯一超时权威，失败一律降级为 NonBlockingError（不阻断主流程）；`once` Hook 失败后保留注册，下次事件自然补发。理由：出站 POST 目标（自定义 webhook/CI 触发）幂等性无法保证，重试决策交给配置方业务层（历史设计曾挂 `AddStandardResilienceHandler`，但 hook 层取消令牌先行生效导致重试窗口名存实亡，已移除）。
+> **HTTP 韧性（刻意不重试）**：Notification 与 Http 的出站调用**不做自动重试、无熔断**——`timeout`（默认 5s）是单次调用的唯一超时权威，失败一律降级为 NonBlockingError（不阻断主流程）；`once` Hook 失败后保留注册，下次事件自然补发。理由：出站 POST 目标（自定义 webhook/CI 触发）幂等性无法保证，重试决策交给配置方业务层。
 
 **示例**：
 
@@ -347,9 +374,9 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
   "url": "https://ci.example.com/api/trigger",
   "headers": {
     "Authorization": "Bearer {{Token}}",
-    "X-Event": "{{Event}}"
+    "X-Point": "{{Point}}"
   },
-  "body": "{\"event\":\"{{Event}}\",\"tool\":\"{{ToolName}}\",\"cwd\":\"{{Cwd}}\",\"timestamp\":\"{{Timestamp}}\"}"
+  "body": "{\"point\":\"{{Point}}\",\"tool\":\"{{ToolName}}\",\"cwd\":\"{{Cwd}}\",\"timestamp\":\"{{Timestamp}}\"}"
 }
 ```
 
@@ -396,19 +423,19 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 | `url` | **必填**。默认端点，必须 `https://`；发送时 hooks.json 的 `webhookUrl` 优先 |
 | `headers` | 附加请求头；值支持消息模板 |
 | `body` | **必填**。JSON 请求体模板；字符串叶子支持消息模板，其他类型保持原样 |
-| `signing` | 签名定义，或 `{"preset": "..."}` 简写（见下） |
+| `signing` | 签名定义，或 `{"preset": "..."}` 简写（见下）；preset 存在时其余 `signing` 字段被忽略 |
 | `success` | 响应成功判定：顶层字段 `field` 与 `equals` 相等即成功；缺省仅看 HTTP 2xx |
 
 **签名定义**（`signing` 完整写法）：
 
 | 字段 | 说明 |
 |------|------|
-| `keyTemplate` / `messageTemplate` | HMAC key / message 模板；变量仅 `{Secret}` / `{Timestamp}`（Unix 秒）/ `{TimestampMs}`（毫秒），禁止表达式求值 |
+| `keyTemplate` / `messageTemplate` | HMAC key / message 模板；变量仅 `{Secret}` / `{Timestamp}` / `{TimestampMs}`，禁止表达式求值 |
 | `encoding` | `base64`（默认）/ `base64-urlencoded`（钉钉）/ `hex` |
 | `placement` | `query`（默认）/ `header`（header 放置时签名与时间戳自动附加为请求头） |
 | `paramName` | 签名参数名，默认 `sign` |
 | `timestampParamName` | 时间戳参数名，默认 `timestamp` |
-| `timestampMs` | `true` 时时间戳参数与 `{Timestamp}` 取毫秒（钉钉要求毫秒） |
+| `timestampMs` | `true` 时 URL / Header 中的时间戳参数取毫秒（钉钉要求毫秒）；签名模板变量 `{Timestamp}` 恒为 Unix 秒，毫秒用 `{TimestampMs}` |
 
 **签名 preset**（官方算法固化为三选一）：
 
@@ -418,7 +445,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 | `wechat_work` | 企业微信 | HMAC(key = `secret`, msg = `timestamp秒\nsecret`) → Base64 |
 | `dingtalk` | 钉钉 | HMAC(key = `timestamp毫秒\nsecret`, msg = "") → Base64 → URL 编码 |
 
-**消息模板字段**（body 字符串叶子与 headers 值）：`{{Text}}` / `{{Title}}` / `{{Event}}` / `{{Timestamp}}`（兼容单花括号写法）。第一级 payload 渲染（`config.message` 的 `{{Event}}` 等 HookPayload 字段）仍由 Notification 执行器完成。
+**消息模板字段**（body 字符串叶子与 headers 值）：`{{Text}}` / `{{Title}}` / `{{Event}}`（拦截点线格式名，如 `pre_tool_call`）/ `{{Timestamp}}`（`yyyy-MM-dd HH:mm:ss`）；单花括号写法同样接受，未知占位符保持原样。第一级 payload 渲染（`config.message` 的 `{{Point}}` 等 `HookPayload` 字段）仍由 Notification 执行器完成。
 
 **校验规则**：url 非 https / 缺 body / 未知 preset 的定义跳过并记录 Warning，不影响同文件其他条目；JSON 错误含行号。
 
@@ -439,15 +466,15 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 
 ### 6.2 文件格式
 
-`hooks.json` 的根对象即为 hooks 内容（按事件名分组），支持两种格式：
+`hooks.json` 的根对象即为 hooks 内容（按拦截点名分组），支持两种格式：
 
 #### 新格式（推荐）：matcher-group
 
-每个事件下是 matcher 分组数组，每个分组包含 `matcher` 和 `hooks`：
+每个拦截点下是 matcher 分组数组，每个分组包含 `matcher` 和 `hooks`：
 
 ```json
 {
-  "preToolUse": [
+  "pre_tool_call": [
     {
       "matcher": "Bash",
       "hooks": [
@@ -470,7 +497,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
       ]
     }
   ],
-  "postToolUse": [
+  "post_tool_call": [
     {
       "matcher": "*",
       "hooks": [
@@ -478,31 +505,30 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
           "type": "http",
           "method": "POST",
           "url": "https://audit.example.com/api/tool",
-          "body": "{\"tool\":\"{{ToolName}}\",\"event\":\"{{Event}}\"}"
+          "body": "{\"tool\":\"{{ToolName}}\",\"point\":\"{{Point}}\"}"
         }
       ]
     }
   ],
-  "sessionStart": [
+  "pre_model_call": [
     {
-      "matcher": "startup",
+      "matcher": "gpt-*",
       "hooks": [
         {
           "type": "command",
-          "command": "echo 'Session started'"
+          "command": "echo 'model request'"
         }
       ]
     }
   ],
-  "stop": [
+  "output": [
     {
-      "matcher": "",
       "hooks": [
         {
           "type": "notification",
           "provider": "wechat_work",
           "webhookUrl": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
-          "message": "AI 响应结束于 {{Timestamp}}"
+          "message": "AI 响应完成于 {{Timestamp}}"
         }
       ]
     }
@@ -512,7 +538,16 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 
 #### 旧格式（平铺）——已不再支持
 
-`HookSettingsLoader` 只解析 matcher-group 格式。事件下直接平铺 hook 配置数组（无 `matcher`/`hooks` 包装）的旧格式会被跳过（反序列化后 `Hooks` 为空），不会自动包装为 `matcher=""`。
+`HookSettingsLoader` 只解析 matcher-group 格式。拦截点下直接平铺 hook 配置数组（无 `matcher`/`hooks` 包装）的旧格式会被跳过（反序列化后 `Hooks` 为空），不会自动包装为 `matcher=""`。
+
+#### 已废弃事件名——加载期诊断
+
+旧版 OneCode 专有事件名不再有效，加载时给出**明确诊断**（不静默跳过）：
+
+| 旧事件名 | 诊断 |
+|---------|------|
+| `PreToolUse` / `PostToolUse` / `UserPromptSubmit` | 提示迁移到 `pre_tool_call` / `post_tool_call` / `input` |
+| `SessionStart` / `SessionEnd` / `Stop` / `StopFailure` / `PreCompact` / `PostCompact` / `GoalStageInvoke` / `Notification` | 提示"不再属于 Hook 拦截范围"，并说明对应能力仍由宿主负责 |
 
 ### 6.3 Matcher 语法
 
@@ -527,7 +562,7 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 | `"Write\|Read"` | 管道分隔多值 | `Write` 或 `Read` 触发 |
 | `"  Write  \|  Read  "` | 自动 trim 空白 | 等价于 `Write\|Read` |
 
-> **注意**：matcher 字段名因事件而异（如 PreToolUse 为 `tool_name`，SessionStart 为 `source`）。详见 [事件清单](#4-事件清单)。无 matcher 的事件（UserPromptSubmit / Stop）使用 `""` 或 `"*"`。
+> **注意**：matcher 字段名因拦截点而异（工具节点为 `tool_name`，模型节点为 `model_id`）。详见 [§4 拦截点清单与边界](#4-拦截点清单与边界)。无 matcher 的拦截点（`input` / `output`）使用 `""` 或 `"*"`。
 
 ### 6.4 策略控制
 
@@ -552,7 +587,8 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 | 任一层 hooks.json 解析失败（JSON 损坏 / IO 错误 / 根节点非对象） | 保留上一次有效配置，诊断记录 `Failed`，LogWarning |
 | 构建过程抛出意外异常 | 保留上一次有效配置，LogError |
 | hooks.json 被删除 | 正常路径：清空该层 config hook（NotFound 参与整体交换） |
-| 未知事件名 / 未知 HookType | 非致命：跳过该条目并警告，其余条目照常生效 |
+| 已废弃事件名 / 内部生命周期拦截点名 | 非致命：跳过该条目并写入加载诊断（已废弃事件名给出迁移提示，内部生命周期拦截点提示不在开放范围） |
+| 未知 `type`（HookType） | 非致命：跳过该条目并记 Warning 日志（不写入加载诊断），其余条目照常生效 |
 
 > **注意**：`config:` 前缀注册名是热重载区分配置 hook 与编程注册 hook 的依据，自定义 hook 的注册名请勿使用该前缀。
 
@@ -564,23 +600,28 @@ $bytes = [Text.Encoding]::UTF8.GetBytes('your-plain-secret')
 
 | 子命令 | 语法 | 说明 |
 |--------|------|------|
-| 无参数 | `/hooks` | 概览：持久 hook 数 + 工作区信任状态 + 配置文件路径 + 各 hooks.json 最近一次加载诊断（状态 / hook 数 / 解析错误） |
+| 无参数 | `/hooks` | 概览：持久 hook 数 + 配置代次 + 工作区信任状态 + 配置文件路径 + 各 hooks.json 最近一次加载诊断（状态 / hook 数 / 解析错误） |
 | `list` / `ls` | `/hooks list` | 完整 hook 列表（按 source 分组：Managed / User / Project / Plugin） |
-| `events` | `/hooks events` | 可用 hook 事件列表（含 matcher 字段） |
+| `events` | `/hooks events` | 可用拦截点列表（含 matcher 字段） |
 | `status` | `/hooks status` | Hook 策略状态（工作区信任） |
 
 `/hooks` 概览示例：
 
 ```text
-Hooks: lifecycle hook system
+Hooks: agent interception points
 
   Persistent hooks: 3
+  Config generation: 1
 
   Workspace trusted: yes
 
 Config files:
   ~/.onecode/hooks.json         (user-level, priority 100)
   .onecode/hooks.json           (project-level, priority 200)
+
+Load diagnostics (last bootstrap):
+  ~/.onecode: Loaded (2 hooks)
+  <cwd>/.onecode: NotFound (0 hooks)
 
 Subcommands: /hooks list | /hooks events | /hooks status
 ```
@@ -589,26 +630,26 @@ Subcommands: /hooks list | /hooks events | /hooks status
 
 ```text
 User hooks:
-  PreToolUse:
-    [100] Command    config:PreToolUse:Command:abc123
-           command: echo 'About to run Bash'
-  PostToolUse:
-    [100] Http       config:PostToolUse:Http:def456
+  pre_tool_call:
+   [100] Command    config:pre_tool_call:Command:abc123
+             command: echo 'About to run Bash'
+  post_tool_call:
+   [100] Http       config:post_tool_call:Http:def456
 
 Project hooks:
-  Stop:
-    [200] Notification config:Stop:Notification:ghi789
+  output:
+   [200] Notification config:output:Notification:ghi789
 ```
 
 ### 7.2 典型场景示例
 
-#### 场景 1：危险命令阻断（PreToolUse + Command）
+#### 场景 1：危险命令阻断（pre_tool_call + Command）
 
 阻止 `rm -rf /` 等危险命令执行：
 
 ```json
 {
-  "preToolUse": [
+  "pre_tool_call": [
     {
       "matcher": "Bash",
       "hooks": [
@@ -635,11 +676,11 @@ if "rm -rf /" in cmd:
 sys.exit(0)
 ```
 
-#### 场景 2：工具执行后飞书通知（PostToolUse + Notification）
+#### 场景 2：工具执行后飞书通知（post_tool_call + Notification）
 
 ```json
 {
-  "postToolUse": [
+  "post_tool_call": [
     {
       "matcher": "Bash",
       "hooks": [
@@ -656,22 +697,22 @@ sys.exit(0)
 }
 ```
 
-#### 场景 3：会话启动触发 CI（SessionStart + Http）
+#### 场景 3：审计回调（post_model_call + Http）
 
 ```json
 {
-  "sessionStart": [
+  "post_model_call": [
     {
-      "matcher": "startup",
+      "matcher": "gpt-*",
       "hooks": [
         {
           "type": "http",
           "method": "POST",
-          "url": "https://ci.example.com/api/onecode/start",
+          "url": "https://ci.example.com/api/onecode/model-response",
           "headers": {
             "Authorization": "Bearer ci-token-xxx"
           },
-          "body": "{\"session\":\"{{SessionId}}\",\"cwd\":\"{{Cwd}}\"}"
+          "body": "{\"session\":\"{{SessionId}}\",\"cwd\":\"{{Cwd}}\",\"ts\":\"{{Timestamp}}\"}"
         }
       ]
     }
@@ -679,28 +720,18 @@ sys.exit(0)
 }
 ```
 
-#### 场景 4：压缩前后审计（PreCompact / PostCompact）
+#### 场景 4：模型调用审计（pre_model_call + Command）
 
 ```json
 {
-  "preCompact": [
+  "pre_model_call": [
     {
       "matcher": "*",
       "hooks": [
         {
           "type": "command",
-          "command": "echo '[audit] compact starting' >> ~/.onecode/audit.log"
-        }
-      ]
-    }
-  ],
-  "postCompact": [
-    {
-      "matcher": "*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "echo '[audit] compact done' >> ~/.onecode/audit.log"
+          "command": "echo '[audit] model request' >> ~/.onecode/audit.log",
+          "timeout": 2000
         }
       ]
     }
@@ -708,19 +739,18 @@ sys.exit(0)
 }
 ```
 
-#### 场景 5：错误停止告警（StopFailure + Notification）
+#### 场景 5：最终响应出口管控（output + Notification）
 
 ```json
 {
-  "stopFailure": [
+  "output": [
     {
-      "matcher": "rate_limit|server_error",
       "hooks": [
         {
           "type": "notification",
           "provider": "wechat_work",
           "webhookUrl": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
-          "message": "⚠️ OneCode 错误停止 ({{Event}}) @ {{Timestamp}}"
+          "message": "✅ OneCode 响应完成 @ {{Timestamp}}"
         }
       ]
     }
@@ -728,9 +758,12 @@ sys.exit(0)
 }
 ```
 
+> 压缩审计、会话启动通知、错误停止告警等能力已移出 Hook 拦截范围（见 [§4 边界](#4-拦截点清单与边界)），
+> 请改用可观测性通道或宿主产品能力。
+
 ### 7.3 编程式触发 Hook
 
-业务模块可通过注入 `IHookExecutionService` 直接触发生命周期事件：
+业务模块可通过注入 `IHookExecutionService` 直接触发拦截点：
 
 ```csharp
 public class MyService
@@ -745,13 +778,13 @@ public class MyService
 
         var payload = new HookPayload
         {
-            Event = HookEvent.UserPromptSubmit,
+            Point = HookInterceptionPoint.Input,
             Cwd = Environment.CurrentDirectory,
             UserMessage = "some user prompt",
         };
 
-        // actualMatcherValue 为对应事件的 matcher 字段值
-        // （如 PreToolUse 传 tool_name，SessionStart 传 source）
+        // actualMatcherValue 为对应拦截点的 matcher 字段值
+        // （如 pre_tool_call 传 tool_name，pre_model_call 传 model_id）
         await _hooks.FireAsync(payload, actualMatcherValue: null, ct: ct);
     }
 }
@@ -773,7 +806,7 @@ public class MyPlugin
         _registry.Register(new HookRegistration
         {
             Name = "my-plugin:audit",
-            Event = HookEvent.PostToolUse,
+            Point = HookInterceptionPoint.PostToolCall,
             Matcher = "Bash",
             Priority = 150,  // User 级
             ExecutorType = HookType.Command,
@@ -792,15 +825,15 @@ public class MyPlugin
 
 ## 8. 模板插值字段
 
-`Notification` 和 `Http` 类型执行器支持 `{{Field}}` 模板插值，字段来自 `HookPayload`：
+`Notification` 和 `Http` 类型执行器支持 `{{Field}}` 模板插值；可插值字段限于下表 8 个（`HookPayload` 的其余字段不参与插值）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `{{Event}}` | `string` | 事件名称（如 `PreToolUse`） |
+| `{{Point}}` | `string` | 拦截点线格式名（如 `pre_tool_call`） |
 | `{{SessionId}}` | `string` | 会话 ID |
 | `{{Cwd}}` | `string` | 当前工作目录 |
-| `{{ToolName}}` | `string` | 工具名称（仅工具相关事件） |
-| `{{UserMessage}}` | `string` | 用户消息（UserPromptSubmit 事件） |
+| `{{ToolName}}` | `string` | 工具名称（仅工具相关拦截点） |
+| `{{UserMessage}}` | `string` | 用户消息（input 拦截点） |
 | `{{AgentId}}` | `string` | Agent ID |
 | `{{AgentType}}` | `string` | Agent 类型 |
 | `{{Timestamp}}` | `string` | 触发时间戳（格式 `yyyy-MM-dd HH:mm:ss`） |
@@ -814,7 +847,7 @@ public class MyPlugin
 
 ```json
 {
-  "url": "https://api.example.com/{{Event}}",
+  "url": "https://api.example.com/{{Point}}",
   "headers": { "X-Tool": "{{ToolName}}" },
   "body": "{\"cwd\":\"{{Cwd}}\",\"ts\":\"{{Timestamp}}\"}"
 }
@@ -835,14 +868,12 @@ public class MyPlugin
 
 ### 9.2 执行顺序
 
-同一事件下多个匹配的 hook 按 `priority` **升序**串行执行（数值越小越先执行）。执行结果通过 `HookResultAggregator` 聚合：
+同一拦截点下多个匹配的 hook 按 `priority` **升序**串行执行（数值越小越先执行）。执行结果通过 `HookResultAggregator` 聚合：
 
 | 字段 | 聚合策略 |
 |---------|---------|
-| `PreventContinuation`（布尔） | OR（任一为 true 则结果为 true） |
 | `BlockingErrors` / `AdditionalContexts`（列表） | 累加 |
-| `Message` / `SystemMessage`（字符串） | last-write-wins（`Message` 为空时回退 `SystemMessage`） |
-| `UpdatedInput` | last-write-wins |
+| `Message`（字符串） | last-write-wins（单个 hook 的 `Message` 优先于其 `SystemMessage`，跨 hook 取最后一个非空值） |
 
 ### 9.3 Once Hook
 
@@ -860,14 +891,14 @@ Hook 仅在**受信任工作区**中触发。`HookPolicyService.IsCurrentWorkspa
 
 ### 10.2 策略开关
 
-当前没有 `disableAll` / `allowManagedOnly` / `strictPluginOnly` 等策略开关（设计曾规划于 Hook 模块架构设计，未实现）。工作区信任（§10.1）是唯一的策略门控。
+当前没有 `disableAll` / `allowManagedOnly` / `strictPluginOnly` 等策略开关。工作区信任（§10.1）是唯一的策略门控。
 
 ### 10.3 异常处理策略
 
 | 场景 | 策略 | 说明 |
 |------|------|------|
-| Pre-hook（PreToolUse）异常 | **fail-closed** | 异常转为 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性） |
-| Post-hook（PostToolUse）异常 | **fail-soft** | 仅记日志，保留原工具结果返回 |
+| Pre-hook（pre_tool_call）异常 | **fail-closed** | 异常转为 `ToolResult.Error` 使该次工具调用失败（不调用 `ctx.Terminate`，保留批次完整性） |
+| Post-hook（post_tool_call）异常 | **fail-soft** | 仅记日志，保留原工具结果返回 |
 | 单个 hook 执行器异常 | 隔离 | 异常被吞掉记 Warning，其他 hook 继续执行 |
 | `OperationCanceledException` | 透传 | 保留取消信号，不吞掉 |
 
@@ -912,7 +943,8 @@ public static HookType Parse(string? type) => type?.ToLowerInvariant() switch
     "notification" => HookType.Notification,
     "http" => HookType.Http,
     "webhook" => HookType.Webhook,  // 新增
-    _ => HookType.Command,
+    null => HookType.Command,
+    _ => throw new ArgumentException($"Unknown hook type: '{type}'. Valid values: command, notification, http, webhook."),
 };
 ```
 
@@ -970,19 +1002,22 @@ services.AddHttpClient<SlackNotificationProvider>();
   "type": "notification",
   "provider": "slack",
   "webhookUrl": "https://hooks.slack.com/services/xxx",
-  "message": "事件 {{Event}} 触发 @ {{Timestamp}}"
+  "message": "拦截点 {{Point}} 触发 @ {{Timestamp}}"
 }
 ```
 
 > 编译型与声明式并存时，`NotificationProviderRegistry` 按名称解析：声明式定义优先，同名声明式胜出。
 
-### 11.3 新增生命周期事件
+### 11.3 新增拦截点
 
-如需新增生命周期事件（如 `OnTokenBudgetExceeded` / `PreFileWrite`）：
+拦截点集合与 AGENT-HOOKS-0.1 协议对齐，**不再自由扩展**。如需新增拦截点（如 `OnTokenBudgetExceeded` / `PreFileWrite`）：
 
-1. **扩展 `HookEvent` 枚举**（`OneCode.Core/Hooks/HookEvent.cs`）
-2. **更新 `HookEventMetadataRegistry`**（`OneCode.Core/Hooks/HookEventMetadata.cs`）添加事件元数据
+1. **扩展 `HookInterceptionPoint` 枚举**（`OneCode.Core/Hooks/HookInterceptionPoint.cs`）并同步 `HookInterceptionPoints` 的线格式名、matcher 字段与开放集合
+2. **更新 `HookPointMetadataRegistry`**（`OneCode.Core/Hooks/HookPointMetadata.cs`）添加拦截点元数据
 3. **在业务模块触发**：注入 `IHookExecutionService` 并调用 `FireAsync`
+
+> 新增拦截点前先确认它确实是 **agent execution seam**（输入 / 模型 / 工具 / 输出四类边界之一）。
+> 产品会话生命周期、压缩、Goal 编排、审批通知、异常告警不属于协议拦截范围，不应伪装成新拦截点。
 
 ---
 
@@ -999,8 +1034,13 @@ services.AddHttpClient<SlackNotificationProvider>();
    - 未出现 → 检查 `hooks.json` 路径与 JSON 语法（注意：只支持 matcher-group 格式，见 §6.2）
 
 3. **检查 matcher**：
-   - 运行 `/hooks events` 确认事件的 matcher 字段名
+   - 运行 `/hooks events` 确认拦截点的 matcher 字段名
    - 确认 `actualMatcherValue` 与 matcher pattern 匹配（如 `Bash` vs `bash` 大小写不敏感）
+
+4. **确认拦截点已在产品路径接线**：`input` / `output` 只在 `QueryStreamEngine` 主链路生效；
+   `pre_tool_call` / `post_tool_call` 只对走 `AgentPipelineBuilder` 的工具型 Agent 生效
+   （Main / Worker / Team / Goal 子目标）。`GoalDecomposer` 等直连模型路径不构造 agent 生命周期，
+   **不触发**任何拦截点。
 
 ### 12.2 Hook 执行失败
 
@@ -1010,7 +1050,8 @@ services.AddHttpClient<SlackNotificationProvider>();
 
 ### 12.3 Hook 阻断未生效
 
-- 仅 `PreToolUse` 和 `Stop` 事件支持阻断（exit code 2）
+- 仅 `input` / `pre_tool_call` / `output` 支持阻断（exit code 2）；
+  `pre_model_call` / `post_model_call` / `post_tool_call` 是审计语义，deny（exit code 2）不会改变主流程
 - 确认 exit code 为 `2`（其他非零退出码视为非阻断错误）
 - 查看 stderr 输出（阻断时显示给模型或用户）
 
@@ -1020,10 +1061,10 @@ Hook 执行相关日志通过 `ILogger` 输出，关键日志类别：
 
 | 日志类别 | 关键消息 |
 |---------|---------|
-| `HookExecutionService` | `Hook execution skipped: workspace not trusted` |
+| `HookExecutionService` | `Hook execution skipped: workspace not trusted`（Debug 级） |
 | `HookExecutionService` | `Hook '{Name}' execution error` |
-| `CommandHookExecutor` | `Command hook execution failed` / `Command hook timed out` |
-| `HttpHookExecutor` | `HTTP hook timed out` / `HTTP hook execution failed` |
+| `CommandHookExecutor` | `Command hook execution failed`（超时以结果消息 `Command hook timed out after {N}ms` 呈现，不写日志） |
+| `HttpHookExecutor` | `HTTP hook timed out after {N}ms` / `HTTP hook execution failed` |
 | `NotificationHookExecutor` | `Notification provider '{Provider}' not registered` |
 | `HookConfigBootstrapper` | `Bootstrapped {Count} hooks total` |
 
@@ -1034,4 +1075,4 @@ Hook 执行相关日志通过 `ILogger` 输出，关键日志类别：
 - [Hook 模块架构设计](./adr/0005-hook-module-design.md) — 架构决策、数据模型、实现细节
 - [设置文档 - Hooks 配置](./settings.md#hooks-配置) — `hooks.json` 与策略开关
 - [命令文档 - /hooks](./commands.md#hooks) — `/hooks` 命令完整说明
-- [Permission vs ToolApproval vs Filter](./adr/0001-permission-vs-toolapproval-vs-filter.md) — HookMiddleware 在 MAF 管道中的位置
+- [Permission vs ToolApproval vs Filter](./adr/0001-permission-vs-toolapproval-vs-filter.md) — MAF 函数调用管道中 Permission / ToolApproval / 观测性中间件的职责边界与数据流

@@ -24,9 +24,6 @@ public sealed class ChatService : IConversationRunner, ICacheSafeParamsProvider
     /// <inheritdoc />
     public CacheSafeParams? Current => _engine.LastCacheSafeParams;
 
-    /// <summary>Alias for <see cref="Current"/> kept for call sites that still read the snapshot by name.</summary>
-    public CacheSafeParams? LastCacheSafeParams => _engine.LastCacheSafeParams;
-
     public ChatService(
         ILogger<ChatService> logger,
         IMainAgentRunner mainAgentRunner,

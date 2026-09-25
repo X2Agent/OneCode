@@ -8,11 +8,7 @@ namespace OneCode.App.Tui;
 /// (<see cref="QueryEvent"/>, <see cref="OrchestrationEvent"/>) into TUI-layer
 /// <see cref="TuiEvent"/> instances.
 /// </summary>
-/// <remarks>
-/// Extracted from <see cref="OneCode.App.Services.InteractiveModeExecutor"/> to
-/// keep that class focused on orchestration. These functions have no instance
-/// dependencies and no side effects.
-/// </remarks>
+/// <remarks>No instance dependencies and no side effects.</remarks>
 public static class TuiEventMapper
 {
     /// <summary>Maps QueryEvent → TuiEvent (pure mapping, no side effects).</summary>
@@ -181,6 +177,8 @@ public static class TuiEventMapper
     /// <summary>
     /// 映射 OrchestrationEvent.ApprovalRequest → TuiApprovalRequest。
     /// 桥接 ResponseSource，使 TUI 的决策回传到 Team 路径的 inline handler。
+    /// Team 桥只提供单次批准（成员策略固定 PermissionMode.Team），故不开放
+    /// 「本次对话全部允许」升级档——该决策会被桥按拒绝处理。
     /// </summary>
     private static TuiEvent MapOrchestrationApprovalRequest(
         string agentName,
@@ -188,7 +186,10 @@ public static class TuiEventMapper
         string? toolInput,
         TaskCompletionSource<OneCode.Core.Permissions.ApprovalDecision> responseSource)
     {
-        var tuiEvent = new TuiApprovalRequest(agentName, toolName, toolInput);
+        var tuiEvent = new TuiApprovalRequest(agentName, toolName, toolInput)
+        {
+            AllowSessionEscalation = false,
+        };
         tuiEvent.ResponseSource.Task.ContinueWith(t =>
         {
             if (t.IsCompletedSuccessfully)

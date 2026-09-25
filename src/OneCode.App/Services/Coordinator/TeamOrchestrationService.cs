@@ -18,8 +18,7 @@ namespace OneCode.App.Services.Coordinator;
 /// Team config: YAML files at ~/.onecode/teams/{name}/team.yaml
 /// using the same AgentTemplateConfig format as sub-agent templates.
 ///
-/// Agent 构建、工作流运行、审批事件映射已分别提取到
-/// <see cref="TeamAgentFactory"/>、<see cref="TeamWorkflowRunner"/>，审批映射内联到 TeamAgentFactory 中。
+/// Agent 构建见 <see cref="TeamAgentFactory"/>，工作流运行见 <see cref="TeamWorkflowRunner"/>。
 /// </summary>
 public sealed partial class TeamOrchestrationService
     : ITeamOrchestrationService, IDisposable

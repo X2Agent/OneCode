@@ -75,11 +75,11 @@ public sealed class HarnessInstructionsWiringTests
     /// Main 组装漏斗：<c>AgentPipelineBuilder</c> 必须把片段交给 MAF，且片段在前、主体在后。
     /// </summary>
     [Fact]
-    public async Task BuildChatClientAgent_ForwardsHarnessFragmentAheadOfAgentBody()
+    public async Task BuildHarnessAgent_ForwardsHarnessFragmentAheadOfAgentBody()
     {
         var client = new CapturingChatClient();
 
-        var handle = AgentPipelineBuilder.BuildChatClientAgent(new ChatClientAgentBuildOptions
+        var handle = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
             ChatClient = client,
             Name = "main-agent",

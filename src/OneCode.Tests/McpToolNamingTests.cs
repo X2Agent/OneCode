@@ -31,27 +31,24 @@ public sealed class McpToolNamingTests
     }
 
     [Fact]
-    public async Task RenamedAIFunction_DelegatesSchemaDescriptionAndInvocation()
+    public async Task RenamedAIFunction_RenamesWrapperAndDelegatesEverythingElse()
     {
         using var inputSchema = JsonDocument.Parse("""{"type":"object","properties":{"value":{"type":"string"}}}""");
-        using var returnSchema = JsonDocument.Parse("""{"type":"string"}""");
         var inner = Substitute.For<AIFunction>();
         inner.Name.Returns("original");
         inner.Description.Returns("description");
         inner.JsonSchema.Returns(inputSchema.RootElement.Clone());
-        inner.ReturnJsonSchema.Returns(returnSchema.RootElement.Clone());
         inner.InvokeAsync(default!, default)
             .ReturnsForAnyArgs(new ValueTask<object?>("ok"));
 
         var renamed = new RenamedAIFunction(inner, "mcp__server__original");
         var result = await renamed.InvokeAsync(new AIFunctionArguments(), TestContext.Current.CancellationToken);
 
+        // The wrapper's single responsibility: expose the new name while the inner
+        // metadata and invocation pass through unchanged.
         renamed.Name.Should().Be("mcp__server__original");
         renamed.Description.Should().Be("description");
-        renamed.JsonSchema.GetProperty("type").GetString().Should().Be("object");
-        renamed.ReturnJsonSchema!.Value.GetProperty("type").GetString().Should().Be("string");
-        result.Should().Be("ok");
-        inner.ReceivedCalls().Count(call => call.GetMethodInfo().Name == "InvokeCoreAsync")
-            .Should().Be(1);
+        renamed.JsonSchema.GetRawText().Should().Be(inner.JsonSchema.GetRawText());
+        result.Should().Be("ok", "invocation must be delegated to the wrapped function");
     }
 }

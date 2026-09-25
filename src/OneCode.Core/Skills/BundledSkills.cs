@@ -24,7 +24,6 @@ public static class BundledSkills
 
         RegisterSkill(skills, CreateBatchSkill());
         RegisterSkill(skills, CreateDebugSkill());
-        RegisterSkill(skills, CreateLoopSkill());
         RegisterSkill(skills, CreateStuckSkill());
         RegisterSkill(skills, CreateVerifySkill());
         RegisterSkill(skills, CreateSimplifySkill());
@@ -86,28 +85,6 @@ You are a systematic debugger. Your job is to investigate, isolate, and resolve 
 ## User Issue
 
 {issue}");
-
-    private static BundledSkill CreateLoopSkill() => new(
-        Name: "loop",
-        Description: "Execute a task repeatedly until the result matches the target",
-        Prompt: @"# Loop: Iterative Execution Until Correct
-
-You will execute a task repeatedly until the output matches what is expected.
-
-## Instructions
-
-1. Execute the task.
-2. Compare the result against the expected output.
-3. If incorrect, analyze what went wrong, fix it, and retry.
-4. Repeat until correct or maximum iterations reached.
-
-## Task
-
-{task}
-
-## Expected Result
-
-{expected}");
 
     private static BundledSkill CreateStuckSkill() => new(
         Name: "stuck",

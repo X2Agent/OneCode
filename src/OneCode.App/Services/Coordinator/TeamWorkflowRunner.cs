@@ -28,8 +28,6 @@ internal interface ITeamTaskWorkflowRunner
 }
 
 /// <summary>
-/// Workflow runner extracted from TeamOrchestrationService.
-///
 /// 职责：基于 MAF 的两种团队协调模式构建并执行工作流：
 ///   - GroupChat（<see cref="RoundRobinGroupChatManager"/>）：peer 协作，轮询发言。
 ///   - Magentic（<see cref="MagenticWorkflowBuilder"/>）：orchestrator 委派 worker。

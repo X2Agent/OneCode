@@ -6,7 +6,6 @@ namespace OneCode.App.Query;
 
 /// <summary>
 /// Tool assembly / config resolution / unknown-tool fallback for <see cref="QueryStreamEngine"/>.
-/// Extracted from the former partial split into a real collaborator (no shared mutable state).
 /// </summary>
 internal sealed class ToolAssembler
 {
@@ -73,9 +72,10 @@ internal sealed class ToolAssembler
             .ToList();
         var provider = _configManager.Current.Effective.Provider?.ToLowerInvariant();
 
-        // P3: 使用 ModelCapabilities.RequiresToolFiltering 替代 provider == "ollama" 一刀切
-        // 云端模型（Anthropic/OpenAI 等）始终全量；本地模型按上下文窗口决定：
-        // ≥ 32K 走全量（prompt caching 更高效），< 32K 走过滤（SessionToolSet 分层加载）
+        // 使用 ModelCapabilities.RequiresToolFiltering 判断（provider 优先）：
+        // Anthropic/OpenAI 等云端 provider 始终全量（prompt caching 更高效）；
+        // provider == "ollama" 始终过滤（工具定义 token 开销对小窗口影响显著）；
+        // 未知 provider 才按 ollamaContextWindow 阈值决定（≥ 32K 全量）。
         var contextWindow = _configManager.Current.Effective.OllamaContextWindow;
         var needsFiltering = ModelCapabilities.RequiresToolFiltering(provider, contextWindow);
 

@@ -1,5 +1,4 @@
 using OneCode.Core.Domain;
-using OneCode.Core.Hooks;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
@@ -21,7 +20,6 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
         Directory.CreateDirectory(_tempDir);
         _store = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
         _manager = new SessionManager(_store, NullLogger<SessionManager>.Instance, _tempDir,
-            hookExecutionService: Substitute.For<IHookExecutionService>(),
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
             sessionIdHolder: new SessionIdHolder(),
@@ -173,7 +171,6 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
         _store,
         NullLogger<SessionManager>.Instance,
         _tempDir,
-        hookExecutionService: Substitute.For<IHookExecutionService>(),
         shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
         tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
         sessionIdHolder: new SessionIdHolder(),

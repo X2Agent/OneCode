@@ -17,7 +17,7 @@ namespace OneCode.Tests;
 /// </para>
 /// <para>
 /// 本测试的「真实写入端」是 <c>AddToolServices()</c> 的注册表（与生产同一份代码路径），
-/// 读取端是 <see cref="ToolApprovalMarker.Apply"/> 的实际产物。
+/// 读取端是 <see cref="ToolApprovalMarker.Apply(IList{AITool}, ToolMetadataRegistry)"/> 的实际产物。
 /// </para>
 /// </remarks>
 public sealed class ProductionApprovalBoundaryTests
@@ -39,8 +39,10 @@ public sealed class ProductionApprovalBoundaryTests
     /// <remarks>
     /// 注意 <c>Safe</c>（如 <c>Task</c>、<c>AskUserQuestion</c>）<b>不在</b>此名单：
     /// <see cref="ToolPolicyDefaults.ForRisk"/> 对 <c>Safe</c> 给出 <c>Conditional</c>，
-    /// 因此它们<b>会</b>带标记。这不造成用户被追问——<c>CheckReadOnlyAndEvaluate</c> 对非写非只读工具
-    /// 直接 <c>Allow</c>，自动批准规则随之放行。断言放在 <see cref="SafeTools_BoundaryIsResolvedByPolicyNotRisk"/>。
+    /// 因此它们<b>会</b>带标记。这与「只读工具不标记」并不矛盾：只读工具在权限层无条件 <c>Allow</c>，
+    /// 没有 Ask 需要落地；<c>Safe</c> 工具则经 <c>PermissionCheckHelpers.CheckReadOnlyAndEvaluate</c>
+    /// 的规则评估（无匹配 → <c>Ask</c>），边界正是 Ask 的落点。
+    /// 断言放在 <see cref="SafeTools_BoundaryIsResolvedByPolicyNotRisk"/>。
     /// </remarks>
     private static readonly string[] MustNotRequireApproval =
     [
@@ -49,7 +51,8 @@ public sealed class ProductionApprovalBoundaryTests
 
     /// <summary>
     /// <c>Safe</c> 工具的边界由**权限政策**消解，而不是靠没有标记。
-    /// 本用例锁住这个分工：风险映射给 <c>Conditional</c>，而权限层对非写/非只读工具直接 Allow。
+    /// 本用例锁住这个分工的前一半：风险映射给出 <c>Conditional</c>（带边界）；
+    /// 是否真的追问用户由规则层决定（<c>EvaluateRules</c> 无匹配 → <c>Ask</c>）。
     /// </summary>
     /// <remarks>
     /// 这里**不**查 <c>ToolNames.ReadOnlyTools</c>：该门面是全局静态单例
@@ -61,12 +64,13 @@ public sealed class ProductionApprovalBoundaryTests
         ToolPolicyDefaults.ForRisk(ToolRisk.Safe).Should().Be(ToolApprovalMode.Conditional,
             "Safe tools carry a boundary; it is resolved by the permission policy, not by omitting the marker");
 
-        // 权限层对非写/非只读工具直接 Allow（PermissionCheckHelpers.CheckReadOnlyAndEvaluate），
-        // 所以带标记不会变成用户提问——这正是 Safe 工具可以带边界的原因。
+        // 权限层对非写/非只读工具走 EvaluateRules（PermissionCheckHelpers.CheckReadOnlyAndEvaluate），
+        // 命中规则给 Allow/Deny、无匹配给 Ask —— 所以带标记的 Safe 工具是否追问用户取决于规则，
+        // 而不是取决于风险级别本身。
         var (registry, _) = BuildProductionTools();
         registry.GetPolicy("Task").ApprovalMode.Should().Be(ToolApprovalMode.Conditional);
         registry.GetPolicy("Task").Risk.Should().Be(ToolRisk.Safe,
-            "Task is Safe: it neither reads nor writes data, so the policy layer allows it outright");
+            "Task is Safe: it neither reads nor writes data, so its boundary comes from the rules, not from risk");
     }
 
     [Fact]

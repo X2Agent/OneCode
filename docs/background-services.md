@@ -18,15 +18,15 @@
 
 ## 1. 概述
 
-OneCode 共有 **5 个长循环后台服务** + **2 个启动加载服务** + **1 个 UI 定时器**：
+OneCode 共有 **5 个长循环后台服务** + **3 个启动加载服务** + **4 个 UI 定时器**：
 
 | 类别 | 机制 | 数量 | 说明 |
 |------|------|------|------|
 | 长循环后台服务 | `BackgroundService` | 5 个 | 周期性轮询或事件驱动，进程生命周期内常驻 |
-| 启动加载服务 | `IHostedService` | 2 个 | 仅启动时执行一次，停止时清理资源 |
-| UI 定时器 | `IApplication.AddTimeout` | 1 个 | Terminal.Gui 主循环节拍，非业务调度 |
+| 启动加载服务 | `IHostedService` | 3 个 | 仅启动时执行一次，停止时清理资源 |
+| UI 定时器 | `IApplication.AddTimeout` | 4 个 | Terminal.Gui 主循环节拍，非业务调度 |
 
-[AutoDreamService](#5-autodream-记忆整合) 现已改造为标准 `BackgroundService`，随宿主生命周期自动启停，同时支持外部 `Trigger()` 信号触发，记忆统一写入 `MEMORY.md`。
+[AutoDreamService](#5-autodream-记忆整合) 是标准 `BackgroundService`，随宿主生命周期自动启停，同时支持外部 `Trigger()` 信号触发，记忆统一写入 `MEMORY.md`。
 
 ---
 
@@ -124,7 +124,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 
 **它不构建也不替换 provider**：agent 可见的技能由 `SkillProviderFactory` 在**每次 agent run** 时解析，
 斜杠命令发现由 `SkillCatalog` 直接读文件系统——两者都不需要重建。因此本服务只负责通知，不持有
-`AgentSkillsProvider` 或 `SkillProviderHolder`。
+`AgentSkillsProvider` 或 `SkillProviderFactory`。
 
 留在 App 层的原因：需要 `SkillCatalog` 与 TUI 重渲染通知，不属于 Core 抽象。
 
@@ -153,7 +153,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.App/Services/AutoDream/AutoDreamService.cs](../src/OneCode.App/Services/AutoDream/AutoDreamService.cs) |
 | 类型 | `BackgroundService`（Singleton + HostedService 双注册） |
 | 执行时机 | 定时轮询（每小时 1 次，硬编码安全网）+ 外部 `Trigger()` 信号（如 `/memory autodream trigger` 命令） |
-| 职责 | 四重门控后启动轻量 Agent 整理**会话历史**，增量变更 JSON 合并写入 `MEMORY.md` |
+| 职责 | 四重门控后启动轻量 Agent 整理**会话工作记忆与历史会话**，增量变更 JSON 合并写入 `MEMORY.md` |
 | 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor` |
 
 双注册模式说明：`AddSingleton<AutoDreamService>()` + `AddHostedService(sp => sp.GetRequiredService<AutoDreamService>())`，
@@ -176,17 +176,30 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 
 留在 App 层的原因：依赖 Plan/Build 工作流应用服务与交互会话抽象（App 层业务）。
 
-### 3.3 UI 定时器
-
-#### SpinnerController
+#### 3.2.5 HostStopSessionCloseService
 
 | 属性 | 值 |
 |------|-----|
-| 文件 | [OneCode.App/Tui/SpinnerController.cs](../src/OneCode.App/Tui/SpinnerController.cs) |
-| 机制 | `IApplication.AddTimeout` |
-| 用途 | Braille spinner 帧动画，Terminal.Gui 主循环节拍 |
+| 文件 | [OneCode.App/Services/Hooks/HostStopSessionCloseService.cs](../src/OneCode.App/Services/Hooks/HostStopSessionCloseService.cs) |
+| 类型 | `IHostedService`（注册于 `src/OneCode.App/Services/Hooks/HookServiceCollectionExtensions.cs`） |
+| 执行时机 | `StartAsync` 空实现；**仅宿主停止时**（`StopAsync`）执行一次 |
+| 职责 | 宿主停止时关闭前台会话，覆盖 TUI 退出键 / Ctrl+C / 宿主关闭等未走 `/exit` 的退出路径 |
+| 依赖 | `ISessionManager`（App 层会话编排） |
 
-非业务调度，仅用于 UI 动画。
+位于 `Services/Hooks/` 目录，但**不触发任何 hook**：`SessionEnd` 拦截点已移出 Hook 范围，本服务只负责会话收尾。
+`/exit`、`/quit` 已由 `ExitCommand` 以 `prompt_input_exit` 显式关闭会话，此处为幂等 no-op。
+收尾使用 `CancellationToken.None` 而非停止令牌——停止阶段令牌可能已取消，不能截断收尾投递。
+
+### 3.3 UI 定时器
+
+| 定时器 | 文件 | 周期 | 用途 |
+|--------|------|------|------|
+| `SpinnerController` | [OneCode.App/Tui/SpinnerController.cs](../src/OneCode.App/Tui/SpinnerController.cs) | 帧间隔 | Braille spinner 帧动画 |
+| `AgentStatusBar` 模式闪烁 | [OneCode.App/Tui/AgentStatusBar.cs](../src/OneCode.App/Tui/AgentStatusBar.cs) | 400ms，一次性 | 模式切换时的高亮闪烁，到时清除标记 |
+| 流式预览重建 | [OneCode.App/Tui/ChatTranscriptView.Streaming.cs](../src/OneCode.App/Tui/ChatTranscriptView.Streaming.cs) | 16ms（约 60 FPS 上限），一次性 | 合并同一节拍窗口内的多次 token 到达，把每 token 重排的 O(n²) 降为每窗口一次 |
+| 启动首帧调度 | [OneCode.App/Tui/OneCodeToplevel.cs](../src/OneCode.App/Tui/OneCodeToplevel.cs) | `TimeSpan.Zero`，一次性 | 界面就绪后补一次欢迎页、MCP 状态栏刷新与焦点设置 |
+
+均通过 `IApplication.AddTimeout` 注册，没有业务调度：不轮询后台状态，不替代 `BackgroundService`。
 
 ---
 
@@ -224,15 +237,19 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 
 ### 4.2 Cron 工具
 
-通过单个 `Cron` AI 工具的 `action` 参数暴露 5 个操作（旧版 5 个独立工具已合并）：
+通过单个 `Cron` AI 工具的 `action` 参数暴露 5 个操作：
 
-| `action` | 风险等级 | 说明 |
-|------|---------|------|
-| `create` | Safe | 创建定时任务，支持标准 5 字段 cron 表达式 |
-| `list` | ReadOnly | 列出所有定时任务 |
-| `delete` | Destructive | 按 ID 删除定时任务 |
-| `pause` | Safe | 暂停任务（保留历史，不删除） |
-| `resume` | Safe | 恢复暂停的任务（重算 NextRunAt，不补执行错过的） |
+| `action` | 说明 |
+|------|------|
+| `create` | 创建定时任务，支持标准 5 字段 cron 表达式 |
+| `list` | 列出所有定时任务 |
+| `delete` | 按 ID 删除定时任务 |
+| `pause` | 暂停任务（保留历史，不删除） |
+| `resume` | 恢复暂停的任务（重算 NextRunAt，不补执行错过的） |
+
+工具整体声明为 `ToolRisk.Destructive`（`ToolPolicyDefaults.ForRisk` 据此给出 `Always` 审批模式），加载策略为
+`ToolLoadPolicy.Deferred`（不自动加载，需经 ToolSearch 激活）。注册处按 `action` 细分的风险等级不存在——
+5 个操作共用同一个工具级风险标注，因此只读的 `list` 也会经过审批边界。
 
 ### 4.3 CronJobEntry 字段
 
@@ -260,7 +277,8 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 
 ### 4.6 执行策略
 
-Cron 触发的任务以 `WorkingMode.Goal` 执行——无人值守下模型可自主分解子任务并迭代验证（`CronJobExecutor.ExecuteJobAsync`）。早期实现使用 `WorkingMode.Plan`（只读），但 Plan 模式下提交的计划会进入持久化 `AwaitingApproval`，必须由用户审批，不适合无人值守的 Cron 场景，因此已改为 Goal 模式。
+Cron 触发的任务以 `WorkingMode.Goal` 执行——无人值守下模型可自主分解子任务并迭代验证（`CronJobExecutor.ExecuteJobAsync`）。
+Plan 模式下提交的计划会进入持久化 `AwaitingApproval`，必须由用户审批，不适合无人值守场景，因此 Cron 不使用 Plan 模式。
 
 ---
 
@@ -306,8 +324,8 @@ AutoDream **默认开启**，无需任何配置。两个自然门控（时间 + 
 
 1. 门控检查（四重，任一不通过即退出）
 2. 获取跨进程文件锁（`FileStream` + `FileShare.None`，原子获取）——锁文件在 `{cwd}/.onecode/memory/autodream.lock`
-3. 扫描 `~/.onecode/events/*.jsonl` 统计**当前项目**的新会话（按事件信封的 `payload.working_directory` 字段过滤）
-4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`session_count` 变量）
+3. 收集候选：`{cwd}/.onecode/agent-file-memory/` 中自上次整合后被改动的**会话工作记忆**（最多 20 个，最新优先，只读快照）；再扫描 `~/.onecode/events/*.jsonl` 统计**当前项目**的新会话（按事件信封的 `payload.working_directory` 字段过滤）
+4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`session_count`、`working_memory_root`、`working_memory_section` 变量）
 5. 启动轻量 `ChatClientAgent`（仅 Read/Glob/Grep 只读工具）
 6. Agent 输出结构化 JSON 数组
 7. 解析增量变更 JSON 数组后，按 `scope` 写入 `IMemoryEntryStore`：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md`（Agent 输出经 `SanitizeKey`/`SanitizeValue` 清洗，防 MEMORY.md 结构注入）
@@ -316,7 +334,7 @@ AutoDream **默认开启**，无需任何配置。两个自然门控（时间 + 
 
 ### 5.5 写入位置与项目隔离
 
-通过 `IMemoryEntryStore` + `MemoryScope` 枚举区分作用域，实现层按 scope 解析物理目录（不再使用 KV store / `memory-store/` 目录，所有记忆统一存在 `MEMORY.md` 中）：
+通过 `IMemoryEntryStore` + `MemoryScope` 枚举区分作用域，实现层按 scope 解析物理目录，所有记忆统一存在 `MEMORY.md` 中：
 
 | Scope | 物理目录 | 入口文件 | 用途 |
 |-------|---------|----------|------|
@@ -368,7 +386,7 @@ AutoDream **默认开启**，开箱即用。如需调整，在 `settings.json` �
 | 跨进程 | `FileStream` + `FileShare.None` | 原子获取，`Dispose` 自动释放 |
 | 僵尸锁 | `StaleLockTimeout`（2 小时） | 超时锁可安全抢占 |
 
-跨进程锁使用 `FileStream` 独占模式，比原来的"先检查再写入"非原子方案安全得多。
+跨进程锁使用 `FileStream` 独占模式（`FileShare.None`）原子获取，无"先检查再写入"的窗口。
 即使进程崩溃，GC 也会回收文件句柄，不会留下永久锁。
 
 ---
@@ -431,33 +449,13 @@ services.AddYoloRuleStoreLoader();
 
 ## 7. 已知问题与改进方向
 
-### 7.1 已修复
-
-| 问题 | 修复 |
-|------|------|
-| LspHostedService 的 `StartServersAsync()` 为 fire-and-forget，违反项目异步规范 | 改为追踪 `_startTask` 字段，`StopAsync` 中 await 观察异常，保留 `ApplicationStarted` 延迟启动语义 |
-
-### 7.2 待修复
-
 | 优先级 | 问题 | 建议 |
 |--------|------|------|
-| P1 | 缺少统一的 `IStartupTask` 抽象 | 将 YoloRuleStoreLoader、LspHostedService 等启动任务统一管理 |
+| P1 | 缺少统一的 `IStartupTask` 抽象 | 将 YoloRuleStoreLoader、LspHostedService、HostStopSessionCloseService 等启动任务统一管理 |
 | P2 | App 层后台服务注册散落多个文件 | 补 `AddAppBackgroundServices` 聚合方法，与 Automation 层对齐 |
 | P2 | CronJobExecutor 系统提示词缓存永不失效 | 监听 skills/MCP 变更事件刷新缓存 |
 
-### 7.3 已修复（本轮）
-
-| 问题 | 修复 |
-|------|------|
-| AutoDreamService 未接线，属于死代码 | 改造为 `BackgroundService`，定时轮询 + `Trigger()` 双触发，接入宿主生命周期 |
-| AutoDream 配置仅支持环境变量 | 走 `IConfigManager`，支持 `settings.json`（`autodream.enabled` / `minHours` / `minSessions`）+ 环境变量覆盖，默认开启 |
-| AutoDream 文件锁非原子写入 | 改用 `FileStream` + `FileShare.None` 独占锁，原子获取 |
-| AutoDream 扫描节流不持久化 | `_lastSessionScanAt` 持久化到 `last_session_scan_at` 文件，跨重启生效 |
-| AutoDream 始终用主模型 | 直接复用 `fastModel`，未配置时回退到主 `model`，无需单独配置 |
-| AutoDream 失败仍更新时间戳 | 改为仅成功时更新 `last_consolidated_at`，失败可下次重试 |
-| `FileSystemMemoryStore` 前缀匹配缺陷 | 已废弃 KV store 路线，改为 `IMemoryEntryStore` + `MemoryScope` 枚举，记忆统一写入 `MEMORY.md` |
-| 记忆存储不区分项目（全局污染） | `IMemoryEntryStore` 按 `MemoryScope.User`/`Project` 路由到不同物理目录：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md` |
-| AutoDream 状态文件全局化（跨项目干扰） | 状态文件（lock、时间戳）迁入 `{cwd}/.onecode/memory/`，与项目 `MEMORY.md` 同目录，按项目独立 |
-| AutoDream 会话扫描统计所有项目的会话 | 按 session 文件首行的 `working_directory` 字段过滤，仅统计当前项目 |
-| AutoDream 会话扫描用 `*.json` 匹配不到 `.jsonl` 文件 | 修正为 `*.jsonl`，会话门控恢复正常 |
-| AutoDream prompt 缺少项目上下文 | 注入 `project_root` 变量，Agent 可按项目过滤会话 |
+前两项当前状态：启动任务各自实现 `IHostedService` 并按领域目录分散注册（`AddCronScheduler`、`AddModelCatalogRefresh`、
+`AddYoloRuleStoreLoader`、`AddHookServices`、`AddLspServices`、`AddAutoDreamServices`、`AddPlanWorkflowServices`、`AddSkillServices`），
+没有 `IStartupTask` 抽象与 `AddAppBackgroundServices` 聚合入口。
+`CronJobExecutor` 的 `_cachedSystemPrompt` / `_cachedHarnessPrompt` 用 `??=` 缓存后不再失效：会话中途新增 skill 或 MCP 服务器，Cron 任务仍使用旧提示词。

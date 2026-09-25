@@ -4,19 +4,27 @@ namespace OneCode.App.Services.Hooks;
 /// 钩子注册表——管理所有钩子处理器
 ///
 /// 架构特点：
-/// - 按 matcher 分组索引，支持事件 + matcher 两维过滤
+/// - 按 matcher 分组索引，支持拦截点 + matcher 两维过滤
 /// - Priority 升序排序执行（数值越小越先执行）
 /// - 仅负责注册、查询、移除；执行调度由 HookExecutionService 负责
+/// - <see cref="Generation"/> 记录配置代次：整体替换时递增，供可观测性与审计引用
 /// </summary>
 public sealed class HookRegistry
 {
     private readonly GlobHookMatcher _matcher;
-    private readonly Dictionary<HookEvent, List<MatcherGroup>> _matcherIndex = new();
+    private readonly Dictionary<HookInterceptionPoint, List<MatcherGroup>> _matcherIndex = new();
     private readonly object _lock = new();
+    private long _generation;
 
     public HookRegistry(GlobHookMatcher matcher)
     {
         _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
+    }
+
+    /// <summary>当前配置代次；每次整体替换 +1，单调递增。</summary>
+    public long Generation
+    {
+        get { lock (_lock) { return _generation; } }
     }
 
     public void Register(HookRegistration hook)
@@ -39,15 +47,16 @@ public sealed class HookRegistry
             _matcherIndex.Clear();
             foreach (var hook in hooks)
                 RegisterLocked(hook);
+            _generation++;
         }
     }
 
     private void RegisterLocked(HookRegistration hook)
     {
-        if (!_matcherIndex.TryGetValue(hook.Event, out var groups))
+        if (!_matcherIndex.TryGetValue(hook.Point, out var groups))
         {
             groups = [];
-            _matcherIndex[hook.Event] = groups;
+            _matcherIndex[hook.Point] = groups;
         }
 
         var group = groups.Find(g =>
@@ -73,11 +82,11 @@ public sealed class HookRegistry
     }
 
     /// <summary>
-    /// 获取匹配指定事件和 matcher 值的 hook 注册项。
-    /// 使用 _matcherIndex 进行 O(1) 事件查找，避免 GetAll() 的 O(n) 全量扫描。
+    /// 获取匹配指定拦截点和 matcher 值的 hook 注册项。
+    /// 使用 _matcherIndex 进行 O(1) 拦截点查找，避免 GetAll() 的 O(n) 全量扫描。
     /// </summary>
-    public IReadOnlyList<HookRegistration> GetMatchesForEvent(HookEvent @event, string? matcherValue)
-        => GetMatchesLocked(@event, matcherValue);
+    public IReadOnlyList<HookRegistration> GetMatchesForPoint(HookInterceptionPoint point, string? matcherValue)
+        => GetMatchesLocked(point, matcherValue);
 
     public void Unregister(string name)
     {
@@ -95,11 +104,11 @@ public sealed class HookRegistry
         }
     }
 
-    private List<HookRegistration> GetMatchesLocked(HookEvent @event, string? matcherValue)
+    private List<HookRegistration> GetMatchesLocked(HookInterceptionPoint point, string? matcherValue)
     {
         lock (_lock)
         {
-            if (!_matcherIndex.TryGetValue(@event, out var groups))
+            if (!_matcherIndex.TryGetValue(point, out var groups))
                 return [];
 
             List<HookRegistration> matchedHooks = [];

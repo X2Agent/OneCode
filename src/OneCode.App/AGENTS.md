@@ -30,7 +30,6 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | `OneCode.Core` | 接口与领域模型 | Core |
 | `OneCode.Infrastructure` | 外部系统适配 | Infrastructure |
 | `Terminal.Gui` | TUI 渲染（仅 `Tui/` 子目录） | App |
-| `System.CommandLine` | 命令行解析（仅 `Commands/` 和入口） | App |
 | `Microsoft.Extensions.AI` | AI 调用抽象（`IChatClient` / `ChatMessage` 等核心接口） | App |
 | `Microsoft.Extensions.Hosting` | DI + 生命周期 | App |
 | `YamlDotNet` | YAML 解析（Skill frontmatter、主题文件） | App |
@@ -79,7 +78,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 
 | 类型 | 位置 | 保留原因 |
 |------|------|---------|
-| `MainAgentRunner` / `ForkedAgentRunner` | `App.Services.Agent` | 业务编排器，依赖 13+ 个 App 服务（MemoryService、SessionManager、LspDiagnosticRegistry、PermissionModeProvider、SkillProviderHolder、ConversationShellExecutorManager 等），属于 Application 层"组合"职责，不属于 Infrastructure "外部系统适配"职责。下沉需提取 10+ 个 Core 接口，会让 Core 沦为接口垃圾场。 |
+| `MainAgentRunner` / `ForkedAgentRunner` | `App.Services.Agent` | 业务编排器，依赖 13+ 个 App 服务（MemoryService、SessionManager、LspDiagnosticRegistry、PermissionModeProvider、SkillProviderFactory、ConversationShellExecutorManager 等），属于 Application 层"组合"职责，不属于 Infrastructure "外部系统适配"职责。下沉需提取 10+ 个 Core 接口，会让 Core 沦为接口垃圾场。 |
 | `DesignContextProvider` / `LspDiagnosticContextProvider` / `PlanModeAttachmentProvider` / `BuildModeAttachmentProvider` / `GoalContextProvider` / `ShellEnvironmentProvider` / `ModeInstructionProvider` | `App.Services.Context` 等 | MAF `AIContextProvider` 子类，但本质是"将 App 层业务状态注入 LLM 上下文"的胶水代码，依赖 App 层服务（GoalContextState、PermissionModeProvider、SessionManager 等）。下沉不会减少 App↔Infrastructure 的耦合面。 |
 
 **判断准则**：

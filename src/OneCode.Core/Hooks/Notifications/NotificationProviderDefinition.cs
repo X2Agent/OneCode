@@ -52,7 +52,7 @@ public sealed record ProviderSignatureDefinition
     /// <summary>时间戳参数名。</summary>
     public string TimestampParamName { get; init; } = "timestamp";
 
-    /// <summary>true 时时间戳参数与 <c>{Timestamp}</c> 变量取毫秒（钉钉要求毫秒）；缺省 Unix 秒。</summary>
+    /// <summary>true 时 URL/header 的时间戳参数取毫秒（钉钉要求毫秒）；缺省 Unix 秒。签名模板变量 <c>{Timestamp}</c> 恒为 Unix 秒，毫秒请用 <c>{TimestampMs}</c>。</summary>
     [JsonPropertyName("timestampMs")]
     public bool TimestampInMilliseconds { get; init; }
 

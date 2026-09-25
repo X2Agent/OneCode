@@ -87,8 +87,6 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
         _logger = logger;
     }
 
-    // IMemoryEntryStore
-
     /// <inheritdoc/>
     public async Task<IReadOnlyList<MemoryEntry>> LoadAsync(MemoryScope scope, CancellationToken ct = default)
     {

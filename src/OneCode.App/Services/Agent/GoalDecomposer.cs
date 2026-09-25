@@ -9,7 +9,7 @@ namespace OneCode.App.Services.Agent;
 ///
 /// 设计说明：
 /// - 不走 AgentPipelineBuilder（decompose/replan 不需要工具循环、权限检查等重型中间件）
-/// - 补齐了审计日志 + Hook 触发 + token 统计，避免 decompose/replan 成为治理盲区
+/// - 补齐了审计日志 + token 统计，避免 decompose/replan 成为治理盲区
 /// - 失败时返回 fallback 单目标计划，保证 Goal 工作流能继续执行
 /// </summary>
 internal interface IGoalPlanningService
@@ -35,11 +35,13 @@ internal sealed class GoalDecomposer : IGoalPlanningService
     private readonly IChatClient _chatClient;
     private readonly ILogger<GoalDecomposer> _logger;
     private readonly IPromptManager _promptManager;
-    private readonly IHookExecutionService _hookExecutionService;
 
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        // GetResponseAsync<T>（结构化路径）内部会 MakeReadOnly()，未显式指定解析器的实例会在那里抛异常，
+        // 且异常会被 StructuredChatCall 的拒绝重试宽捕获吞掉、伪装成网关拒绝。见 StructuredChatCall 的守卫。
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
     };
 
     /// <summary>
@@ -98,13 +100,11 @@ internal sealed class GoalDecomposer : IGoalPlanningService
     public GoalDecomposer(
         IChatClient chatClient,
         ILogger<GoalDecomposer> logger,
-        IPromptManager promptManager,
-        IHookExecutionService hookExecutionService)
+        IPromptManager promptManager)
     {
         _chatClient = chatClient;
         _logger = logger;
         _promptManager = promptManager;
-        _hookExecutionService = hookExecutionService;
     }
 
     /// <summary>
@@ -192,10 +192,10 @@ internal sealed class GoalDecomposer : IGoalPlanningService
 
             var chatOptions = CreateStructuredChatOptions(modelId);
 
-            var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
+            var call = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-replanner", replanPrompt, ct).ConfigureAwait(false);
 
-            var newPlan = TryDeserializePlan(response.Text);
+            var newPlan = call.Value ?? TryDeserializePlan(call.Text);
 
             if (newPlan?.Goals is null || newPlan.Goals.Count == 0)
             {
@@ -213,7 +213,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
                 "Replanning succeeded: {Count} new sub-goals replacing original remaining goals",
                 replannedGoals.Count);
 
-            return (replannedGoals, inputTokens, outputTokens);
+            return (replannedGoals, call.InputTokens, call.OutputTokens);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -230,7 +230,8 @@ internal sealed class GoalDecomposer : IGoalPlanningService
     /// </summary>
     /// <param name="parent">待分解的父子目标。</param>
     /// <param name="nextId">子目标起始 ID（由调用方根据当前 GoalList 大小计算）。</param>
-    /// <param name="modelId">当前实际模型 ID，用于按模型缓存结构化输出兼容性。</param>
+    /// <param name="modelId">当前实际模型 ID，透传到 ChatOptions.ModelId；response_format 能力协商在
+    /// 每次调用内由 <see cref="StructuredChatCall"/> 完成（schema 请求 → 文本降级 → 无格式重试）。</param>
     /// <param name="ct">取消令牌。</param>
     public async Task<(List<GoalItem> SubGoals, long InputTokens, long OutputTokens)?>
         DecomposeSubGoalAsync(GoalItem parent, int nextId, string? modelId, CancellationToken ct)
@@ -248,10 +249,10 @@ internal sealed class GoalDecomposer : IGoalPlanningService
 
             var chatOptions = CreateStructuredChatOptions(modelId);
 
-            var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
+            var call = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-sub-decomposer", parent.Description, ct).ConfigureAwait(false);
 
-            var newPlan = TryDeserializePlan(response.Text);
+            var newPlan = call.Value ?? TryDeserializePlan(call.Text);
 
             if (newPlan?.Goals is null || newPlan.Goals.Count == 0)
             {
@@ -268,7 +269,7 @@ internal sealed class GoalDecomposer : IGoalPlanningService
                 "Sub-goal #{ParentId} decomposed into {Count} sub-goals at depth {Depth}",
                 parent.Id, subGoals.Count, parent.Depth + 1);
 
-            return (subGoals, inputTokens, outputTokens);
+            return (subGoals, call.InputTokens, call.OutputTokens);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -293,18 +294,19 @@ internal sealed class GoalDecomposer : IGoalPlanningService
 
             var chatOptions = CreateStructuredChatOptions(modelId);
 
-            var (response, inputTokens, outputTokens) = await RunStructuredLlmCallAsync(
+            var call = await RunStructuredLlmCallAsync(
                 messages, chatOptions, "goal-decomposer", goal, ct).ConfigureAwait(false);
 
-            var plan = TryDeserializePlan(response.Text);
+            // 结构化优先（原生 schema），失败走 ExtractJsonBlock 文本降级
+            var plan = call.Value ?? TryDeserializePlan(call.Text);
             if (plan is not null)
-                return (plan, inputTokens, outputTokens, Error: null);
+                return (plan, call.InputTokens, call.OutputTokens, Error: null);
 
             // 空文本通常意味着推理模型把 token 预算耗在 reasoning_content 上；
             // 解析失败则说明输出里没有可提取的 JSON 计划块。两者都给出可诊断的错误，
             // 供 DecomposeWithFallbackAsync 的 Warning 日志使用。
-            return (new GoalPlan(), inputTokens, outputTokens,
-                Error: string.IsNullOrWhiteSpace(response.Text)
+            return (new GoalPlan(), call.InputTokens, call.OutputTokens,
+                Error: string.IsNullOrWhiteSpace(call.Text)
                     ? $"model returned empty text (reasoning budget likely exhausted; maxOutput={chatOptions.MaxOutputTokens})"
                     : "model output contained no parseable JSON plan block");
         }
@@ -319,20 +321,21 @@ internal sealed class GoalDecomposer : IGoalPlanningService
     {
         ModelId = modelId,
         MaxOutputTokens = 8192,
-        // Do not set ResponseFormat here. Some OpenAI-compatible gateways reject every
-        // response_format variant, and exception-driven probing still raises a first-chance
-        // ClientResultException while debugging. The goal-decomposer system prompt already
-        // contains the exact JSON contract, so prompt-only JSON is the portable baseline.
+        // ResponseFormat 不在此处设置：能力协商统一由 StructuredChatCall 完成
+        //（schema 请求 → 同响应文本降级 → 硬拒绝时无格式重试）。goal-decomposer 系统提示词
+        // 自带完整 JSON 契约，正是无格式重试路径（可移植基线）的契约来源。
     };
 
     /// <summary>
-    /// 结构化 LLM 调用的统一辅助方法。
+    /// 结构化 LLM 调用的统一辅助方法（"结构化请求 + 文本降级"，见 <see cref="StructuredChatCall"/>）。
     /// 为 decompose/replan 等轻量级 LLM 调用提供：
-    /// - 审计日志（记录调用阶段、输入长度、输出长度、token 用量）
-    /// - Hook 触发（UserPromptSubmit 事件，让自定义钩子感知 decompose/replan 调用）
+    /// - 审计日志（记录调用阶段、输入长度、输出长度、token 用量、是否经由原生 schema）
     /// - 统一 token 统计（从 response.Usage 提取并返回）
+    ///
+    /// 返回值：<see cref="StructuredChatResult{T}.Value"/> 为原生 schema 路径的结果；
+    /// 为空时调用方用 <see cref="StructuredChatResult{T}.Text"/> 走 <see cref="TryDeserializePlan"/> 降级解析。
     /// </summary>
-    private async Task<(ChatResponse Response, long InputTokens, long OutputTokens)> RunStructuredLlmCallAsync(
+    private async Task<StructuredChatResult<GoalPlan>> RunStructuredLlmCallAsync(
         IReadOnlyList<ChatMessage> messages,
         ChatOptions chatOptions,
         string stageName,
@@ -345,38 +348,16 @@ internal sealed class GoalDecomposer : IGoalPlanningService
             "Goal LLM call starting: stage={Stage}, inputChars={Chars}, maxOutput={MaxTokens}",
             stageName, inputChars, chatOptions.MaxOutputTokens);
 
-        // Hook 触发：让 UserPromptSubmit 钩子感知到 decompose/judge 阶段的 LLM 调用
-        if (_hookExecutionService is not null)
-        {
-            try
-            {
-                var payload = new HookPayload
-                {
-                    Event = HookEvent.GoalStageInvoke,
-                    Cwd = Environment.CurrentDirectory,
-                    UserMessage = $"[{stageName}] {userPrompt}",
-                };
-                // stage 名作 matcher 值（goal-decomposer / goal-sub-decomposer / goal-replanner）
-                await _hookExecutionService.FireAsync(payload, actualMatcherValue: stageName, ct: ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                // Hook 失败不应阻断 LLM 调用
-                _logger.LogWarning(ex, "Hook execution failed for stage {Stage}, continuing with LLM call", stageName);
-            }
-        }
+        // GoalDecomposer 是直连模型路径（不构造 agent 生命周期），不在 Hook 6 个拦截点范围内。
 
-        var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct)
-            .ConfigureAwait(false);
+        var call = await StructuredChatCall.CallAsync<GoalPlan>(
+            _chatClient, messages, chatOptions, JsonOptions, _logger, ct).ConfigureAwait(false);
 
-        var inputTokens = (long)(response.Usage?.InputTokenCount ?? 0);
-        var outputTokens = (long)(response.Usage?.OutputTokenCount ?? 0);
-
-        // 审计日志：调用后记录 token 用量和输出规模
+        // 审计日志：调用后记录 token 用量、输出规模与结构化路径
         _logger.LogInformation(
-            "Goal LLM call completed: stage={Stage}, inputTokens={InputTokens}, outputTokens={OutputTokens}, outputChars={OutputChars}",
-            stageName, inputTokens, outputTokens, response.Text?.Length ?? 0);
+            "Goal LLM call completed: stage={Stage}, inputTokens={InputTokens}, outputTokens={OutputTokens}, outputChars={OutputChars}, viaSchema={ViaSchema}",
+            stageName, call.InputTokens, call.OutputTokens, call.Text.Length, call.ViaSchema);
 
-        return (response, inputTokens, outputTokens);
+        return call;
     }
 }

@@ -52,7 +52,6 @@ public sealed class MainAgentRunnerTests : IDisposable
             modeProvider: _modeProvider,
             permissionChecker: Substitute.For<IPermissionChecker>(),
             tokenLedger: new TokenLedger());
-
         var chatClient = Substitute.For<IChatClient>();
         var modelManager = new ModelManager(_configManager, new ModelCatalogStore());
         var promptManager = new PromptManager();
@@ -68,7 +67,7 @@ public sealed class MainAgentRunnerTests : IDisposable
             new AgentContextPipeline(sharedBuilder, mainContextBuilder),
             _pipelineAssembly,
             new CompactionStrategyFactory(chatClient, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
-            new AgentSessionStore(null, NullLogger<AgentSessionStore>.Instance),
+            new AgentSessionPersistence(null!, null!, NullLogger<AgentSessionPersistence>.Instance),
             chatClient,
             NullLoggerFactory.Instance,
             Substitute.For<IServiceProvider>(),

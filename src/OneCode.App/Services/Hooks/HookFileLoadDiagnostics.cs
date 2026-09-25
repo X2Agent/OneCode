@@ -17,7 +17,7 @@ public enum HookFileLoadStatus
 /// <param name="ConfigDir">配置目录（hooks.json 的上层目录）。</param>
 /// <param name="Status">加载状态。</param>
 /// <param name="HookCount">成功注册的 hook 数量。</param>
-/// <param name="Errors">非致命诊断消息（未知事件名等）。</param>
+/// <param name="Errors">非致命诊断消息（已迁移/不再支持的事件名等）。</param>
 public sealed record HookFileLoadReport(
     string ConfigDir,
     HookFileLoadStatus Status,
@@ -27,12 +27,12 @@ public sealed record HookFileLoadReport(
 /// <summary>Loader 层结果：解析出的 hook 配置 + 诊断消息。</summary>
 /// <param name="Path">hooks.json 绝对路径。</param>
 /// <param name="Status">加载状态。</param>
-/// <param name="Hooks">事件名 → matcher 组列表；加载失败或为空时为 null。</param>
+/// <param name="Hooks">拦截点 → matcher 组列表；加载失败或为空时为 null。</param>
 /// <param name="Errors">非致命诊断消息。</param>
 public sealed record HookFileLoadResult(
     string Path,
     HookFileLoadStatus Status,
-    Dictionary<HookEvent, List<HookMatcherGroup>>? Hooks,
+    Dictionary<HookInterceptionPoint, List<HookMatcherGroup>>? Hooks,
     IReadOnlyList<string> Errors);
 
 /// <summary>

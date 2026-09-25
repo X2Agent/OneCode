@@ -8,7 +8,8 @@ public sealed record HookRegistration
     /// <summary>Hook 名称（用于调试和移除）</summary>
     public string Name { get; init; } = string.Empty;
 
-    public HookEvent Event { get; init; }
+    /// <summary>绑定的拦截点。</summary>
+    public HookInterceptionPoint Point { get; init; }
 
     /// <summary>匹配器 pattern："" 或 "*" 匹配所有</summary>
     public string Matcher { get; init; } = string.Empty;
