@@ -135,7 +135,10 @@ public sealed class SessionContextBar : View
     internal static string ShortenPath(string path, int maxChars = 20)
     {
         if (string.IsNullOrEmpty(path)) return string.Empty;
-        var name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
+        // 手工按两种分隔符取末段：Path.GetFileName 在 Unix 上只认 '/',
+        // 会把 "C:\projects\OneCode" 整体当作文件名（跨平台语义以测试锚定）。
+        var trimmed = path.TrimEnd('\\', '/');
+        var name = trimmed[(trimmed.LastIndexOfAny(['\\', '/']) + 1)..];
         if (string.IsNullOrEmpty(name)) name = path;
 
         if (name.Length <= maxChars) return name;

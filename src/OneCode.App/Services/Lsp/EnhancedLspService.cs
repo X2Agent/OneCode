@@ -283,9 +283,12 @@ public sealed class EnhancedLspService : IEnhancedLspService, IAsyncDisposable
     /// <summary>目录归属判定（internal 供单测）：带分隔符边界的前缀匹配，/a/b 不匹配 /a/bc。</summary>
     internal static bool IsUnderDirectory(string filePath, string directory, StringComparison comparison)
     {
-        var prefix = directory.Replace('/', Path.DirectorySeparatorChar)
-            .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return filePath.Replace('/', Path.DirectorySeparatorChar).StartsWith(prefix, comparison);
+        var sep = Path.DirectorySeparatorChar;
+        // 两种分隔符都规范化到平台分隔符：Windows 路径可能带 '/'，Unix 上收到的
+        // Windows 风格路径也必须能比较（分隔符不匹配曾让前缀匹配静默失效）。
+        string Normalize(string s) => s.Replace('\\', sep).Replace('/', sep);
+        var prefix = Normalize(directory).TrimEnd(sep) + sep;
+        return Normalize(filePath).StartsWith(prefix, comparison);
     }
 
     public async ValueTask DisposeAsync()

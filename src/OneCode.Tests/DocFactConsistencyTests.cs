@@ -195,7 +195,7 @@ public sealed class DocFactConsistencyTests
     /// <para>
     /// <b>排除项</b>：
     /// <list type="bullet">
-    /// <item>MAF 源码引用（<c>agent-framework/</c>）——本地只读 checkout；存在时一并校验，未 checkout 时跳过</item>
+    /// <item>MAF 源码引用（见 <see cref="IsMafSourceReference"/>）——本地只读 checkout；存在时一并校验，未 checkout 时跳过</item>
     /// <item>占位符示例名（<c>Xxx*</c> / <c>My*</c> 等，见 <see cref="IsPlaceholderPath"/>）</item>
     /// <item>历史引用（限定词 + 同行给出真实新位置，或删除限定词，见 <see cref="IsHistoricalReference(string, string?, string)"/>）</item>
     /// <item>被省略的路径片段（如 <c>.cs</c>、<c>ServiceCollectionExtensions.*.cs</c> 通配）</item>
@@ -209,7 +209,7 @@ public sealed class DocFactConsistencyTests
         // 不能排除 `)`/`]` 等后续字符——多数引用写在 Markdown 链接 `[标签](路径)` 里。
         var pathPattern = new Regex(@"[\w./\\-]*\.cs(?![\w])", RegexOptions.Compiled);
         var violations = new List<string>();
-        var mafAvailable = Directory.Exists(Path.Combine(FindRepoRoot(), "agent-framework"));
+        var mafAvailable = MafSourceRoot() is not null;
 
         foreach (var doc in AllDocsWithPathReferences())
         {
@@ -217,12 +217,6 @@ public sealed class DocFactConsistencyTests
 
             for (var i = 0; i < lines.Length; i++)
             {
-                // MAF 源码是本地只读 checkout；未 checkout 时无法校验，跳过而非报假违规
-                if (!mafAvailable && MentionsMafSource(lines[i]))
-                {
-                    continue;
-                }
-
                 foreach (Match match in pathPattern.Matches(lines[i]))
                 {
                     var referenced = match.Value;
@@ -231,6 +225,13 @@ public sealed class DocFactConsistencyTests
                         || IsGlobFragment(lines[i], match)
                         || ExistsAsSourceFile(referenced)
                         || IsHistoricalReference(lines[i], EnclosingTableHeader(lines, i), referenced))
+                    {
+                        continue;
+                    }
+
+                    // MAF 源码是本地只读 checkout：存在时上面已连同 src/ 一并校验；
+                    // 未 checkout 时无法对框架侧引用取证，跳过而非报假违规。
+                    if (!mafAvailable && IsMafSourceReference(referenced))
                     {
                         continue;
                     }
@@ -247,17 +248,65 @@ public sealed class DocFactConsistencyTests
     }
 
     /// <summary>
+    /// MAF 源码引用的路径前缀——文档记录 MAF 上游（pinned <c>dotnet-1.22.0</c>）取证时的惯用写法。
+    /// </summary>
+    private static readonly string[] MafSourcePathPrefixes =
+    [
+        "agent-framework/",     // 仓库相对：agent-framework/dotnet/src/...
+        "dotnet/",              // 简写：dotnet/src/Microsoft.Agents.AI/...
+        "Microsoft.Agents",     // 包相对：Microsoft.Agents.AI/Harness/...
+        "Microsoft.Extensions.AI",
+        "Harness/",             // 包内相对：Harness/ToolApproval/...
+    ];
+
+    /// <summary>
+    /// MAF 上游源码的裸文件名——只可能指向 MAF checkout，不可能存在于本仓库。
+    /// 本地有 MAF checkout 时这些名字仍随 <see cref="VerifiableSourceFiles"/> 逐一校验
+    /// （不存在即违规）；未 checkout 时无法取证，由 <see cref="Docs_AllReferencedSourceFilesExist"/>
+    /// 跳过。新增 MAF 引用若忘记补录，CI 会失败提醒——这是有意识的动作，不是静默放行。
+    /// </summary>
+    private static readonly HashSet<string> MafSourceFileNames = new(StringComparer.Ordinal)
+    {
+        "AIAgentChatClient.cs",
+        "AIAgentStructuredOutput.cs",
+        "AIJudgeLoopEvaluator.cs",
+        "AgentExtensions.cs",
+        "ApprovalRequirement.cs",
+        "BackgroundAgentsProvider.cs",
+        "BackgroundTaskCompletionLoopEvaluator.cs",
+        "ChatClientExtensions.cs",
+        "ChatClientHarnessExtensions.cs",
+        "CompletionMarkerLoopEvaluator.cs",
+        "FeatureIndex.cs",
+        "HarnessAgent.cs",
+        "HarnessAgentOptions.cs",
+        "HostedWorkflowState.cs",
+        "LoopAgent.cs",
+        "LoopAgentOptions.cs",
+        "LoopContext.cs",
+        "OpenTelemetryAgent.cs",
+        "SummarizationCompactionStrategy.cs",
+    };
+
+    /// <summary>是否为 MAF 源码引用（只读 checkout，可能未拉取）。</summary>
+    private static bool IsMafSourceReference(string referenced)
+    {
+        var normalized = referenced.Replace('\\', '/');
+        if (MafSourcePathPrefixes.Any(p => normalized.StartsWith(p, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        var fileName = normalized[(normalized.LastIndexOf('/') + 1)..];
+        return MafSourceFileNames.Contains(fileName);
+    }
+
+    /// <summary>
     /// 是否为 glob 通配的一部分（如 <c>*Tests.cs</c>、<c>Xxx*.cs</c>）——通配片段不是具体路径。
     /// </summary>
     private static bool IsGlobFragment(string line, Match match)
         => (match.Index > 0 && line[match.Index - 1] == '*')
         || (match.Index + match.Length < line.Length && line[match.Index + match.Length] == '*');
-
-    /// <summary>该行是否在引用 MAF 源码（只读 checkout，可能未拉取）。</summary>
-    private static bool MentionsMafSource(string line)
-        => line.Contains("agent-framework", StringComparison.OrdinalIgnoreCase)
-        || line.Contains("Microsoft.Agents", StringComparison.Ordinal)
-        || line.Contains("Microsoft.Extensions.AI", StringComparison.Ordinal);
 
     /// <summary>
     /// 是否值得校验：排除通配片段、占位符与省略前缀。
@@ -625,13 +674,27 @@ public sealed class DocFactConsistencyTests
     private static IEnumerable<string> VerifiableSourceFiles(string repoRoot)
     {
         var roots = new List<string> { Path.Combine(repoRoot, "src") };
-        var mafRoot = Path.Combine(repoRoot, "agent-framework", "dotnet", "src");
-        if (Directory.Exists(mafRoot))
+        if (MafSourceRoot() is { } mafRoot)
         {
             roots.Add(mafRoot);
         }
 
         return roots.SelectMany(EnumerateSourceFiles);
+    }
+
+    /// <summary>
+    /// 本地 MAF 只读 checkout 的源码根；未 checkout（或 checkout 不完整）时返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 必须按 <c>dotnet/src</c> 而非 <c>agent-framework</c> 判断——仓库索引里提交了
+    /// <c>agent-framework</c> 的 gitlink（无 <c>.gitmodules</c>），CI checkout 会留下
+    /// <b>空目录</b>；按父目录判断会把「无源码可校验」误判为「可校验」，
+    /// 导致整批 MAF 上游引用报假违规（本地能过只因开发者有完整 checkout）。
+    /// </remarks>
+    private static string? MafSourceRoot()
+    {
+        var mafRoot = Path.Combine(FindRepoRoot(), "agent-framework", "dotnet", "src");
+        return Directory.Exists(mafRoot) ? mafRoot : null;
     }
 
     private static IEnumerable<string> EnumerateSourceFiles(string root) =>

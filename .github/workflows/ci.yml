@@ -55,13 +55,19 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # Windows runner 默认 shell 是 pwsh，环境变量须用 $env: 形式访问；
+      # 裸 $SOLUTION 在 pwsh 下为空字符串（MSB1003），在 bash 下才展开。
+      # 三个平台无关步骤统一显式用 bash，语义与 ubuntu 完全一致。
       - name: Restore
+        shell: bash
         run: dotnet restore "$SOLUTION"
 
       - name: Build
+        shell: bash
         run: dotnet build "$SOLUTION" -c "$CONFIGURATION" --no-restore
 
       - name: Test
+        shell: bash
         run: dotnet test "$TEST_PROJECT" -c "$CONFIGURATION" --no-build --no-restore --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
 
       - name: Enforce coverage floor
