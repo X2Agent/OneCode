@@ -21,11 +21,16 @@ public sealed class PathsHelperTests
         var result = PathsHelper.SafeResolve("../../etc/passwd", workDir);
 
         result.IsSuccess.Should().BeFalse();
-        // Temp 沙箱下该输入实际命中受保护目录拦截（而非一般的工作目录越界分支），
-        // 错误文案必须显式说明 Access denied 并回显被拒绝的路径。
-        result.Error.Should().Contain("Access denied", "拒绝原因必须显式可见")
-            .And.Contain("protected system directory", "真实失败分支是受保护目录拦截")
-            .And.Contain("../../etc/passwd", "错误文案必须回显被拒绝的路径");
+        result.Error.Should().Contain("../../etc/passwd", "错误文案必须回显被拒绝的路径");
+        // 拒绝分支随平台而异：Windows 上解析结果落在 AppData 等受保护目录内
+        // （"Access denied" / "protected system directory"），Linux 上 /etc 不在
+        // 受保护列表内而走通用越界分支（"outside the working directory"）。
+        // 两种均为正确拒绝，文案都必须显式说明原因（约定同 PathTraversalTests）。
+        result.Error.Should().Match(error =>
+                error.Contains("Access denied", StringComparison.Ordinal)
+                || error.Contains("protected system directory", StringComparison.Ordinal)
+                || error.Contains("outside the working directory", StringComparison.Ordinal),
+            "拒绝原因必须显式可见");
     }
 
     [Fact]

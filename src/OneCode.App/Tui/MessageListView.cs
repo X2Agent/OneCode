@@ -421,7 +421,7 @@ public sealed partial class MessageListView : View
     public void EndTailRegion()
     {
         if (_tailRegionStart < 0) return;
-        var count = _lines.Count - _tailRegionStart;
+        var count = Math.Max(0, _lines.Count - _tailRegionStart);
         if (count > 0)
             _lines.RemoveRange(_tailRegionStart, count);
         _tailRegionStart = -1;

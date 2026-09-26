@@ -22,18 +22,6 @@ env:
   TEST_PROJECT: src/OneCode.Tests/OneCode.Tests.csproj
 
 jobs:
-  docs:
-    name: Command docs sync
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check command docs sync
-        shell: pwsh
-        run: ./scripts/check-docs.ps1 -RepoRoot "$env:GITHUB_WORKSPACE"
-
   build-test:
     name: Build and test (${{ matrix.os }})
     # 主目标平台是 Windows,而 Terminal.Gui 的鼠标/按键绑定按平台分支

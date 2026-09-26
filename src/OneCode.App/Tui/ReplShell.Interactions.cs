@@ -139,7 +139,10 @@ public sealed partial class ReplShell : IInteractionSession
             }
             if (wizard.HandleKey(kb))
             {
-                RefreshQuestionWizard();
+                // 已完成（末题提交/取消）的向导不再重渲：完成续体会异步拆除尾部
+                // 交互区域，此时刷新只会与之竞争修改 MessageListView 行表。
+                if (!wizard.ResultTask.IsCompleted)
+                    RefreshQuestionWizard();
                 // 推进后当前题可能变为文本题 — 立即进入输入模式，否则输入框会
                 // 回落到普通聊天提交路径（Enter 误发消息）
                 EnterTextModeForCurrentQuestion();
@@ -149,7 +152,11 @@ public sealed partial class ReplShell : IInteractionSession
 
         if (_activeInlineSelector is { } selector && selector.HandleKey(kb))
         {
-            RefreshInlineSelector();
+            // 已完成（确认/Esc 取消）的选择器不再重渲：ShowPlanCard 等处注册的
+            // 完成续体会异步执行 DismissInlineSelector 拆除尾部区域，此时刷新只会
+            // 与之竞争修改 MessageListView 行表。
+            if (!selector.ResultTask.IsCompleted)
+                RefreshInlineSelector();
             return true;
         }
 
@@ -177,7 +184,9 @@ public sealed partial class ReplShell : IInteractionSession
                 wizard.SetTextAnswer(_chatInput.CurrentText.Trim());
                 _chatInput.ClearQuestionMode();
                 wizard.HandleKey(kb);
-                RefreshQuestionWizard();
+                // 末题提交会完成向导，完成续体异步拆除尾部区域——同 HandleInteractionKey 守卫。
+                if (!wizard.ResultTask.IsCompleted)
+                    RefreshQuestionWizard();
                 EnterTextModeForCurrentQuestion();
                 return true;
             }
@@ -260,10 +269,14 @@ public sealed partial class ReplShell : IInteractionSession
             if (longText) return; // 长文本答案由 Ctrl+Enter 导航路径提交
             _app.Invoke(() =>
             {
-                _activeQuestionWizard?.SetTextAnswer(answer);
+                var active = _activeQuestionWizard;
+                if (active is null) return;
+                active.SetTextAnswer(answer);
                 _chatInput.ClearQuestionMode();
-                _activeQuestionWizard?.HandleKey(Key.Enter);
-                RefreshQuestionWizard();
+                active.HandleKey(Key.Enter);
+                // 末题提交完成向导后，完成续体异步拆区——不再重渲（守卫同 HandleInteractionKey）。
+                if (!active.ResultTask.IsCompleted)
+                    RefreshQuestionWizard();
                 EnterTextModeForCurrentQuestion();
             });
         }, longText);

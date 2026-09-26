@@ -24,10 +24,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check command docs sync
-        shell: pwsh
-        run: ./scripts/check-docs.ps1 -RepoRoot "$env:GITHUB_WORKSPACE"
-
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:

@@ -10,8 +10,7 @@ namespace OneCode.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>为何需要这组测试</b>：本仓库只有 <c>scripts/check-docs.ps1</c> 校验了 <c>docs/commands.md</c> 的命令清单，
-/// 文档里的 <b>API 名 / 路径名 / 计数</b>从未被任何自动化覆盖。历史后果：
+/// <b>为何需要这组测试</b>：文档里的 <b>API 名 / 路径名 / 计数</b> 缺乏自动化覆盖，历史后果：
 /// </para>
 /// <list type="bullet">
 /// <item>一个不存在的 API <c>AddTool&lt;T&gt;</c> 曾污染 5 处文档（含根 <c>AGENTS.md</c>）</item>
