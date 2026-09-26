@@ -102,8 +102,8 @@ public sealed partial class ChatInputView
         var imageExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp" };
         var lines = text.Replace("\r\n", "\n").Split('\n');
-        var imagePaths = new List<string>();
-        var otherContent = new List<string>();
+        List<string> imagePaths = [];
+        List<string> otherContent = [];
 
         foreach (var line in lines)
         {

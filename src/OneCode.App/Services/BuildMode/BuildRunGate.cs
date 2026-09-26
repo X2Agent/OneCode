@@ -14,45 +14,30 @@ namespace OneCode.App.Services.BuildMode;
 /// Encapsulates Build Run gate logic: controlled build attempts, terminal-reason
 /// resolution, cancelled-run persistence, and plan-run completion.
 /// </summary>
-public sealed class BuildRunGate
+public sealed class BuildRunGate(
+    IMainAgentRunner mainAgentRunner,
+    ISessionManager sessionManager,
+    IToolProtocolValidator toolProtocolValidator,
+    ILogger<BuildRunGate> logger,
+    IBuildRunCoordinator? buildRunCoordinator = null,
+    IClarificationInteractionService? clarificationInteraction = null,
+    ControlledBuildAttemptHost? controlledBuildAttemptHost = null,
+    IBuildRunStore? buildRunStore = null,
+    OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
+    IPlanWorkflowApplicationService? planWorkflow = null,
+    PlanCardPublisher? planCardPublisher = null)
 {
-    private readonly IMainAgentRunner _mainAgentRunner;
-    private readonly IBuildRunCoordinator? _buildRunCoordinator;
-    private readonly IClarificationInteractionService? _clarificationInteraction;
-    private readonly ControlledBuildAttemptHost? _controlledBuildAttemptHost;
-    private readonly IBuildRunStore? _buildRunStore;
-    private readonly OneCode.Core.Workflows.IOperationLedger? _operationLedger;
-    private readonly IPlanWorkflowApplicationService? _planWorkflow;
-    private readonly PlanCardPublisher? _planCardPublisher;
-    private readonly ISessionManager _sessionManager;
-    private readonly IToolProtocolValidator _toolProtocolValidator;
-    private readonly ILogger<BuildRunGate> _logger;
-
-    public BuildRunGate(
-        IMainAgentRunner mainAgentRunner,
-        ISessionManager sessionManager,
-        IToolProtocolValidator toolProtocolValidator,
-        ILogger<BuildRunGate> logger,
-        IBuildRunCoordinator? buildRunCoordinator = null,
-        IClarificationInteractionService? clarificationInteraction = null,
-        ControlledBuildAttemptHost? controlledBuildAttemptHost = null,
-        IBuildRunStore? buildRunStore = null,
-        OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
-        IPlanWorkflowApplicationService? planWorkflow = null,
-        PlanCardPublisher? planCardPublisher = null)
-    {
-        _mainAgentRunner = mainAgentRunner;
-        _sessionManager = sessionManager;
-        _toolProtocolValidator = toolProtocolValidator;
-        _logger = logger;
-        _buildRunCoordinator = buildRunCoordinator;
-        _clarificationInteraction = clarificationInteraction;
-        _controlledBuildAttemptHost = controlledBuildAttemptHost;
-        _buildRunStore = buildRunStore;
-        _operationLedger = operationLedger;
-        _planWorkflow = planWorkflow;
-        _planCardPublisher = planCardPublisher;
-    }
+    private readonly IMainAgentRunner _mainAgentRunner = mainAgentRunner;
+    private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly IToolProtocolValidator _toolProtocolValidator = toolProtocolValidator;
+    private readonly ILogger<BuildRunGate> _logger = logger;
+    private readonly IBuildRunCoordinator? _buildRunCoordinator = buildRunCoordinator;
+    private readonly IClarificationInteractionService? _clarificationInteraction = clarificationInteraction;
+    private readonly ControlledBuildAttemptHost? _controlledBuildAttemptHost = controlledBuildAttemptHost;
+    private readonly IBuildRunStore? _buildRunStore = buildRunStore;
+    private readonly OneCode.Core.Workflows.IOperationLedger? _operationLedger = operationLedger;
+    private readonly IPlanWorkflowApplicationService? _planWorkflow = planWorkflow;
+    private readonly PlanCardPublisher? _planCardPublisher = planCardPublisher;
 
     /// <summary>Whether all required Build Run dependencies are configured.</summary>
     public bool IsConfigured => _buildRunCoordinator is not null

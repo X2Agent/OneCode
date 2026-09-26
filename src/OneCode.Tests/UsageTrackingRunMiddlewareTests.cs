@@ -67,7 +67,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         // 输入 + 输出 = 1.5M + 1M（缓存读取计入输入，不重复相加）
         tracker.GetTotalTokens().Should().Be(2_500_000);
@@ -81,7 +81,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         // CacheWrite 独立提取，不并入输入/输出：总 token = 1M
         tracker.GetTotalTokens().Should().Be(1_000_000);
@@ -95,7 +95,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         // ReasoningTokens 是 OutputTokens 的子集（此处 output=0），不单独入账
         tracker.GetTotalTokens().Should().Be(1_000_000);
@@ -108,10 +108,13 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(null, "claude-sonnet-4", null);
 
-        var response = await runFunc([], null, null, stubAgent, CancellationToken.None);
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         response.Should().NotBeNull();
         response.Usage.Should().NotBeNull();
+        // null TokenLedger 只跳过记账，usage 本身必须原样透传
+        response.Usage!.InputTokenCount.Should().Be(100);
+        response.Usage.OutputTokenCount.Should().Be(50);
     }
 
     [Fact]
@@ -121,7 +124,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(null));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         tracker.GetTotalTokens().Should().Be(0);
     }
@@ -134,7 +137,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         tracker.GetTotalTokens().Should().Be(0);
     }
@@ -156,7 +159,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var (_, runStreamingFunc) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
         var results = new List<AgentResponseUpdate>();
-        await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             results.Add(update);
 
         results.Should().HaveCount(3);
@@ -176,7 +179,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(updates);
         var (_, runStreamingFunc) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await foreach (var _ in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var _ in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
         { }
 
         tracker.GetTotalTokens().Should().Be(0);
@@ -196,7 +199,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var (_, runStreamingFunc) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
         var texts = new List<string?>();
-        await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+        await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             texts.Add(update.Text);
 
         texts.Should().Equal("A", "", "B");
@@ -256,8 +259,8 @@ public sealed class UsageTrackingRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse(usage));
         var (runFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
 
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
-        await runFunc([], null, null, stubAgent, CancellationToken.None);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
+        await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
         // Two runs: 1M + 1M
         tracker.GetTotalTokens().Should().Be(2_000_000);
@@ -278,7 +281,7 @@ public sealed class UsageTrackingRunMiddlewareTests
         var texts = new List<string?>();
         var act = async () =>
         {
-            await foreach (var update in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+            await foreach (var update in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
                 texts.Add(update.Text);
         };
 
@@ -302,7 +305,7 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         var act = async () =>
         {
-            await foreach (var _ in runStreamingFunc([], null, null, stubAgent, CancellationToken.None))
+            await foreach (var _ in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
             { }
         };
 

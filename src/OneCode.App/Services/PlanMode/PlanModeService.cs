@@ -5,23 +5,17 @@ namespace OneCode.App.Services.PlanMode;
 /// <summary>
 /// Plan 模式运行时实现：会话模式、提示词缓存与权限 provider 同步。
 /// </summary>
-public sealed class PlanModeService : IPlanModeService
+public sealed class PlanModeService(
+    IPermissionModeProvider permissionModeProvider,
+    IPromptManager promptManager) : IPlanModeService
 {
-    private readonly IPermissionModeProvider _permissionModeProvider;
-    private readonly IPromptManager _promptManager;
+    private readonly IPermissionModeProvider _permissionModeProvider = permissionModeProvider;
+    private readonly IPromptManager _promptManager = promptManager;
     private readonly Lock _lock = new();
     private string? _cachedPlanPrompt;
 
     private bool _inPlanMode;
     private PermissionMode? _prePlanMode;
-
-    public PlanModeService(
-        IPermissionModeProvider permissionModeProvider,
-        IPromptManager promptManager)
-    {
-        _permissionModeProvider = permissionModeProvider;
-        _promptManager = promptManager;
-    }
 
     public bool IsInPlanMode
     {

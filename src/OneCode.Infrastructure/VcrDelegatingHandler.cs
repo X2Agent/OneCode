@@ -8,7 +8,7 @@ namespace OneCode.Infrastructure;
 /// for deterministic testing. When VCR is in "replay" mode, matching requests are
 /// served from cached fixtures; in "record" mode, responses are captured to disk.
 /// </summary>
-public sealed class VcrDelegatingHandler : DelegatingHandler
+public sealed class VcrDelegatingHandler(VcrMode mode, string? fixtureDir = null) : DelegatingHandler
 {
     /// <summary>Fixture 文件名哈希截断长度（16 hex chars = 64-bit 碰撞空间）。</summary>
     private const int FixtureKeyHashLength = 16;
@@ -19,14 +19,8 @@ public sealed class VcrDelegatingHandler : DelegatingHandler
     /// <summary>写入 fixture 时使用（带缩进，便于 diff/审计）。</summary>
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
-    private readonly VcrMode _mode;
-    private readonly string _fixtureDir;
-
-    public VcrDelegatingHandler(VcrMode mode, string? fixtureDir = null)
-    {
-        _mode = mode;
-        _fixtureDir = fixtureDir ?? VcrPaths.HttpFixturesDir;
-    }
+    private readonly VcrMode _mode = mode;
+    private readonly string _fixtureDir = fixtureDir ?? VcrPaths.HttpFixturesDir;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct)

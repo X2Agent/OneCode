@@ -592,7 +592,7 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
         _disposed = true;
 
         _healthCts.Cancel();
-        if (_healthLoopTask != null)
+        if (_healthLoopTask is not null)
         {
             try
             {

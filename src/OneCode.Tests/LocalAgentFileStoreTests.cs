@@ -55,7 +55,7 @@ public sealed class LocalAgentFileStoreTests : IDisposable
     {
         IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
-        await fs.WriteTextFileAsync("ifs-write.txt", "written", CancellationToken.None);
+        await fs.WriteTextFileAsync("ifs-write.txt", "written", TestContext.Current.CancellationToken);
 
         File.Exists(Path.Combine(_projectDir, "ifs-write.txt")).Should().BeTrue();
     }
@@ -65,7 +65,7 @@ public sealed class LocalAgentFileStoreTests : IDisposable
     {
         IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
-        await fs.WriteTextFileAsync("sub/dir/file.txt", "content", CancellationToken.None);
+        await fs.WriteTextFileAsync("sub/dir/file.txt", "content", TestContext.Current.CancellationToken);
 
         var path = Path.Combine(_projectDir, "sub", "dir", "file.txt");
         File.Exists(path).Should().BeTrue();
@@ -117,7 +117,7 @@ public sealed class LocalAgentFileStoreTests : IDisposable
         IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
         // Relative path that escapes via ..
-        var act = async () => await fs.ReadTextFileAsync("../outside/secret.txt", CancellationToken.None);
+        var act = async () => await fs.ReadTextFileAsync("../outside/secret.txt", TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
     }
@@ -127,7 +127,7 @@ public sealed class LocalAgentFileStoreTests : IDisposable
     {
         IFileSystem fs = new LocalAgentFileStore(CreateWd());
 
-        var act = async () => await fs.WriteTextFileAsync("../outside/hack.txt", "hacked", CancellationToken.None);
+        var act = async () => await fs.WriteTextFileAsync("../outside/hack.txt", "hacked", TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
         File.Exists(Path.Combine(_outsideDir, "hack.txt")).Should().BeFalse();

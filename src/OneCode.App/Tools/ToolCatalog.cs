@@ -180,7 +180,7 @@ public sealed class ToolCatalog : IToolCatalog
         ToolMetadataRegistry metadata)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var tools = new List<AIFunction>();
+        List<AIFunction> tools = [];
 
         foreach (var reg in registrations)
         {

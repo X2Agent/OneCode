@@ -9,18 +9,12 @@ namespace OneCode.App.Services.Lsp;
 /// Listens to textDocument/publishDiagnostics notifications and stores them
 /// for later retrieval by LspTool and other consumers.
 /// </summary>
-public sealed class LspDiagnosticRegistry : IDisposable
+public sealed class LspDiagnosticRegistry(ILogger<LspDiagnosticRegistry>? logger = null, int maxDiagnosticsPerFile = 1000) : IDisposable
 {
-    private readonly ILogger<LspDiagnosticRegistry> _logger;
+    private readonly ILogger<LspDiagnosticRegistry> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<LspDiagnosticRegistry>.Instance;
     private readonly ConcurrentDictionary<string, List<LspDiagnostic>> _diagnostics = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastUpdated = new();
-    private readonly int _maxDiagnosticsPerFile;
-
-    public LspDiagnosticRegistry(ILogger<LspDiagnosticRegistry>? logger = null, int maxDiagnosticsPerFile = 1000)
-    {
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<LspDiagnosticRegistry>.Instance;
-        _maxDiagnosticsPerFile = maxDiagnosticsPerFile;
-    }
+    private readonly int _maxDiagnosticsPerFile = maxDiagnosticsPerFile;
 
     /// <summary>
     /// Raised whenever diagnostics are updated via <see cref="ProcessDiagnostics"/>.
@@ -53,7 +47,7 @@ public sealed class LspDiagnosticRegistry : IDisposable
                 foreach (var diag in diagArray.EnumerateArray())
                 {
                     var diagnostic = ParseDiagnostic(serverName, uri, diag);
-                    if (diagnostic != null)
+                    if (diagnostic is not null)
                         diagnostics.Add(diagnostic);
                 }
             }
@@ -83,7 +77,7 @@ public sealed class LspDiagnosticRegistry : IDisposable
     /// </summary>
     public IReadOnlyList<LspDiagnostic> GetDiagnostics(string serverName, string? uri = null)
     {
-        if (uri != null)
+        if (uri is not null)
         {
             var key = $"{serverName}:{uri}";
             return _diagnostics.TryGetValue(key, out var diags) ? diags : [];

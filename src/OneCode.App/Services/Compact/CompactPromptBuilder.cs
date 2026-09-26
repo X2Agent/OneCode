@@ -9,14 +9,9 @@ namespace OneCode.App.Services.Compact;
 /// Builds the system prompt, chat messages, and chat options used to invoke the
 /// summarisation model during a compact run.
 /// </summary>
-public sealed class CompactPromptBuilder
+public sealed class CompactPromptBuilder(IPromptManager promptManager)
 {
-    private readonly IPromptManager _promptManager;
-
-    public CompactPromptBuilder(IPromptManager promptManager)
-    {
-        _promptManager = promptManager;
-    }
+    private readonly IPromptManager _promptManager = promptManager;
 
     /// <summary>
     /// 加载压缩摘要 prompt（<c>system/compact</c>）。显式 <c>/compact</c> 与 MAF in-pipeline 压缩共用。

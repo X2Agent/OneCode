@@ -40,7 +40,7 @@ internal sealed class GoalCompletionService(
         if (current.State is not (GoalRunState.Executing or GoalRunState.Validating or GoalRunState.Publishing))
             throw new InvalidOperationException($"GoalRun '{current.Id}' cannot complete from state '{current.State}'.");
 
-        var report = new List<GoalGateEvidence>();
+        List<GoalGateEvidence> report = [];
         // Fix-1/F-03：预算耗尽跳过的必需步骤不是完整性失败——保持 Paused 终态并输出汇总报告，
         // 用户可追加预算后通过 /resume-goal 续跑，而不是被判 Failed。
         var budgetSkipped = current.Plan

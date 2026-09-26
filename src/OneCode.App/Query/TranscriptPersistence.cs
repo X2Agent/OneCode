@@ -3,16 +3,10 @@ using OneCode.App.Session;
 namespace OneCode.App.Query;
 
 /// <summary>Persists the assistant transcript and completed tool batches for a finished run.</summary>
-internal sealed class TranscriptPersistence
+internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILogger logger)
 {
-    private readonly ISessionManager _sessionManager;
-    private readonly ILogger _logger;
-
-    public TranscriptPersistence(ISessionManager sessionManager, ILogger logger)
-    {
-        _sessionManager = sessionManager;
-        _logger = logger;
-    }
+    private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly ILogger _logger = logger;
 
     public async Task PersistAsync(
         QueryStreamRequest request,

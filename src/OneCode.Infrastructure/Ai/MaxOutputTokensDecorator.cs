@@ -11,19 +11,15 @@ namespace OneCode.Infrastructure.Ai;
 /// 此装饰器在 MainAgentRunner 构建 ChatClient 栈时组装，不在 DI 单例层注册。
 /// （自动压缩不在这里：它由 Harness 经 <c>HarnessAgentOptions.CompactionStrategy</c> 挂载。）
 /// </summary>
-public sealed class MaxOutputTokensDecorator : IChatClient
+public sealed class MaxOutputTokensDecorator(IChatClient inner) : IChatClient
 {
-    private readonly IChatClient _inner;
+    private readonly IChatClient _inner = inner;
     private const int RecoveryLimit = 3;
     private const int EscalatedMaxTokens = 65_536;
     private const string RecoveryPrompt =
-        "Output token limit hit. Resume directly — no apology, no recap. " +
-        "Continue from exactly where you left off.";
-
-    public MaxOutputTokensDecorator(IChatClient inner)
-    {
-        _inner = inner;
-    }
+        """
+        Output token limit hit. Resume directly — no apology, no recap. Continue from exactly where you left off.
+        """;
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,

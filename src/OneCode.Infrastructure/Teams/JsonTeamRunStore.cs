@@ -3,19 +3,14 @@ using OneCode.Core.Coordinator;
 
 namespace OneCode.Infrastructure.Teams;
 
-public sealed class JsonTeamRunStore : ITeamRunStore
+public sealed class JsonTeamRunStore(string baseDirectory) : ITeamRunStore
 {
-    private readonly string _baseDirectory;
+    private readonly string _baseDirectory = baseDirectory;
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
     };
-
-    public JsonTeamRunStore(string baseDirectory)
-    {
-        _baseDirectory = baseDirectory;
-    }
 
     public async Task<TeamRun?> LoadAsync(TeamRunId runId, CancellationToken ct = default)
     {

@@ -15,14 +15,18 @@ namespace OneCode.App.Tools;
 ///
 /// <para>同查询结果缓存 10 分钟（存原始结果，域过滤每次独立应用），避免重复搜索浪费配额。</para>
 /// </summary>
-public sealed class WebSearchTool
+public sealed class WebSearchTool(
+    IConfigManager config,
+    ILogger<WebSearchTool> logger,
+    IEnumerable<IWebSearchProvider> apiProviders,
+    IMemoryCache cache)
 {
     private const int MaxResults = 8;
 
-    private readonly IConfigManager _config;
-    private readonly ILogger<WebSearchTool> _logger;
-    private readonly IReadOnlyList<IWebSearchProvider> _apiProviders;
-    private readonly IMemoryCache _cache;
+    private readonly IConfigManager _config = config;
+    private readonly ILogger<WebSearchTool> _logger = logger;
+    private readonly IReadOnlyList<IWebSearchProvider> _apiProviders = apiProviders.ToArray();
+    private readonly IMemoryCache _cache = cache;
 
     /// <summary>
     /// 缓存键前缀。缓存的是提供方返回的**原始**结果，不含域过滤：
@@ -36,18 +40,6 @@ public sealed class WebSearchTool
 
     // 单条缓存上限：限制无同步字典的旧实现遗留的无界增长风险。
     private const int CacheEntrySize = 1;
-
-    public WebSearchTool(
-        IConfigManager config,
-        ILogger<WebSearchTool> logger,
-        IEnumerable<IWebSearchProvider> apiProviders,
-        IMemoryCache cache)
-    {
-        _config = config;
-        _logger = logger;
-        _apiProviders = apiProviders.ToArray();
-        _cache = cache;
-    }
 
     [Description("Search the web for current information, returning a list of results with title, URL, and snippet. " +
                  "Use this to find up-to-date information beyond your knowledge cutoff (e.g. latest library versions, recent API changes, current events). " +
@@ -82,7 +74,7 @@ public sealed class WebSearchTool
             });
         }
 
-        var failures = new List<string>();
+        List<string> failures = [];
         foreach (var (providerName, attempt) in BuildChain(_config.Current.Effective, query))
         {
             ct.ThrowIfCancellationRequested();

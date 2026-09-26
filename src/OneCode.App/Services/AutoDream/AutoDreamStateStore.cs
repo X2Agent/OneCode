@@ -5,7 +5,7 @@ namespace OneCode.App.Services.AutoDream;
 /// 与跨进程整合锁（autodream.lock）。状态目录由 <see cref="AutoDreamService.GetProjectStateDir"/>
 /// 动态提供（project 优先，回退全局目录）。
 /// </summary>
-internal sealed class AutoDreamStateStore
+internal sealed class AutoDreamStateStore(ILogger logger, Func<string> stateDirProvider)
 {
     private const string ConsolidationLockFile = "autodream.lock";
     private const string LastConsolidatedAtFile = "last_consolidated_at";
@@ -14,14 +14,8 @@ internal sealed class AutoDreamStateStore
     /// <summary>整合锁文件最大存活时间：超过则视为僵尸锁，可安全抢占。</summary>
     private static readonly TimeSpan StaleLockTimeout = TimeSpan.FromHours(2);
 
-    private readonly ILogger _logger;
-    private readonly Func<string> _stateDirProvider;
-
-    public AutoDreamStateStore(ILogger logger, Func<string> stateDirProvider)
-    {
-        _logger = logger;
-        _stateDirProvider = stateDirProvider;
-    }
+    private readonly ILogger _logger = logger;
+    private readonly Func<string> _stateDirProvider = stateDirProvider;
 
     public DateTimeOffset GetLastConsolidatedAt() => Read(LastConsolidatedAtFile);
 

@@ -48,7 +48,7 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
             BindingFlags.NonPublic | BindingFlags.Public)!;
         var context = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(contextType);
 
-        var result = (ValueTask<AIContext>)method!.Invoke(provider, [context, CancellationToken.None])!;
+        var result = (ValueTask<AIContext>)method!.Invoke(provider, [context, TestContext.Current.CancellationToken])!;
         return await result.AsTask();
     }
 

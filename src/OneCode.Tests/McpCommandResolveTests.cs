@@ -34,16 +34,16 @@ public sealed class McpCommandResolveTests
     }
 
     [Theory]
-    [InlineData("0")]
-    [InlineData("4")]
-    public void TryParseIndex_ZeroOrOutOfRange_TerminalError(string raw)
+    [InlineData("0", "not a valid result number")]
+    [InlineData("4", "out of range")]
+    public void TryParseIndex_ZeroOrOutOfRange_TerminalError(string raw, string expectedFragment)
     {
         var ok = InstallTargetResolver.TryParseIndex(raw, cacheCount: 3, out var index, out var error);
 
         // 序号语法成立 → 终态错误，绝不能误落名字通道
         ok.Should().BeTrue();
         index.Should().Be(0);
-        error.Should().NotBeNull();
+        error.Should().NotBeNull().And.Contain(expectedFragment);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public sealed class McpCommandResolveTests
         var sut = CreateCommand(client);
 
         await sut.ExecuteAsync(["search", "weather"]);
-        var resolution = await sut.ResolveInstallTargetAsync("1", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("1", TestContext.Current.CancellationToken);
 
         resolution.QualifiedName.Should().Be("io.github.user/weather-cached");
         resolution.Error.Should().BeNull();
@@ -246,7 +246,7 @@ public sealed class McpCommandResolveTests
         var (client, handler) = CreateRegistryClient();
         var sut = CreateCommand(client);
 
-        var resolution = await sut.ResolveInstallTargetAsync("1", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("1", TestContext.Current.CancellationToken);
 
         resolution.QualifiedName.Should().BeNull();
         resolution.Error.Should().NotBeNull().And.Contain("/mcp search");
@@ -262,7 +262,7 @@ public sealed class McpCommandResolveTests
 
         // 先建立非空缓存（1 条），再引用越界编号
         await sut.ExecuteAsync(["search", "first"]);
-        var resolution = await sut.ResolveInstallTargetAsync("7", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("7", TestContext.Current.CancellationToken);
 
         resolution.Error.Should().NotBeNull().And.Contain("out of range");
         handler.RequestedUrls.Should().ContainSingle("越界报错纯本地，不再请求网络");
@@ -274,7 +274,7 @@ public sealed class McpCommandResolveTests
         var (client, handler) = CreateRegistryClient();
         var sut = CreateCommand(client);
 
-        var resolution = await sut.ResolveInstallTargetAsync("com.example/weather", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("com.example/weather", TestContext.Current.CancellationToken);
 
         resolution.QualifiedName.Should().Be("com.example/weather");
         handler.RequestedUrls.Should().BeEmpty("限定名原样放行，元数据由安装步骤拉取");
@@ -289,7 +289,7 @@ public sealed class McpCommandResolveTests
             Entry(Server("io.github.user/weather", description: "the one and only"))));
         var sut = CreateCommand(client);
 
-        var resolution = await sut.ResolveInstallTargetAsync("weather", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("weather", TestContext.Current.CancellationToken);
 
         // 防 404 双查回归：短名直接走 search（一次请求），绝不先碰单查端点
         var requested = handler.RequestedUrls.Should().ContainSingle().Subject;
@@ -306,11 +306,11 @@ public sealed class McpCommandResolveTests
             Entry(Server("io.github.user/weather"))));
         var sut = CreateCommand(client);
 
-        var resolution = await sut.ResolveInstallTargetAsync("weather", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("weather", TestContext.Current.CancellationToken);
 
         resolution.Error.Should().NotBeNull().And.Contain("ambiguous");
         // 歧义候选必须写回编号缓存，使提示中的编号可直接回选
-        var followUp = await sut.ResolveInstallTargetAsync("2", CancellationToken.None);
+        var followUp = await sut.ResolveInstallTargetAsync("2", TestContext.Current.CancellationToken);
         followUp.QualifiedName.Should().Be("io.github.user/weather");
         handler.RequestedUrls.Should().ContainSingle("候选来自同一次 search，回选编号不再请求网络");
     }
@@ -322,7 +322,7 @@ public sealed class McpCommandResolveTests
         handler.Route(u => u.Contains("search="), PageJson(Entry(Server("com.example/notes"))));
         var sut = CreateCommand(client);
 
-        var resolution = await sut.ResolveInstallTargetAsync("weather", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("weather", TestContext.Current.CancellationToken);
 
         resolution.QualifiedName.Should().BeNull();
         resolution.Error.Should().NotBeNull().And.Contain("not found");
@@ -339,7 +339,7 @@ public sealed class McpCommandResolveTests
 
         await sut.ExecuteAsync(["search", "first"]);
         await sut.ExecuteAsync(["search", "empty-no-hit"]);
-        var resolution = await sut.ResolveInstallTargetAsync("1", CancellationToken.None);
+        var resolution = await sut.ResolveInstallTargetAsync("1", TestContext.Current.CancellationToken);
 
         // 空结果清空缓存：编号不得引用过期列表
         resolution.QualifiedName.Should().BeNull();

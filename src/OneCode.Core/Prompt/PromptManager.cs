@@ -1,15 +1,9 @@
 namespace OneCode.Core.Prompt;
 
-public sealed class PromptManager : IPromptManager
+public sealed class PromptManager(ILogger<PromptManager>? logger = null) : IPromptManager
 {
     private readonly List<IPromptStore> _stores = new();
     private readonly Dictionary<string, PromptTemplate> _templates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ILogger? _logger;
-
-    public PromptManager(ILogger<PromptManager>? logger = null)
-    {
-        _logger = logger;
-    }
 
     public PromptManager AddStore(IPromptStore store)
     {
@@ -31,20 +25,20 @@ public sealed class PromptManager : IPromptManager
         foreach (var store in _stores)
         {
             var content = await store.GetAsync(name, ct).ConfigureAwait(false);
-            if (content != null)
+            if (content is not null)
             {
-                _logger?.LogDebug("Prompt '{Name}' loaded from store", name);
+                logger?.LogDebug("Prompt '{Name}' loaded from store", name);
                 return content;
             }
         }
 
         if (_templates.TryGetValue(name, out var template))
         {
-            _logger?.LogDebug("Prompt '{Name}' loaded from registered template", name);
+            logger?.LogDebug("Prompt '{Name}' loaded from registered template", name);
             return template.Render();
         }
 
-        _logger?.LogWarning("Prompt '{Name}' not found in any store", name);
+        logger?.LogWarning("Prompt '{Name}' not found in any store", name);
         return null;
     }
 
@@ -60,7 +54,7 @@ public sealed class PromptManager : IPromptManager
         CancellationToken ct = default)
     {
         var raw = await GetPromptAsync(name, ct).ConfigureAwait(false);
-        if (raw == null)
+        if (raw is null)
         {
             if (_templates.TryGetValue(name, out var template))
             {

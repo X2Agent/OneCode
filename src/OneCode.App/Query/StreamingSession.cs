@@ -16,7 +16,11 @@ namespace OneCode.App.Query;
 /// object lets <see cref="Digest"/> stay a pure (unit-testable) mapping over
 /// <c>(update, session)</c> while <see cref="QueryStreamEngine"/> only orchestrates.
 /// </summary>
-internal sealed class StreamingSession
+internal sealed class StreamingSession(
+    string agentRunId,
+    bool includeNextPrompt,
+    ILogger logger,
+    Action<string>? autoActivateTool = null)
 {
     private readonly StringBuilder _textBuilder = new();
     private readonly Dictionary<string, string> _toolNamesByCallId = new(StringComparer.Ordinal);
@@ -37,25 +41,13 @@ internal sealed class StreamingSession
     /// 链路三（未知工具自愈）回调：遇到 hallucinate 但已在注册表登记的工具名时自动激活，
     /// 使下一轮工具列表包含该工具。由 engine 注入，保持本类无 engine 依赖、可独立单测。
     /// </summary>
-    private readonly Action<string>? _autoActivateTool;
-    private readonly ILogger _logger;
+    private readonly Action<string>? _autoActivateTool = autoActivateTool;
+    private readonly ILogger _logger = logger;
 
-    public StreamingSession(
-        string agentRunId,
-        bool includeNextPrompt,
-        ILogger logger,
-        Action<string>? autoActivateTool = null)
-    {
-        ToolBatchCollector = new ToolBatchCollector(agentRunId);
-        NextPromptParser = includeNextPrompt ? new NextPromptTagStreamParser() : null;
-        _logger = logger;
-        _autoActivateTool = autoActivateTool;
-    }
+    public ToolBatchCollector ToolBatchCollector { get; } = new(agentRunId);
 
-    public ToolBatchCollector ToolBatchCollector { get; }
-
-    public NextPromptTagStreamParser? NextPromptParser { get; }
-
+    public NextPromptTagStreamParser? NextPromptParser { get; } =
+        includeNextPrompt ? new NextPromptTagStreamParser() : null;
     public int TurnCount => _turnCount;
 
     public int TotalInputTokens => _totalInputTokens;

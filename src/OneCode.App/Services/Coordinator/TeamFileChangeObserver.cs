@@ -14,7 +14,7 @@ internal static class TeamFileChangeObserver
     public static (List<FileChange> FileChanges, Action<OrchestrationEvent>? ObservedSink)
         CreateObservedSink(Action<OrchestrationEvent>? eventSink)
     {
-        var fileChanges = new List<FileChange>();
+        List<FileChange> fileChanges = [];
         var fileIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         Action<OrchestrationEvent>? observedSink = evt =>
         {

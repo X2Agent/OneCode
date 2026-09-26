@@ -19,20 +19,13 @@ namespace OneCode.Infrastructure;
 /// which is a different store instance and a different concern.
 /// </para>
 /// </summary>
-public sealed class LocalAgentFileStore : IFileSystem
+public sealed class LocalAgentFileStore(
+    IWorkingDirectoryAccessor wd,
+    ILogger<LocalAgentFileStore>? logger = null) : IFileSystem
 {
-    private readonly string _workingDirectory;
-    private readonly IReadOnlyList<string>? _additionalDirectories;
-    private readonly ILogger<LocalAgentFileStore>? _logger;
-
-    public LocalAgentFileStore(
-        IWorkingDirectoryAccessor wd,
-        ILogger<LocalAgentFileStore>? logger = null)
-    {
-        _workingDirectory = wd.WorkingDirectory;
-        _additionalDirectories = wd.AdditionalDirectories;
-        _logger = logger;
-    }
+    private readonly string _workingDirectory = wd.WorkingDirectory;
+    private readonly IReadOnlyList<string>? _additionalDirectories = wd.AdditionalDirectories;
+    private readonly ILogger<LocalAgentFileStore>? _logger = logger;
 
     // IFileSystem methods
 
@@ -133,15 +126,9 @@ public sealed class LocalAgentFileStore : IFileSystem
     {
         var expanded = PathsHelper.ExpandHome(path);
 
-        string resolved;
-        if (Path.IsPathRooted(expanded))
-        {
-            resolved = Path.GetFullPath(expanded);
-        }
-        else
-        {
-            resolved = Path.GetFullPath(Path.Combine(_workingDirectory, expanded));
-        }
+        var resolved = Path.IsPathRooted(expanded)
+            ? Path.GetFullPath(expanded)
+            : Path.GetFullPath(Path.Combine(_workingDirectory, expanded));
 
         if (PathBoundary.IsWithinDirectory(resolved, _workingDirectory))
             return resolved;

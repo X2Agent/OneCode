@@ -124,7 +124,7 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
         if (!Directory.Exists(_plansRoot))
             return [];
 
-        var workflows = new List<PlanWorkflow>();
+        List<PlanWorkflow> workflows = [];
         foreach (var file in Directory.EnumerateFiles(_plansRoot, "aggregate.json", SearchOption.AllDirectories))
         {
             ct.ThrowIfCancellationRequested();

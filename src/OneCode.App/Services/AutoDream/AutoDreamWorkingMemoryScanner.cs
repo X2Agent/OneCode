@@ -23,14 +23,9 @@ namespace OneCode.App.Services.AutoDream;
 /// lifecycle instead.
 /// </para>
 /// </remarks>
-public sealed class AutoDreamWorkingMemoryScanner
+public sealed class AutoDreamWorkingMemoryScanner(ILogger<AutoDreamWorkingMemoryScanner>? logger = null)
 {
-    private readonly ILogger<AutoDreamWorkingMemoryScanner>? _logger;
-
-    public AutoDreamWorkingMemoryScanner(ILogger<AutoDreamWorkingMemoryScanner>? logger = null)
-    {
-        _logger = logger;
-    }
+    private readonly ILogger<AutoDreamWorkingMemoryScanner>? _logger = logger;
 
     /// <summary>
     /// Reads every working-memory file for <paramref name="projectRoot"/> that changed since

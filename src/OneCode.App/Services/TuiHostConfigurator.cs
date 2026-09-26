@@ -330,7 +330,7 @@ public sealed class TuiHostConfigurator(
             {
                 var conversation = await session.SessionManager.SwitchToSessionAsync(sessionId, token)
                     .ConfigureAwait(false);
-                if (conversation == null)
+                if (conversation is null)
                 {
                     throw new InvalidOperationException($"Session '{sessionId}' not found.");
                 }

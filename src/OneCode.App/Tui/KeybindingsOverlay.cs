@@ -50,7 +50,7 @@ public sealed class KeybindingsOverlay : CenteredOverlay
         IReadOnlyList<KeybindingView> bindings,
         IReadOnlyList<KeybindingWarning> warnings)
     {
-        var rows = new List<string>();
+        List<string> rows = [];
 
         foreach (var group in bindings.GroupBy(b => b.Context, StringComparer.Ordinal))
         {

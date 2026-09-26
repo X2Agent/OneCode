@@ -48,7 +48,7 @@ public sealed class MessageFlowRenderer
     private IReadOnlyList<FormattedLine> RenderUserMessage(UserMessage msg)
     {
         var time = msg.Timestamp.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
-        var lines = new List<FormattedLine>();
+        List<FormattedLine> lines = [];
         var barColor = TuiPalette.GetModeBarColor(CurrentMode);
         var timeStr = $"{time}";
         const int scrollbarWidth = 1;
@@ -119,7 +119,7 @@ public sealed class MessageFlowRenderer
 
     private IReadOnlyList<FormattedLine> RenderAssistantMessage(AssistantMessage msg)
     {
-        var lines = new List<FormattedLine>();
+        List<FormattedLine> lines = [];
 
         foreach (var block in msg.Content)
         {
@@ -223,7 +223,7 @@ public sealed class MessageFlowRenderer
 
     private IReadOnlyList<FormattedLine> RenderToolResultMessage(ToolResultMessage msg)
     {
-        var lines = new List<FormattedLine>();
+        List<FormattedLine> lines = [];
 
         // Show tool name + status icon so the result is visually linked to its tool call.
         lines.Add(MakeToolLine(msg.ToolName, null, !msg.IsError));
@@ -252,14 +252,14 @@ public sealed class MessageFlowRenderer
 
     private IReadOnlyList<FormattedLine> RenderSystemMessage(SystemMessage msg)
     {
-        var lines = new List<FormattedLine>();
+        List<FormattedLine> lines = [];
         var availableWidth = Math.Max(20, CurrentWidth - ContentIndent - 2);
         var isFirstLine = true;
 
         // StringReader.ReadLine() automatically handles \r\n, \n, and \r across platforms
         using var reader = new StringReader(msg.Content);
         string? rawLine;
-        while ((rawLine = reader.ReadLine()) != null)
+        while ((rawLine = reader.ReadLine()) is not null)
         {
             var wrapped = WordWrap(rawLine, availableWidth);
 
@@ -334,12 +334,11 @@ public sealed class MessageFlowRenderer
     /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度截断 args 段，防止长参数溢出视口被裁切。</summary>
     internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null, int maxWidth = 0)
     {
-        var segments = new List<LineSegment>
-        {
+        List<LineSegment> segments = [
             new($"{Indent}", TuiPalette.BgPrimary),
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
-        };
+        ];
         // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
         if (!string.IsNullOrWhiteSpace(agentName))
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));

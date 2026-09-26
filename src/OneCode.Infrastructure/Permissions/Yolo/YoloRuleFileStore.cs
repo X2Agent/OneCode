@@ -6,21 +6,10 @@ namespace OneCode.Infrastructure.Permissions.Yolo;
 /// <summary>
 /// Loads / saves <c>~/.onecode/yolo_rules.json</c>. Core <see cref="YoloRuleStore"/> stays in-memory only.
 /// </summary>
-public sealed class YoloRuleFileStore : IYoloRuleFileStore
+public sealed class YoloRuleFileStore(string? rulesPath = null, ILogger<YoloRuleFileStore>? logger = null) : IYoloRuleFileStore
 {
-    private readonly string _rulesPath;
-    private readonly ILogger<YoloRuleFileStore>? _logger;
-
-    public YoloRuleFileStore(ILogger<YoloRuleFileStore>? logger = null)
-        : this(GetDefaultRulesPath(), logger)
-    {
-    }
-
-    public YoloRuleFileStore(string rulesPath, ILogger<YoloRuleFileStore>? logger = null)
-    {
-        _rulesPath = rulesPath;
-        _logger = logger;
-    }
+    private readonly string _rulesPath = rulesPath ?? GetDefaultRulesPath();
+    private readonly ILogger<YoloRuleFileStore>? _logger = logger;
 
     public string RulesPath => _rulesPath;
 

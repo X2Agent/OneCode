@@ -18,12 +18,14 @@ namespace OneCode.App.Services.Skills;
 /// through a bounded channel before the event fires.
 /// </para>
 /// </remarks>
-public sealed class SkillFilesWatcher : BackgroundService
+public sealed class SkillFilesWatcher(
+    ILogger<SkillFilesWatcher> logger,
+    SkillCatalog catalog) : BackgroundService
 {
     private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(300);
 
-    private readonly ILogger<SkillFilesWatcher> _logger;
-    private readonly SkillCatalog _catalog;
+    private readonly ILogger<SkillFilesWatcher> _logger = logger;
+    private readonly SkillCatalog _catalog = catalog;
 
     private readonly Channel<string> _changeChannel =
         Channel.CreateBounded<string>(new BoundedChannelOptions(1)
@@ -40,14 +42,6 @@ public sealed class SkillFilesWatcher : BackgroundService
     /// skill slash commands.
     /// </summary>
     public event Action? SkillsChanged;
-
-    public SkillFilesWatcher(
-        ILogger<SkillFilesWatcher> logger,
-        SkillCatalog catalog)
-    {
-        _logger = logger;
-        _catalog = catalog;
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

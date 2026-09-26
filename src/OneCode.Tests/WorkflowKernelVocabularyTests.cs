@@ -92,7 +92,8 @@ public sealed class ModeBudgetSettingsTests
         // Goal 全开：三级预算模型三维度均生效。
         budget.ToGoalBudget().MaxSubGoalAttempts.Should().Be(20);
         budget.ToGoalBudget().MaxTotalTokens.Should().Be(200_000);
-        budget.ToGoalBudget().MaxWallClock.Should().NotBeNull();
+        // maxWallClockHours 未配置时取内置默认 2.0 小时。
+        budget.ToGoalBudget().MaxWallClock.Should().Be(TimeSpan.FromHours(2.0));
     }
 
     [Fact]
@@ -102,6 +103,6 @@ public sealed class ModeBudgetSettingsTests
 
         budget.MaxTurns.Should().Be(CoreConstants.Session.MaxTurnsDefault);
         budget.ToGoalBudget().MaxSubGoalAttempts.Should().Be(20);
-        budget.ToGoalBudget().MaxWallClock.Should().NotBeNull();
+        budget.ToGoalBudget().MaxWallClock.Should().Be(TimeSpan.FromHours(2.0), "墙钟默认上限 2 小时");
     }
 }

@@ -530,7 +530,7 @@ internal sealed class TeamWorkflowRunner(
         if (imagePaths is not { Count: > 0 })
             return new ChatMessage(ChatRole.User, goal);
 
-        var contents = new List<AIContent>();
+        List<AIContent> contents = [];
         if (!string.IsNullOrEmpty(goal))
             contents.Add(new TextContent(goal));
 

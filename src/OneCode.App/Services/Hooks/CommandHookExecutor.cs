@@ -10,14 +10,9 @@ namespace OneCode.App.Services.Hooks;
 /// - 2: 阻断
 /// - 其他: 非阻断错误
 /// </summary>
-public sealed class CommandHookExecutor : IHookExecutor
+public sealed class CommandHookExecutor(ILogger<CommandHookExecutor> logger) : IHookExecutor
 {
-    private readonly ILogger<CommandHookExecutor> _logger;
-
-    public CommandHookExecutor(ILogger<CommandHookExecutor> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILogger<CommandHookExecutor> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public HookType Type => HookType.Command;
 

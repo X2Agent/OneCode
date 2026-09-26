@@ -415,7 +415,7 @@ public sealed partial class OneCodeToplevel : Window
 
     public void UpdateRuntimeState(string? model = null, string? effort = null)
     {
-        if (model != null)
+        if (model is not null)
             ApplyRuntimeModel(model, _lastRoundInputTokens);
 
         _shell.FocusChatInput();

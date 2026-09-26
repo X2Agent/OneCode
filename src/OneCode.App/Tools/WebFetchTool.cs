@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Net;
 using System.Text;
-using AngleSharp.Html.Parser;
 using Microsoft.Extensions.Caching.Memory;
 using OneCode.Infrastructure.Config;
 
@@ -10,10 +9,11 @@ namespace OneCode.App.Tools;
 /// <summary>
 /// WebFetch tool - fetches content from a URL and applies a prompt to extract information.
 /// </summary>
-public sealed class WebFetchTool
+public sealed class WebFetchTool(
+    IHttpClientFactory httpClientFactory,
+    IMemoryCache cache,
+    ILogger<WebFetchTool> logger)
 {
-    private static readonly HtmlParser _htmlParser = new();
-
     // Constants matching TypeScript implementation
     private const int MaxUrlLength = 2000;
     private const int MaxHttpContentLength = 10 * 1024 * 1024; // 10MB
@@ -37,19 +37,9 @@ public sealed class WebFetchTool
         "or report the limitation to the user.]";
 
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IMemoryCache _cache;
-    private readonly ILogger<WebFetchTool> _logger;
-
-    public WebFetchTool(
-        IHttpClientFactory httpClientFactory,
-        IMemoryCache cache,
-        ILogger<WebFetchTool> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _cache = cache;
-        _logger = logger;
-    }
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly IMemoryCache _cache = cache;
+    private readonly ILogger<WebFetchTool> _logger = logger;
 
     private HttpClient CreateFetchHttpClient()
     {

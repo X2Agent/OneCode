@@ -13,17 +13,8 @@ namespace OneCode.Automation.Cron;
 /// <c>AddCronTools</c> 的 DI 工厂以 <c>GetRequiredService</c> 解析，要求 host 先调用
 /// <c>AddCronScheduler</c> 注册调度器。
 /// </remarks>
-public sealed class CronTool
+public sealed class CronTool(ICronParser cronParser, CronSchedulerService scheduler)
 {
-    private readonly ICronParser _cronParser;
-    private readonly CronSchedulerService _scheduler;
-
-    public CronTool(ICronParser cronParser, CronSchedulerService scheduler)
-    {
-        _cronParser = cronParser;
-        _scheduler = scheduler;
-    }
-
     [Description("Manage scheduled cron jobs: create, list, delete, pause, or resume. " +
                  "Use 'create' with a 5-field cron expression and prompt; 'list' to see all jobs; " +
                  "'delete'/'pause'/'resume' take a job ID.")]
@@ -51,13 +42,13 @@ public sealed class CronTool
     private async Task<ToolResult> CreateAsync(
         string? cron, string? prompt, bool recurring, bool durable, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(cron) || !_cronParser.IsValid(cron))
+        if (string.IsNullOrWhiteSpace(cron) || !cronParser.IsValid(cron))
             return ToolResult.Error($"Invalid cron expression: {cron}");
         if (string.IsNullOrWhiteSpace(prompt))
             return ToolResult.Error("prompt is required");
 
-        var nextRun = _cronParser.ComputeNextRun(cron, DateTimeOffset.UtcNow);
-        if (nextRun == null)
+        var nextRun = cronParser.ComputeNextRun(cron, DateTimeOffset.UtcNow);
+        if (nextRun is null)
             return ToolResult.Error($"No future matches for: {cron}");
 
         var id = Guid.NewGuid().ToString("N")[..8];
@@ -75,7 +66,7 @@ public sealed class CronTool
             NextRunAt = nextRun.Value.ToUnixTimeSeconds(),
         };
 
-        if (!await _scheduler.TryAddJobAsync(entry, ct).ConfigureAwait(false))
+        if (!await scheduler.TryAddJobAsync(entry, ct).ConfigureAwait(false))
             return ToolResult.Error(
                 $"Max {CronSchedulerService.MaxJobs} cron jobs reached or job could not be persisted");
 
@@ -91,7 +82,7 @@ public sealed class CronTool
 
     private ToolResult List()
     {
-        var jobs = _scheduler.GetJobs();
+        var jobs = scheduler.GetJobs();
         var result = jobs.Select(j => new
         {
             j.Id,
@@ -113,7 +104,7 @@ public sealed class CronTool
         if (string.IsNullOrWhiteSpace(id))
             return ToolResult.Error("id is required for delete");
 
-        return _scheduler.TryRemoveJob(id)
+        return scheduler.TryRemoveJob(id)
             ? ToolResult.JsonSuccess(new { id, status = "deleted" })
             : ToolResult.Error($"Cron job '{id}' not found");
     }
@@ -123,7 +114,7 @@ public sealed class CronTool
         if (string.IsNullOrWhiteSpace(id))
             return ToolResult.Error("id is required for pause");
 
-        var ok = await _scheduler.TrySetPausedAsync(id, paused: true, ct).ConfigureAwait(false);
+        var ok = await scheduler.TrySetPausedAsync(id, paused: true, ct).ConfigureAwait(false);
         return ok
             ? ToolResult.JsonSuccess(new { id, status = "paused" })
             : ToolResult.Error($"Cron job '{id}' not found");
@@ -134,7 +125,7 @@ public sealed class CronTool
         if (string.IsNullOrWhiteSpace(id))
             return ToolResult.Error("id is required for resume");
 
-        var ok = await _scheduler.TrySetPausedAsync(id, paused: false, ct).ConfigureAwait(false);
+        var ok = await scheduler.TrySetPausedAsync(id, paused: false, ct).ConfigureAwait(false);
         return ok
             ? ToolResult.JsonSuccess(new { id, status = "resumed" })
             : ToolResult.Error($"Cron job '{id}' not found");

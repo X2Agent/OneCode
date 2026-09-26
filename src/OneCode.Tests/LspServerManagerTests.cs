@@ -28,6 +28,8 @@ public sealed class LspServerManagerTests
         var status = manager.GetStatus().Should().ContainSingle(s => s.Name == "ghost-lsp").Subject;
         status.IsRunning.Should().BeFalse();
         status.LastError.Should().NotBeNullOrEmpty("启动失败原因必须对 /lsp status 可见（软失败落池）");
+        status.LastError.Should().Contain("definitely-not-a-real-lsp-binary-xyz",
+            "失败原因必须指向具体二进制（Process.Start 的 Win32Exception 文案含目标文件名），否则模型无从自诊断");
     }
 
     [Fact]

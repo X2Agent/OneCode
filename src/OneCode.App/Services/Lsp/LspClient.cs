@@ -6,11 +6,11 @@ namespace OneCode.App.Services.Lsp;
 /// LSP (Language Server Protocol) client implementation.
 /// Uses JSON-RPC over stdio to communicate with LSP servers.
 /// </summary>
-public sealed class LspClient : IAsyncDisposable
+public sealed class LspClient(string serverName, ILogger<LspClient> logger, Action<Exception>? onCrash = null) : IAsyncDisposable
 {
-    private readonly string _serverName;
-    private readonly ILogger<LspClient> _logger;
-    private readonly Action<Exception>? _onCrash;
+    private readonly string _serverName = serverName;
+    private readonly ILogger<LspClient> _logger = logger;
+    private readonly Action<Exception>? _onCrash = onCrash;
     private Process? _process;
     private bool _isInitialized;
     private bool _isStopping;
@@ -52,13 +52,6 @@ public sealed class LspClient : IAsyncDisposable
     public int ActiveWorkDoneProgress => _activeProgressTokens;
     private int _activeProgressTokens;
 
-    public LspClient(string serverName, ILogger<LspClient> logger, Action<Exception>? onCrash = null)
-    {
-        _serverName = serverName;
-        _logger = logger;
-        _onCrash = onCrash;
-    }
-
     /// <summary>
     /// Start the LSP server process.
     /// </summary>
@@ -79,7 +72,7 @@ public sealed class LspClient : IAsyncDisposable
             foreach (var arg in args)
                 psi.ArgumentList.Add(arg);
 
-            if (env != null)
+            if (env is not null)
             {
                 foreach (var (key, value) in env)
                     psi.Environment[key] = value;
@@ -120,7 +113,7 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public async Task<JsonElement> InitializeAsync(JsonElement initializeParams)
     {
-        if (_process == null || _process.StandardInput.BaseStream == null)
+        if (_process is null || _process.StandardInput.BaseStream is null)
             throw new InvalidOperationException("LSP client not started");
 
         if (_startFailed)
@@ -162,7 +155,7 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public async Task<JsonElement> SendRequestAsync(string method, JsonElement parameters, CancellationToken ct = default)
     {
-        if (_process == null)
+        if (_process is null)
             throw new InvalidOperationException("LSP client not started");
 
         if (_startFailed)
@@ -198,7 +191,7 @@ public sealed class LspClient : IAsyncDisposable
             {
                 try
                 {
-                    if (_process != null)
+                    if (_process is not null)
                     {
                         var cancelParams = JsonSerializer.SerializeToElement(new { id = requestId });
                         _ = SendNotificationAsync("$/cancelRequest", cancelParams);
@@ -247,7 +240,7 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public async Task SendNotificationAsync(string method, JsonElement parameters)
     {
-        if (_process == null)
+        if (_process is null)
             throw new InvalidOperationException("LSP client not started");
 
         var notification = new
@@ -272,7 +265,7 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public void OnNotification(string method, Action<JsonElement> handler)
     {
-        if (_process == null)
+        if (_process is null)
         {
             _pendingNotificationHandlers.Add(new PendingNotificationHandler(method, handler));
             return;
@@ -286,7 +279,7 @@ public sealed class LspClient : IAsyncDisposable
     /// </summary>
     public void OnRequest(string method, Func<JsonElement, Task<JsonElement>> handler)
     {
-        if (_process == null)
+        if (_process is null)
         {
             // Pre-StartAsync: queue for later registration (symmetric with OnNotification).
             // The previous implementation incorrectly added a no-op notification handler
@@ -320,7 +313,7 @@ public sealed class LspClient : IAsyncDisposable
         try
         {
             var stream = _process!.StandardOutput.BaseStream;
-            while (_process != null && !_process.HasExited)
+            while (_process is not null && !_process.HasExited)
             {
                 var jsonText = await LspProtocol.ReadFrameAsync(stream).ConfigureAwait(false);
                 if (jsonText is null)
@@ -366,7 +359,7 @@ public sealed class LspClient : IAsyncDisposable
                             handler = h;
                     }
 
-                    if (handler != null)
+                    if (handler is not null)
                     {
                         var taskKey = Guid.NewGuid().ToString("N");
                         _outstandingServerRequests[taskKey] = Task.Run(async () =>
@@ -500,7 +493,7 @@ public sealed class LspClient : IAsyncDisposable
 
     private async Task SendJsonRpcMessageAsync(object message)
     {
-        if (_process == null)
+        if (_process is null)
             throw new InvalidOperationException("LSP client not started");
 
         await LspProtocol.WriteFrameAsync(_process.StandardInput.BaseStream, message).ConfigureAwait(false);
@@ -526,7 +519,7 @@ public sealed class LspClient : IAsyncDisposable
 
         try
         {
-            if (_process != null && !_process.HasExited)
+            if (_process is not null && !_process.HasExited)
             {
                 await SendNotificationAsync("shutdown", LspProtocol.EmptyObject).ConfigureAwait(false);
                 await SendNotificationAsync("exit", LspProtocol.EmptyObject).ConfigureAwait(false);
@@ -558,7 +551,7 @@ public sealed class LspClient : IAsyncDisposable
             }
 
             // Observe the read loop so unobserved-task-exception warnings don't fire.
-            if (_readLoopTask != null)
+            if (_readLoopTask is not null)
             {
                 try
                 {

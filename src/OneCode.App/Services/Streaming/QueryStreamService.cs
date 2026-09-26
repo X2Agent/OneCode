@@ -301,7 +301,7 @@ public sealed class QueryStreamService(
     internal static string? BuildConfigMissingMessage(IConfigManager configManager)
     {
         var settings = configManager.Current.Effective;
-        var missing = new List<string>();
+        List<string> missing = [];
 
         if (string.IsNullOrEmpty(settings.Model))
             missing.Add("model（模型）");

@@ -21,17 +21,12 @@ public sealed record NotificationProviderLoadResult(
 /// url 必须以 https:// 开头、body 必须为 JSON 对象、signing.preset 必须已知。
 /// JSON 损坏 / IO 失败记录错误并整体跳过（含行号）。
 /// </summary>
-public sealed class NotificationProviderDefinitionLoader
+public sealed class NotificationProviderDefinitionLoader(ILogger<NotificationProviderDefinitionLoader> logger)
 {
     /// <summary>定义文件名（位于各配置目录下）。</summary>
     public const string FileName = "notification-providers.json";
 
-    private readonly ILogger<NotificationProviderDefinitionLoader> _logger;
-
-    public NotificationProviderDefinitionLoader(ILogger<NotificationProviderDefinitionLoader> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILogger<NotificationProviderDefinitionLoader> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// 加载 <paramref name="configDir"/> 下的 notification-providers.json。

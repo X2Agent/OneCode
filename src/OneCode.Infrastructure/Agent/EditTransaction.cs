@@ -4,22 +4,17 @@ namespace OneCode.Infrastructure.Agent;
 /// Snapshot-based edit transaction for file-modifying tools.
 /// If the transaction is disposed without Commit(), snapshotted files are restored.
 /// </summary>
-public sealed class EditTransaction : IDisposable
+public sealed class EditTransaction(ILogger<EditTransaction>? logger = null) : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, byte[]> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _newFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _lastTouchedVersion = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ILogger<EditTransaction>? _logger;
+    private readonly ILogger<EditTransaction>? _logger = logger;
     private long _changeVersion;
     private bool _committed;
     private bool _rollbackOnDispose = true;
     private TransactionPersistenceContext? _persistence;
-
-    public EditTransaction(ILogger<EditTransaction>? logger = null)
-    {
-        _logger = logger;
-    }
 
     /// <summary>
     /// Durable Operation Ledger binding (S-04). When set, the edit pipeline records every file
@@ -192,14 +187,6 @@ public sealed class EditTransaction : IDisposable
             if (errors > 0)
                 _logger?.LogError("Rollback completed with {Errors} errors", errors);
         }
-    }
-
-    private static string? ComputeCurrentHash(string path)
-    {
-        if (!File.Exists(path))
-            return null;
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
     }
 
     void IDisposable.Dispose()

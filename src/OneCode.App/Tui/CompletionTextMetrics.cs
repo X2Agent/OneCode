@@ -66,7 +66,7 @@ internal static class CompletionTextMetrics
         if (string.IsNullOrEmpty(text))
             return [""];
 
-        var lines = new List<string>();
+        List<string> lines = [];
         var pos = 0;
 
         while (pos < text.Length)

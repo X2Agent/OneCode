@@ -31,7 +31,7 @@ public sealed class LoopCommand(
                 "示例：/loop 修复登录页样式回归 --check \"npm test -- --run login\"\n" +
                 "提示：--check 的退出码 0 即为本轮通过；不加 --check 时退回构建/测试验证。"));
 
-        var taskParts = new List<string>();
+        List<string> taskParts = [];
         string? checkCommand = null;
         var maxIterations = ModeBudgetSettings.FromSettings(configManager.Current.Effective).MaxLoopIterations;
 

@@ -24,18 +24,12 @@ namespace OneCode.App.Services.BuildMode;
 /// - 通过 <see cref="AIContext.Messages"/> 注入 System 消息（MAF 原生）
 /// - 通过 <see cref="IPermissionModeProvider"/> 判断当前是否在 Build 模式
 /// </summary>
-public sealed class BuildModeAttachmentProvider : ModeAwareAttachmentProviderBase
+public sealed class BuildModeAttachmentProvider(
+    IPermissionModeProvider modeProvider,
+    IPromptManager promptManager) : ModeAwareAttachmentProviderBase
 {
-    private readonly IPermissionModeProvider _modeProvider;
-    private readonly IPromptManager _promptManager;
-
-    public BuildModeAttachmentProvider(
-        IPermissionModeProvider modeProvider,
-        IPromptManager promptManager)
-    {
-        _modeProvider = modeProvider;
-        _promptManager = promptManager;
-    }
+    private readonly IPermissionModeProvider _modeProvider = modeProvider;
+    private readonly IPromptManager _promptManager = promptManager;
 
     protected override bool IsInMode => _modeProvider.CurrentMode == PermissionMode.AcceptEdits;
 

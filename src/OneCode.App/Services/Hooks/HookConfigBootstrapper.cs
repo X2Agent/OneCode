@@ -10,30 +10,20 @@ namespace OneCode.App.Services.Hooks;
 /// 启动时调用一次，将 <c>~/.onecode/hooks.json</c> 和 <c>.onecode/hooks.json</c>
 /// 中的 hook 配置注册到系统，并把各文件加载状态写入 <see cref="HookLoadDiagnostics"/>。
 /// </summary>
-public sealed class HookConfigBootstrapper
+public sealed class HookConfigBootstrapper(
+    HookSettingsLoader loader,
+    HookRegistry registry,
+    NotificationProviderDefinitionLoader providerLoader,
+    NotificationProviderRegistry providerRegistry,
+    HookLoadDiagnostics loadDiagnostics,
+    ILogger<HookConfigBootstrapper> logger)
 {
-    private readonly HookSettingsLoader _loader;
-    private readonly HookRegistry _registry;
-    private readonly NotificationProviderDefinitionLoader _providerLoader;
-    private readonly NotificationProviderRegistry _providerRegistry;
-    private readonly HookLoadDiagnostics _loadDiagnostics;
-    private readonly ILogger<HookConfigBootstrapper> _logger;
-
-    public HookConfigBootstrapper(
-        HookSettingsLoader loader,
-        HookRegistry registry,
-        NotificationProviderDefinitionLoader providerLoader,
-        NotificationProviderRegistry providerRegistry,
-        HookLoadDiagnostics loadDiagnostics,
-        ILogger<HookConfigBootstrapper> logger)
-    {
-        _loader = loader ?? throw new ArgumentNullException(nameof(loader));
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _providerLoader = providerLoader ?? throw new ArgumentNullException(nameof(providerLoader));
-        _providerRegistry = providerRegistry ?? throw new ArgumentNullException(nameof(providerRegistry));
-        _loadDiagnostics = loadDiagnostics ?? throw new ArgumentNullException(nameof(loadDiagnostics));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly HookSettingsLoader _loader = loader ?? throw new ArgumentNullException(nameof(loader));
+    private readonly HookRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+    private readonly NotificationProviderDefinitionLoader _providerLoader = providerLoader ?? throw new ArgumentNullException(nameof(providerLoader));
+    private readonly NotificationProviderRegistry _providerRegistry = providerRegistry ?? throw new ArgumentNullException(nameof(providerRegistry));
+    private readonly HookLoadDiagnostics _loadDiagnostics = loadDiagnostics ?? throw new ArgumentNullException(nameof(loadDiagnostics));
+    private readonly ILogger<HookConfigBootstrapper> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>config 来源注册名的固定前缀（热重载重建时据此区分配置 hook 与编程注册 hook）。</summary>
     public const string ConfigNamePrefix = "config:";

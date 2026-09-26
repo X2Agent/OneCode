@@ -66,7 +66,7 @@ public static class SkillDiscovery
 
         for (var depth = 0; depth <= maxDepth && level.Count > 0; depth++)
         {
-            var next = new List<string>();
+            List<string> next = [];
 
             foreach (var directory in level.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {

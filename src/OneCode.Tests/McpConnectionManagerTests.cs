@@ -87,6 +87,8 @@ public sealed class McpStartupPreconnectorTests
         var act = () => sut.EnsureConnectedAsync(ct);
 
         await act.Should().NotThrowAsync();
+        // 预连接任务必须实际跑完（ConnectAll 恰好一次），回调异常被吞不等于任务未完成
+        await manager.Received(1).ConnectAllAsync(ct);
     }
 }
 

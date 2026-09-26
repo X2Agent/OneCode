@@ -431,6 +431,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
         var loaded = await _store.LoadAsync(MemoryScope.Project, default);
         loaded[0].HitCount.Should().Be(1);
         loaded[0].LastHitAt.Should().NotBeNull();
+        loaded[0].LastHitAt!.Value.Should().BeAfter(created, "LastHitAt 必须晚于条目创建时刻");
     }
 
     /// <summary>
@@ -534,6 +535,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
 
         loaded[0].HitCount.Should().Be(1);
         loaded[0].LastHitAt.Should().NotBeNull();
+        loaded[0].LastHitAt!.Value.Should().BeAfter(created, "LastHitAt 必须晚于条目创建时刻");
     }
 
     /// <summary>

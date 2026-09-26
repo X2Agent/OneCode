@@ -17,16 +17,10 @@ public sealed class SshShellExecutorOptions
 /// Executes shell commands on a remote host via SSH.
 /// Wraps <see cref="SshRemoteService"/> as a MAF <see cref="ShellExecutor"/>.
 /// </summary>
-public sealed class SshShellExecutor : ShellExecutor
+public sealed class SshShellExecutor(SshRemoteService ssh, SshShellExecutorOptions? options = null) : ShellExecutor
 {
-    private readonly SshRemoteService _ssh;
-    private readonly SshShellExecutorOptions _options;
-
-    public SshShellExecutor(SshRemoteService ssh, SshShellExecutorOptions? options = null)
-    {
-        _ssh = ssh;
-        _options = options ?? new SshShellExecutorOptions();
-    }
+    private readonly SshRemoteService _ssh = ssh;
+    private readonly SshShellExecutorOptions _options = options ?? new();
 
     public override async Task<ShellResult> RunAsync(string command, CancellationToken cancellationToken = default)
     {

@@ -47,7 +47,9 @@ namespace OneCode.Infrastructure.Memory;
 /// Atomic file replacement (temp + rename) ensures readers never see a partial write.
 /// </para>
 /// </remarks>
-public sealed partial class MemoryEntryStore : IMemoryEntryStore
+public sealed partial class MemoryEntryStore(
+    IWorkingDirectoryAccessor wdAccessor,
+    ILogger<MemoryEntryStore>? logger = null) : IMemoryEntryStore
 {
     /// <summary>Maximum entries per scope (LRU eviction when exceeded).</summary>
     public const int MaxEntries = 200;
@@ -76,16 +78,8 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
 
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> s_locks = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly IWorkingDirectoryAccessor _wdAccessor;
-    private readonly ILogger<MemoryEntryStore>? _logger;
-
-    public MemoryEntryStore(
-        IWorkingDirectoryAccessor wdAccessor,
-        ILogger<MemoryEntryStore>? logger = null)
-    {
-        _wdAccessor = wdAccessor ?? throw new ArgumentNullException(nameof(wdAccessor));
-        _logger = logger;
-    }
+    private readonly IWorkingDirectoryAccessor _wdAccessor = wdAccessor ?? throw new ArgumentNullException(nameof(wdAccessor));
+    private readonly ILogger<MemoryEntryStore>? _logger = logger;
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<MemoryEntry>> LoadAsync(MemoryScope scope, CancellationToken ct = default)
@@ -346,7 +340,7 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
             return [];
 
         var body = StripFrontmatter(content);
-        var results = new List<MemoryEntry>();
+        List<MemoryEntry> results = [];
 
         var matches = EntryHeaderRegex().Matches(body);
         if (matches.Count == 0)
@@ -424,16 +418,9 @@ public sealed partial class MemoryEntryStore : IMemoryEntryStore
                 valueStartIndex = i;
         }
 
-        string value;
-        if (valueStartIndex >= 0 && valueStartIndex < lines.Length)
-        {
-            var valueLines = lines.Skip(valueStartIndex);
-            value = string.Join('\n', valueLines).Trim();
-        }
-        else
-        {
-            value = string.Empty;
-        }
+        var value = valueStartIndex >= 0 && valueStartIndex < lines.Length
+            ? string.Join('\n', lines.Skip(valueStartIndex)).Trim()
+            : string.Empty;
 
         var source = props.GetValueOrDefault("source") ?? ManualSource;
         var category = props.GetValueOrDefault("category") ?? MemoryEntry.DeriveCategory(key);

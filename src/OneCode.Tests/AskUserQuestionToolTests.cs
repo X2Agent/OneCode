@@ -29,7 +29,8 @@ public sealed class AskUserQuestionToolTests
         result.Content.Should().Contain("Use EF Core or Dapper?");
         // 关键防回归：不能出现伪装成用户答案的固定字符串
         result.Content.Should().NotContain("Answer: (no interactive terminal available)");
-        result.SuggestedNextAction.Should().NotBeNullOrEmpty();
+        result.SuggestedNextAction.Should().Be("Choose a reasonable default or skip the step that required user input.",
+            "headless 错误的后续动作必须是安全默认/跳过，而不是把错误当答案");
     }
 
     [Fact]
@@ -60,7 +61,8 @@ public sealed class AskUserQuestionToolTests
 
         result.IsError.Should().BeTrue();
         result.Content.Should().Contain("did not provide an answer");
-        result.SuggestedNextAction.Should().NotBeNullOrEmpty();
+        result.SuggestedNextAction.Should().Be("Choose a reasonable default or skip the step that required user input.",
+            "取消/无 UI 场景的后续动作必须是安全默认/跳过");
     }
 
     [Fact]
@@ -208,7 +210,7 @@ public sealed class AskUserQuestionToolTests
                 EmitEvent: emitEvent),
             new TuiLaunchOptions(
                 Version: "test",
-                ExternalCancellation: CancellationToken.None,
+                ExternalCancellation: TestContext.Current.CancellationToken,
                 SlashCommands: []));
     }
 

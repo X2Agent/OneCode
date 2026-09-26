@@ -17,19 +17,10 @@ namespace OneCode.Core.Permissions;
 ///    - 未命中（None）→ fallback 到 Auto 模式的 ReadOnlyAndEvaluate 配置
 ///      （走 EvaluateRules → 无规则则 Ask，保证安全兜底）
 /// </summary>
-public sealed class PermissionChecker : IPermissionChecker
+public sealed class PermissionChecker(
+    IYoloClassifier yoloClassifier,
+    ILogger<PermissionChecker>? logger = null) : IPermissionChecker
 {
-    private readonly IYoloClassifier _yoloClassifier;
-    private readonly ILogger<PermissionChecker>? _logger;
-
-    public PermissionChecker(
-        IYoloClassifier yoloClassifier,
-        ILogger<PermissionChecker>? logger = null)
-    {
-        _yoloClassifier = yoloClassifier;
-        _logger = logger;
-    }
-
     public async Task<PermissionCheckResult> CheckAsync(
         string toolName,
         JsonElement toolInput,
@@ -46,10 +37,10 @@ public sealed class PermissionChecker : IPermissionChecker
         string toolName, JsonElement toolInput, ToolPermissionContext context, CancellationToken ct)
     {
         var shortcut = PermissionCheckHelpers.CheckReadOnlyAndFileWrite(toolName, toolInput, context);
-        if (shortcut != null)
+        if (shortcut is not null)
             return shortcut;
 
-        var yoloResult = await _yoloClassifier.ClassifyAsync(
+        var yoloResult = await yoloClassifier.ClassifyAsync(
             toolName, toolInput, ct: ct).ConfigureAwait(false);
 
         if (yoloResult.IsMatched)
@@ -59,14 +50,14 @@ public sealed class PermissionChecker : IPermissionChecker
 
             if (yoloResult.IsSoftDeny)
             {
-                _logger?.LogInformation(
+                logger?.LogInformation(
                     "YOLO rule soft-denied tool {Tool}: {Reason}",
                     toolName, yoloResult.Reason);
                 return PermissionCheckResult.Ask(
                     $"YOLO classifier requests confirmation: {yoloResult.Reason}");
             }
 
-            _logger?.LogInformation(
+            logger?.LogInformation(
                 "YOLO rule blocked tool {Tool}: {Reason}",
                 toolName, yoloResult.Reason);
             return PermissionCheckResult.Deny($"Blocked by YOLO classifier: {yoloResult.Reason}");

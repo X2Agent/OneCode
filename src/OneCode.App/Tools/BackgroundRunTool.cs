@@ -66,7 +66,7 @@ public sealed class BackgroundRunTool
         // Validate paths referenced in the command string (same as BashTool).
         var pathValidationError = ShellExecutionHelper.ValidateReferencedPaths(
             command, _wd.WorkingDirectory, BashCommandClassifier.ExtractReferencedPaths, _wd.AdditionalDirectories);
-        if (pathValidationError != null)
+        if (pathValidationError is not null)
             return ToolResult.Error(pathValidationError);
 
         // 通过 PathsHelper.SafeResolve 校验 cwd
@@ -104,7 +104,7 @@ public sealed class BackgroundRunTool
                 psi.ArgumentList.Add(command);
 
                 proc = System.Diagnostics.Process.Start(psi);
-                if (proc == null) { _taskService.UpdateTask(task.Id, status: TaskStatus.Failed); return; }
+                if (proc is null) { _taskService.UpdateTask(task.Id, status: TaskStatus.Failed); return; }
 
                 // Task 'stop' 取消 token 时杀掉整个进程树（cmd/sh 启动的子进程一并终止）
                 using var killReg = taskToken.Register(() =>

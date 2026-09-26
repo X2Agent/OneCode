@@ -21,16 +21,10 @@ namespace OneCode.App.Services.Agent;
 /// （<c>TodoCompletionLoopEvaluator</c> 用的是同一条路径）。解析不到（profile
 /// 未启用 Todo）时发布空列表——面板应隐藏，而不是保留上一个 agent 的陈旧清单。</para>
 /// </remarks>
-public sealed class TodoProjectionService
+public sealed class TodoProjectionService(OrchestrationEventBus bus, ILogger<TodoProjectionService> logger)
 {
-    private readonly OrchestrationEventBus _bus;
-    private readonly ILogger<TodoProjectionService> _logger;
-
-    public TodoProjectionService(OrchestrationEventBus bus, ILogger<TodoProjectionService> logger)
-    {
-        _bus = bus;
-        _logger = logger;
-    }
+    private readonly OrchestrationEventBus _bus = bus;
+    private readonly ILogger<TodoProjectionService> _logger = logger;
 
     /// <summary>
     /// 读取当前会话的待办快照并发布。无订阅者（headless / Cron）时整体跳过，

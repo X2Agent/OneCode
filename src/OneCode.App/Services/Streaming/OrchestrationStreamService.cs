@@ -144,6 +144,7 @@ public sealed class OrchestrationStreamService(
             }
             catch (OperationCanceledException)
             {
+                // 取消即正常收尾，不再向下游写入错误。
             }
             catch (Exception ex)
             {
@@ -255,7 +256,7 @@ public sealed class OrchestrationStreamService(
         if (result is null)
             return null;
 
-        var lines = new List<string>();
+        List<string> lines = [];
         if (result.Delivery is { } delivery)
         {
             foreach (var gate in delivery.Gates.Where(g => g.Required && g.Status != QualityGateStatus.Passed))
@@ -337,6 +338,7 @@ public sealed class OrchestrationStreamService(
             }
             catch (OperationCanceledException)
             {
+                // 取消即正常收尾，不再向下游写入错误。
             }
             catch (Exception ex)
             {

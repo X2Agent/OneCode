@@ -244,7 +244,7 @@ internal sealed class GoalSubGoalLoop(
         if (imagePaths is not { Count: > 0 })
             return new ChatMessage(ChatRole.User, prompt);
 
-        var contents = new List<AIContent>();
+        List<AIContent> contents = [];
         if (!string.IsNullOrEmpty(prompt))
             contents.Add(new TextContent(prompt));
 

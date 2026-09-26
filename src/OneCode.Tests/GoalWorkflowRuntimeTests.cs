@@ -260,6 +260,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
     public async Task ExecuteNext_PublishesBudgetWarningOncePerLevelChange()
     {
         // Fix-6/N-03：EvaluateWarning 结果必须发布到 EventWriter，且级别不变时不重复发布。
+        var startTime = DateTimeOffset.UtcNow;
         var store = new JsonGoalRunStore(Path.Combine(_root, "warning-events"));
         var plan = new[] { Snapshot(1), Snapshot(2) };
         // 14/20 = 70% → Early（黄色）。
@@ -286,6 +287,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
 
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         persisted!.Budget.LastActivityAt.Should().NotBeNull("wall clock tracking must stamp activity");
+        persisted.Budget.LastActivityAt!.Value.Should().BeOnOrAfter(startTime)
+            .And.BeOnOrBefore(DateTimeOffset.UtcNow.AddSeconds(5), "LastActivityAt 必须落在测试执行时间窗内");
     }
 
     [Fact]

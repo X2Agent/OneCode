@@ -3,17 +3,12 @@ using OneCode.Infrastructure.Config;
 
 namespace OneCode.Infrastructure.Mcp;
 
-public sealed class McpMultiScopeConfigLoader
+public sealed class McpMultiScopeConfigLoader(ILogger<McpMultiScopeConfigLoader> logger)
 {
     private const string ConfigFileName = ".mcp.json";
     private const string LocalConfigFileName = ".mcp.local.json";
 
-    private readonly ILogger<McpMultiScopeConfigLoader> _logger;
-
-    public McpMultiScopeConfigLoader(ILogger<McpMultiScopeConfigLoader> logger)
-    {
-        _logger = logger;
-    }
+    private readonly ILogger<McpMultiScopeConfigLoader> _logger = logger;
 
     public static string GetUserConfigPath()
     {
@@ -141,19 +136,19 @@ public sealed class McpMultiScopeConfigLoader
         var merged = new Dictionary<string, McpServerDefinition>(
             StringComparer.OrdinalIgnoreCase);
 
-        if (user?.Servers != null)
+        if (user?.Servers is not null)
         {
             foreach (var (name, def) in user.Servers)
                 merged[name] = def;
         }
 
-        if (project?.Servers != null)
+        if (project?.Servers is not null)
         {
             foreach (var (name, def) in project.Servers)
                 merged[name] = def;
         }
 
-        if (local?.Servers != null)
+        if (local?.Servers is not null)
         {
             foreach (var (name, def) in local.Servers)
                 merged[name] = def;

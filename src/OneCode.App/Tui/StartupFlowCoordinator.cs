@@ -8,27 +8,20 @@ namespace OneCode.App.Tui;
 /// 可选依赖（保留可空）：
 /// - <see cref="_logger"/>：仅记录 trust 拒绝日志；缺失时静默
 /// </remarks>
-public sealed class StartupFlowCoordinator
+public sealed class StartupFlowCoordinator(
+    Func<bool> shouldShowTrustPrompt,
+    Func<CancellationToken, Task<bool>> ensureTrustAsync,
+    ILogger<StartupFlowCoordinator>? logger = null)
 {
-    private readonly Func<bool> _shouldShowTrustPrompt;
-    private readonly Func<CancellationToken, Task<bool>> _ensureTrustAsync;
-    private readonly ILogger<StartupFlowCoordinator>? _logger;
+    private readonly Func<bool> _shouldShowTrustPrompt = shouldShowTrustPrompt;
+    private readonly Func<CancellationToken, Task<bool>> _ensureTrustAsync = ensureTrustAsync;
+    private readonly ILogger<StartupFlowCoordinator>? _logger = logger;
 
     public StartupFlowCoordinator(
         TrustService trustService,
         ILogger<StartupFlowCoordinator>? logger = null)
         : this(trustService.ShouldShowTrustPrompt, trustService.EnsureTrustAsync, logger)
     {
-    }
-
-    internal StartupFlowCoordinator(
-        Func<bool> shouldShowTrustPrompt,
-        Func<CancellationToken, Task<bool>> ensureTrustAsync,
-        ILogger<StartupFlowCoordinator>? logger = null)
-    {
-        _shouldShowTrustPrompt = shouldShowTrustPrompt;
-        _ensureTrustAsync = ensureTrustAsync;
-        _logger = logger;
     }
 
     public async Task<StartupFlowResult> RunInteractiveAsync(CancellationToken ct = default)

@@ -25,7 +25,7 @@ public sealed class BackgroundWaitTool
         {
             ct.ThrowIfCancellationRequested();
             var task = _taskService.GetTask(taskId);
-            if (task == null) return ToolResult.Error($"Task #{taskId} not found");
+            if (task is null) return ToolResult.Error($"Task #{taskId} not found");
             if (task.Status is TaskStatus.Completed or TaskStatus.Failed or TaskStatus.Cancelled)
             {
                 var output = _taskService.GetTaskOutput(taskId);

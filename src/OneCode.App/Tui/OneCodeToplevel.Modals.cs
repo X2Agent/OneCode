@@ -48,7 +48,7 @@ public sealed partial class OneCodeToplevel
         _app.Invoke(() =>
         {
             // Fail-closed: malformed tool input must not offer Allow / AllowAlways.
-            var options = new List<InlineSelectorOption>();
+            List<InlineSelectorOption> options = [];
             if (request.AllowApprovals)
             {
                 options.Add(new("allow", "允许执行 (仅本次)", request.Message));

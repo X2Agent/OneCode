@@ -190,7 +190,7 @@ public sealed class TeamRequirementService(
             ? config.Members
             : [new TeamMember($"{config.TeamName}-member", "member", null)];
 
-        var tasks = new List<TeamTaskDefinition>();
+        List<TeamTaskDefinition> tasks = [];
         foreach (var member in members)
         {
             var role = !string.IsNullOrWhiteSpace(member.Role) ? member.Role! : member.AgentId;

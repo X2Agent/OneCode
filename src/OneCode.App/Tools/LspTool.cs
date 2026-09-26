@@ -14,18 +14,11 @@ namespace OneCode.App.Tools;
 /// and workspace-wide symbol search.
 /// Server routing is automatic by file extension when the server parameter is omitted.
 /// </summary>
-public sealed class LspTool
+public sealed class LspTool(ILspServerManager serverManager, LanguagePackRegistry packRegistry, ILogger<LspTool>? logger = null)
 {
-    private readonly ILspServerManager _serverManager;
-    private readonly LanguagePackRegistry _packRegistry;
-    private readonly ILogger<LspTool>? _logger;
-
-    public LspTool(ILspServerManager serverManager, LanguagePackRegistry packRegistry, ILogger<LspTool>? logger = null)
-    {
-        _serverManager = serverManager;
-        _packRegistry = packRegistry;
-        _logger = logger;
-    }
+    private readonly ILspServerManager _serverManager = serverManager;
+    private readonly LanguagePackRegistry _packRegistry = packRegistry;
+    private readonly ILogger<LspTool>? _logger = logger;
 
     [Description("Perform Language Server Protocol operations: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol.")]
     public async Task<ToolResult> ExecuteLspAsync(
@@ -59,12 +52,12 @@ public sealed class LspTool
                 return ToolResult.Error("No LSP servers running. Use /lsp install <lang> to set up a language server.");
 
             var ecServer = server ?? ecStatus.FirstOrDefault()?.Name;
-            if (ecServer == null)
+            if (ecServer is null)
                 return ToolResult.Error("No LSP server available. Use /lsp install <lang>.");
 
             var ecCaps = ecStatus.FirstOrDefault(s => s.Name == ecServer)?.Capabilities;
             var ecCapError = CheckCapability(ecCaps, "workspace/executeCommand", action, ecServer);
-            if (ecCapError != null) return ecCapError;
+            if (ecCapError is not null) return ecCapError;
 
             try
             {
@@ -86,7 +79,7 @@ public sealed class LspTool
 
         // Auto-resolve server by file extension when not specified
         var targetServer = server ?? _packRegistry.ResolveServerName(file) ?? status.FirstOrDefault()?.Name;
-        if (targetServer == null)
+        if (targetServer is null)
             return ToolResult.Error("No LSP server available for this file type. Use /lsp install <lang>.");
 
         // Retrieve capabilities for the resolved server to gate unsupported methods
@@ -94,10 +87,10 @@ public sealed class LspTool
 
         // Check server capability before dispatching — avoids server errors for unsupported methods
         var lspMethod = ActionToLspMethod(action.ToLowerInvariant());
-        if (lspMethod != null)
+        if (lspMethod is not null)
         {
             var capError = CheckCapability(serverCapabilities, lspMethod, action, targetServer);
-            if (capError != null) return capError;
+            if (capError is not null) return capError;
         }
 
         try
@@ -147,8 +140,8 @@ public sealed class LspTool
             return new { symbols = Array.Empty<object>() };
 
         var @params = JsonSerializer.SerializeToElement(new { query });
-        var merged = new List<JsonElement>();
-        var errors = new List<string>();
+        List<JsonElement> merged = [];
+        List<string> errors = [];
 
         foreach (var s in status)
         {

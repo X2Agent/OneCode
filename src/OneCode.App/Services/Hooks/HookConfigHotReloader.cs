@@ -12,7 +12,12 @@ namespace OneCode.App.Services.Hooks;
 /// - 任一层配置解析失败（Failed）或构建异常时保留上一次有效配置（last-good），不因瞬时坏文件清空 hook
 /// - Dispose 停止全部 watcher（DI 容器在宿主停止时自动释放单例）
 /// </summary>
-public sealed class HookConfigHotReloader : IDisposable
+public sealed class HookConfigHotReloader(
+    HookConfigBootstrapper bootstrapper,
+    HookRegistry registry,
+    HookLoadDiagnostics loadDiagnostics,
+    NotificationProviderRegistry providerRegistry,
+    ILogger<HookConfigHotReloader> logger) : IDisposable
 {
     private static readonly HashSet<string> WatchedFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -20,11 +25,11 @@ public sealed class HookConfigHotReloader : IDisposable
         "notification-providers.json",
     };
 
-    private readonly HookConfigBootstrapper _bootstrapper;
-    private readonly HookRegistry _registry;
-    private readonly HookLoadDiagnostics _loadDiagnostics;
-    private readonly NotificationProviderRegistry _providerRegistry;
-    private readonly ILogger<HookConfigHotReloader> _logger;
+    private readonly HookConfigBootstrapper _bootstrapper = bootstrapper ?? throw new ArgumentNullException(nameof(bootstrapper));
+    private readonly HookRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+    private readonly HookLoadDiagnostics _loadDiagnostics = loadDiagnostics ?? throw new ArgumentNullException(nameof(loadDiagnostics));
+    private readonly NotificationProviderRegistry _providerRegistry = providerRegistry ?? throw new ArgumentNullException(nameof(providerRegistry));
+    private readonly ILogger<HookConfigHotReloader> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     private readonly object _lock = new();
     private readonly List<FileSystemWatcher> _watchers = [];
@@ -36,20 +41,6 @@ public sealed class HookConfigHotReloader : IDisposable
 
     /// <summary>防抖窗口毫秒数（默认 500，与 CodeIndexHotReloader 一致）。</summary>
     public int DebounceMs { get; init; } = 500;
-
-    public HookConfigHotReloader(
-        HookConfigBootstrapper bootstrapper,
-        HookRegistry registry,
-        HookLoadDiagnostics loadDiagnostics,
-        NotificationProviderRegistry providerRegistry,
-        ILogger<HookConfigHotReloader> logger)
-    {
-        _bootstrapper = bootstrapper ?? throw new ArgumentNullException(nameof(bootstrapper));
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _loadDiagnostics = loadDiagnostics ?? throw new ArgumentNullException(nameof(loadDiagnostics));
-        _providerRegistry = providerRegistry ?? throw new ArgumentNullException(nameof(providerRegistry));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <summary>
     /// 启动路径：先执行一次完整 Bootstrap，再开始监视配置目录。

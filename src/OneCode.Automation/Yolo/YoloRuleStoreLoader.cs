@@ -10,31 +10,20 @@ namespace OneCode.Automation.Yolo;
 /// - 文件不存在/解析失败不应阻断启动（已由 <see cref="IYoloRuleFileStore"/> 兜底）
 /// - 加载晚于首次工具调用不会导致功能错误：YoloRuleStore 构造时已装入置默认规则
 /// </summary>
-public sealed class YoloRuleStoreLoader : IHostedService
+public sealed class YoloRuleStoreLoader(
+    YoloRuleStore ruleStore,
+    IYoloRuleFileStore fileStore,
+    ILogger<YoloRuleStoreLoader>? logger = null) : IHostedService
 {
-    private readonly YoloRuleStore _ruleStore;
-    private readonly IYoloRuleFileStore _fileStore;
-    private readonly ILogger<YoloRuleStoreLoader>? _logger;
-
-    public YoloRuleStoreLoader(
-        YoloRuleStore ruleStore,
-        IYoloRuleFileStore fileStore,
-        ILogger<YoloRuleStoreLoader>? logger = null)
-    {
-        _ruleStore = ruleStore;
-        _fileStore = fileStore;
-        _logger = logger;
-    }
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var rules = await _fileStore.LoadOrDefaultsAsync(cancellationToken).ConfigureAwait(false);
-            _ruleStore.ReplaceRules(rules);
-            _logger?.LogDebug(
+            var rules = await fileStore.LoadOrDefaultsAsync(cancellationToken).ConfigureAwait(false);
+            ruleStore.ReplaceRules(rules);
+            logger?.LogDebug(
                 "YOLO rules loaded: {Count} rules from {Path}",
-                _ruleStore.Rules.Count, _fileStore.RulesPath);
+                ruleStore.Rules.Count, fileStore.RulesPath);
         }
         catch (OperationCanceledException)
         {
@@ -42,7 +31,7 @@ public sealed class YoloRuleStoreLoader : IHostedService
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning(ex, "Failed to load YOLO rules on startup");
+            logger?.LogWarning(ex, "Failed to load YOLO rules on startup");
         }
     }
 

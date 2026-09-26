@@ -16,16 +16,10 @@ public sealed record GitStatus(
 /// <summary>
 /// Provides Git information about the working directory.
 /// </summary>
-public sealed class GitInfo
+public sealed class GitInfo(IProcessRunner processRunner, ILogger<GitInfo> logger)
 {
-    private readonly IProcessRunner _processRunner;
-    private readonly ILogger<GitInfo> _logger;
-
-    public GitInfo(IProcessRunner processRunner, ILogger<GitInfo> logger)
-    {
-        _processRunner = processRunner;
-        _logger = logger;
-    }
+    private readonly IProcessRunner _processRunner = processRunner;
+    private readonly ILogger<GitInfo> _logger = logger;
 
     /// <summary>
     /// Returns null if not a git repo or git is not installed.

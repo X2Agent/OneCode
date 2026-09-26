@@ -102,8 +102,19 @@ public sealed class SubprocessScriptRunnerTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var result = await runner(null!, script, null, null!, cts.Token);
 
-        // If we get here, no deadlock occurred
-        result.Should().NotBeNull();
+        // If we get here, no deadlock occurred。stdout 被 MaxOutputChars(30000) 截断并带标记，
+        // 截断前的前缀必须完整连续、且不混入 stderr。
+        var stdout = (string)result!;
+        stdout.Should().NotContain("stderr_line", "stderr 不得混入 stdout 流");
+        stdout.Should().EndWith("… [output truncated]", "超过 MaxOutputChars 的输出必须以截断标记结尾");
+        // 剥离截断标记；30000 字符按字符切，可能把最后一行切半，故丢弃末行后校验剩余前缀连续。
+        var body = stdout[..^"… [output truncated]".Length].TrimEnd('\r', '\n');
+        var stdoutLines = body.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
+        stdoutLines = stdoutLines[..^1];
+        stdoutLines.Should().HaveCountGreaterThan(1000, "截断前仍应保留大量 stdout 行");
+        stdoutLines[0].Should().Be("stdout_line_1");
+        stdoutLines[^1].Should().Be($"stdout_line_{stdoutLines.Length}",
+            "截断前输出必须从 1 起连续编号，说明流式读取没有丢行");
     }
 
     [Fact]

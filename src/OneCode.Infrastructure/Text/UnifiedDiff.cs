@@ -55,8 +55,8 @@ public static class UnifiedDiff
                 return ([], []);
 
             var edits = ComputeEdits(orig, mod);
-            var added = new List<string>();
-            var removed = new List<string>();
+            List<string> added = [];
+            List<string> removed = [];
 
             foreach (var (o, m, op) in edits)
             {
@@ -66,10 +66,12 @@ public static class UnifiedDiff
                     removed.Add(orig[o]);
             }
 
-            return (added.ToArray(), removed.ToArray());
+            return ([.. added], [.. removed]);
         }
-        catch
+        // 防御兜底：Diff 计算绝不向调用方抛异常，异常时按"无变更"处理。
+        catch (Exception ex)
         {
+            Debug.WriteLine(ex, "UnifiedDiff.ComputeLineChanges failed");
             return ([], []);
         }
     }

@@ -5,23 +5,15 @@ namespace OneCode.App.Tui;
 /// 类似 InlineSelector，但支持多问题和更复杂的导航。
 /// 渲染逻辑见 <c>QuestionWizard.Rendering.cs</c>。
 /// </summary>
-public sealed partial class QuestionWizard
+public sealed partial class QuestionWizard(string title, IReadOnlyList<WizardQuestion> questions, int startIndex = 0)
 {
-    private readonly string _title;
-    private readonly List<WizardQuestion> _questions;
-    private int _currentIndex;
+    private readonly string _title = title;
+    private readonly List<WizardQuestion> _questions = questions.ToList();
+    private int _currentIndex = Math.Clamp(startIndex, 0, questions.Count - 1);
     private int _selectedOptionIndex;
     private readonly TaskCompletionSource<WizardResult> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly HashSet<int> _selectedMultipleOptions = new();
-
-    public QuestionWizard(string title, IReadOnlyList<WizardQuestion> questions, int startIndex = 0)
-    {
-        _title = title;
-        _questions = questions.ToList();
-        _currentIndex = Math.Clamp(startIndex, 0, _questions.Count - 1);
-        _selectedOptionIndex = 0;
-    }
 
     public string Title => _title;
     public IReadOnlyList<WizardQuestion> Questions => _questions;
@@ -180,7 +172,7 @@ public sealed partial class QuestionWizard
     private void SaveMultipleChoiceAnswer()
     {
         var question = CurrentQuestion;
-        if (question.Type == QuestionType.MultipleChoice && question.Options != null)
+        if (question.Type == QuestionType.MultipleChoice && question.Options is not null)
         {
             question.MultipleAnswers.Clear();
             foreach (var idx in _selectedMultipleOptions.OrderBy(i => i))
@@ -197,7 +189,7 @@ public sealed partial class QuestionWizard
         var question = CurrentQuestion;
         return question.Type == QuestionType.Confirm
             ? WizardQuestion.ConfirmOptions
-            : question.Options ?? new List<string>();
+            : question.Options ?? [];
     }
 
     private void SelectSingleOption()
@@ -247,7 +239,7 @@ public sealed partial class QuestionWizard
         _selectedOptionIndex = 0;
         _selectedMultipleOptions.Clear();
 
-        if (question.IsChoiceType && question.Options != null)
+        if (question.IsChoiceType && question.Options is not null)
         {
             if (!string.IsNullOrEmpty(question.Answer))
             {

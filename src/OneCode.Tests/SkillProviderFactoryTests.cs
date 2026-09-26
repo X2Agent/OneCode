@@ -48,17 +48,6 @@ public sealed class SkillProviderFactoryTests : IDisposable
             $"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n");
     }
 
-    [Fact]
-    public void Create_WithBundledSkillsOnly_ReturnsProvider()
-    {
-        var mcpManager = Substitute.For<IMcpConnectionManager>();
-        mcpManager.GetConnectedClients().Returns([]);
-
-        var sut = CreateSut(mcpManager);
-
-        sut.Create().Should().NotBeNull();
-    }
-
     /// <summary>
     /// Bundled skills are always present, so a provider built with no connected MCP servers and no
     /// files on disk still advertises skills. Pins that the factory wires bundled skills in.
@@ -73,6 +62,9 @@ public sealed class SkillProviderFactoryTests : IDisposable
         var context = await InvokeAsync(sut.Create());
 
         context.Instructions.Should().NotBeNullOrWhiteSpace();
+        // 无磁盘 skill、无 MCP 服务器时，Instructions 必须由 bundled skills 构成并包含其名称。
+        context.Instructions.Should().Contain("debug", "bundled skill 名称必须出现在 provider 指令中");
+        context.Instructions.Should().Contain("verify");
     }
 
     /// <summary>
@@ -131,7 +123,7 @@ public sealed class SkillProviderFactoryTests : IDisposable
     /// substitutes are not <see cref="McpClient"/>, so they exercise that guard.
     /// </summary>
     [Fact]
-    public void Create_SkipsConnectedClientsThatAreNotSdkBacked()
+    public async Task Create_SkipsConnectedClientsThatAreNotSdkBacked()
     {
         var mcpManager = Substitute.For<IMcpConnectionManager>();
         mcpManager.GetConnectedClients().Returns([("not-sdk-backed", Substitute.For<IMcpClient>())]);
@@ -140,6 +132,13 @@ public sealed class SkillProviderFactoryTests : IDisposable
         var act = () => sut.Create();
 
         act.Should().NotThrow();
+
+        // 不可用的客户端被跳过后，Create 的产物必须仍由 bundled skills 构成，
+        // 且不得把失败客户端的标识当作 skill 注入。
+        var context = await InvokeAsync(sut.Create());
+        context.Instructions.Should().NotBeNullOrWhiteSpace();
+        context.Instructions.Should().Contain("debug", "跳过无效客户端后 bundled skills 仍然生效");
+        context.Instructions.Should().NotContain("not-sdk-backed");
     }
 
     private static async Task<AIContext> InvokeAsync(AgentSkillsProvider provider)

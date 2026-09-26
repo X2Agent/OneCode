@@ -21,16 +21,11 @@ namespace OneCode.App.Services.GoalMode;
 /// 与 BuildModeAttachmentProvider 对齐：gated on PermissionMode 内部判断，
 /// 非 Goal 模式时 no-op。
 /// </summary>
-public sealed class GoalContextProvider : ReadOnlyAIContextProviderBase
+public sealed class GoalContextProvider(IPermissionModeProvider modeProvider, GoalContextState state)
+    : ReadOnlyAIContextProviderBase
 {
-    private readonly IPermissionModeProvider _modeProvider;
-    private readonly GoalContextState _state;
-
-    public GoalContextProvider(IPermissionModeProvider modeProvider, GoalContextState state)
-    {
-        _modeProvider = modeProvider;
-        _state = state;
-    }
+    private readonly IPermissionModeProvider _modeProvider = modeProvider;
+    private readonly GoalContextState _state = state;
 
     private bool IsInGoalMode => _modeProvider.CurrentMode == PermissionMode.GoalAuto;
 

@@ -126,7 +126,7 @@ internal sealed class ChatCompletionController
         }
 
         // 按 Source 分组，每组前插入分隔行（Claude Code 风格）。
-        var grouped = new List<SlashCommandEntry>();
+        List<SlashCommandEntry> grouped = [];
         foreach (var (source, label) in GroupOrder)
         {
             var group = matched.Where(c => c.Source == source).ToList();
@@ -166,7 +166,7 @@ internal sealed class ChatCompletionController
         // 构建 _filtered（含续行）和 displayItems。
         // 长描述按 descAvailable 做自动换行，续行缩进对齐到描述列，且不可被选中。
         _filtered = [];
-        var displayItems = new List<string>();
+        List<string> displayItems = [];
         var indent = new string(' ', nameWidth + 2);
 
         foreach (var entry in grouped)

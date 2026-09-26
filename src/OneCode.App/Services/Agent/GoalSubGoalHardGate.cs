@@ -22,7 +22,7 @@ internal sealed class GoalSubGoalHardGate(
         string agentOutput,
         CancellationToken ct)
     {
-        var validations = new List<GoalValidationEvidence>();
+        List<GoalValidationEvidence> validations = [];
         var fullWorkingDirectory = Path.GetFullPath(workingDirectory);
         var relativeChangedFiles = changedFiles
             .Select(path => Path.GetRelativePath(fullWorkingDirectory, Path.GetFullPath(path)))

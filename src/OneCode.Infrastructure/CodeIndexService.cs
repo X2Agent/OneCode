@@ -10,9 +10,9 @@ namespace OneCode.Infrastructure;
 ///
 /// Supports C#, TypeScript, JavaScript, Python, Go, and Java.
 /// </summary>
-public sealed partial class CodeIndexService : ICodeIndexService
+public sealed partial class CodeIndexService(ILogger<CodeIndexService>? logger = null) : ICodeIndexService
 {
-    private readonly ILogger<CodeIndexService>? _logger;
+    private readonly ILogger<CodeIndexService>? _logger = logger;
 
     // Inverted index: lowercase symbol name → list of symbols
     private readonly ConcurrentDictionary<string, List<CodeSymbol>> _index = new(StringComparer.OrdinalIgnoreCase);
@@ -28,11 +28,6 @@ public sealed partial class CodeIndexService : ICodeIndexService
     public bool IsIndexing => _isIndexing;
     public int SymbolCount => _index.Values.Sum(v => v.Count);
     public DateTimeOffset? LastIndexedAt { get; private set; }
-
-    public CodeIndexService(ILogger<CodeIndexService>? logger = null)
-    {
-        _logger = logger;
-    }
 
     public Task BuildIndexAsync(string rootDirectory, CancellationToken ct = default)
     {

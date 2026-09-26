@@ -129,7 +129,7 @@ public sealed class DeleteTool
     private static int CountFiles(string directory)
     {
         var count = 0;
-        var pending = new Stack<string>();
+        Stack<string> pending = new();
         pending.Push(directory);
         while (pending.Count > 0)
         {

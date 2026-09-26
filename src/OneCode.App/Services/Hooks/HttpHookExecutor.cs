@@ -13,21 +13,15 @@ namespace OneCode.App.Services.Hooks;
 /// 与 Notification 的区别：HTTP 面向通用 HTTP 调用（自定义 URL/Method/Headers/Body），
 /// Notification 面向消息推送业务场景（飞书/企微等固定渠道格式）。
 /// </summary>
-public sealed class HttpHookExecutor : IHookExecutor
+public sealed class HttpHookExecutor(
+    IHttpClientFactory httpClientFactory,
+    ILogger<HttpHookExecutor> logger) : IHookExecutor
 {
     private const string HttpClientName = Constants.HttpClientNames.HookHttp;
     private const string DefaultMethod = "POST";
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<HttpHookExecutor> _logger;
-
-    public HttpHookExecutor(
-        IHttpClientFactory httpClientFactory,
-        ILogger<HttpHookExecutor> logger)
-    {
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly ILogger<HttpHookExecutor> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public HookType Type => HookType.Http;
 

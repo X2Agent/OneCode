@@ -13,20 +13,14 @@ namespace OneCode.App.Tools;
 /// 自动将目标工具激活到当前会话的 <see cref="SessionToolSet"/> 中。
 /// 激活通过 <see cref="ISessionToolSetManager.TryActivate"/> → <see cref="ToolActivationContext"/> 完成。
 /// </remarks>
-public sealed class ToolSearchTool
+public sealed class ToolSearchTool(ToolMetadataRegistry metadata, ISessionToolSetManager activationManager)
 {
     private const int DefaultMaxResults = 5;
     private const int MaxResultsCap = 20;
     private const string SelectPrefix = "select:";
 
-    private readonly ToolMetadataRegistry _metadata;
-    private readonly ISessionToolSetManager _activationManager;
-
-    public ToolSearchTool(ToolMetadataRegistry metadata, ISessionToolSetManager activationManager)
-    {
-        _metadata = metadata;
-        _activationManager = activationManager;
-    }
+    private readonly ToolMetadataRegistry _metadata = metadata;
+    private readonly ISessionToolSetManager _activationManager = activationManager;
 
     [Description("Search for available tools by keyword or select a specific tool with 'select:<name>'.")]
     public ToolResult Search(

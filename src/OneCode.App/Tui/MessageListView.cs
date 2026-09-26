@@ -223,7 +223,7 @@ public sealed partial class MessageListView : View
             _lines.RemoveRange(tailStart, _lines.Count - tailStart);
         }
 
-        var toolSnapshots = new List<(string Name, string? Args, bool IsExpanded)>();
+        List<(string Name, string? Args, bool IsExpanded)> toolSnapshots = [];
         bool? thinkingExpanded = null;
         for (var i = start; i < _lines.Count; i++)
         {
@@ -292,8 +292,8 @@ public sealed partial class MessageListView : View
         var tailLines = _tailRegionStart is >= 0 and var tailStart
             ? _lines.GetRange(tailStart, _lines.Count - tailStart)
             : null;
-        var toolStates = new List<(string Name, string? Args, bool IsExpanded)>();
-        var thinkingStates = new List<(string Content, bool IsExpanded)>();
+        List<(string Name, string? Args, bool IsExpanded)> toolStates = [];
+        List<(string Content, bool IsExpanded)> thinkingStates = [];
         foreach (var entry in _lines)
         {
             switch (entry.Tag)

@@ -116,9 +116,7 @@ public static class BudgetGuardRunMiddleware
     /// 构造预算超支提示消息。
     /// </summary>
     internal static string FormatBudgetExceededMessage(long currentTokens, long budgetLimit)
-        => $"[Budget Exceeded] Cumulative token usage {currentTokens:N0} (input + output) has reached the budget limit {budgetLimit:N0}. "
-           + "Agent run was not executed to prevent runaway usage. "
-           + "Increase --max-budget-tokens or reset the session to continue.";
+        => $"[Budget Exceeded] Cumulative token usage {currentTokens:N0} (input + output) has reached the budget limit {budgetLimit:N0}. Agent run was not executed to prevent runaway usage. Increase --max-budget-tokens or reset the session to continue.";
 
     /// <summary>
     /// 创建预算超支的短路 <see cref="AgentResponse"/>。

@@ -13,22 +13,11 @@ namespace OneCode.Core.Permissions.Yolo;
 ///   - 维持 YoloRuleStore 的调用封装（PermissionChecker 不直接依赖 YoloRuleStore）
 ///   - 通过 ToolMetadataRegistry 统一安全工具判定（不再维护独立的硬编码白名单）
 /// </summary>
-public sealed class YoloClassifier : IYoloClassifier
+public sealed class YoloClassifier(
+    YoloRuleStore ruleStore,
+    Tools.ToolMetadataRegistry toolMetadata,
+    ILogger<YoloClassifier>? logger = null) : IYoloClassifier
 {
-    private readonly YoloRuleStore _ruleStore;
-    private readonly ILogger<YoloClassifier>? _logger;
-    private readonly Tools.ToolMetadataRegistry _toolMetadata;
-
-    public YoloClassifier(
-        YoloRuleStore ruleStore,
-        Tools.ToolMetadataRegistry toolMetadata,
-        ILogger<YoloClassifier>? logger = null)
-    {
-        _ruleStore = ruleStore;
-        _logger = logger;
-        _toolMetadata = toolMetadata;
-    }
-
     /// <summary>
     /// 对工具调用进行安全分类。
     /// 纯规则路径：allowlist → YoloRuleStore 规则匹配 → 未匹配返回 None。
@@ -44,10 +33,10 @@ public sealed class YoloClassifier : IYoloClassifier
 
         var inputString = ExtractInputString(toolName, toolInput);
 
-        var ruleMatch = _ruleStore.MatchRule(inputString ?? toolName);
-        if (ruleMatch != null)
+        var ruleMatch = ruleStore.MatchRule(inputString ?? toolName);
+        if (ruleMatch is not null)
         {
-            _logger?.LogDebug("YOLO rule matched: {Type} {Pattern}", ruleMatch.Type, ruleMatch.Pattern);
+            logger?.LogDebug("YOLO rule matched: {Type} {Pattern}", ruleMatch.Type, ruleMatch.Pattern);
 
             return Task.FromResult(ruleMatch.Type.ToLowerInvariant() switch
             {
@@ -64,7 +53,7 @@ public sealed class YoloClassifier : IYoloClassifier
     }
 
     public bool IsAllowlistedTool(string toolName) =>
-        _toolMetadata.GetPolicy(toolName).ApprovalMode == Tools.ToolApprovalMode.Never;
+        toolMetadata.GetPolicy(toolName).ApprovalMode == Tools.ToolApprovalMode.Never;
 
     private static string? ExtractInputString(string toolName, JsonElement input)
     {

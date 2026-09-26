@@ -21,18 +21,13 @@ namespace OneCode.Core.Memory;
 /// flowing unchanged so callers can distinguish a user cancel from a broken store.
 /// </para>
 /// </remarks>
-public sealed class MemoryStoreReadException : Exception
+public sealed class MemoryStoreReadException(MemoryScope scope, string message, Exception innerException)
+    : Exception(message, innerException)
 {
     /// <summary>The scope whose backing store could not be read.</summary>
-    public MemoryScope Scope { get; }
+    public MemoryScope Scope { get; } = scope;
 
     /// <summary>The path that could not be read, when the backend has one.</summary>
     /// <remarks>Carried for logging only. Callers must not surface it to the model as a result.</remarks>
     public string? FilePath { get; init; }
-
-    public MemoryStoreReadException(MemoryScope scope, string message, Exception innerException)
-        : base(message, innerException)
-    {
-        Scope = scope;
-    }
 }

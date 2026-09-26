@@ -285,7 +285,7 @@ public sealed class SessionContextBar : View
     /// </summary>
     private List<(string Text, Color Color)> BuildRightSegments(int viewportWidth)
     {
-        var segs = new List<(string Text, Color Color)>();
+        List<(string Text, Color Color)> segs = [];
 
         // 轮次 (if > 0, hidden on very narrow terminals)
         if (_turnNumber > 0 && viewportWidth >= 60)

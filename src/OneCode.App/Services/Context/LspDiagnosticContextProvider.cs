@@ -25,11 +25,14 @@ namespace OneCode.App.Services.Context;
 /// actionable value for the agent.
 /// </para>
 /// </summary>
-public sealed class LspDiagnosticContextProvider : ReadOnlyAIContextProviderBase
+public sealed class LspDiagnosticContextProvider(
+    LspDiagnosticRegistry diagnosticRegistry,
+    ILogger<LspDiagnosticContextProvider> logger,
+    string workingDirectory) : ReadOnlyAIContextProviderBase
 {
-    private readonly LspDiagnosticRegistry _diagnosticRegistry;
-    private readonly ILogger<LspDiagnosticContextProvider> _logger;
-    private readonly string _workingDirectory;
+    private readonly LspDiagnosticRegistry _diagnosticRegistry = diagnosticRegistry ?? throw new ArgumentNullException(nameof(diagnosticRegistry));
+    private readonly ILogger<LspDiagnosticContextProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string _workingDirectory = workingDirectory ?? throw new ArgumentNullException(nameof(workingDirectory));
 
     private const int MaxTotalDiagnostics = 30;
     private const int MaxPerFile = 10;
@@ -39,16 +42,6 @@ public sealed class LspDiagnosticContextProvider : ReadOnlyAIContextProviderBase
     // agent is discussing non-code topics and the diagnostic set is stable.
     private int _lastSignature;
     private string? _lastInjectedMessage;
-
-    public LspDiagnosticContextProvider(
-        LspDiagnosticRegistry diagnosticRegistry,
-        ILogger<LspDiagnosticContextProvider> logger,
-        string workingDirectory)
-    {
-        _diagnosticRegistry = diagnosticRegistry ?? throw new ArgumentNullException(nameof(diagnosticRegistry));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _workingDirectory = workingDirectory ?? throw new ArgumentNullException(nameof(workingDirectory));
-    }
 
     protected override ValueTask<AIContext> ProvideAIContextAsync(
         AIContextProvider.InvokingContext context,

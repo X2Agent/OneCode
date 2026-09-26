@@ -74,8 +74,9 @@ public sealed class PowerShellCommandClassifierTests
     [Fact]
     public void GetDestructiveCommandWarning_EncodedCommandPlaceholder_ReturnsWarning()
     {
+        // "<base64>" 尾部的 '>' 被 tokenizer 判为写重定向 → 命中重定向警告分支。
         PowerShellCommandClassifier.GetDestructiveCommandWarning("-EncodedCommand <base64>")
-            .Should().NotBeNull();
+            .Should().Be("Note: may overwrite files via PowerShell redirection");
     }
 
     [Theory]

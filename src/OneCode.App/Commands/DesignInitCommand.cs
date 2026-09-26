@@ -193,7 +193,7 @@ public sealed class DesignInitCommand(
     private string ScanFrontendFiles(string cwd)
     {
         var sb = new StringBuilder();
-        var found = new List<string>();
+        List<string> found = [];
 
         try
         {
@@ -261,7 +261,7 @@ public sealed class DesignInitCommand(
 
     private static string DetectFrameworks(string cwd)
     {
-        var detected = new List<string>();
+        List<string> detected = [];
 
         foreach (var (marker, name) in FrameworkMarkers)
         {

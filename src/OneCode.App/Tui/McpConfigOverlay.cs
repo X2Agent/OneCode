@@ -385,7 +385,7 @@ public sealed class McpConfigOverlay : FormOverlay<McpConfigResult?>
     /// <summary>保存并完成 overlay（internal 供 headless 测试驱动保存路径）。</summary>
     internal void TrySave()
     {
-        var changes = new List<McpConfigServerChange>();
+        List<McpConfigServerChange> changes = [];
         foreach (var entry in _entries)
         {
             var state = _edits[entry.Name];

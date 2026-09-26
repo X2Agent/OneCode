@@ -9,17 +9,12 @@ namespace OneCode.App.Services.Hooks;
 /// - 仅负责注册、查询、移除；执行调度由 HookExecutionService 负责
 /// - <see cref="Generation"/> 记录配置代次：整体替换时递增，供可观测性与审计引用
 /// </summary>
-public sealed class HookRegistry
+public sealed class HookRegistry(GlobHookMatcher matcher)
 {
-    private readonly GlobHookMatcher _matcher;
+    private readonly GlobHookMatcher _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
     private readonly Dictionary<HookInterceptionPoint, List<MatcherGroup>> _matcherIndex = new();
     private readonly object _lock = new();
     private long _generation;
-
-    public HookRegistry(GlobHookMatcher matcher)
-    {
-        _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
-    }
 
     /// <summary>当前配置代次；每次整体替换 +1，单调递增。</summary>
     public long Generation

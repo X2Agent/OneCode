@@ -32,27 +32,18 @@ using OneCode.Core.Models;
 
 namespace OneCode.App;
 
-public sealed class OneCodeApp : IAsyncDisposable
+public sealed class OneCodeApp(
+    IHost host,
+    InteractiveModeExecutor executor,
+    IConfigManager configManager,
+    ILogger<OneCodeApp> logger,
+    AppStartupService startup) : IAsyncDisposable
 {
-    private readonly IHost _host;
-    private readonly InteractiveModeExecutor _executor;
-    private readonly IConfigManager _configManager;
-    private readonly ILogger<OneCodeApp> _logger;
-    private readonly AppStartupService _startup;
-
-    private OneCodeApp(
-        IHost host,
-        InteractiveModeExecutor executor,
-        IConfigManager configManager,
-        ILogger<OneCodeApp> logger,
-        AppStartupService startup)
-    {
-        _host = host;
-        _executor = executor;
-        _configManager = configManager;
-        _logger = logger;
-        _startup = startup;
-    }
+    private readonly IHost _host = host;
+    private readonly InteractiveModeExecutor _executor = executor;
+    private readonly IConfigManager _configManager = configManager;
+    private readonly ILogger<OneCodeApp> _logger = logger;
+    private readonly AppStartupService _startup = startup;
 
     public static OneCodeApp Create(string[] args)
     {

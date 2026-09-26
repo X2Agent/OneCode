@@ -16,7 +16,7 @@ public static partial class ChatBlockRenderers
 
     public static IReadOnlyList<FormattedLine> RenderTeamSidebar(TeamSidebarContent content, int width)
     {
-        var lines = new List<FormattedLine> { FormattedLine.Plain("", TuiPalette.BgPrimary) };
+        List<FormattedLine> lines = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
         void Add(FormattedLine line)
         {
             if (lines.Count < TeamSidebarMaxRows) lines.Add(line);

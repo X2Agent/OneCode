@@ -20,19 +20,13 @@ namespace OneCode.App.Query;
 /// </list>
 /// 线程安全：所有公共方法通过 <see cref="Lock"/> 同步。
 /// </remarks>
-public sealed class SessionToolSet
+public sealed class SessionToolSet(IToolCatalog catalog, ToolMetadataRegistry metadata)
 {
-    private readonly IToolCatalog _catalog;
-    private readonly ToolMetadataRegistry _metadata;
+    private readonly IToolCatalog _catalog = catalog;
+    private readonly ToolMetadataRegistry _metadata = metadata;
     private readonly List<string> _activatedOrder = [];      // 激活顺序（追加不重排）
     private readonly HashSet<string> _activatedSet = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _lock = new();
-
-    public SessionToolSet(IToolCatalog catalog, ToolMetadataRegistry metadata)
-    {
-        _catalog = catalog;
-        _metadata = metadata;
-    }
 
     /// <summary>当前已激活的工具名称集合（只读快照）。</summary>
     public IReadOnlySet<string> ActivatedNames
@@ -72,7 +66,7 @@ public sealed class SessionToolSet
                 }
             }
 
-            var result = new List<AIFunction>();
+            List<AIFunction> result = [];
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Always 工具（catalog 注册顺序）

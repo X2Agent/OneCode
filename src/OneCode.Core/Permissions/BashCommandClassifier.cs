@@ -151,7 +151,7 @@ public static partial class BashCommandClassifier
         if (string.IsNullOrWhiteSpace(command))
             return false;
 
-        if (GetDestructiveCommandWarning(command) != null)
+        if (GetDestructiveCommandWarning(command) is not null)
             return true;
 
         foreach (var statement in Tokenizer.SplitStatements(command))

@@ -7,17 +7,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OneCode.Infrastructure;
 
-public sealed class ProcessRunner : IProcessRunner
+public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null) : IProcessRunner
 {
     private readonly ConcurrentDictionary<string, bool> _commandExistsCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ILogger<ProcessRunner> _logger;
-
-    public ProcessRunner(ILogger<ProcessRunner> logger)
-    {
-        _logger = logger;
-    }
-
-    public ProcessRunner() : this(NullLoggerFactory.Instance.CreateLogger<ProcessRunner>()) { }
+    private readonly ILogger<ProcessRunner> _logger = logger ?? NullLogger<ProcessRunner>.Instance;
 
     public async Task<ProcessResult?> ExecuteAsync(
         string command,
@@ -107,7 +100,7 @@ public sealed class ProcessRunner : IProcessRunner
                 .WithWorkingDirectory(ResolveWorkingDirectory(workingDirectory))
                 .WithValidation(CommandResultValidation.None);
 
-            if (environmentVariables != null)
+            if (environmentVariables is not null)
                 cli = cli.WithEnvironmentVariables(env =>
                 {
                     foreach (var kvp in environmentVariables)

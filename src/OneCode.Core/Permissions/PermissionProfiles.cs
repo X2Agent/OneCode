@@ -145,7 +145,7 @@ public static class PermissionProfiles
 
         var result = PermissionCheckHelpers.AutoAllowFileWriteAndShell(
             toolName, toolInput, context, destructiveShellResult);
-        if (result != null)
+        if (result is not null)
             return result;
 
         if (config.ExtraAllowedTools?.Contains(toolName) == true)
@@ -168,7 +168,7 @@ public static class PermissionProfiles
         ToolPermissionContext context)
     {
         var readOnlyResult = PermissionCheckHelpers.CheckReadOnlyWithPath(toolName, toolInput, context);
-        if (readOnlyResult != null)
+        if (readOnlyResult is not null)
             return readOnlyResult;
 
         if (config.ExtraAllowedTools?.Contains(toolName) == true)

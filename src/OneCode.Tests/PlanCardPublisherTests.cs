@@ -33,11 +33,19 @@ public sealed class PlanCardPublisherTests
     {
         // Headless/Cron 场景无 TUI 订阅者——总线 Publish 必须为 no-op，
         // CreatePlanTool 在无 TUI 的运行中调用 Publish 不能崩溃。
-        var sut = new PlanCardPublisher(new OrchestrationEventBus());
+        var bus = new OrchestrationEventBus();
+        var sut = new PlanCardPublisher(bus);
 
         var act = () => sut.Publish(PlanWorkflow.Create(SessionId.NewId()));
 
         act.Should().NotThrow();
+
+        // 无订阅者发布后总线不得进入损坏状态：后续订阅者仍能正常收到事件。
+        PlanWorkflow? lateSubscriber = null;
+        bus.Subscribe(evt => lateSubscriber = ((OrchestrationEvent.PlanProjectionChanged)evt).Workflow);
+        var workflow = PlanWorkflow.Create(SessionId.NewId());
+        sut.Publish(workflow);
+        lateSubscriber.Should().BeSameAs(workflow, "无订阅者发布是 no-op，不得影响后续订阅生效");
     }
 
     [Fact]

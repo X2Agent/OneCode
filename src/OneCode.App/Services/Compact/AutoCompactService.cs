@@ -25,7 +25,10 @@ namespace OneCode.App.Services.Compact;
 ///   ≥ 0.7/0.6 — MAF in-pipeline L2 LLM 摘要；≥ 0.85/0.8 — L3 截断兜底，用户无感知
 /// </para>
 /// </summary>
-public sealed class AutoCompactService
+public sealed class AutoCompactService(
+    CompactService compactService,
+    ISessionConversationAccess sessionManager,
+    ILogger<AutoCompactService> logger)
 {
     private const double WarningThreshold = 0.70;
     private const int MaxTrackedSessions = 100;
@@ -33,21 +36,11 @@ public sealed class AutoCompactService
     private static bool IsRunningAsWorkerAgent() =>
         Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.IsWorker) is "1" or "true";
 
-    private readonly CompactService _compactService;
-    private readonly ISessionConversationAccess _sessionManager;
-    private readonly ILogger<AutoCompactService> _logger;
+    private readonly CompactService _compactService = compactService;
+    private readonly ISessionConversationAccess _sessionManager = sessionManager;
+    private readonly ILogger<AutoCompactService> _logger = logger;
     private readonly Dictionary<string, CompactWarningState> _warningStates = new();
     private readonly object _warningLock = new();
-
-    public AutoCompactService(
-        CompactService compactService,
-        ISessionConversationAccess sessionManager,
-        ILogger<AutoCompactService> logger)
-    {
-        _compactService = compactService;
-        _sessionManager = sessionManager;
-        _logger = logger;
-    }
 
     /// <summary>
     /// 检查 transcript 规模并在 70% 阈值时设置告警标志。

@@ -149,7 +149,7 @@ internal sealed class TuiTestContextBuilder
             GetKeybindingWarnings: () => _keybindingWarnings),
         Options: new TuiLaunchOptions(
             Version: "test",
-            ExternalCancellation: CancellationToken.None,
+            ExternalCancellation: TestContext.Current.CancellationToken,
             SlashCommands: _slashCommands));
 
     /// <summary>默认键位解析器，与生产启动时同源（<c>OneCodeToplevel</c> 的兜底分支）。</summary>

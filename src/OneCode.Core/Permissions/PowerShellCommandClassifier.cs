@@ -211,7 +211,7 @@ public static partial class PowerShellCommandClassifier
         if (string.IsNullOrWhiteSpace(command))
             return false;
 
-        if (GetDestructiveCommandWarning(command) != null)
+        if (GetDestructiveCommandWarning(command) is not null)
             return true;
 
         foreach (var statement in Tokenizer.SplitStatements(command))

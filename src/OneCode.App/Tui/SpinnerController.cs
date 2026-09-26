@@ -9,7 +9,10 @@ namespace OneCode.App.Tui;
 ///
 /// 线程安全：仅在 Terminal.Gui 主循环上调用。
 /// </summary>
-internal sealed class SpinnerController
+/// <param name="app">Terminal.Gui 应用实例，用于 timeout 调度。</param>
+/// <param name="onFrameAdvanced">每次帧推进后调用的回调。
+/// 通常是所属 View 的 <c>() => SetNeedsDraw()</c>。</param>
+internal sealed class SpinnerController(IApplication app, Action onFrameAdvanced)
 {
     /// <summary>
     /// Braille 盲文 spinner 帧序列（10 帧，循环播放）。
@@ -25,19 +28,10 @@ internal sealed class SpinnerController
     /// </summary>
     private const int CadenceMs = 150;
 
-    private readonly IApplication _app;
-    private readonly Action _onFrameAdvanced;
+    private readonly IApplication _app = app;
+    private readonly Action _onFrameAdvanced = onFrameAdvanced;
     private int _frameIndex;
     private object? _timeoutToken;
-
-    /// <param name="app">Terminal.Gui 应用实例，用于 timeout 调度。</param>
-    /// <param name="onFrameAdvanced">每次帧推进后调用的回调。
-    /// 通常是所属 View 的 <c>() => SetNeedsDraw()</c>。</param>
-    public SpinnerController(IApplication app, Action onFrameAdvanced)
-    {
-        _app = app;
-        _onFrameAdvanced = onFrameAdvanced;
-    }
 
     /// <summary>动画 timeout 是否处于活跃状态。</summary>
     public bool IsRunning => _timeoutToken is not null;

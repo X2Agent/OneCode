@@ -9,29 +9,21 @@ using System.Threading.Channels;
 
 namespace OneCode.Infrastructure.Ai;
 
-public sealed class RetryOnOverloadChatClient : IChatClient
+public sealed class RetryOnOverloadChatClient(
+    IChatClient inner,
+    ILogger<RetryOnOverloadChatClient>? logger = null,
+    int maxRetries = 6) : IChatClient
 {
-    private readonly IChatClient _inner;
-    private readonly ResiliencePipeline _pipeline;
-    private readonly ILogger<RetryOnOverloadChatClient>? _logger;
-    private readonly int _maxRetries;
-
     private static readonly TimeSpan DefaultRetryDelay = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(120);
     private const double CircuitBreakerFailureRatio = 0.8;
     private const int CircuitBreakerMinimumThroughput = 3;
     private static readonly TimeSpan CircuitBreakerDuration = TimeSpan.FromSeconds(60);
 
-    public RetryOnOverloadChatClient(
-        IChatClient inner,
-        ILogger<RetryOnOverloadChatClient>? logger = null,
-        int maxRetries = 6)
-    {
-        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        _logger = logger;
-        _maxRetries = maxRetries;
-
-        _pipeline = new ResiliencePipelineBuilder()
+    private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    private readonly ILogger<RetryOnOverloadChatClient>? _logger = logger;
+    private readonly int _maxRetries = maxRetries;
+    private readonly ResiliencePipeline _pipeline = new ResiliencePipelineBuilder()
             .AddCircuitBreaker(new CircuitBreakerStrategyOptions
             {
                 FailureRatio = CircuitBreakerFailureRatio,
@@ -40,14 +32,14 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                 ShouldHandle = static args => ValueTask.FromResult(IsRateLimitError(args.Outcome.Exception)),
                 OnOpened = args =>
                 {
-                    _logger?.LogWarning(
+                    logger?.LogWarning(
                         "Rate-limit circuit breaker OPENED for {Duration:g}. Cause: {Error}",
                         args.BreakDuration, args.Outcome.Exception?.Message);
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = _ =>
                 {
-                    _logger?.LogInformation("Rate-limit circuit breaker CLOSED, resuming requests");
+                    logger?.LogInformation("Rate-limit circuit breaker CLOSED, resuming requests");
                     return ValueTask.CompletedTask;
                 },
             })
@@ -61,7 +53,7 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                 ShouldHandle = static args => ValueTask.FromResult(IsTransientUpstreamError(args.Outcome.Exception)),
                 OnRetry = args =>
                 {
-                    _logger?.LogWarning(
+                    logger?.LogWarning(
                         "LLM rate limit / overload — attempt {Attempt}/{Max}, retrying in {Delay:g}. Error: {Error}",
                         args.AttemptNumber + 1, maxRetries,
                         args.RetryDelay,
@@ -76,7 +68,7 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                         4.0 * Math.Pow(2, attempt),
                         120.0);
 
-                    if (GetServerRetryAfter(args.Outcome.Exception) is { } retryAfter)
+                    if (GetServerRetryAfter(args.Outcome.Exception, logger) is { } retryAfter)
                     {
                         // 取 Retry-After 与指数退避的最大值，确保不因服务端过小的建议值跳过退避
                         var delay = TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
@@ -86,7 +78,6 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                 },
             })
             .Build();
-    }
 
     public void Dispose() => _inner.Dispose();
 
@@ -228,31 +219,9 @@ public sealed class RetryOnOverloadChatClient : IChatClient
         || (ex is UpstreamProviderErrorException { IsTransient: true })
         || IsRateLimitError(ex);
 
-    private TimeSpan? GetRetryAfterDelay(ClientResultException ex)
-    {
-        try
-        {
-            var response = ex.GetRawResponse();
-            if (response is null) return null;
-            foreach (var header in response.Headers)
-            {
-                if (header.Key.Equals("Retry-After", StringComparison.OrdinalIgnoreCase)
-                    && int.TryParse(header.Value, out var seconds))
-                {
-                    return TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 120));
-                }
-            }
-        }
-        catch (Exception ex2)
-        {
-            _logger?.LogDebug(ex2, "Failed to parse Retry-After header from rate-limit response");
-        }
-        return null;
-    }
-
     /// <summary>取服务端 Retry-After：掩码错误体异常由 Handler 从响应头读出挂载，
     /// ClientResultException 走原始响应头。</summary>
-    private TimeSpan? GetServerRetryAfter(Exception? ex)
+    private static TimeSpan? GetServerRetryAfter(Exception? ex, ILogger<RetryOnOverloadChatClient>? logger)
     {
         switch (ex)
         {
@@ -275,7 +244,7 @@ public sealed class RetryOnOverloadChatClient : IChatClient
                 }
                 catch (Exception ex2)
                 {
-                    _logger?.LogDebug(ex2, "Failed to parse Retry-After header from rate-limit response");
+                    logger?.LogDebug(ex2, "Failed to parse Retry-After header from rate-limit response");
                 }
                 return null;
 
@@ -290,7 +259,7 @@ public sealed class RetryOnOverloadChatClient : IChatClient
             4.0 * Math.Pow(2, attempt),
             120.0);
 
-        if (GetServerRetryAfter(ex) is { } retryAfter)
+        if (GetServerRetryAfter(ex, _logger) is { } retryAfter)
         {
             return TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
         }

@@ -48,12 +48,12 @@ public class GenericVerificationProviderTests
     {
         var provider = new GenericVerificationProvider(_processRunner, _logger);
         // .py 文件不在任何 profile 中
-        var result = await provider.VerifyAsync("/tmp", ["foo.py"], CancellationToken.None);
+        var result = await provider.VerifyAsync("/tmp", ["foo.py"], TestContext.Current.CancellationToken);
         result.Success.Should().BeTrue();
         result.Errors.Should().BeEmpty();
         // 不应该调用任何进程
         await _processRunner.DidNotReceive().ExecuteWithTimeoutAsync(
-            Arg.Any<string>(), Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>());
+            Arg.Any<string>(), Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class GenericVerificationProviderTests
     {
         var provider = new GenericVerificationProvider(_processRunner, _logger);
         // .cs 文件但没有 .csproj 标记
-        var result = await provider.VerifyAsync("/tmp", ["foo.cs"], CancellationToken.None);
+        var result = await provider.VerifyAsync("/tmp", ["foo.cs"], TestContext.Current.CancellationToken);
         result.Success.Should().BeTrue();
     }
 
@@ -75,7 +75,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyAsync(tempDir, ["foo.cs"], CancellationToken.None);
+            var result = await provider.VerifyAsync(tempDir, ["foo.cs"], TestContext.Current.CancellationToken);
             result.Success.Should().BeTrue();
         }
         finally
@@ -91,7 +91,7 @@ public class GenericVerificationProviderTests
         _processRunner.CommandExistsAsync("dotnet").Returns(true);
         var errorOutput = "Program.cs(10,5): error CS0103: The name 'foo' does not exist in the current context";
         _processRunner.ExecuteWithTimeoutAsync(
-            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(1, "", errorOutput, false));
 
         var provider = new GenericVerificationProvider(_processRunner, _logger);
@@ -100,7 +100,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], CancellationToken.None);
+            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], TestContext.Current.CancellationToken);
             result.Success.Should().BeFalse();
             result.Errors.Should().HaveCount(1);
             result.Errors[0].File.Should().Be("Program.cs");
@@ -123,7 +123,7 @@ public class GenericVerificationProviderTests
         _processRunner.CommandExistsAsync("cargo").Returns(true);
         var errorOutput = "error[E0425]: cannot find value `foo` in this scope --> src/main.rs:2:5";
         _processRunner.ExecuteWithTimeoutAsync(
-            "cargo", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+            "cargo", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(1, "", errorOutput, false));
 
         var provider = new GenericVerificationProvider(_processRunner, _logger);
@@ -132,7 +132,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "Cargo.toml"), "[package]");
         try
         {
-            var result = await provider.VerifyAsync(tempDir, ["src/main.rs"], CancellationToken.None);
+            var result = await provider.VerifyAsync(tempDir, ["src/main.rs"], TestContext.Current.CancellationToken);
             result.Success.Should().BeFalse();
             result.Errors.Should().HaveCount(1);
             result.Errors[0].File.Should().Be("src/main.rs");
@@ -153,7 +153,7 @@ public class GenericVerificationProviderTests
     {
         _processRunner.CommandExistsAsync("dotnet").Returns(true);
         _processRunner.ExecuteWithTimeoutAsync(
-            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, "", "", false));
 
         var provider = new GenericVerificationProvider(_processRunner, _logger);
@@ -162,7 +162,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], CancellationToken.None);
+            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], TestContext.Current.CancellationToken);
             result.Success.Should().BeTrue();
             result.Errors.Should().BeEmpty();
         }
@@ -178,7 +178,7 @@ public class GenericVerificationProviderTests
     {
         _processRunner.CommandExistsAsync("dotnet").Returns(true);
         _processRunner.ExecuteWithTimeoutAsync(
-                "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+                "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, "", "", false));
 
         var provider = new GenericVerificationProvider(_processRunner, _logger);
@@ -187,7 +187,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyBuildAndTestsAsync(tempDir, ["Program.cs"], CancellationToken.None);
+            var result = await provider.VerifyBuildAndTestsAsync(tempDir, ["Program.cs"], TestContext.Current.CancellationToken);
 
             result.Success.Should().BeTrue();
             await _processRunner.Received(1).ExecuteWithTimeoutAsync(
@@ -206,7 +206,7 @@ public class GenericVerificationProviderTests
     {
         _processRunner.CommandExistsAsync("dotnet").Returns(true);
         _processRunner.ExecuteWithTimeoutAsync(
-                "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+                "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(call =>
             {
                 var args = call.ArgAt<string[]>(1);
@@ -221,7 +221,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyBuildAndTestsAsync(tempDir, ["Program.cs"], CancellationToken.None);
+            var result = await provider.VerifyBuildAndTestsAsync(tempDir, ["Program.cs"], TestContext.Current.CancellationToken);
 
             result.Success.Should().BeFalse();
             result.Errors.Should().ContainSingle(error => error.File == "(test)");
@@ -238,7 +238,7 @@ public class GenericVerificationProviderTests
     {
         _processRunner.CommandExistsAsync("dotnet").Returns(true);
         _processRunner.ExecuteWithTimeoutAsync(
-            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>())
+            "dotnet", Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(-1, "", "", TimedOut: true));
 
         var provider = new GenericVerificationProvider(_processRunner, _logger);
@@ -247,7 +247,7 @@ public class GenericVerificationProviderTests
         File.WriteAllText(Path.Combine(tempDir, "test.csproj"), "<Project />");
         try
         {
-            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], CancellationToken.None);
+            var result = await provider.VerifyAsync(tempDir, ["Program.cs"], TestContext.Current.CancellationToken);
             result.Success.Should().BeFalse();
             result.Errors.Should().HaveCount(1);
             result.Errors[0].Message.Should().Contain("timed out");

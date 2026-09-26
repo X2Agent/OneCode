@@ -18,7 +18,7 @@ public sealed partial class MessageListView
     /// </summary>
     public List<int> FindMatches(string query, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
     {
-        var results = new List<int>();
+        List<int> results = [];
         if (string.IsNullOrWhiteSpace(query)) return results;
         for (var i = 0; i < _lines.Count; i++)
         {
@@ -36,7 +36,7 @@ public sealed partial class MessageListView
         string pattern, out Regex? compiled, RegexOptions options = RegexOptions.IgnoreCase)
     {
         compiled = null;
-        var results = new List<int>();
+        List<int> results = [];
         if (string.IsNullOrWhiteSpace(pattern)) return results;
         compiled = new Regex(pattern, options, TimeSpan.FromSeconds(1));
         for (var i = 0; i < _lines.Count; i++)

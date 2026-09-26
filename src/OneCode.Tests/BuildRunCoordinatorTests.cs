@@ -363,6 +363,8 @@ public sealed class BuildRunCoordinatorTests : IDisposable
         resumed.State.Should().Be(BuildRunState.Implementing);
         resumed.Scope.Should().NotBeNull();
         resumed.Plan.Should().NotBeNull();
+        resumed.Plan!.Tasks.Should().ContainSingle(task => task.Id == "implementation",
+            "无 prescribed plan 时派生的 quick-fix 计划只含单个 implementation 任务");
     }
 
     [Fact]

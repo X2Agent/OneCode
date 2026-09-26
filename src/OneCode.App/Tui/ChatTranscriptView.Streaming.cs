@@ -159,7 +159,7 @@ public sealed partial class ChatTranscriptView
         _renderer.CurrentWidth = width;
         try
         {
-            var pending = new List<FormattedLine>();
+            List<FormattedLine> pending = [];
 
             for (var i = 0; i < _stream.StatusLines.Count; i++)
             {
@@ -312,7 +312,7 @@ public sealed partial class ChatTranscriptView
     private IReadOnlyList<FormattedLine> BuildCommittedStreamLines(
         IReadOnlyList<FormattedLine> statusLines, string text, int width)
     {
-        var lines = new List<FormattedLine>();
+        List<FormattedLine> lines = [];
 
         // Preserve tool-call / thinking / notice lines with uniform spacing.
         foreach (var line in statusLines)

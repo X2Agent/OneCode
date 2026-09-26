@@ -18,7 +18,10 @@ namespace OneCode.App.Tools;
 /// <para>playwright MCP 暴露单一共享浏览器会话：navigate+snapshot 必须串行，
 /// 否则并发调用会互相覆盖页面状态（<see cref="_sessionGate"/>）。</para>
 /// </summary>
-public sealed class BrowserFetchTool
+public sealed class BrowserFetchTool(
+    IMcpConnectionManager connectionManager,
+    ILogger<BrowserFetchTool> logger,
+    SemaphoreSlim sessionGate)
 {
     /// <summary>内置 playwright 服务名（<see cref="BuiltInMcpServers"/> 预置）。</summary>
     public const string ServerName = "playwright";
@@ -29,26 +32,15 @@ public sealed class BrowserFetchTool
     private const int DefaultTimeoutMs = 30_000;
     private const int MaxSnapshotLength = 100_000;
 
-    private readonly IMcpConnectionManager _connectionManager;
-    private readonly ILogger<BrowserFetchTool> _logger;
-    private readonly SemaphoreSlim _sessionGate;
+    private readonly IMcpConnectionManager _connectionManager = connectionManager;
+    private readonly ILogger<BrowserFetchTool> _logger = logger;
+    private readonly SemaphoreSlim _sessionGate = sessionGate;
 
     public BrowserFetchTool(
         IMcpConnectionManager connectionManager,
         ILogger<BrowserFetchTool> logger)
         : this(connectionManager, logger, new SemaphoreSlim(1, 1))
     {
-    }
-
-    /// <summary>测试构造器：注入 gate 以断言共享会话串行化，无需真实 MCP 连接。</summary>
-    internal BrowserFetchTool(
-        IMcpConnectionManager connectionManager,
-        ILogger<BrowserFetchTool> logger,
-        SemaphoreSlim sessionGate)
-    {
-        _connectionManager = connectionManager;
-        _logger = logger;
-        _sessionGate = sessionGate;
     }
 
     [Description("Fetch a web page in a real (headless) browser and return its accessibility snapshot. " +

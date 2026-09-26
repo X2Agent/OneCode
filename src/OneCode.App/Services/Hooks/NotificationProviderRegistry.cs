@@ -12,28 +12,22 @@ namespace OneCode.App.Services.Hooks;
 /// 三层合并（内置 &lt; 用户 &lt; 项目，整条替换）后经 <see cref="SetDefinitions"/> 注入；
 /// <see cref="DeclarativeNotificationProvider"/> 实例按名称缓存，HttpClient 来自命名工厂客户端。
 /// </summary>
-public sealed class NotificationProviderRegistry
+public sealed class NotificationProviderRegistry(
+    IEnumerable<INotificationProvider> compiled,
+    IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory)
 {
     /// <summary>声明式引擎使用的命名 HttpClient。</summary>
     public const string HttpClientName = "hook-notification-providers";
 
-    private readonly Dictionary<string, INotificationProvider> _compiled;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly Dictionary<string, INotificationProvider> _compiled =
+        compiled?.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase)
+        ?? new Dictionary<string, INotificationProvider>(StringComparer.OrdinalIgnoreCase);
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly ILoggerFactory _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
     private readonly object _lock = new();
     private Dictionary<string, NotificationProviderDefinition> _definitions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, INotificationProvider> _declarative = new(StringComparer.OrdinalIgnoreCase);
-
-    public NotificationProviderRegistry(
-        IEnumerable<INotificationProvider> compiled,
-        IHttpClientFactory httpClientFactory,
-        ILoggerFactory loggerFactory)
-    {
-        _compiled = compiled?.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, INotificationProvider>(StringComparer.OrdinalIgnoreCase);
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
-    }
 
     /// <summary>整体替换声明式定义（Bootstrap/热重载时调用），并清空实例缓存。</summary>
     public void SetDefinitions(IReadOnlyDictionary<string, NotificationProviderDefinition> definitions)

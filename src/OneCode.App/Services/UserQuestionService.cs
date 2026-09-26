@@ -6,14 +6,9 @@ namespace OneCode.App.Services;
 /// TUI 层用户提问服务的实现 — 通过发射 <see cref="TuiUserQuestionRequest"/> 事件
 /// 与 <see cref="OneCodeToplevel"/> 通信，显示交互式提问对话框。
 /// </summary>
-public sealed class UserQuestionService : IUserQuestionService
+public sealed class UserQuestionService(TuiInteractionBridge bridge) : IUserQuestionService
 {
-    private readonly TuiInteractionBridge _bridge;
-
-    public UserQuestionService(TuiInteractionBridge bridge)
-    {
-        _bridge = bridge;
-    }
+    private readonly TuiInteractionBridge _bridge = bridge;
 
     public async Task<string?> AskAsync(
         string question,

@@ -15,16 +15,10 @@ namespace OneCode.App.Services;
 /// and bridges the dependency inversion. It also breaks what would otherwise be
 /// a DI cycle: SessionManager → IPlanFileService → IWorkingDirectoryAccessor → SessionManager.
 /// </remarks>
-internal sealed class SessionWorkingDirectoryAccessor : IWorkingDirectoryAccessor
+internal sealed class SessionWorkingDirectoryAccessor(ISessionWorkingDirectory sessionManager, IConfigManager configManager) : IWorkingDirectoryAccessor
 {
-    private readonly ISessionWorkingDirectory _sessionManager;
-    private readonly IConfigManager _configManager;
-
-    public SessionWorkingDirectoryAccessor(ISessionWorkingDirectory sessionManager, IConfigManager configManager)
-    {
-        _sessionManager = sessionManager;
-        _configManager = configManager;
-    }
+    private readonly ISessionWorkingDirectory _sessionManager = sessionManager;
+    private readonly IConfigManager _configManager = configManager;
 
     public string WorkingDirectory => _sessionManager.WorkingDirectory;
 

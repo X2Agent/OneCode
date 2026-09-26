@@ -13,27 +13,19 @@ namespace OneCode.App.Services.Setup;
 /// 执行 OneCode 自更新:下载 GitHub Release 资产 → 校验 SHA256 → 解压 → 原地替换当前安装。
 /// 升级完成后需重启进程才能使用新版本(当前进程仍运行旧代码)。
 /// </summary>
-public sealed class UpgradeService
+public sealed class UpgradeService(
+    IHttpClientFactory httpClientFactory,
+    ReleaseNotesService releaseNotesService,
+    IProcessRunner processRunner,
+    ILogger<UpgradeService> logger)
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ReleaseNotesService _releaseNotesService;
-    private readonly IProcessRunner _processRunner;
-    private readonly ILogger<UpgradeService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly ReleaseNotesService _releaseNotesService = releaseNotesService;
+    private readonly IProcessRunner _processRunner = processRunner;
+    private readonly ILogger<UpgradeService> _logger = logger;
 
     // 下载大文件(自包含单文件可达 80MB+)需要比 API 调用更长的超时
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(10);
-
-    public UpgradeService(
-        IHttpClientFactory httpClientFactory,
-        ReleaseNotesService releaseNotesService,
-        IProcessRunner processRunner,
-        ILogger<UpgradeService> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _releaseNotesService = releaseNotesService;
-        _processRunner = processRunner;
-        _logger = logger;
-    }
 
     /// <summary>
     /// 执行完整升级流程:检查版本 → 下载 → 校验 → 解压 → 替换。
@@ -233,8 +225,8 @@ public sealed class UpgradeService
         var sourceExePath = Path.Combine(sourceDir, sourceExeName);
         var backupDir = Path.Combine(tempDir, "install-backup");
         Directory.CreateDirectory(backupDir);
-        var backedUpFiles = new List<(string Target, string Backup)>();
-        var createdFiles = new List<string>();
+        List<(string Target, string Backup)> backedUpFiles = [];
+        List<string> createdFiles = [];
         var backupExePath = Path.Combine(backupDir, sourceExeName);
 
         try

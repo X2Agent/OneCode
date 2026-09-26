@@ -108,7 +108,11 @@ public sealed class ToolApprovalMarkerTests
 
         var result = ToolApprovalMarker.Apply([function], metadata);
 
-        ((AIFunction)result![0]).GetService<ApprovalRequiredAIFunction>().Should().NotBeNull();
+        var markedFunction = (AIFunction)result![0];
+        markedFunction.GetService<ApprovalRequiredAIFunction>().Should().NotBeNull(
+            "Conditional 与 Always 一样需要协议边界标记");
+        markedFunction.Name.Should().Be(DangerousToolName,
+            "MAF 审批规则按工具名匹配，包装不得改变 Name");
     }
 
     /// <summary>没有元数据来源时保持原样，不得凭空标记（未知工具按风险拒绝，而不是按标记）。</summary>

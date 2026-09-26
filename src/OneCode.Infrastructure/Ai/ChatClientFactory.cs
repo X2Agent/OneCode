@@ -71,7 +71,7 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
     {
         var effectiveBaseUrl = baseUrl?.TrimEnd('/');
         // Anthropic SDK appends /v1 internally, so strip it if the user included it.
-        if (effectiveBaseUrl != null && effectiveBaseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        if (effectiveBaseUrl is not null && effectiveBaseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
             effectiveBaseUrl = effectiveBaseUrl[..^3];
 
         var options = new ClientOptions

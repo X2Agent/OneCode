@@ -79,7 +79,7 @@ public sealed partial class RequirementAssessmentService
             || (scopeIsLarge && externalDependencies > 0 && !hasConstraintEvidence);
         var risk = DetermineRisk(normalized, scopeIsLarge, externalDependencies);
 
-        var reasons = new List<string>();
+        List<string> reasons = [];
         if (!goalIsClear) reasons.Add("The requested outcome does not identify both a concrete action and a bounded target.");
         if (!scopeIsBounded) reasons.Add("The target repository, module, file, symbol, or output boundary is not explicit.");
         if (!acceptanceIsDeterministic) reasons.Add("No deterministic test, command, invariant, or observable expected result can be derived.");

@@ -3,32 +3,24 @@ namespace OneCode.App.Tui;
 // 滚动状态管理：封装滚动偏移、自动滚动、滚动到底部标记，以及所有滚动操作。
 // 通过回调与宿主 View 交互（视口高度、行数、滚动事件、重绘请求）。
 
-internal sealed class ScrollState
+internal sealed class ScrollState(
+    Func<int> getViewportHeight,
+    Func<int> getLineCount,
+    Action<int>? onScrolled = null,
+    Action? onNeedsDraw = null)
 {
     private int _scrollOffset;
     private bool _autoScroll = true;
     private bool _needsScrollToBottom;
 
-    private readonly Func<int> _getViewportHeight;
-    private readonly Func<int> _getLineCount;
-    private readonly Action<int>? _onScrolled;
-    private readonly Action? _onNeedsDraw;
+    private readonly Func<int> _getViewportHeight = getViewportHeight;
+    private readonly Func<int> _getLineCount = getLineCount;
+    private readonly Action<int>? _onScrolled = onScrolled;
+    private readonly Action? _onNeedsDraw = onNeedsDraw;
 
     public int ScrollOffset => _scrollOffset;
     public bool AutoScroll => _autoScroll;
     public bool NeedsScrollToBottom => _needsScrollToBottom;
-
-    public ScrollState(
-        Func<int> getViewportHeight,
-        Func<int> getLineCount,
-        Action<int>? onScrolled = null,
-        Action? onNeedsDraw = null)
-    {
-        _getViewportHeight = getViewportHeight;
-        _getLineCount = getLineCount;
-        _onScrolled = onScrolled;
-        _onNeedsDraw = onNeedsDraw;
-    }
 
     /// <summary>滚动到指定行（居中显示），用于搜索跳转。</summary>
     public void ScrollToLine(int lineIdx)

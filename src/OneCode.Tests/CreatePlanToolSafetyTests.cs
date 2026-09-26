@@ -348,6 +348,8 @@ Run tests to verify.
         var failures = InvokeQualityGate(plan);
 
         failures.Should().NotBeEmpty("architecture without tech stack should fail");
+        failures.Should().ContainSingle().Which.Should().Contain("tech stack",
+            "唯一失败原因必须是调研证据检查（无文件路径/code block/技术栈关键词），而非长度或结构检查");
     }
 
     // helpers

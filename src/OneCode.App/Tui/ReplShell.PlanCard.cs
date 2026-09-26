@@ -48,12 +48,11 @@ public sealed partial class ReplShell
         // PendingApproval：确保侧边栏可见（用户需要看到完整计划才能决策），
         // 并弹出 InlineSelector 决策面板。
         SetPlanSidebarVisible(true);
-        var options = new List<InlineSelectorOption>
-        {
+        List<InlineSelectorOption> options = [
             new("approve", "批准并执行", "冻结当前计划，切换到 Build 模式立即开始执行"),
             new("edit", "输入修改意见", "返回输入框，用自然语言说明要调整的内容"),
             new("reject", "拒绝计划", "保持在 Plan 模式，重新规划当前方案"),
-        };
+        ];
         var selector = new InlineSelector("请审批右侧计划", options);
         ShowInlineSelector(selector);
 

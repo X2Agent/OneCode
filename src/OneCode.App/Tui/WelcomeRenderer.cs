@@ -55,7 +55,7 @@ public static class WelcomeRenderer
     /// </param>
     public static IReadOnlyList<FormattedLine> Render(WelcomeInfo info, int viewWidth, int viewHeight = 0)
     {
-        var body = new List<FormattedLine>();
+        List<FormattedLine> body = [];
 
         // pixel logo (centered, gray blocks)
         var logoWidth = PixelLogo.Length > 0 ? TextWidthHelper.GetDisplayWidth(PixelLogo[0]) : 0;
@@ -93,7 +93,7 @@ public static class WelcomeRenderer
 
         void RenderTipLine((string Key, string Desc)[] tips)
         {
-            var tipSegs = new List<LineSegment>();
+            List<LineSegment> tipSegs = [];
             for (var i = 0; i < tips.Length; i++)
             {
                 var (key, desc) = tips[i];

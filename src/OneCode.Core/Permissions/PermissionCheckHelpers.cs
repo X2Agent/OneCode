@@ -128,7 +128,7 @@ public static class PermissionCheckHelpers
     {
         // 前置快路径：只读工具 + 文件写入（与 Auto 模式 YOLO 路径共用）
         var shortcut = CheckReadOnlyAndFileWrite(toolName, toolInput, context);
-        if (shortcut != null)
+        if (shortcut is not null)
             return shortcut;
 
         // 3. Shell 工具：区分危险 vs 常规
@@ -198,7 +198,7 @@ public static class PermissionCheckHelpers
         ToolPermissionContext context)
     {
         var readOnlyResult = CheckReadOnlyWithPath(toolName, toolInput, context);
-        if (readOnlyResult != null)
+        if (readOnlyResult is not null)
             return readOnlyResult;
 
         // 路径校验（文件写入/Shell 工具）：越界直接 Deny
@@ -236,7 +236,7 @@ public static class PermissionCheckHelpers
 
         foreach (var (_, group) in context.RulesBySource)
         {
-            if (group.AlwaysDeny != null)
+            if (group.AlwaysDeny is not null)
             {
                 foreach (var rule in group.AlwaysDeny)
                 {
@@ -245,7 +245,7 @@ public static class PermissionCheckHelpers
                 }
             }
 
-            if (group.AlwaysAllow != null)
+            if (group.AlwaysAllow is not null)
             {
                 foreach (var rule in group.AlwaysAllow)
                 {
@@ -335,8 +335,8 @@ public static class PermissionCheckHelpers
         if (!string.Equals(rule.ToolName, toolName, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        if (rule.InputPattern == null) return true;
-        if (inputStr == null) return false;
+        if (rule.InputPattern is null) return true;
+        if (inputStr is null) return false;
 
         return PermissionRuleParser.GlobMatch(rule.InputPattern, inputStr);
     }

@@ -15,17 +15,15 @@ internal static class QuestionCardRenderer
         string? description = null,
         int viewWidth = TuiSpacing.DefaultContentWidth)
     {
-        var lines = new List<FormattedLine>
-        {
+        List<FormattedLine> lines = [
             FormattedLine.Plain("", TuiPalette.BgPrimary),
-        };
+        ];
 
-        var titleSegments = new List<LineSegment>
-        {
+        List<LineSegment> titleSegments = [
             new("  ", TuiPalette.BgPrimary),
             new($"{TuiGlyphs.BarQuote} ", TuiPalette.Accent),
             new("需要补充信息", TuiPalette.Accent),
-        };
+        ];
         if (!string.Equals(title, "需要补充信息", StringComparison.Ordinal))
             titleSegments.Add(new($"  ·  {title}", TuiPalette.FgSecondary));
         if (currentQuestion is not null && totalQuestions is not null)
@@ -41,10 +39,9 @@ internal static class QuestionCardRenderer
             var available = Math.Max(8, viewWidth - indent.Length - TextWidthHelper.GetDisplayWidth(typePrefix));
             var wrapped = TextWidthHelper.WordWrapByWidth(prompt, available);
 
-            var firstSegments = new List<LineSegment>
-            {
+            List<LineSegment> firstSegments = [
                 new(indent, TuiPalette.BgPrimary),
-            };
+            ];
             if (typePrefix.Length > 0)
                 firstSegments.Add(new(typePrefix, TuiPalette.FgMuted));
             firstSegments.Add(new(wrapped.Count > 0 ? wrapped[0] : prompt, TuiPalette.FgPrimary));

@@ -28,7 +28,7 @@ public sealed class EnterWorktreeTool
         if (File.Exists(statePath)) return ToolResult.Error("Already in a worktree session");
 
         var gitRoot = await _gitHelper.GetRepositoryRootAsync(cwd, ct).ConfigureAwait(false);
-        if (gitRoot == null) return ToolResult.Error("Not in a git repository");
+        if (gitRoot is null) return ToolResult.Error("Not in a git repository");
 
         var slug = !string.IsNullOrWhiteSpace(name) ? SanitizeSlug(name!) : GenerateSlug();
         if (slug.Length == 0) slug = GenerateSlug();

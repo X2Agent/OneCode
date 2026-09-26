@@ -17,20 +17,13 @@ namespace OneCode.App.Tools;
 ///
 /// Supports <c>dryRun: true</c> — returns a unified diff preview without writing.
 /// </summary>
-public sealed class WriteTool
+public sealed class WriteTool(ILspNotifier notifier, IWorkingDirectoryAccessor wd, SshRemoteService ssh)
 {
     private const int MaxContentLength = 10_000_000; // 10 MB
 
-    private readonly ILspNotifier _notifier;
-    private readonly IWorkingDirectoryAccessor _wd;
-    private readonly SshRemoteService _ssh;
-
-    public WriteTool(ILspNotifier notifier, IWorkingDirectoryAccessor wd, SshRemoteService ssh)
-    {
-        _notifier = notifier;
-        _wd = wd;
-        _ssh = ssh;
-    }
+    private readonly ILspNotifier _notifier = notifier;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
+    private readonly SshRemoteService _ssh = ssh;
 
     [Description("Write content to a file, creating it if it does not exist or fully overwriting it if it does. " +
                  "Prefer the Edit tool for targeted modifications to existing files — Write replaces the entire file content. " +

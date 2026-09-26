@@ -19,24 +19,16 @@ namespace OneCode.App.Tools;
 /// - <c>notifier</c>（构造参数）：LSP 通知器；生产环境由 DI 注入 <see cref="OneCode.App.Services.Lsp.LspNotifier"/>
 /// - <see cref="_ssh"/>：SSH 远程编辑；仅在配置远程连接时非空，缺失时走本地文件系统
 /// </remarks>
-public sealed class EditTool
+public sealed class EditTool(
+    ILspNotifier notifier,
+    IWorkingDirectoryAccessor wd,
+    SshRemoteService ssh,
+    ILogger<EditTool>? logger = null)
 {
-    private readonly ILspNotifier _notifier;
-    private readonly IWorkingDirectoryAccessor _wd;
-    private readonly SshRemoteService _ssh;
-    private readonly ILogger<EditTool>? _logger;
-
-    public EditTool(
-        ILspNotifier notifier,
-        IWorkingDirectoryAccessor wd,
-        SshRemoteService ssh,
-        ILogger<EditTool>? logger = null)
-    {
-        _notifier = notifier;
-        _wd = wd;
-        _ssh = ssh;
-        _logger = logger;
-    }
+    private readonly ILspNotifier _notifier = notifier;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
+    private readonly SshRemoteService _ssh = ssh;
+    private readonly ILogger<EditTool>? _logger = logger;
 
     [Description("Perform a search-and-replace edit on a file. Safer than Write for targeted modifications because it preserves surrounding content. " +
                  "Uniqueness contract: by default oldString MUST appear exactly once in the file — the call errors on 0 matches (typo/whitespace mismatch) or >1 matches (provide more context to disambiguate). " +
@@ -247,7 +239,7 @@ public sealed class EditTool
                 bestPath = candidate;
             }
 
-            if (bestPath == null)
+            if (bestPath is null)
                 return null;
 
             var threshold = Math.Max(3, requestedName.Length / 3);
@@ -297,7 +289,7 @@ public sealed class EditTool
 
     private static IEnumerable<string> EnumerateFilesSafely(string root)
     {
-        var pending = new Stack<string>();
+        Stack<string> pending = new();
         pending.Push(root);
 
         while (pending.Count > 0)

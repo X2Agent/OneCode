@@ -236,7 +236,7 @@ public sealed partial class OneCodeToplevel
             .ToList();
         if (approval.Tasks.Count > 3)
             taskLines.Add($"  … 共 {approval.Tasks.Count} 个任务");
-        var lines = new List<string> { $"团队 {approval.TeamName} 计划审批中：" };
+        List<string> lines = [ $"团队 {approval.TeamName} 计划审批中：" ];
         lines.AddRange(taskLines.Count > 0 ? taskLines : [approval.Summary]);
         foreach (var line in lines)
             _shell.Transcript.AddSystem(line);
@@ -335,7 +335,7 @@ public sealed partial class OneCodeToplevel
 
         // 标题使用真实工具名（Bash），与执行后对话列表里的工具行一致——
         // 旧实现硬编码 "Shell 命令"，审批提示与调用记录对不上。
-        return (warning != null ? "！ 危险命令 !" : $"$ {toolName} 命令", sb.ToString());
+        return (warning is not null ? "！ 危险命令 !" : $"$ {toolName} 命令", sb.ToString());
     }
 
     private static (string, string) BuildFilePrompt(string toolName, System.Text.Json.JsonElement input)

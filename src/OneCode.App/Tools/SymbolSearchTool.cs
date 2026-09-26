@@ -17,24 +17,16 @@ namespace OneCode.App.Tools;
 /// returns no results or no server is running, the tool falls back to the local
 /// code index (Levenshtein-based fuzzy match over indexed source files).
 /// </summary>
-public sealed class SymbolSearchTool
+public sealed class SymbolSearchTool(
+    ICodeIndexService indexService,
+    IWorkingDirectoryAccessor wd,
+    ILspServerManager serverManager,
+    ILogger<SymbolSearchTool>? logger = null)
 {
-    private readonly ICodeIndexService _indexService;
-    private readonly IWorkingDirectoryAccessor _wd;
-    private readonly ILspServerManager _serverManager;
-    private readonly ILogger<SymbolSearchTool> _logger;
-
-    public SymbolSearchTool(
-        ICodeIndexService indexService,
-        IWorkingDirectoryAccessor wd,
-        ILspServerManager serverManager,
-        ILogger<SymbolSearchTool>? logger = null)
-    {
-        _indexService = indexService;
-        _wd = wd;
-        _serverManager = serverManager;
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SymbolSearchTool>.Instance;
-    }
+    private readonly ICodeIndexService _indexService = indexService;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
+    private readonly ILspServerManager _serverManager = serverManager;
+    private readonly ILogger<SymbolSearchTool> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SymbolSearchTool>.Instance;
 
     [Description("Search code symbols (class, method, interface etc.) by name. Uses LSP workspace/symbol when available for semantic accuracy, falling back to the local code index on failure.")]
     public async Task<ToolResult> SymbolSearchAsync(
@@ -136,7 +128,7 @@ public sealed class SymbolSearchTool
             return [];
 
         var @params = JsonSerializer.SerializeToElement(new { query });
-        var merged = new List<LspSymbolResult>();
+        List<LspSymbolResult> merged = [];
 
         foreach (var s in status)
         {
@@ -307,7 +299,7 @@ public sealed class SymbolSearchTool
 
     private static string BuildFilter(string? kind, string? pathScope)
     {
-        var parts = new List<string>();
+        List<string> parts = [];
         if (!string.IsNullOrEmpty(kind)) parts.Add($" of kind \"{kind}\"");
         if (!string.IsNullOrEmpty(pathScope)) parts.Add($" under \"{pathScope}\"");
         return string.Concat(parts);

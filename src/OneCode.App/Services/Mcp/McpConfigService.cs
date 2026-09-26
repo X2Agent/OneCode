@@ -22,7 +22,7 @@ public sealed class McpConfigService(
         var statuses = connectionManager.GetStatus()
             .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
-        var entries = new List<McpConfigServerEntry>();
+        List<McpConfigServerEntry> entries = [];
         foreach (var (name, def) in merged.Servers.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
             var connected = statuses.TryGetValue(name, out var st) && st.IsConnected;
@@ -45,7 +45,7 @@ public sealed class McpConfigService(
     /// </summary>
     public async Task<string> ApplyAsync(McpConfigResult result, CancellationToken ct = default)
     {
-        var notes = new List<string>();
+        List<string> notes = [];
         foreach (var change in result.Servers)
         {
             var saved = await SaveToConfigFileAsync(change, ct).ConfigureAwait(false);

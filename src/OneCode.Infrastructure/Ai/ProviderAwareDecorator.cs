@@ -19,18 +19,11 @@ namespace OneCode.Infrastructure.Ai;
 /// 只会得到「看起来生效、实际静默失效」的假象。思考/推理意图统一走 MEAI 标准的
 /// <see cref="ChatOptions.Reasoning"/>，由各适配器自行翻译。
 /// </remarks>
-public sealed class ProviderAwareDecorator : IChatClient
+public sealed class ProviderAwareDecorator(IChatClient inner, string providerId, int? ollamaNumCtx = null) : IChatClient
 {
-    private readonly IChatClient _inner;
-    private readonly string _providerId;
-    private readonly int? _ollamaNumCtx;
-
-    public ProviderAwareDecorator(IChatClient inner, string providerId, int? ollamaNumCtx = null)
-    {
-        _inner = inner;
-        _providerId = providerId;
-        _ollamaNumCtx = ollamaNumCtx;
-    }
+    private readonly IChatClient _inner = inner;
+    private readonly string _providerId = providerId;
+    private readonly int? _ollamaNumCtx = ollamaNumCtx;
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,

@@ -7,16 +7,10 @@ namespace OneCode.App.Services.Setup;
 /// Checks for product updates by querying the latest GitHub release and comparing
 /// against the current assembly version.
 /// </summary>
-public sealed class ReleaseNotesService
+public sealed class ReleaseNotesService(IHttpClientFactory httpClientFactory, ILogger<ReleaseNotesService> logger)
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<ReleaseNotesService> _logger;
-
-    public ReleaseNotesService(IHttpClientFactory httpClientFactory, ILogger<ReleaseNotesService> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
-    }
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly ILogger<ReleaseNotesService> _logger = logger;
 
     /// <summary>
     /// Query the latest release and compare it with the current version.

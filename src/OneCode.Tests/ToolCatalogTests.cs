@@ -162,6 +162,11 @@ public sealed class ToolCatalogTests
             "a disconnected server's tool must not remain selectable");
         registry.GetVisibleToolNames().Should().NotContain("mcp__a__tool");
         registry.Get("mcp__b__tool").Should().NotBeNull("the still-connected server is unaffected");
+
+        // 对外暴露的工具列表必须同步剔除（否则 ToolSearch 之外的直接枚举仍会推荐失效工具）。
+        var servedNames = catalog.Tools.Select(t => t.Name).ToList();
+        servedNames.Should().NotContain("mcp__a__tool", "断连服务器的工具必须退出对外工具列表");
+        servedNames.Should().Contain("mcp__b__tool", "仍在线服务器的工具不受影响");
     }
 
     /// <summary>

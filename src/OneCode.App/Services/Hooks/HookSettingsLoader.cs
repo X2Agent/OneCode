@@ -10,7 +10,7 @@ namespace OneCode.App.Services.Hooks;
 /// 已废弃的 OneCode 专有事件名给出**显式迁移诊断**（有后继节点的提示新名，无后继节点的提示不支持），
 /// 不静默跳过；JSON 损坏 / IO 失败记录错误并整体跳过（含行号）。
 /// </summary>
-public sealed class HookSettingsLoader
+public sealed class HookSettingsLoader(ILogger<HookSettingsLoader> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -20,12 +20,7 @@ public sealed class HookSettingsLoader
     private static readonly string OpenPointList =
         string.Join(", ", HookInterceptionPoints.Open.Select(HookInterceptionPoints.ToWireName));
 
-    private readonly ILogger<HookSettingsLoader> _logger;
-
-    public HookSettingsLoader(ILogger<HookSettingsLoader> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILogger<HookSettingsLoader> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
     /// 加载 <paramref name="configDir"/> 下的 hooks.json。

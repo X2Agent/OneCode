@@ -10,18 +10,12 @@ namespace OneCode.App.Services.Hooks;
 /// 模板插值：支持 {{Field}} 语法替换 HookPayload 字段（如 {{Point}} / {{UserMessage}}），
 /// 由 <see cref="HookTemplateRenderer"/> 统一实现。
 /// </summary>
-public sealed class NotificationHookExecutor : IHookExecutor
+public sealed class NotificationHookExecutor(
+    NotificationProviderRegistry registry,
+    ILogger<NotificationHookExecutor> logger) : IHookExecutor
 {
-    private readonly NotificationProviderRegistry _registry;
-    private readonly ILogger<NotificationHookExecutor> _logger;
-
-    public NotificationHookExecutor(
-        NotificationProviderRegistry registry,
-        ILogger<NotificationHookExecutor> logger)
-    {
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly NotificationProviderRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+    private readonly ILogger<NotificationHookExecutor> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public HookType Type => HookType.Notification;
 

@@ -17,21 +17,14 @@ namespace OneCode.App.Services.Agent;
 /// <c>HarnessAgentOptions.CompactionStrategy</c>，由 Harness 自行挂载唯一的 provider。
 /// 产品侧再挂一份会让同一次模型调用被压缩两次，且外层 provider 会覆盖内层的会话状态。</para>
 /// </summary>
-public sealed class CompactionStrategyFactory
+public sealed class CompactionStrategyFactory(
+    IChatClient chatClient,
+    IModelManager modelManager,
+    CompactPromptBuilder compactPromptBuilder)
 {
-    private readonly IChatClient _chatClient;
-    private readonly IModelManager _modelManager;
-    private readonly CompactPromptBuilder _compactPromptBuilder;
-
-    public CompactionStrategyFactory(
-        IChatClient chatClient,
-        IModelManager modelManager,
-        CompactPromptBuilder compactPromptBuilder)
-    {
-        _chatClient = chatClient;
-        _modelManager = modelManager;
-        _compactPromptBuilder = compactPromptBuilder;
-    }
+    private readonly IChatClient _chatClient = chatClient;
+    private readonly IModelManager _modelManager = modelManager;
+    private readonly CompactPromptBuilder _compactPromptBuilder = compactPromptBuilder;
 
     /// <summary>
     /// 构建主 Agent 压缩策略，并返回模型 ProviderId（供 PipelineSecurityContext 使用）。

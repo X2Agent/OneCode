@@ -33,7 +33,8 @@ public static partial class SkillFrontmatterParser
             {
                 metadata = s_deserializer.Deserialize<SkillFrontmatterRaw?>(match.Groups["yaml"].Value);
             }
-            catch
+            // YAML 解析失败按"无有效 frontmatter"处理。
+            catch (Exception)
             {
                 document = default!;
                 return false;

@@ -13,10 +13,12 @@ namespace OneCode.Infrastructure;
 ///
 /// Dispose to stop watching.
 /// </summary>
-public sealed class CodeIndexHotReloader : IDisposable
+public sealed class CodeIndexHotReloader(
+    ICodeIndexService indexService,
+    ILogger<CodeIndexHotReloader>? logger = null) : IDisposable
 {
-    private readonly ICodeIndexService _indexService;
-    private readonly ILogger<CodeIndexHotReloader> _logger;
+    private readonly ICodeIndexService _indexService = indexService ?? throw new ArgumentNullException(nameof(indexService));
+    private readonly ILogger<CodeIndexHotReloader> _logger = logger ?? NullLogger<CodeIndexHotReloader>.Instance;
 
     private readonly object _lock = new();
     private readonly HashSet<string> _pendingChanged = new(StringComparer.OrdinalIgnoreCase);
@@ -27,14 +29,6 @@ public sealed class CodeIndexHotReloader : IDisposable
 
     /// <summary>Debounce window in milliseconds (default 500).</summary>
     public int DebounceMs { get; init; } = 500;
-
-    public CodeIndexHotReloader(
-        ICodeIndexService indexService,
-        ILogger<CodeIndexHotReloader>? logger = null)
-    {
-        _indexService = indexService ?? throw new ArgumentNullException(nameof(indexService));
-        _logger = logger ?? NullLogger<CodeIndexHotReloader>.Instance;
-    }
 
     /// <summary>
     /// Start watching <paramref name="rootDirectory"/> for source-file changes.
@@ -147,8 +141,8 @@ public sealed class CodeIndexHotReloader : IDisposable
 
         lock (_lock)
         {
-            changed = new List<string>(_pendingChanged);
-            removed = new List<string>(_pendingRemoved);
+            changed = [.. _pendingChanged];
+            removed = [.. _pendingRemoved];
             _pendingChanged.Clear();
             _pendingRemoved.Clear();
             _debounceTimer?.Dispose();

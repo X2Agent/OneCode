@@ -18,7 +18,7 @@ namespace OneCode.Infrastructure.Ai;
 ///
 /// fixture 存储在 <c>~/.onecode/vcr/chat/{hash}.json</c>（流式用 <c>.stream.json</c> 后缀）。
 /// </summary>
-public sealed class VcrChatClientDecorator : IChatClient
+public sealed class VcrChatClientDecorator(IChatClient inner, VcrMode mode, string? fixtureDir = null) : IChatClient
 {
     /// <summary>Fixture 文件名哈希截断长度（16 hex chars = 64-bit 碰撞空间，足够本地缓存）。</summary>
     private const int FixtureKeyHashLength = 16;
@@ -33,16 +33,9 @@ public sealed class VcrChatClientDecorator : IChatClient
     /// <summary>写入 fixture 时使用（带缩进，便于 diff/审计）；读取时使用 <see cref="JsonOptions"/>。</summary>
     private static readonly JsonSerializerOptions WriteOptions = new(JsonOptions) { WriteIndented = true };
 
-    private readonly IChatClient _inner;
-    private readonly VcrMode _mode;
-    private readonly string _fixtureDir;
-
-    public VcrChatClientDecorator(IChatClient inner, VcrMode mode, string? fixtureDir = null)
-    {
-        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        _mode = mode;
-        _fixtureDir = fixtureDir ?? VcrPaths.ChatFixturesDir;
-    }
+    private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    private readonly VcrMode _mode = mode;
+    private readonly string _fixtureDir = fixtureDir ?? VcrPaths.ChatFixturesDir;
 
     public void Dispose() => _inner.Dispose();
 

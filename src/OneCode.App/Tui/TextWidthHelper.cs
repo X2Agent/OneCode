@@ -246,7 +246,7 @@ public static class TextWidthHelper
     /// </summary>
     public static List<string> WordWrapByWidth(string text, int maxWidth)
     {
-        var result = new List<string>();
+        List<string> result = [];
         if (string.IsNullOrEmpty(text)) return result;
         if (maxWidth <= 0) maxWidth = 40;
 

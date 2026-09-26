@@ -12,7 +12,7 @@ public sealed class AgentToolTests
     private static ITaskService CreateTaskService()
     {
         var taskService = Substitute.For<ITaskService>();
-        taskService.GetTaskToken(Arg.Any<string>()).Returns(CancellationToken.None);
+        taskService.GetTaskToken(Arg.Any<string>()).Returns(TestContext.Current.CancellationToken);
         return taskService;
     }
 

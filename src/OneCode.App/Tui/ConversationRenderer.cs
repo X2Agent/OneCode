@@ -30,12 +30,11 @@ internal static class ConversationRenderer
             ? (string.IsNullOrEmpty(duration) ? " \u00b7 error" : $" \u00b7 {duration}")
             : string.IsNullOrEmpty(duration) ? string.Empty : $" \u00b7 {duration}";
 
-        var segments = new List<LineSegment>
-        {
+        List<LineSegment> segments = [
             new($"{Indent}", TuiPalette.BgPrimary),
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
-        };
+        ];
         // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
         if (!string.IsNullOrWhiteSpace(agentName))
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));

@@ -67,11 +67,10 @@ public sealed class CronSchedulerService : BackgroundService
         // Snapshot under the lock: callers (CronTool, CronCommand) iterate the
         // returned collection, and concurrent ReloadJobs / AddJob / TryRemoveJob
         // mutations would otherwise throw InvalidOperationException on List<T>
-        // enumeration. AsReadOnly() wraps the live list, not a copy, so it is NOT
-        // safe against concurrent mutation either — we must ToList() under the lock.
+        // enumeration. ToArray() takes a copy under the lock, which IS safe.
         lock (_reloadLock)
         {
-            return _jobs.ToList().AsReadOnly();
+            return _jobs.ToArray();
         }
     }
 
@@ -281,7 +280,7 @@ public sealed class CronSchedulerService : BackgroundService
         foreach (var job in snapshot)
         {
             if (job.Paused) continue;
-            if (job.NextRunAt == null) continue;
+            if (job.NextRunAt is null) continue;
             var nextRun = DateTimeOffset.FromUnixTimeSeconds(job.NextRunAt.Value);
 
             if (now >= nextRun)
@@ -370,7 +369,7 @@ public sealed class CronSchedulerService : BackgroundService
                 {
                     var json = File.ReadAllText(file);
                     var entry = JsonSerializer.Deserialize<CronJobEntry>(json);
-                    if (entry == null) continue;
+                    if (entry is null) continue;
 
                     // Path traversal defence: reject entries whose Id contains characters
                     // that could escape the cron directory when used in file-path construction.
@@ -394,7 +393,7 @@ public sealed class CronSchedulerService : BackgroundService
                         continue;
                     }
 
-                    if (entry.NextRunAt == null && entry.Recurring && !entry.Paused)
+                    if (entry.NextRunAt is null && entry.Recurring && !entry.Paused)
                     {
                         var next = _cronParser.ComputeNextRun(entry.Cron, DateTimeOffset.UtcNow);
                         entry.NextRunAt = next?.ToUnixTimeSeconds();

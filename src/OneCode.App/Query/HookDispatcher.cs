@@ -4,21 +4,14 @@ using OneCode.Core.Config;
 namespace OneCode.App.Query;
 
 /// <summary>Hook 触发与桌面通知的封装，拆自 <see cref="QueryStreamEngine"/>。</summary>
-internal sealed class HookDispatcher
+internal sealed class HookDispatcher(
+    IHookExecutionService hookExecutionService,
+    IConfigManager configManager,
+    INotifierService notifierService)
 {
-    private readonly IHookExecutionService _hookExecutionService;
-    private readonly IConfigManager _configManager;
-    private readonly INotifierService _notifierService;
-
-    public HookDispatcher(
-        IHookExecutionService hookExecutionService,
-        IConfigManager configManager,
-        INotifierService notifierService)
-    {
-        _hookExecutionService = hookExecutionService;
-        _configManager = configManager;
-        _notifierService = notifierService;
-    }
+    private readonly IHookExecutionService _hookExecutionService = hookExecutionService;
+    private readonly IConfigManager _configManager = configManager;
+    private readonly INotifierService _notifierService = notifierService;
 
     /// <summary>
     /// 触发拦截点并返回聚合结果。matcher 的实际比较值由调用方通过

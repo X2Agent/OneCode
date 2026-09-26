@@ -77,6 +77,7 @@ public sealed class LargeFileProtectionTests
             var act = () => transaction.Snapshot(path);
 
             act.Should().NotThrow();
+            transaction.SnapshotCount.Should().Be(1, "恰好低于上限的文件必须完整进入快照（与 exactly-limit 用例同一口径）");
         }
         finally { Cleanup(); }
     }

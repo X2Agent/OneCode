@@ -7,7 +7,4 @@ namespace OneCode.Core.Domain;
 /// 从 App/MainAgentRunner 下沉到 Core.Domain，使 Infrastructure 层的
 /// PromptTooLongRecoveryRunMiddleware 可直接引用，避免反向依赖。
 /// </summary>
-public sealed class PromptTooLongException : Exception
-{
-    public PromptTooLongException(string message) : base(message) { }
-}
+public sealed class PromptTooLongException(string message) : Exception(message);

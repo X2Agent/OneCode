@@ -13,7 +13,7 @@ public sealed partial class SkillCatalog(string workingDir)
 
     public IReadOnlyList<string> GetSkillDirectories()
     {
-        var result = new List<string>();
+        List<string> result = [];
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void Add(string path)

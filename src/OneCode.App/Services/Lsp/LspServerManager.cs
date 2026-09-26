@@ -209,7 +209,7 @@ public sealed class LspServerManager : ILspServerManager, IAsyncDisposable
     /// </summary>
     public IReadOnlyList<LspDiagnosticEntry> GetDiagnostics(string? serverName = null)
     {
-        var diagnostics = serverName != null
+        var diagnostics = serverName is not null
             ? _diagnosticRegistry.GetDiagnostics(serverName)
             : _diagnosticRegistry.GetAllDiagnostics();
 
@@ -344,7 +344,7 @@ public sealed class LspServerManager : ILspServerManager, IAsyncDisposable
 
         _healthCheckCts.Cancel();
 
-        if (_healthCheckTask != null)
+        if (_healthCheckTask is not null)
         {
             try
             {

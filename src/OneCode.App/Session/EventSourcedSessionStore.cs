@@ -34,7 +34,7 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
             var replacementRequired = existing.Count > 0
                 && !MessagesMatch(existingMessages, conversation.Messages);
 
-            var events = new List<SessionEvent>();
+            List<SessionEvent> events = [];
 
             if (existingSnapshot is null || !SnapshotsMatch(existingSnapshot, conversation))
             {

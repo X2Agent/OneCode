@@ -14,7 +14,7 @@ namespace OneCode.Infrastructure;
 /// - Windows 文本写入：PowerShell + UTF-8 临时文件（解决 OEM 编码乱码）
 /// - Unix 文本写入：pbcopy / wl-copy / xclip（stdin 使用 UTF-8 编码）
 /// </summary>
-public sealed class ClipboardService : IClipboardService
+public sealed class ClipboardService(ILogger<ClipboardService> logger) : IClipboardService
 {
     private static readonly (string Cmd, string Args)[] LinuxCopyTools =
     [
@@ -23,12 +23,7 @@ public sealed class ClipboardService : IClipboardService
         ("xsel",     "--clipboard --input"),
     ];
 
-    private readonly ILogger<ClipboardService> _logger;
-
-    public ClipboardService(ILogger<ClipboardService> logger)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly ILogger<ClipboardService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task<string?> TryCopyTextAsync(string text, CancellationToken ct = default)
@@ -88,7 +83,7 @@ public sealed class ClipboardService : IClipboardService
     /// <inheritdoc />
     public async Task<List<string>> GetFilesAsync(CancellationToken ct = default)
     {
-        var files = new List<string>();
+        List<string> files = [];
         try
         {
             if (OperatingSystem.IsWindows())

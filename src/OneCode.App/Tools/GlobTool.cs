@@ -116,6 +116,10 @@ public sealed class GlobTool
     {
         if (string.IsNullOrEmpty(workspaceRoot)) return fullPath;
         try { return Path.GetRelativePath(workspaceRoot, fullPath); }
-        catch (Exception) { return fullPath; }
+        catch (Exception)
+        {
+            // 非法路径字符等异常直接回退为原始路径，由上层忽略规则再行判定。
+            return fullPath;
+        }
     }
 }

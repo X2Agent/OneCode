@@ -148,7 +148,7 @@ public sealed class AgentStatusBar : View
     /// </summary>
     internal List<LeftItem> BuildLeftItems()
     {
-        var items = new List<LeftItem>();
+        List<LeftItem> items = [];
         // Activity / Spinner（必显，文案按固定显示宽度截断）
         if (_busy)
         {
@@ -210,7 +210,7 @@ public sealed class AgentStatusBar : View
     /// </summary>
     internal static List<LeftItem> Fit(IReadOnlyList<LeftItem> items, int maxWidth)
     {
-        var result = new List<LeftItem>(items);
+        List<LeftItem> result = [.. items];
         while (MeasureWidth(result) > maxWidth)
         {
             var lastDroppable = -1;

@@ -9,16 +9,10 @@ namespace OneCode.App.Query;
 /// <see cref="QueryStreamEngine"/> 为真正的协作类（原为 partial 分片）。无新增共享可变状态，
 /// 结果经 <see cref="BuildPreambleState"/> 带出。
 /// </summary>
-internal sealed class BuildPreambleRunner
+internal sealed class BuildPreambleRunner(BuildRunGate buildRunGate, ToolAssembler toolAssembler)
 {
-    private readonly BuildRunGate _buildRunGate;
-    private readonly ToolAssembler _toolAssembler;
-
-    public BuildPreambleRunner(BuildRunGate buildRunGate, ToolAssembler toolAssembler)
-    {
-        _buildRunGate = buildRunGate;
-        _toolAssembler = toolAssembler;
-    }
+    private readonly BuildRunGate _buildRunGate = buildRunGate;
+    private readonly ToolAssembler _toolAssembler = toolAssembler;
 
     /// <summary>
     /// Build 门禁前置：澄清 → 计划审批 → 终态判定。状态事件随交互逐步流出（时序与
@@ -171,7 +165,7 @@ internal sealed class BuildPreambleRunner
         QueryStreamRequest request,
         CancellationToken ct)
     {
-        var durableStates = new List<BuildRun>();
+        List<BuildRun> durableStates = [];
         var run = await coordinator.BeginOrResumeAsync(
             buildConversationId,
             prompt,

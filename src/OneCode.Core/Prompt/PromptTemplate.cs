@@ -2,16 +2,15 @@ namespace OneCode.Core.Prompt;
 
 public sealed class PromptTemplate
 {
-    private readonly string _name;
     private readonly string _rawTemplate;
 
-    public string Name => _name;
+    public string Name { get; }
 
     public PromptTemplate(string name, string rawTemplate)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(rawTemplate);
-        _name = name;
+        Name = name;
         _rawTemplate = rawTemplate;
     }
 

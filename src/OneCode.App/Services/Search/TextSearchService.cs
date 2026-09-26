@@ -119,7 +119,7 @@ public sealed class TextSearchService(
         args.Add(request.SearchPath);
 
         var result = await processRunner.ExecuteAsync("rg", args.ToArray(), workspaceRoot, ct: ct);
-        if (result == null)
+        if (result is null)
             return [];
 
         // ripgrep exit code 1 = no matches (not an error), exit code 2+ = actual error
@@ -317,7 +317,7 @@ public sealed class TextSearchService(
             return [];
         }
 
-        var results = new List<string>();
+        List<string> results = [];
         var matches = regex.Matches(content);
         if (matches.Count == 0) return results;
 
@@ -351,7 +351,7 @@ public sealed class TextSearchService(
                 matchLineNums.Add(i);
         }
 
-        var results = new List<string>();
+        List<string> results = [];
         if (matchLineNums.Count == 0) return results;
 
         var ranges = BuildContextRanges(matchLineNums, contextBefore, contextAfter, allLines.Length);

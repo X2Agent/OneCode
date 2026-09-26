@@ -2,17 +2,13 @@ using OneCode.Core.Prompt;
 
 namespace OneCode.Infrastructure.Prompt;
 
-public sealed class FilePromptStore : IPromptStore
+public sealed class FilePromptStore(string basePath, string fileExtension = ".prompt") : IPromptStore
 {
-    private readonly string _basePath;
-    private readonly string _fileExtension;
+    private readonly string _basePath = basePath ?? throw new ArgumentNullException(nameof(basePath));
+    private readonly string _fileExtension = NormalizeExtension(fileExtension);
 
-    public FilePromptStore(string basePath, string fileExtension = ".prompt")
-    {
-        ArgumentNullException.ThrowIfNull(basePath);
-        _basePath = basePath;
-        _fileExtension = fileExtension.StartsWith('.') ? fileExtension : "." + fileExtension;
-    }
+    private static string NormalizeExtension(string extension)
+        => extension.StartsWith('.') ? extension : "." + extension;
 
     public async Task<string?> GetAsync(string name, CancellationToken ct = default)
     {

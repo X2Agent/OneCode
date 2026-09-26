@@ -35,7 +35,7 @@ public sealed class ReviewCache
             {
                 var json = File.ReadAllText(path);
                 var entries = JsonSerializer.Deserialize<Dictionary<string, DateTimeOffset>>(json);
-                if (entries != null)
+                if (entries is not null)
                 {
                     foreach (var (hash, time) in entries)
                         cache._reviewed[hash] = time;

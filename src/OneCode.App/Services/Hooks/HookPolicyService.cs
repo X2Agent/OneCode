@@ -7,14 +7,9 @@ namespace OneCode.App.Services.Hooks;
 /// <summary>
 /// Hook 策略控制——工作区信任检查。
 /// </summary>
-public sealed class HookPolicyService
+public sealed class HookPolicyService(IConfigManager configManager)
 {
-    private readonly IConfigManager _configManager;
-
-    public HookPolicyService(IConfigManager configManager)
-    {
-        _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
-    }
+    private readonly IConfigManager _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
 
     public bool IsCurrentWorkspaceTrusted()
     {

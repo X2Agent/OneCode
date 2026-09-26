@@ -55,7 +55,16 @@ public sealed class ConversationShellExecutorManagerTests : IAsyncDisposable
         _sut.TryGet(id).Should().BeNull();
         var result = await _sut.ExecuteAsync(id, _workDir, "echo ok", CommandTimeout, ct);
         result.ExitCode.Should().Be(0);
-        _sut.TryGet(id).Should().NotBeNull();
+        var firstExecutor = _sut.TryGet(id);
+        firstExecutor.Should().NotBeNull();
+
+        // 再次释放后执行必须重建新实例（复用契约的另一半）。
+        await _sut.ReleaseAsync(id);
+        _sut.TryGet(id).Should().BeNull("释放后不得残留旧执行器");
+        var second = await _sut.ExecuteAsync(id, _workDir, "echo ok", CommandTimeout, ct);
+        second.ExitCode.Should().Be(0);
+        var rebuilt = _sut.TryGet(id);
+        rebuilt.Should().NotBeNull().And.NotBeSameAs(firstExecutor, "释放后必须重建全新执行器");
     }
 
     [Fact]

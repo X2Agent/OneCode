@@ -179,8 +179,8 @@ public sealed class WorkspaceIgnoreProvider(
         if (content is null)
             return new WorkspaceIgnoreSnapshot(null, [], []);
 
-        var rules = new List<WorkspaceIgnoreSnapshot.IgnoreRule>();
-        var diagnostics = new List<string>();
+        List<WorkspaceIgnoreSnapshot.IgnoreRule> rules = [];
+        List<string> diagnostics = [];
         var lineNumber = 0;
         foreach (var rawLine in content.Split(['\r', '\n'], StringSplitOptions.None))
         {

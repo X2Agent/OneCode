@@ -89,6 +89,8 @@ public sealed class ProductionApprovalBoundaryTests
             function.GetService<ApprovalRequiredAIFunction>().Should().NotBeNull(
                 $"'{name}' is registered as requiring approval but carries no native marker, "
                 + "so an Ask decision would execute it directly");
+            function.Name.Should().Be(name,
+                "the marker delegates Name; MAF approval rules match by tool name, so wrapping must not rename it");
         }
     }
 

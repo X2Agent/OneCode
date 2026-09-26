@@ -53,7 +53,7 @@ public sealed class CompactService(
         CancellationToken ct = default)
     {
         session ??= sessionAccess.ForegroundConversation;
-        if (session == null)
+        if (session is null)
         {
             logger.LogWarning("CompactAsync: no active conversation");
             return null;

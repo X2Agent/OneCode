@@ -22,24 +22,16 @@ namespace OneCode.Infrastructure.Middleware;
 ///   每次文件编辑后，计算增量 Diff 并通过 <c>OnFileChange</c> 回调发射
 ///   <see cref="FileChange"/> 事件，供 TUI 层实时渲染 Diff 块。
 /// </summary>
-public sealed class EditTransactionMiddleware
+public sealed class EditTransactionMiddleware(
+    EditTransaction transaction,
+    string workingDirectory,
+    Action<FileChange>? onFileChange = null,
+    ILogger? logger = null)
 {
-    private readonly EditTransaction _transaction;
-    private readonly string _workingDirectory;
-    private readonly Action<FileChange>? _onFileChange;
-    private readonly ILogger? _logger;
-
-    public EditTransactionMiddleware(
-        EditTransaction transaction,
-        string workingDirectory,
-        Action<FileChange>? onFileChange = null,
-        ILogger? logger = null)
-    {
-        _transaction = transaction;
-        _workingDirectory = workingDirectory;
-        _onFileChange = onFileChange;
-        _logger = logger;
-    }
+    private readonly EditTransaction _transaction = transaction;
+    private readonly string _workingDirectory = workingDirectory;
+    private readonly Action<FileChange>? _onFileChange = onFileChange;
+    private readonly ILogger? _logger = logger;
 
     public Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
@@ -105,6 +97,8 @@ public sealed class EditTransactionMiddleware
 
             return File.ReadAllBytes(path);
         }
+        // 读失败按"无前值"处理属有意设计：缺失/超限的 before 内容以 null 入账，
+        // 崩溃恢复时该文件按"事务前不存在"策略处理。
         catch (Exception)
         {
             return null;

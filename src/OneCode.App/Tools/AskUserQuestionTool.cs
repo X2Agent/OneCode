@@ -11,14 +11,9 @@ namespace OneCode.App.Tools;
 /// canned string for a real user answer. The caller must pick a safe default
 /// or skip the step that required clarification.
 /// </summary>
-public sealed class AskUserQuestionTool
+public sealed class AskUserQuestionTool(IUserQuestionService userQuestionService)
 {
-    private readonly IUserQuestionService _userQuestionService;
-
-    public AskUserQuestionTool(IUserQuestionService userQuestionService)
-    {
-        _userQuestionService = userQuestionService;
-    }
+    private readonly IUserQuestionService _userQuestionService = userQuestionService;
 
     [Description("Ask the user one focused question and block until they respond. Use this only when exactly one blocking decision remains. " +
                  "If two or more related questions are already known, call AskUserQuestions once instead of asking them serially across agent turns. " +
@@ -75,7 +70,7 @@ public sealed class AskUserQuestionTool
                 suggestedNextAction: "Choose reasonable defaults or skip the step that required user input.");
         }
 
-        var wizardQuestions = new List<WizardQuestion>();
+        List<WizardQuestion> wizardQuestions = [];
         foreach (var q in questions)
         {
             var id = GetStringProperty(q, "id");
@@ -140,8 +135,7 @@ public sealed class AskUserQuestionTool
             return property.EnumerateArray()
                 .Where(e => e.ValueKind == JsonValueKind.String)
                 .Select(e => e.GetString())
-                .Where(s => s != null)
-                .Cast<string>()
+                .OfType<string>()
                 .ToList();
         }
         return null;

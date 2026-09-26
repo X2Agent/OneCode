@@ -74,6 +74,8 @@ public sealed class GoalRunStoreTests : IDisposable
         var saved = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         saved!.IsTerminal.Should().BeTrue();
         saved.CompletedAt.Should().NotBeNull();
+        // CompletedAt 由 store 在落盘时刻盖章，必须落在本次测试执行的时间窗内
+        saved.CompletedAt!.Value.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
     }
 
     [Fact]

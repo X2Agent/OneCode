@@ -131,7 +131,7 @@ internal static class TeamConfigLoader
     public static IReadOnlyList<(string Name, string FilePath)> DiscoverUserTeams()
     {
         var teamsDir = GetTeamsDirectory();
-        var result = new List<(string, string)>();
+        List<(string, string)> result = [];
 
         if (!Directory.Exists(teamsDir))
             return result;

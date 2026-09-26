@@ -66,13 +66,12 @@ internal static partial class MarkdownRenderer
         var dashes = new string(TuiGlyphs.BorderHorizontal[0], dashCount);
 
         var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerRight}";
-        var headerSegments = new List<LineSegment>
-        {
+        List<LineSegment> headerSegments = [
             new(headerLeft, TuiPalette.Border),
             new(headerLang, TuiPalette.Accent),
             new(headerLangSep + dashes, TuiPalette.Border),
             new(headerRight, TuiPalette.Border),
-        };
+        ];
         lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
 
         // Code body lines — 超宽行按 innerWidth 硬换行成多行盒内片段，
@@ -154,7 +153,7 @@ internal static partial class MarkdownRenderer
 
     private static List<string> ExtractCodeLines(LeafBlock code)
     {
-        var result = new List<string>();
+        List<string> result = [];
         var lines = code.Lines;
         if (lines.Count == 0) return result;
 
@@ -292,13 +291,13 @@ internal static partial class MarkdownRenderer
         if (cell is not ContainerBlock container)
             return cell is LeafBlock leaf ? ExtractInlineText(leaf.Inline) : "";
 
-        var parts = new List<string>();
+        List<string> parts = [];
         foreach (var sub in container)
         {
             var text = sub switch
             {
                 ParagraphBlock para => ExtractInlineText(para.Inline),
-                LeafBlock leaf when leaf.Inline != null => ExtractInlineText(leaf.Inline),
+                LeafBlock leaf when leaf.Inline is not null => ExtractInlineText(leaf.Inline),
                 _ => "",
             };
             if (!string.IsNullOrEmpty(text))
@@ -457,7 +456,7 @@ internal static partial class MarkdownRenderer
 
     private static (bool isCheckbox, bool isChecked, string text) DetectCheckbox(ParagraphBlock? para)
     {
-        if (para?.Inline == null) return (false, false, "");
+        if (para?.Inline is null) return (false, false, "");
 
         var firstChild = para.Inline.FirstChild;
         if (firstChild is not LiteralInline literal)

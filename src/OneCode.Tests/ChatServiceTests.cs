@@ -175,6 +175,7 @@ public sealed class ChatServiceTests
                 && batches[0].IsComplete
                 && batches[0].Calls.Single().CallId == "call_cancelled_complete"
                 && batches[0].Results.Single().CallId == "call_cancelled_complete"),
+            // SUT 取消路径经 PersistCancelledRunAsync 特意用 None 持久化（落库不可再被取消），故此处匹配 None。
             CancellationToken.None);
     }
 
@@ -283,7 +284,7 @@ public sealed class ChatServiceTests
 
         // A TurnStartedEvent should be emitted for the new turn
         var turnStarts = events.OfType<TurnStartedEvent>().ToList();
-        turnStarts.Should().NotBeEmpty("turn boundary should be detected when text follows tool results");
+        turnStarts.Should().HaveCount(1, "turn boundary should be detected exactly once when text follows tool results");
     }
 
     [Fact]

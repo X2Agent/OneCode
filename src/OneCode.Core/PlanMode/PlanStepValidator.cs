@@ -1,7 +1,7 @@
 namespace OneCode.Core.PlanMode;
 
 public sealed class PlanValidationException(IReadOnlyList<string> errors)
-    : InvalidOperationException("Invalid plan steps: " + string.Join("; ", errors))
+    : InvalidOperationException($"Invalid plan steps: {string.Join("; ", errors)}")
 {
     public PlanValidationException(string error)
         : this([error])

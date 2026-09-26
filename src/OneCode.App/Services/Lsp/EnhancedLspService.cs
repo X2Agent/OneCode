@@ -4,25 +4,18 @@ using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Lsp;
 
-public sealed class EnhancedLspService : IEnhancedLspService, IAsyncDisposable
+public sealed class EnhancedLspService(
+    LspServerManager serverManager,
+    LspDiagnosticRegistry diagnosticRegistry,
+    ILogger<EnhancedLspService> logger) : IEnhancedLspService, IAsyncDisposable
 {
-    private readonly LspServerManager _serverManager;
-    private readonly LspDiagnosticRegistry _diagnosticRegistry;
-    private readonly ILogger<EnhancedLspService> _logger;
+    private readonly LspServerManager _serverManager = serverManager;
+    private readonly LspDiagnosticRegistry _diagnosticRegistry = diagnosticRegistry;
+    private readonly ILogger<EnhancedLspService> _logger = logger;
     // File sync state: tracks version numbers for open files (absent key = not opened yet)
     private readonly ConcurrentDictionary<string, int> _fileVersions = new();
     // 每个 open 文档最近一次 didChange/didOpen 的发送时刻（P2 诊断新鲜度基线）。
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastDidChangeUtc = new(StringComparer.Ordinal);
-
-    public EnhancedLspService(
-        LspServerManager serverManager,
-        LspDiagnosticRegistry diagnosticRegistry,
-        ILogger<EnhancedLspService> logger)
-    {
-        _serverManager = serverManager;
-        _diagnosticRegistry = diagnosticRegistry;
-        _logger = logger;
-    }
 
     public Task<bool> StartServerAsync(LspServerConfig config, CancellationToken ct = default) =>
         _serverManager.StartServerAsync(config, ct);

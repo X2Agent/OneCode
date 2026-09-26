@@ -190,14 +190,13 @@ public sealed partial class ChatTranscriptView : View
             ? TextWidthHelper.TruncateByWidth(firstLine, summaryBudget)
             : firstLine;
         var tag = new ErrorLineTag(text, IsExpanded: true);
-        var lines = new List<FormattedLine>
-        {
+        List<FormattedLine> lines = [
             FormattedLine.FromSegmentsWithTag(new[]
             {
                 new LineSegment($" {TuiGlyphs.Expanded} {TuiGlyphs.Failed}  ", TuiPalette.Error),
                 new LineSegment(summary, TuiPalette.Error),
             }, tag),
-        };
+        ];
 
         var maxContentWidth = Math.Max(20, contentWidth - ConversationRenderer.ContentIndent - 2);
         // 首行已完整出现在摘要中则跳过，否则从首行起展示（含单行超长错误）。
@@ -392,7 +391,7 @@ public sealed partial class ChatTranscriptView : View
         {
             _committedJournal.Add(width =>
             {
-                var lines = new List<FormattedLine> { FormattedLine.Plain("", TuiPalette.BgPrimary) };
+                List<FormattedLine> lines = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
                 lines.AddRange(renderAtWidth(width));
                 return lines;
             });

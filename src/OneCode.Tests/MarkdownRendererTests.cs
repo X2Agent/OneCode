@@ -161,7 +161,9 @@ public sealed class MarkdownRendererTests
     {
         var lines = MarkdownRenderer.Render("");
 
-        lines.Should().NotBeEmpty();
+        var line = lines.Should().ContainSingle("空/空白输入渲染为单个空白行").Subject;
+        line.Role.Should().Be(LineRole.Assistant);
+        line.Text.Should().BeEmpty();
     }
 
     [Fact]
@@ -169,7 +171,9 @@ public sealed class MarkdownRendererTests
     {
         var lines = MarkdownRenderer.Render(null!);
 
-        lines.Should().NotBeEmpty();
+        var line = lines.Should().ContainSingle("空/空白输入渲染为单个空白行").Subject;
+        line.Role.Should().Be(LineRole.Assistant);
+        line.Text.Should().BeEmpty();
     }
 
     [Fact]

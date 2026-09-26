@@ -23,14 +23,9 @@ namespace OneCode.App.Services.PlanMode;
 /// - 通过 <see cref="AIContext.Messages"/> 注入 System 消息（MAF 原生）
 /// - 通过 <see cref="IPlanModeService.IsInPlanMode"/> 判断当前是否在 Plan 模式
 /// </summary>
-public sealed class PlanModeAttachmentProvider : ModeAwareAttachmentProviderBase
+public sealed class PlanModeAttachmentProvider(IPlanModeService planMode) : ModeAwareAttachmentProviderBase
 {
-    private readonly IPlanModeService _planMode;
-
-    public PlanModeAttachmentProvider(IPlanModeService planMode)
-    {
-        _planMode = planMode;
-    }
+    private readonly IPlanModeService _planMode = planMode;
 
     protected override bool IsInMode => _planMode.IsInPlanMode;
 

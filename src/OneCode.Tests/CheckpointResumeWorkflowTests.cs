@@ -102,6 +102,12 @@ public sealed class CheckpointResumeWorkflowTests
             "resumed workflow should produce new checkpoints at superstep boundaries");
         run2.LastCheckpoint.Should().NotBeNull();
 
+        // 游标语义：resume 从 run1 最后 checkpoint 恢复，run2 初始游标继承同一 CheckpointId
+        //（检查点管理器按会话存储，恢复即续用该游标，而非新建代际）；SessionId 仍归属同一会话。
+        run2.LastCheckpoint!.SessionId.Should().Be(sessionId);
+        run2.LastCheckpoint.CheckpointId.Should().Be(lastCheckpoint.CheckpointId,
+            "resume 的初始游标必须继承 run1 最后 checkpoint，证明从正确的恢复点继续");
+
         await run2.DisposeAsync();
     }
 
@@ -131,6 +137,11 @@ public sealed class CheckpointResumeWorkflowTests
             cp.CheckpointId.Should().NotBeNullOrEmpty(
                 "every checkpoint must have a non-empty checkpoint ID");
         }
+
+        // CheckpointId 是内部生成的 GUID("N")，不编码 superstep 序号；
+        // 可断言的真实不变量是每个 superstep 的 checkpoint 游标彼此独立、不重复。
+        run.Checkpoints.Select(cp => cp.CheckpointId)
+            .Should().OnlyHaveUniqueItems("每个 superstep 产出的 checkpoint 必须是新代游标，不得复用");
 
         run.LastCheckpoint.Should().NotBeNull();
         run.LastCheckpoint!.CheckpointId.Should().NotBeNullOrEmpty();

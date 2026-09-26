@@ -83,7 +83,7 @@ public sealed partial class QuestionWizard
 
     private void RenderMultipleChoice(List<FormattedLine> lines, WizardQuestion question, int viewWidth)
     {
-        if (question.Options == null) return;
+        if (question.Options is null) return;
 
         // "  " + bullet(1) + "[✓](✓ 为 U+2713，占 2 列)" + 空格 = 8 列。
         const int prefixWidth = 8;
@@ -171,10 +171,9 @@ public sealed partial class QuestionWizard
 
     private void RenderNavigationHints(List<FormattedLine> lines, WizardQuestion question)
     {
-        var navHints = new List<LineSegment>
-        {
+        List<LineSegment> navHints = [
             new("  ", TuiPalette.BgPrimary),
-        };
+        ];
 
         if (!IsFirstQuestion && !question.IsTextType)
         {

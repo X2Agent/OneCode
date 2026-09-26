@@ -248,7 +248,7 @@ public sealed class AgentTaskWorkflowCompiler(IAgentRunner runner, ILogger<Agent
         string descendant,
         IReadOnlyDictionary<string, List<string>> dependencies)
     {
-        var pending = new Stack<string>();
+        Stack<string> pending = new();
         pending.Push(descendant);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (pending.Count > 0)

@@ -23,7 +23,7 @@ internal static partial class MarkdownRenderer
             return [new ConvLine(LineRole.Assistant, "")];
 
         var doc = Markdig.Markdown.Parse(markdown, Pipeline);
-        var lines = new List<ConvLine>();
+        List<ConvLine> lines = [];
         var effectiveWidth = viewWidth > 0 ? viewWidth : 80;
 
         foreach (var block in doc)
@@ -149,7 +149,7 @@ internal static partial class MarkdownRenderer
 
     private static void RenderLeafBlock(Block block, List<ConvLine> lines, int indent, int viewWidth)
     {
-        if (block is LeafBlock leaf && leaf.Inline != null)
+        if (block is LeafBlock leaf && leaf.Inline is not null)
         {
             var text = ExtractInlineText(leaf.Inline);
             var prefix = new string(' ', indent * 2 + 2);
@@ -162,12 +162,12 @@ internal static partial class MarkdownRenderer
 
     private static string ExtractInlineText(ContainerInline? inline)
     {
-        if (inline == null) return "";
+        if (inline is null) return "";
 
         var sb = new System.Text.StringBuilder();
         var child = inline.FirstChild;
 
-        while (child != null)
+        while (child is not null)
         {
             switch (child)
             {

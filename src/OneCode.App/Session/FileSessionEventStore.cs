@@ -52,7 +52,7 @@ public sealed class FileSessionEventStore : ISessionEventStore
                 : existing.Max(sessionEvent => sessionEvent.Sequence) + 1L;
             var sequences = new long[events.Count];
             var file = GetEventFile(sessionId);
-            var temporaryFile = file + ".tmp-" + Guid.NewGuid().ToString("N");
+            var temporaryFile = $"{file}.tmp-{Guid.NewGuid():N}";
 
             try
             {
@@ -158,7 +158,7 @@ public sealed class FileSessionEventStore : ISessionEventStore
         if (!File.Exists(file))
             return [];
 
-        var lines = new List<string>();
+        List<string> lines = [];
         await using var stream = new FileStream(
             file,
             FileMode.Open,

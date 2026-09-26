@@ -13,10 +13,10 @@ using OneCode.Infrastructure.Config;
 /// Runtime override via <see cref="SetCurrentMode"/> is intentional session-scoped state
 /// (TUI / slash-command), not a DI ambient anti-pattern.
 /// </remarks>
-public sealed class PermissionModeProvider : IPermissionModeProvider
+public sealed class PermissionModeProvider(IConfigManager config, ILogger<PermissionModeProvider>? logger = null) : IPermissionModeProvider
 {
-    private readonly IConfigManager _config;
-    private readonly ILogger<PermissionModeProvider>? _logger;
+    private readonly IConfigManager _config = config;
+    private readonly ILogger<PermissionModeProvider>? _logger = logger;
 
     // Runtime override — null means "fall back to config".
     // Guarded by a lock because Nullable<enum> cannot be marked volatile
@@ -24,12 +24,6 @@ public sealed class PermissionModeProvider : IPermissionModeProvider
     // tool-execution threads.
     private readonly object _runtimeOverrideLock = new();
     private PermissionMode? _runtimeOverride;
-
-    public PermissionModeProvider(IConfigManager config, ILogger<PermissionModeProvider>? logger = null)
-    {
-        _config = config;
-        _logger = logger;
-    }
 
     public PermissionMode CurrentMode
     {

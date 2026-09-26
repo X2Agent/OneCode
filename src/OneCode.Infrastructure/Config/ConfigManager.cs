@@ -19,16 +19,9 @@ public sealed class ConfigManager : IConfigManager, IDisposable
     private FileSystemWatcher? _projectWatcher;
     private DateTime _lastReloadTime;
 
-    public ConfigManager() : this(GetDefaultConfigDir(), projectConfigDir: null)
+    public ConfigManager(string? configDir = null, string? projectConfigDir = null)
     {
-    }
-
-    public ConfigManager(string configDir) : this(configDir, projectConfigDir: null)
-    {
-    }
-
-    public ConfigManager(string configDir, string? projectConfigDir)
-    {
+        configDir ??= GetDefaultConfigDir();
         ArgumentException.ThrowIfNullOrWhiteSpace(configDir);
         _configDir = configDir;
         _projectConfigDir = string.IsNullOrWhiteSpace(projectConfigDir) ? null : projectConfigDir;

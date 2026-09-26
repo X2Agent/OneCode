@@ -21,24 +21,16 @@ namespace OneCode.App.Services.Agent;
 /// profile always yields the same provider order, so injection order stays predictable.
 /// </para>
 /// </remarks>
-public sealed class SharedContextProviderBuilder
+public sealed class SharedContextProviderBuilder(
+    ILoggerFactory loggerFactory,
+    SkillProviderFactory skillProviderFactory,
+    AgentMemoryDependencies memory,
+    AgentRuntimeContextDependencies runtime)
 {
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly SkillProviderFactory _skillProviderFactory;
-    private readonly AgentMemoryDependencies _memory;
-    private readonly AgentRuntimeContextDependencies _runtime;
-
-    public SharedContextProviderBuilder(
-        ILoggerFactory loggerFactory,
-        SkillProviderFactory skillProviderFactory,
-        AgentMemoryDependencies memory,
-        AgentRuntimeContextDependencies runtime)
-    {
-        _loggerFactory = loggerFactory;
-        _skillProviderFactory = skillProviderFactory;
-        _memory = memory;
-        _runtime = runtime;
-    }
+    private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    private readonly SkillProviderFactory _skillProviderFactory = skillProviderFactory;
+    private readonly AgentMemoryDependencies _memory = memory;
+    private readonly AgentRuntimeContextDependencies _runtime = runtime;
 
     /// <summary>Builds the shared ContextProvider list for <paramref name="profile"/>.</summary>
     /// <remarks>
@@ -51,7 +43,7 @@ public sealed class SharedContextProviderBuilder
         AgentContextProviderOptions options)
     {
         var behavior = PipelineProfileBehavior.For(profile);
-        var providers = new List<AIContextProvider>();
+        List<AIContextProvider> providers = [];
         var cwd = options.WorkingDirectory;
 
         foreach (var capability in Enum.GetValues<AgentCapability>())

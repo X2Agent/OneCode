@@ -10,13 +10,18 @@ using OneCode.Core.Keybindings;
 /// 上下文分发（解析时并入，无 push/pop 生命周期）；独立构造（工具层/测试）时
 /// 回退到默认绑定，行为一致。用户可通过 keybindings.json 重映射 selector:*。
 /// </summary>
-public sealed class InlineSelector
+public sealed class InlineSelector(
+    string title,
+    IReadOnlyList<InlineSelectorOption> options,
+    int defaultIndex = 0,
+    string? prompt = null,
+    bool useInformationRequestCard = false)
 {
-    private readonly string _title;
-    private readonly IReadOnlyList<InlineSelectorOption> _options;
-    private readonly string? _prompt;
-    private readonly bool _useInformationRequestCard;
-    private int _selectedIndex;
+    private readonly string _title = title;
+    private readonly IReadOnlyList<InlineSelectorOption> _options = options;
+    private readonly string? _prompt = prompt;
+    private readonly bool _useInformationRequestCard = useInformationRequestCard;
+    private int _selectedIndex = Math.Clamp(defaultIndex, 0, options.Count - 1);
     private readonly TaskCompletionSource<InlineSelectorResult> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     // 独立构造（无宿主注入）时的回退键位系统：默认绑定 + 空活跃上下文。
@@ -30,20 +35,6 @@ public sealed class InlineSelector
         var resolver = new KeybindingResolver();
         resolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
         return resolver;
-    }
-
-    public InlineSelector(
-        string title,
-        IReadOnlyList<InlineSelectorOption> options,
-        int defaultIndex = 0,
-        string? prompt = null,
-        bool useInformationRequestCard = false)
-    {
-        _title = title;
-        _options = options;
-        _prompt = prompt;
-        _useInformationRequestCard = useInformationRequestCard;
-        _selectedIndex = Math.Clamp(defaultIndex, 0, options.Count - 1);
     }
 
     /// <summary>
@@ -140,12 +131,11 @@ public sealed class InlineSelector
                     d, Math.Max(1, rowBudget - TextWidthHelper.GetDisplayWidth(label) - 4));
             }
 
-            var segs = new List<LineSegment>
-            {
+            List<LineSegment> segs = [
                 new("  ", TuiPalette.BgPrimary),
                 new($"{bullet} ", isSelected ? TuiPalette.Accent : TuiPalette.FgMuted),
                 new(label, labelColor),
-            };
+            ];
 
             if (desc is { Length: > 0 })
                 segs.Add(new($"  {desc}", TuiPalette.FgMuted));
@@ -172,15 +162,14 @@ public sealed class InlineSelector
 
     private static List<FormattedLine> RenderStandardHeader(string title, string? prompt, int viewWidth)
     {
-        var lines = new List<FormattedLine>
-        {
+        List<FormattedLine> lines = [
             FormattedLine.Plain("", TuiPalette.BgPrimary),
             FormattedLine.FromSegments(new[]
             {
                 new LineSegment("  ", TuiPalette.BgPrimary),
                 new LineSegment(title, TuiPalette.Warning),
             }),
-        };
+        ];
         if (!string.IsNullOrWhiteSpace(prompt))
         {
             var available = Math.Max(8, viewWidth - 2);

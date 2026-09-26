@@ -8,21 +8,14 @@ namespace OneCode.Infrastructure.Mcp;
 /// - <see cref="_promptFunc"/>：控制台输入函数；缺失时返回 <c>defaultYes</c> 默认响应
 /// - <see cref="_openBrowserFunc"/>：浏览器打开函数；缺失时记录 warning 并跳过
 /// </remarks>
-public sealed class McpElicitationHandler
+public sealed class McpElicitationHandler(
+    ILogger<McpElicitationHandler> logger,
+    Func<string, CancellationToken, Task<string?>>? promptFunc = null,
+    Func<string, Task>? openBrowserFunc = null)
 {
-    private readonly ILogger<McpElicitationHandler> _logger;
-    private readonly Func<string, CancellationToken, Task<string?>>? _promptFunc;
-    private readonly Func<string, Task>? _openBrowserFunc;
-
-    public McpElicitationHandler(
-        ILogger<McpElicitationHandler> logger,
-        Func<string, CancellationToken, Task<string?>>? promptFunc = null,
-        Func<string, Task>? openBrowserFunc = null)
-    {
-        _logger = logger;
-        _promptFunc = promptFunc;
-        _openBrowserFunc = openBrowserFunc;
-    }
+    private readonly ILogger<McpElicitationHandler> _logger = logger;
+    private readonly Func<string, CancellationToken, Task<string?>>? _promptFunc = promptFunc;
+    private readonly Func<string, Task>? _openBrowserFunc = openBrowserFunc;
 
     public async Task<ElicitationResponse> HandleElicitationAsync(
         McpElicitationPrompt request,

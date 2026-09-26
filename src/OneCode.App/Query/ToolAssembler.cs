@@ -7,27 +7,18 @@ namespace OneCode.App.Query;
 /// <summary>
 /// Tool assembly / config resolution / unknown-tool fallback for <see cref="QueryStreamEngine"/>.
 /// </summary>
-internal sealed class ToolAssembler
+internal sealed class ToolAssembler(
+    IToolCatalog toolCatalog,
+    IConfigManager configManager,
+    ISessionToolSetManager sessionToolSetManager,
+    IToolCapabilityResolver toolCapabilityResolver,
+    ILogger logger)
 {
-    private readonly IToolCatalog _toolCatalog;
-    private readonly IConfigManager _configManager;
-    private readonly ISessionToolSetManager _sessionToolSetManager;
-    private readonly IToolCapabilityResolver _toolCapabilityResolver;
-    private readonly ILogger _logger;
-
-    public ToolAssembler(
-        IToolCatalog toolCatalog,
-        IConfigManager configManager,
-        ISessionToolSetManager sessionToolSetManager,
-        IToolCapabilityResolver toolCapabilityResolver,
-        ILogger logger)
-    {
-        _toolCatalog = toolCatalog;
-        _configManager = configManager;
-        _sessionToolSetManager = sessionToolSetManager;
-        _toolCapabilityResolver = toolCapabilityResolver;
-        _logger = logger;
-    }
+    private readonly IToolCatalog _toolCatalog = toolCatalog;
+    private readonly IConfigManager _configManager = configManager;
+    private readonly ISessionToolSetManager _sessionToolSetManager = sessionToolSetManager;
+    private readonly IToolCapabilityResolver _toolCapabilityResolver = toolCapabilityResolver;
+    private readonly ILogger _logger = logger;
 
     /// <summary>
     /// 链路三：未知工具兜底。本地小模型经常凭名字 hallucinate 调用工具，

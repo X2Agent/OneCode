@@ -5,23 +5,17 @@ namespace OneCode.Automation.ModelCatalog;
 /// <summary>
 /// 后台服务：启动时同步加载磁盘缓存，定期检查并刷新 models.dev 快照。
 /// </summary>
-public sealed class ModelCatalogRefreshService : BackgroundService
+public sealed class ModelCatalogRefreshService(
+    IModelCatalogCache cache,
+    IModelCatalog catalog,
+    ILogger<ModelCatalogRefreshService>? logger = null) : BackgroundService
 {
     private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
-    private readonly IModelCatalogCache _cache;
-    private readonly IModelCatalog _catalog;
-    private readonly ILogger<ModelCatalogRefreshService> _logger;
-
-    public ModelCatalogRefreshService(
-        IModelCatalogCache cache,
-        IModelCatalog catalog,
-        ILogger<ModelCatalogRefreshService>? logger = null)
-    {
-        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ModelCatalogRefreshService>.Instance;
-    }
+    private readonly IModelCatalogCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+    private readonly IModelCatalog _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+    private readonly ILogger<ModelCatalogRefreshService> _logger =
+        logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ModelCatalogRefreshService>.Instance;
 
     public override Task StartAsync(CancellationToken cancellationToken)
     {

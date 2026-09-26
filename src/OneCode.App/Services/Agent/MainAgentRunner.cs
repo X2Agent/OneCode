@@ -10,49 +10,33 @@ namespace OneCode.App.Services.Agent;
 /// MAF-based main agent runner（主查询循环）。
 /// 约束：不能在根 IChatClient 单例级别应用 AIContextProviders（见 ServiceCollectionExtensions.cs）。
 /// </summary>
-public partial class MainAgentRunner : IMainAgentRunner
+public partial class MainAgentRunner(
+    AgentContextPipeline contextPipeline,
+    AgentPipelineAssembly pipelineAssembly,
+    CompactionStrategyFactory compactionBuilder,
+    AgentSessionPersistence sessionStore,
+    IChatClient chatClient,
+    ILoggerFactory loggerFactory,
+    IServiceProvider serviceProvider,
+    Core.Tools.ToolMetadataRegistry toolMetadata,
+    IToolProtocolValidator? toolProtocolValidator = null,
+    IVerificationProvider? verificationProvider = null,
+    TodoProjectionService? todoProjection = null) : IMainAgentRunner
 {
     // IServiceProvider 仅用于传递给 MAF 的 ChatClientAgentBuildOptions.ServiceProvider
     // （MAF 框架要求），不得用于业务逻辑中的 GetService<T>() 调用。
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly ILogger<MainAgentRunner> _logger;
-    private readonly IChatClient _chatClient;
-    private readonly Core.Tools.ToolMetadataRegistry _toolMetadata;
-    private readonly AgentContextPipeline _contextPipeline;
-    private readonly AgentPipelineAssembly _pipelineAssembly;
-    private readonly CompactionStrategyFactory _compactionBuilder;
-    private readonly AgentSessionPersistence _sessionStore;
-    private readonly IToolProtocolValidator _toolProtocolValidator;
-    private readonly IVerificationProvider? _verificationProvider;
-    private readonly TodoProjectionService? _todoProjection;
-
-    public MainAgentRunner(
-        AgentContextPipeline contextPipeline,
-        AgentPipelineAssembly pipelineAssembly,
-        CompactionStrategyFactory compactionBuilder,
-        AgentSessionPersistence sessionStore,
-        IChatClient chatClient,
-        ILoggerFactory loggerFactory,
-        IServiceProvider serviceProvider,
-        Core.Tools.ToolMetadataRegistry toolMetadata,
-        IToolProtocolValidator? toolProtocolValidator = null,
-        IVerificationProvider? verificationProvider = null,
-        TodoProjectionService? todoProjection = null)
-    {
-        _contextPipeline = contextPipeline;
-        _pipelineAssembly = pipelineAssembly;
-        _compactionBuilder = compactionBuilder;
-        _sessionStore = sessionStore;
-        _chatClient = chatClient;
-        _loggerFactory = loggerFactory;
-        _serviceProvider = serviceProvider;
-        _logger = loggerFactory.CreateLogger<MainAgentRunner>();
-        _toolMetadata = toolMetadata;
-        _toolProtocolValidator = toolProtocolValidator ?? new ToolProtocolValidator();
-        _verificationProvider = verificationProvider;
-        _todoProjection = todoProjection;
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    private readonly ILogger<MainAgentRunner> _logger = loggerFactory.CreateLogger<MainAgentRunner>();
+    private readonly IChatClient _chatClient = chatClient;
+    private readonly Core.Tools.ToolMetadataRegistry _toolMetadata = toolMetadata;
+    private readonly AgentContextPipeline _contextPipeline = contextPipeline;
+    private readonly AgentPipelineAssembly _pipelineAssembly = pipelineAssembly;
+    private readonly CompactionStrategyFactory _compactionBuilder = compactionBuilder;
+    private readonly AgentSessionPersistence _sessionStore = sessionStore;
+    private readonly IToolProtocolValidator _toolProtocolValidator = toolProtocolValidator ?? new ToolProtocolValidator();
+    private readonly IVerificationProvider? _verificationProvider = verificationProvider;
+    private readonly TodoProjectionService? _todoProjection = todoProjection;
 
     /// <summary>
     /// 构建已装配全部中间件的 <see cref="AIAgent"/>，供外部编排器（如 Goal 模式的 LoopAgent）包装使用。
@@ -181,7 +165,7 @@ public partial class MainAgentRunner : IMainAgentRunner
 
             while (true)
             {
-                var approvalRequests = new List<ToolApprovalRequestContent>();
+                List<ToolApprovalRequestContent> approvalRequests = [];
 
                 await foreach (var evt in builtAgent.RunStreamingAsync(
                     currentMessages, session, new AgentRunOptions(), ct).ConfigureAwait(false))

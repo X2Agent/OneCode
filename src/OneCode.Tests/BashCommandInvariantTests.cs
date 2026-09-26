@@ -40,7 +40,7 @@ public sealed class BashCommandInvariantTests
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = await sut.CheckAsync("Bash", parameters, CancellationToken.None);
+        var result = await sut.CheckAsync("Bash", parameters, TestContext.Current.CancellationToken);
 
         result.Allowed.Should().BeFalse(
             $"command '{command}' should be blocked by pattern '{expectedPatternName}'");
@@ -59,7 +59,7 @@ public sealed class BashCommandInvariantTests
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = await sut.CheckAsync("Bash", parameters, CancellationToken.None);
+        var result = await sut.CheckAsync("Bash", parameters, TestContext.Current.CancellationToken);
 
         result.Allowed.Should().BeTrue(
             $"command '{command}' should not match any Layer0HardDeny pattern");

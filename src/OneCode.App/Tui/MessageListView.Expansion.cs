@@ -175,7 +175,7 @@ public sealed partial class MessageListView
             _lines.RemoveRange(lineIdx + 1, existing);
 
         var maxContentWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
-        var details = new List<LineEntry>();
+        List<LineEntry> details = [];
         foreach (var line in expanded.Content
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Split('\n'))
@@ -231,7 +231,7 @@ public sealed partial class MessageListView
                 entry.Bg, expanded);
 
             var maxContentWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
-            var details = new List<LineEntry>();
+            List<LineEntry> details = [];
             var contentLines = expanded.Content
                 .Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
             // Skip the first line — already shown (possibly truncated) in the summary.

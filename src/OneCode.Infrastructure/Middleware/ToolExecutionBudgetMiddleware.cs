@@ -6,21 +6,15 @@ namespace OneCode.Infrastructure.Middleware;
 /// MAF Agent Middleware: limits tool result sizes to prevent token blow-up.
 /// Truncates large string results (> maxResultChars) with a warning.
 /// </summary>
-public sealed class ToolExecutionBudgetMiddleware
+public sealed class ToolExecutionBudgetMiddleware(
+    int maxResultChars = 150_000,
+    ILogger<ToolExecutionBudgetMiddleware>? logger = null)
 {
     /// <summary>Default character budget for a single tool result.</summary>
     public const int DefaultMaxResultChars = 150_000;
 
-    private readonly int _maxResultChars;
-    private readonly ILogger<ToolExecutionBudgetMiddleware>? _logger;
-
-    public ToolExecutionBudgetMiddleware(
-        int maxResultChars = DefaultMaxResultChars,
-        ILogger<ToolExecutionBudgetMiddleware>? logger = null)
-    {
-        _maxResultChars = maxResultChars;
-        _logger = logger;
-    }
+    private readonly int _maxResultChars = maxResultChars;
+    private readonly ILogger<ToolExecutionBudgetMiddleware>? _logger = logger;
 
     public Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,

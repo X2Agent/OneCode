@@ -127,8 +127,7 @@ public sealed class ApprovalBroker : IApprovalBroker
     {
         try
         {
-            var decision = await _request(request, ct).ConfigureAwait(false);
-            return decision;
+            return await _request(request, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

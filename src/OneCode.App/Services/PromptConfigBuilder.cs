@@ -76,10 +76,8 @@ public sealed class PromptConfigBuilder(
         var isFiltered = ModelCapabilities.RequiresToolFiltering(provider, contextWindow);
         var availableTools = isFiltered ? BuildAvailableToolsList() : string.Empty;
 
-        var systemPrompt = await BuildDefaultPromptContentAsync(
+        return await BuildDefaultPromptContentAsync(
             systemContext, userContext, memorySection, availableTools, ct).ConfigureAwait(false);
-
-        return systemPrompt;
     }
 
     /// <summary>

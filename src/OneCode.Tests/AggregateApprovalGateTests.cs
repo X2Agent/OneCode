@@ -53,6 +53,8 @@ public sealed class AggregateApprovalGateTests : IDisposable
         var restored = await sut.GetAsync(sessionId, TestContext.Current.CancellationToken);
         restored!.State.Should().Be(PlanWorkflowState.StartingExecution);
         restored!.ApprovedSnapshot.Should().NotBeNull();
+        // 快照内容必须与发布工作流携带的权威快照等价（持久化往返不失真）
+        restored!.ApprovedSnapshot.Should().BeEquivalentTo(outcome.Workflow.ApprovedSnapshot);
     }
 
     [Fact]

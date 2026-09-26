@@ -89,7 +89,7 @@ internal sealed class TeamAgentFactory(
         // MaxTurns 语义：TeamConfig.MaxTurns = 外层轮数；pipelineMaxToolCallsPerMember = 每 Agent 内部工具调用上限。
         const int pipelineMaxToolCallsPerMember = 50;
 
-        var contextProviders = new List<AIContextProvider>();
+        List<AIContextProvider> contextProviders = [];
         contextProviders.AddRange(pipelineDeps.ContextPipeline.BuildShared(
             PipelineProfile.TeamMember,
             new AgentContextProviderOptions { WorkingDirectory = cwd }));
@@ -198,18 +198,11 @@ internal sealed class TeamAgentFactory(
     /// TEAM 诊断装饰器：记录每次 LLM 调用的进入/退出与响应文本长度。
     /// 用于区分「模型从未被调用」与「调用返回空响应」两类静默失败（turns=0 问题定位）。
     /// </summary>
-    public sealed class DiagnosticsChatClient : IChatClient
+    public sealed class DiagnosticsChatClient(IChatClient inner, string agentId, ILogger<TeamAgentFactory> logger) : IChatClient
     {
-        private readonly IChatClient _inner;
-        private readonly string _agentId;
-        private readonly ILogger<TeamAgentFactory> _logger;
-
-        public DiagnosticsChatClient(IChatClient inner, string agentId, ILogger<TeamAgentFactory> logger)
-        {
-            _inner = inner;
-            _agentId = agentId;
-            _logger = logger;
-        }
+        private readonly IChatClient _inner = inner;
+        private readonly string _agentId = agentId;
+        private readonly ILogger<TeamAgentFactory> _logger = logger;
 
         public async Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)

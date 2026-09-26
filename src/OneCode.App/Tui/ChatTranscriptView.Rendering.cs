@@ -49,10 +49,9 @@ public sealed partial class ChatTranscriptView
     {
         if (_stream.ThinkingSummaryLineIndex < 0) return;
 
-        ReplaceThinkingSpan(new List<FormattedLine>
-        {
+        ReplaceThinkingSpan([
             BuildThinkingSummary("Thinking", isExpanded: true),
-        });
+        ]);
     }
 
     /// <summary>
@@ -65,10 +64,9 @@ public sealed partial class ChatTranscriptView
         if (!_stream.HasThinking || _stream.ThinkingSummaryLineIndex < 0) return;
 
         var durationStr = StreamingToolTracker.FormatDuration(_stream.ThinkingStartTick);
-        ReplaceThinkingSpan(new List<FormattedLine>
-        {
+        ReplaceThinkingSpan([
             BuildThinkingSummary($"Thought for {durationStr}"),
-        });
+        ]);
     }
 
     /// <summary>
@@ -209,14 +207,13 @@ public sealed partial class ChatTranscriptView
         AppendCommittedBlock(width =>
         {
             var available = Math.Max(10, width - ConversationRenderer.ContentIndent - 2);
-            var lines = new List<FormattedLine>
-            {
+            List<FormattedLine> lines = [
                 FormattedLine.FromSegments(new[]
                 {
                     new LineSegment($"{ConversationRenderer.Indent}", TuiPalette.BgPrimary),
                     new LineSegment($"{TuiGlyphs.Collapsed} {agentName}", TuiPalette.FgMuted),
                 }),
-            };
+            ];
             foreach (var line in speechLines.Take(PreviewLineCount))
                 foreach (var wrapped in ConversationRenderer.WordWrapStreaming(line, available))
                     lines.Add(FormattedLine.Plain(

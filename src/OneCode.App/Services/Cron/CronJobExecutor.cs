@@ -21,36 +21,25 @@ namespace OneCode.App.Services.Cron;
 /// Serialised by <see cref="_gate"/> so a cron-triggered run never overlaps the TUI main
 /// loop's run on the same <see cref="SessionManager.ForegroundConversation"/>.
 /// </remarks>
-public sealed class CronJobExecutor : ICronJobExecutor
+public sealed class CronJobExecutor(
+    ILogger<CronJobExecutor> logger,
+    IConversationRunner runner,
+    ISessionManager sessionManager,
+    PromptConfigBuilder promptConfigBuilder,
+    McpStartupPreconnector preconnector,
+    IConfigManager configManager,
+    IModelManager modelManager) : ICronJobExecutor
 {
-    private readonly ILogger<CronJobExecutor> _logger;
-    private readonly IConversationRunner _runner;
-    private readonly ISessionManager _sessionManager;
-    private readonly PromptConfigBuilder _promptConfigBuilder;
-    private readonly McpStartupPreconnector _preconnector;
-    private readonly IConfigManager _configManager;
-    private readonly IModelManager _modelManager;
+    private readonly ILogger<CronJobExecutor> _logger = logger;
+    private readonly IConversationRunner _runner = runner;
+    private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly PromptConfigBuilder _promptConfigBuilder = promptConfigBuilder;
+    private readonly McpStartupPreconnector _preconnector = preconnector;
+    private readonly IConfigManager _configManager = configManager;
+    private readonly IModelManager _modelManager = modelManager;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _cachedSystemPrompt;
     private string? _cachedHarnessPrompt;
-
-    public CronJobExecutor(
-        ILogger<CronJobExecutor> logger,
-        IConversationRunner runner,
-        ISessionManager sessionManager,
-        PromptConfigBuilder promptConfigBuilder,
-        McpStartupPreconnector preconnector,
-        IConfigManager configManager,
-        IModelManager modelManager)
-    {
-        _logger = logger;
-        _runner = runner;
-        _sessionManager = sessionManager;
-        _promptConfigBuilder = promptConfigBuilder;
-        _preconnector = preconnector;
-        _configManager = configManager;
-        _modelManager = modelManager;
-    }
 
     /// <inheritdoc />
     public async Task ExecuteJobAsync(string prompt, CancellationToken ct)

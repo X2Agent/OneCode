@@ -102,7 +102,7 @@ internal sealed partial class PendingAttachmentRegistry
 
     private static HashSet<int> CollectIds(string text, Regex regex)
     {
-        var ids = new HashSet<int>();
+        HashSet<int> ids = [];
         foreach (Match m in regex.Matches(text))
         {
             if (int.TryParse(m.Groups["id"].Value, out var id))

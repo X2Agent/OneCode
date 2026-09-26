@@ -186,9 +186,7 @@ public sealed class InstallCommand(IGitHelper gitHelper) : Command
         // SCP-style: git@github.com:user/repo.git
         if (source.Contains('@') && source.Contains(':'))
             return true;
-        if (source.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return false;
+        return source.EndsWith(".git", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

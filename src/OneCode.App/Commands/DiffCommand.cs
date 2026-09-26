@@ -16,7 +16,7 @@ public sealed class DiffCommand(IGitHelper gitHelper) : Command
 
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
-        var diffArgs = new List<string> { "diff" };
+        List<string> diffArgs = [ "diff" ];
         if (args.Contains("--staged")) diffArgs.Add("--staged");
 
         var filePaths = args.Where(a => a != "--staged" && !a.StartsWith('-')).ToArray();

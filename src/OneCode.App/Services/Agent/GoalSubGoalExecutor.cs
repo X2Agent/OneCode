@@ -74,7 +74,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         ArgumentNullException.ThrowIfNull(eventWriter);
         try
         {
-            var toolExecutions = new List<GoalToolExecutionEvidence>();
+            List<GoalToolExecutionEvidence> toolExecutions = [];
             var userPrompt = await BuildSubGoalPromptAsync(goal, ct).ConfigureAwait(false);
             var runOptions = await BuildSubGoalRunOptionsAsync(
                 goal,

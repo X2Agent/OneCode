@@ -19,17 +19,8 @@ public static class KeybindingSchema
         var contexts = KeybindingDefaults.AllContexts;
         var actions = KeybindingDefaults.AllActions;
 
-        var contextEnum = new List<object>();
-        foreach (var ctx in contexts)
-        {
-            contextEnum.Add(ctx);
-        }
-
-        var actionEnum = new List<object>();
-        foreach (var action in actions)
-        {
-            actionEnum.Add(action);
-        }
+        List<object> contextEnum = [.. contexts];
+        List<object> actionEnum = [.. actions];
 
         var schema = new Dictionary<string, object>
         {

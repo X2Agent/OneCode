@@ -9,22 +9,18 @@ namespace OneCode.Infrastructure.Mcp;
 /// MCP client wrapper using the official ModelContextProtocol SDK.
 /// Supports stdio, SSE, and HTTP (Streamable) transports.
 /// </summary>
-public sealed class McpClient : IMcpClient
+public sealed class McpClient(
+    ILogger<McpClient> logger,
+    McpElicitationHandler? elicitationHandler = null) : IMcpClient
 {
-    private readonly ILogger<McpClient> _logger;
-    private readonly McpElicitationHandler? _elicitationHandler;
+    private readonly ILogger<McpClient> _logger = logger;
+    private readonly McpElicitationHandler? _elicitationHandler = elicitationHandler;
     private global::ModelContextProtocol.Client.McpClient? _client;
     private IClientTransport? _transport;
     private bool _disposed;
 
     /// <summary>底层 MCP SDK 客户端，供 MAF <c>ListAgentToolsWithTaskSupportAsync</c> 等扩展使用。</summary>
     public global::ModelContextProtocol.Client.McpClient? SdkClient => _client;
-
-    public McpClient(ILogger<McpClient> logger, McpElicitationHandler? elicitationHandler = null)
-    {
-        _logger = logger;
-        _elicitationHandler = elicitationHandler;
-    }
 
     // stdio transport
 
@@ -121,7 +117,7 @@ public sealed class McpClient : IMcpClient
     /// </summary>
     public async Task<IReadOnlyList<McpTool>> ListToolsAsync(CancellationToken ct = default)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Not connected to an MCP server");
 
         var tools = await _client.ListToolsAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -156,7 +152,7 @@ public sealed class McpClient : IMcpClient
         Dictionary<string, object?>? arguments = null,
         CancellationToken ct = default)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Not connected to an MCP server");
 
         _logger.LogDebug("Calling MCP tool: {Name}", name);
@@ -175,7 +171,7 @@ public sealed class McpClient : IMcpClient
     /// </summary>
     public async Task<IReadOnlyList<McpResource>> ListResourcesAsync(CancellationToken ct = default)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Not connected to an MCP server");
 
         var resources = await _client.ListResourcesAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -187,7 +183,7 @@ public sealed class McpClient : IMcpClient
     /// </summary>
     public async Task<string> ReadResourceAsync(string uri, CancellationToken ct = default)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Not connected to an MCP server");
 
         var result = await _client.ReadResourceAsync(uri, cancellationToken: ct).ConfigureAwait(false);
@@ -202,7 +198,7 @@ public sealed class McpClient : IMcpClient
     /// <summary>
     /// Check if connected to a server.
     /// </summary>
-    public bool IsConnected => _client != null;
+    public bool IsConnected => _client is not null;
 
     // Implementation details
 
@@ -217,19 +213,19 @@ public sealed class McpClient : IMcpClient
             }
         };
 
-        if (_elicitationHandler != null)
+        if (_elicitationHandler is not null)
         {
             options.Handlers = new McpClientHandlers
             {
                 ElicitationHandler = async (requestParams, token) =>
                 {
-                    if (requestParams == null)
+                    if (requestParams is null)
                         return new ElicitResult { Action = "cancel" };
 
                     var elicitationRequest = new McpElicitationPrompt(
                         ServerName: _transport?.Name ?? "unknown",
                         Message: requestParams.Message,
-                        Schema: requestParams.RequestedSchema != null
+                        Schema: requestParams.RequestedSchema is not null
                             ? JsonSerializer.Serialize(requestParams.RequestedSchema)
                             : null,
                         Url: requestParams.Url);
@@ -247,15 +243,17 @@ public sealed class McpClient : IMcpClient
                         }
                     };
 
-                    if (response.Data != null)
+                    if (response.Data is not null)
                     {
                         try
                         {
                             var contentDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(response.Data);
-                            if (contentDict != null)
+                            if (contentDict is not null)
                                 sdkResult.Content = contentDict;
                         }
-                        catch
+                        // 兜底意图：Data 不是字符串→JsonElement 字典时整体序列化为单值，
+                        // 保证 elicitation 响应内容不丢失（而非丢弃或向服务端报错）。
+                        catch (Exception)
                         {
                             sdkResult.Content = new Dictionary<string, JsonElement>
                             {
@@ -277,7 +275,7 @@ public sealed class McpClient : IMcpClient
 
     private void LogConnectionInfo()
     {
-        if (_client?.ServerInfo != null)
+        if (_client?.ServerInfo is not null)
         {
             _logger.LogInformation("Connected to MCP server: {Name} v{Version}",
                 _client.ServerInfo.Name, _client.ServerInfo.Version);
@@ -293,7 +291,7 @@ public sealed class McpClient : IMcpClient
 
         try
         {
-            if (_client != null)
+            if (_client is not null)
             {
                 await _client.DisposeAsync().ConfigureAwait(false);
             }

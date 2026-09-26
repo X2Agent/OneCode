@@ -213,7 +213,7 @@ public sealed class SessionManager : ISessionManager
         if (conversation is null)
             return;
 
-        var contentBlocks = new List<ContentBlock>();
+        List<ContentBlock> contentBlocks = [];
         if (toolCalls is { Count: > 0 })
             contentBlocks.AddRange(toolCalls);
         if (!string.IsNullOrWhiteSpace(content))
@@ -267,7 +267,7 @@ public sealed class SessionManager : ISessionManager
             if (conversation is null)
                 return;
 
-            var appended = new List<Message>();
+            List<Message> appended = [];
             foreach (var batch in batches)
             {
                 var batchMessageId = ToolBatchMessageId(batch.BatchId);
@@ -363,7 +363,7 @@ public sealed class SessionManager : ISessionManager
         }
 
         var conversation = await _store.LoadAsync(id.Value, ct);
-        if (conversation == null)
+        if (conversation is null)
         {
             _logger.LogWarning("Conversation not found: {ConversationId}", conversationId);
             return null;
@@ -409,7 +409,7 @@ public sealed class SessionManager : ISessionManager
     /// </summary>
     public async Task SaveAsync(CancellationToken ct = default)
     {
-        if (ForegroundConversation == null)
+        if (ForegroundConversation is null)
             return;
 
         ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
@@ -425,7 +425,7 @@ public sealed class SessionManager : ISessionManager
     /// <summary>关闭前台会话；<paramref name="reason"/> 仅供日志与产品状态使用。</summary>
     public async Task CloseAsync(string reason, CancellationToken ct = default)
     {
-        if (ForegroundConversation == null)
+        if (ForegroundConversation is null)
             return;
 
         var sessionId = ForegroundConversation.Id;
@@ -492,7 +492,7 @@ public sealed class SessionManager : ISessionManager
             ?? throw new ArgumentException($"Invalid conversation ID: {conversationId}");
 
         var conversation = await _store.LoadAsync(id, ct);
-        if (conversation == null)
+        if (conversation is null)
             throw new InvalidOperationException($"Conversation not found: {conversationId}");
 
         _logger.LogInformation(
@@ -610,7 +610,7 @@ public sealed class SessionManager : ISessionManager
     /// </summary>
     public async Task PersistTranscriptAsync(CancellationToken ct = default)
     {
-        if (ForegroundConversation == null) return;
+        if (ForegroundConversation is null) return;
 
         ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
         await PersistAsync(ForegroundConversation, ct);

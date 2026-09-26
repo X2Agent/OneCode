@@ -22,33 +22,22 @@ namespace OneCode.App.Tools;
 /// unavailable, uninitialized, or returns no results, the tool transparently
 /// falls back to a word-boundary text search via <see cref="ITextSearchService"/>.
 /// </summary>
-public sealed class FindReferencesTool
+public sealed class FindReferencesTool(
+    ITextSearchService textSearch,
+    IFileSystem fileSystem,
+    IWorkingDirectoryAccessor wd,
+    ILspServerManager serverManager,
+    LanguagePackRegistry packRegistry,
+    ICodeIndexService indexService,
+    ILogger<FindReferencesTool>? logger = null)
 {
-    private readonly ITextSearchService _textSearch;
-    private readonly IFileSystem _fileSystem;
-    private readonly IWorkingDirectoryAccessor _wd;
-    private readonly ILspServerManager _serverManager;
-    private readonly LanguagePackRegistry _packRegistry;
-    private readonly ICodeIndexService _indexService;
-    private readonly ILogger<FindReferencesTool> _logger;
-
-    public FindReferencesTool(
-        ITextSearchService textSearch,
-        IFileSystem fileSystem,
-        IWorkingDirectoryAccessor wd,
-        ILspServerManager serverManager,
-        LanguagePackRegistry packRegistry,
-        ICodeIndexService indexService,
-        ILogger<FindReferencesTool>? logger = null)
-    {
-        _textSearch = textSearch;
-        _fileSystem = fileSystem;
-        _wd = wd;
-        _serverManager = serverManager;
-        _packRegistry = packRegistry;
-        _indexService = indexService;
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FindReferencesTool>.Instance;
-    }
+    private readonly ITextSearchService _textSearch = textSearch;
+    private readonly IFileSystem _fileSystem = fileSystem;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
+    private readonly ILspServerManager _serverManager = serverManager;
+    private readonly LanguagePackRegistry _packRegistry = packRegistry;
+    private readonly ICodeIndexService _indexService = indexService;
+    private readonly ILogger<FindReferencesTool> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FindReferencesTool>.Instance;
 
     [Description("Find all usages/references of a symbol across the codebase. Uses LSP textDocument/references when available for semantic accuracy, falling back to ripgrep word-boundary search otherwise.")]
     public async Task<ToolResult> FindAsync(
@@ -211,7 +200,7 @@ public sealed class FindReferencesTool
     private async Task<List<LspReferenceLocation>> ParseLocationArrayAsync(
         JsonElement el, string searchPath, CancellationToken ct)
     {
-        var result = new List<LspReferenceLocation>();
+        List<LspReferenceLocation> result = [];
 
         IEnumerable<JsonElement> elements = el.ValueKind == JsonValueKind.Array
             ? el.EnumerateArray().Select(e => e)

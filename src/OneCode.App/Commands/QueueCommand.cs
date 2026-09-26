@@ -58,7 +58,7 @@ public sealed class QueueCommand(InputQueue inputQueue) : Command
         if (items.Count == 0)
             return CommandResult.Text("Queue is empty.");
 
-        var lines = new List<string> { $"Input queue ({items.Count}):" };
+        List<string> lines = [ $"Input queue ({items.Count}):" ];
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];

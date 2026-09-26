@@ -22,21 +22,14 @@ namespace OneCode.Infrastructure.Middleware;
 /// 此外处理可恢复错误（overloaded/529）：工具返回的 ToolResult 内容包含 "overloaded"
 /// 或 "529" 时，标记为 Recovery guidance（IsError=false），让 LLM 重试而非计入失败。
 /// </summary>
-public sealed class ToolResultUnwrapMiddleware
+public sealed class ToolResultUnwrapMiddleware(
+    string? modelId = null,
+    string? providerId = null,
+    ILogger<ToolResultUnwrapMiddleware>? logger = null)
 {
-    private readonly string? _modelId;
-    private readonly string? _providerId;
-    private readonly ILogger<ToolResultUnwrapMiddleware>? _logger;
-
-    public ToolResultUnwrapMiddleware(
-        string? modelId = null,
-        string? providerId = null,
-        ILogger<ToolResultUnwrapMiddleware>? logger = null)
-    {
-        _modelId = modelId;
-        _providerId = providerId;
-        _logger = logger;
-    }
+    private readonly string? _modelId = modelId;
+    private readonly string? _providerId = providerId;
+    private readonly ILogger<ToolResultUnwrapMiddleware>? _logger = logger;
 
     public Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,

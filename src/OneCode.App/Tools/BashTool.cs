@@ -71,11 +71,11 @@ public sealed class BashTool
             command, workingDirectory,
             isPowerShell ? PowerShellCommandClassifier.ExtractReferencedPaths : BashCommandClassifier.ExtractReferencedPaths,
             _wd.AdditionalDirectories);
-        if (pathValidationError != null)
+        if (pathValidationError is not null)
             return ToolResult.Error(pathValidationError);
 
         var sedError = isPowerShell ? null : ValidateSedCommand(command);
-        if (sedError != null)
+        if (sedError is not null)
             return ToolResult.Error(sedError);
 
         var warning = isPowerShell
@@ -134,5 +134,5 @@ public sealed class BashTool
 
     public static bool IsSedDangerous(string command) =>
         command.Contains("sed", StringComparison.OrdinalIgnoreCase) &&
-        ValidateSedCommand(command) != null;
+        ValidateSedCommand(command) is not null;
 }

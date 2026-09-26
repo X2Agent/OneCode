@@ -5,15 +5,15 @@ using ModelContextProtocol.Protocol;
 
 namespace OneCode.Infrastructure.Mcp;
 
-public sealed class WebSocketClientTransport : IClientTransport, ITransport, IAsyncDisposable
+public sealed class WebSocketClientTransport(string url, ILogger? logger = null) : IClientTransport, ITransport, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    private readonly string _url;
-    private readonly ILogger? _logger;
+    private readonly string _url = url;
+    private readonly ILogger? _logger = logger;
     private readonly Channel<JsonRpcMessage> _messageChannel = Channel.CreateUnbounded<JsonRpcMessage>();
     private ClientWebSocket? _webSocket;
     private CancellationTokenSource? _readCts;
@@ -23,12 +23,6 @@ public sealed class WebSocketClientTransport : IClientTransport, ITransport, IAs
     public string Name => $"ws:{_url}";
     public string? SessionId { get; private set; }
     public ChannelReader<JsonRpcMessage> MessageReader => _messageChannel.Reader;
-
-    public WebSocketClientTransport(string url, ILogger? logger = null)
-    {
-        _url = url;
-        _logger = logger;
-    }
 
     public async Task<ITransport> ConnectAsync(CancellationToken ct = default)
     {
@@ -86,7 +80,7 @@ public sealed class WebSocketClientTransport : IClientTransport, ITransport, IAs
                 try
                 {
                     var message = JsonSerializer.Deserialize<JsonRpcMessage>(messageJson, _jsonOptions);
-                    if (message != null)
+                    if (message is not null)
                         await _messageChannel.Writer.WriteAsync(message, ct).ConfigureAwait(false);
                 }
                 catch (JsonException ex)
@@ -120,7 +114,7 @@ public sealed class WebSocketClientTransport : IClientTransport, ITransport, IAs
         _messageChannel.Writer.TryComplete();
         _readCts?.Cancel();
 
-        if (_readLoop != null)
+        if (_readLoop is not null)
         {
             try { await _readLoop.ConfigureAwait(false); } catch { /* teardown */ }
         }

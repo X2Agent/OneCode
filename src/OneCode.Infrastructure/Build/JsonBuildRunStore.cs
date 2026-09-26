@@ -272,6 +272,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
                 ValidateEventSequence(events, events[0].RunId, events[0].ConversationId);
                 return events;
             }
+            // 候选文件损坏/不可读 → 尝试下一个（主文件损坏后还有 .bak 兜底）。
             catch (JsonException)
             {
             }

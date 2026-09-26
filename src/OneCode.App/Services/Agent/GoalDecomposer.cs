@@ -30,11 +30,14 @@ internal interface IGoalPlanningService
         CancellationToken ct);
 }
 
-internal sealed class GoalDecomposer : IGoalPlanningService
+internal sealed class GoalDecomposer(
+    IChatClient chatClient,
+    ILogger<GoalDecomposer> logger,
+    IPromptManager promptManager) : IGoalPlanningService
 {
-    private readonly IChatClient _chatClient;
-    private readonly ILogger<GoalDecomposer> _logger;
-    private readonly IPromptManager _promptManager;
+    private readonly IChatClient _chatClient = chatClient;
+    private readonly ILogger<GoalDecomposer> _logger = logger;
+    private readonly IPromptManager _promptManager = promptManager;
 
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new()
     {
@@ -95,16 +98,6 @@ internal sealed class GoalDecomposer : IGoalPlanningService
         {
             return null;
         }
-    }
-
-    public GoalDecomposer(
-        IChatClient chatClient,
-        ILogger<GoalDecomposer> logger,
-        IPromptManager promptManager)
-    {
-        _chatClient = chatClient;
-        _logger = logger;
-        _promptManager = promptManager;
     }
 
     /// <summary>

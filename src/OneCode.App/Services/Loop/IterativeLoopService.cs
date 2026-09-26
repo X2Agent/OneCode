@@ -238,7 +238,7 @@ public sealed class IterativeLoopService(
 
     private static IReadOnlyList<ChatMessage> BuildMessages(LoopRunRequest request, IReadOnlyList<string>? imagePaths)
     {
-        var contents = new List<AIContent>();
+        List<AIContent> contents = [];
         if (!string.IsNullOrWhiteSpace(request.Task))
             contents.Add(new TextContent(request.Task));
 

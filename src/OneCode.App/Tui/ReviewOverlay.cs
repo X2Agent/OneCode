@@ -24,7 +24,7 @@ public sealed class ReviewOverlay : CenteredOverlay
         // Width scales via OverlayHost (up to 70% of terminal); height fits the file list.
         // Soft ceiling of 60 rows — host clamps further to 75% of viewport on resize.
         PreferredWidth = 80;
-        _files = (files ?? new List<ReviewFileEntry>()).ToList();
+        _files = (files ?? []).ToList();
         PreferredHeight = Math.Clamp(_files.Count + 7, 12, 60);
 
         var header = new Label

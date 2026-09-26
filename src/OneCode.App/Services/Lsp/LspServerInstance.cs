@@ -6,26 +6,18 @@ namespace OneCode.App.Services.Lsp;
 /// <summary>
 /// Wraps an LspClient with server-specific logic and state tracking.
 /// </summary>
-public sealed class LspServerInstance
+public sealed class LspServerInstance(LspServerConfig config, ILoggerFactory loggerFactory, LspDiagnosticRegistry diagnosticRegistry)
 {
-    private readonly LspServerConfig _config;
-    private readonly ILogger<LspServerInstance> _logger;
-    private readonly ILogger<LspClient> _clientLogger;
-    private readonly LspDiagnosticRegistry _diagnosticRegistry;
+    private readonly LspServerConfig _config = config;
+    private readonly ILogger<LspServerInstance> _logger = loggerFactory.CreateLogger<LspServerInstance>();
+    private readonly ILogger<LspClient> _clientLogger = loggerFactory.CreateLogger<LspClient>();
+    private readonly LspDiagnosticRegistry _diagnosticRegistry = diagnosticRegistry;
     private LspClient? _client;
     private bool _isHealthy = true;
     private DateTimeOffset? _lastActivity;
 
-    public LspServerInstance(LspServerConfig config, ILoggerFactory loggerFactory, LspDiagnosticRegistry diagnosticRegistry)
-    {
-        _config = config;
-        _logger = loggerFactory.CreateLogger<LspServerInstance>();
-        _clientLogger = loggerFactory.CreateLogger<LspClient>();
-        _diagnosticRegistry = diagnosticRegistry;
-    }
-
     public LspServerConfig Config => _config;
-    public bool IsRunning => _client != null;
+    public bool IsRunning => _client is not null;
     public bool IsInitialized => _client?.IsInitialized ?? false;
     public bool IsHealthy => _isHealthy;
     public JsonElement? Capabilities => _client?.Capabilities;
@@ -117,7 +109,7 @@ public sealed class LspServerInstance
 
     public async Task<JsonElement?> SendRequestAsync(string method, JsonElement parameters, CancellationToken ct = default)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Server not started");
 
         _lastActivity = DateTimeOffset.UtcNow;
@@ -126,7 +118,7 @@ public sealed class LspServerInstance
 
     public async Task SendNotificationAsync(string method, JsonElement parameters)
     {
-        if (_client == null)
+        if (_client is null)
             throw new InvalidOperationException("Server not started");
 
         _lastActivity = DateTimeOffset.UtcNow;
@@ -135,7 +127,7 @@ public sealed class LspServerInstance
 
     public async Task StopAsync()
     {
-        if (_client != null)
+        if (_client is not null)
         {
             await _client.StopAsync().ConfigureAwait(false);
             await _client.DisposeAsync().ConfigureAwait(false);
@@ -166,7 +158,7 @@ public sealed class LspServerInstance
         {
             "processId": {{Environment.ProcessId}},
             "clientInfo": { "name": "OneCode.NET", "version": "{{Core.Product.ProductInfo.Default.Version}}" },
-            "rootUri": {{(rootUri != null ? $"\"{rootUri}\"" : "null")}},
+            "rootUri": {{(rootUri is not null ? $"\"{rootUri}\"" : "null")}},
             "workspaceFolders": {{workspaceFoldersJson}},
             "capabilities": {
                 "workspace": {

@@ -59,7 +59,7 @@ public sealed class CliWorkingDirectoryTests
     {
         var result = CliWorkingDirectory.Parse(args);
 
-        result.Error.Should().NotBeNullOrEmpty();
+        result.Error.Should().Contain("用法错误", "缺值场景必须给出 usage 提示文案");
     }
 
     [Fact]

@@ -19,10 +19,10 @@ namespace OneCode.App.Services.Observability;
 ///
 /// 缓存命中率 = CacheReadTokens / InputTokens
 /// </summary>
-public sealed class TokenUsageTracker : ITokenUsageTracker
+public sealed class TokenUsageTracker(ITokenLedger tokenLedger, ISessionIdProvider sessionIdProvider) : ITokenUsageTracker
 {
-    private readonly ITokenLedger _tokenLedger;
-    private readonly ISessionIdProvider _sessionIdProvider;
+    private readonly ITokenLedger _tokenLedger = tokenLedger;
+    private readonly ISessionIdProvider _sessionIdProvider = sessionIdProvider;
     private readonly object _gate = new();
     private int _queryCount;
     private TokenBreakdown? _lastBreakdown;
@@ -37,14 +37,6 @@ public sealed class TokenUsageTracker : ITokenUsageTracker
     private long _fallbackOutputTokens;
     private long _fallbackCacheReadTokens;
     private long _fallbackCacheWriteTokens;
-
-    public TokenUsageTracker(
-        ITokenLedger tokenLedger,
-        ISessionIdProvider sessionIdProvider)
-    {
-        _tokenLedger = tokenLedger;
-        _sessionIdProvider = sessionIdProvider;
-    }
 
     private SessionTokenUsage? SessionInfo
     {

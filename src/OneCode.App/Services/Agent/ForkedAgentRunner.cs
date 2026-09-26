@@ -19,44 +19,29 @@ namespace OneCode.App.Services.Agent;
 /// （provider 无编程式起任务入口，公共面只有 GetIncompleteTasks / ReleaseSessionAsync）。
 /// 禁止在默认 Full 路径挂 BackgroundAgents（派工双挂 + 产品闸丢失 + 审批不转发）。
 /// </remarks>
-public sealed class ForkedAgentRunner : IAgentRunner
+public sealed class ForkedAgentRunner(
+    ILogger<ForkedAgentRunner> logger,
+    ILoggerFactory loggerFactory,
+    IServiceProvider serviceProvider,
+    AgentContextPipeline contextPipeline,
+    SubAgentPipelineFactory pipelineFactory,
+    ForkedAgentRuntimeDependencies runtime,
+    PromptComposer promptComposer) : IAgentRunner
 {
-    private readonly ILogger<ForkedAgentRunner> _logger;
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly IChatClient _chatClient;
+    private readonly ILogger<ForkedAgentRunner> _logger = logger;
+    private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    private readonly IChatClient _chatClient = runtime.ChatClient;
     // IServiceProvider 仅用于传递给 MAF 的 ChatClientAgentBuildOptions.ServiceProvider
     // （MAF 框架要求），不得用于业务逻辑中的 GetService<T>() 调用。
-    private readonly IServiceProvider _serviceProvider;
-    private readonly AgentContextPipeline _contextPipeline;
-    private readonly SubAgentPipelineFactory _pipelineFactory;
-    private readonly IModelManager _modelManager;
-    private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor;
-    private readonly Core.Tools.ToolMetadataRegistry _toolMetadata;
-    private readonly CompactionStrategyFactory _compactionBuilder;
-    private readonly PromptComposer _promptComposer;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly AgentContextPipeline _contextPipeline = contextPipeline;
+    private readonly SubAgentPipelineFactory _pipelineFactory = pipelineFactory;
+    private readonly IModelManager _modelManager = runtime.ModelManager;
+    private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor = runtime.WorkingDirectory;
+    private readonly Core.Tools.ToolMetadataRegistry _toolMetadata = runtime.ToolMetadata;
+    private readonly CompactionStrategyFactory _compactionBuilder = runtime.CompactionBuilder;
+    private readonly PromptComposer _promptComposer = promptComposer;
     private readonly ConcurrentDictionary<string, ForkedAgentRun> _activeRuns = new();
-
-    public ForkedAgentRunner(
-        ILogger<ForkedAgentRunner> logger,
-        ILoggerFactory loggerFactory,
-        IServiceProvider serviceProvider,
-        AgentContextPipeline contextPipeline,
-        SubAgentPipelineFactory pipelineFactory,
-        ForkedAgentRuntimeDependencies runtime,
-        PromptComposer promptComposer)
-    {
-        _logger = logger;
-        _loggerFactory = loggerFactory;
-        _serviceProvider = serviceProvider;
-        _contextPipeline = contextPipeline;
-        _pipelineFactory = pipelineFactory;
-        _chatClient = runtime.ChatClient;
-        _modelManager = runtime.ModelManager;
-        _workingDirectoryAccessor = runtime.WorkingDirectory;
-        _toolMetadata = runtime.ToolMetadata;
-        _compactionBuilder = runtime.CompactionBuilder;
-        _promptComposer = promptComposer;
-    }
 
     public async Task<ForkedAgentResult> RunForkedAgentAsync(
         ForkedAgentParams parameters,
@@ -147,7 +132,7 @@ public sealed class ForkedAgentRunner : IAgentRunner
             if (csp?.SystemPrompt is { Length: > 0 } sysPrompt)
                 chatMessages.Add(new ChatMessage(ChatRole.System, sysPrompt));
 
-            if (parameters.PromptMessages != null)
+            if (parameters.PromptMessages is not null)
                 chatMessages.AddRange(parameters.PromptMessages);
 
             var session = await pipeline.Agent.CreateSessionAsync(linkedToken).ConfigureAwait(false);

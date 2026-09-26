@@ -40,9 +40,13 @@ public sealed class EnhancedLspServiceTests : IDisposable
 
         service.GetLastDidChangeUtc(file).Should().BeNull("未经写通知路径的文件不应有基线");
 
+        var before = DateTime.UtcNow;
         await service.NotifyFileUpdatedAsync(file);
 
-        service.GetLastDidChangeUtc(file).Should().NotBeNull("didChange 基线是诊断新鲜度判定的数据源");
+        var baseline = service.GetLastDidChangeUtc(file);
+        baseline.Should().NotBeNull("didChange 基线是诊断新鲜度判定的数据源");
+        baseline!.Value.Should().BeOnOrAfter(before, "基线必须是本次通知的时间戳，不得早于通知发起时刻")
+            .And.BeOnOrBefore(DateTime.UtcNow.AddSeconds(5), "基线必须落在测试执行时间窗内");
     }
 
     [Fact]

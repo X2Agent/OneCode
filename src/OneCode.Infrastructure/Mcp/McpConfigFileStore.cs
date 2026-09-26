@@ -61,8 +61,7 @@ public static class McpConfigFileStore
         catch (Exception ex) when (ex is JsonException or IOException)
         {
             throw new InvalidOperationException(
-                $"MCP config file '{path}' exists but could not be read (corrupted or locked). "
-                + "Fix or delete it before modifying MCP servers.",
+                $"MCP config file '{path}' exists but could not be read (corrupted or locked). Fix or delete it before modifying MCP servers.",
                 ex);
         }
     }

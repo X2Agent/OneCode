@@ -16,16 +16,10 @@ namespace OneCode.App.Tools;
 ///   2. LspTool(action="codeActionResolve", query=&lt;CodeAction&gt;) → resolved edit
 ///   3. ApplyWorkspaceEdit(workspaceEditJson=&lt;the edit field&gt;) → applied to files
 /// </summary>
-public sealed class ApplyWorkspaceEditTool
+public sealed class ApplyWorkspaceEditTool(IWorkingDirectoryAccessor wd, ILspNotifier notifier)
 {
-    private readonly IWorkingDirectoryAccessor _wd;
-    private readonly ILspNotifier _notifier;
-
-    public ApplyWorkspaceEditTool(IWorkingDirectoryAccessor wd, ILspNotifier notifier)
-    {
-        _wd = wd;
-        _notifier = notifier;
-    }
+    private readonly IWorkingDirectoryAccessor _wd = wd;
+    private readonly ILspNotifier _notifier = notifier;
 
     [Description("Apply an LSP WorkspaceEdit to files. The edit is a JSON object with a 'documentChanges' array or a 'changes' map, as returned by Lsp codeActionResolve or rename. Each edit's range is 0-based line/character per the LSP spec.")]
     public async Task<ToolResult> ApplyAsync(
@@ -51,7 +45,7 @@ public sealed class ApplyWorkspaceEditTool
         // shape that supports create/rename/delete); changes is the legacy map
         // of uri→TextEdit[].
         var fileEdits = new Dictionary<string, List<TextEditInfo>>(StringComparer.OrdinalIgnoreCase);
-        var operations = new List<FileOperationInfo>();
+        List<FileOperationInfo> operations = [];
 
         if (edit.TryGetProperty("documentChanges", out var dcEl) && dcEl.ValueKind == JsonValueKind.Array)
         {
@@ -226,7 +220,7 @@ public sealed class ApplyWorkspaceEditTool
 
     private static List<TextEditInfo> ParseTextEdits(JsonElement editsEl)
     {
-        var edits = new List<TextEditInfo>();
+        List<TextEditInfo> edits = [];
         if (editsEl.ValueKind != JsonValueKind.Array) return edits;
 
         foreach (var e in editsEl.EnumerateArray())

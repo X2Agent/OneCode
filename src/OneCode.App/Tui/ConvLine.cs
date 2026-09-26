@@ -10,42 +10,32 @@ public enum LineRole
     DiffHunk,
 }
 
-public sealed class ConvLine
+public sealed class ConvLine(
+    LineRole role,
+    string text,
+    IReadOnlyList<LineSegment>? segments = null,
+    object? tag = null,
+    Color? bg = null)
 {
-    public LineRole Role { get; }
-    public string Text { get; }
+    public LineRole Role { get; } = role;
+    public string Text { get; } = text;
 
     /// <summary>
     /// Optional multi-color segments. When set, the renderer uses these
     /// instead of the single-color <see cref="Text"/> to produce a
     /// multi-colored <see cref="FormattedLine"/>.
     /// </summary>
-    public IReadOnlyList<LineSegment>? Segments { get; }
+    public IReadOnlyList<LineSegment>? Segments { get; } = segments;
 
     /// <summary>
     /// Optional metadata tag attached to this line for click interaction
     /// (e.g. tool-line expand/collapse).
     /// </summary>
-    public object? Tag { get; }
+    public object? Tag { get; } = tag;
 
     /// <summary>
     /// Optional background color for the entire line. When set, the renderer
     /// fills the line background with this color before drawing the text.
     /// </summary>
-    public Color? Bg { get; }
-
-    public ConvLine(LineRole role, string text)
-    {
-        Role = role;
-        Text = text;
-    }
-
-    public ConvLine(LineRole role, string text, IReadOnlyList<LineSegment>? segments, object? tag = null, Color? bg = null)
-    {
-        Role = role;
-        Text = text;
-        Segments = segments;
-        Tag = tag;
-        Bg = bg;
-    }
+    public Color? Bg { get; } = bg;
 }

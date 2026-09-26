@@ -2,17 +2,12 @@ using System.Text;
 using Microsoft.Extensions.Options;
 namespace OneCode.App.Logging;
 
-public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
+public sealed class DebugFileLoggerProvider(IOptions<DebugLogConfig> config) : ILoggerProvider, IDisposable
 {
-    internal readonly DebugLogConfig _config;
+    internal readonly DebugLogConfig _config = config.Value;
     private readonly ConcurrentDictionary<string, DebugFileLogger> _loggers = new();
     private StreamWriter? _writer;
     private readonly object _lock = new();
-
-    public DebugFileLoggerProvider(IOptions<DebugLogConfig> config)
-    {
-        _config = config.Value;
-    }
 
     public ILogger CreateLogger(string categoryName)
     {
@@ -26,7 +21,7 @@ public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
             return;
 
         EnsureWriter();
-        if (_writer == null) return;
+        if (_writer is null) return;
 
         var entry = FormatEntry(categoryName, level, message);
 
@@ -52,17 +47,17 @@ public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
 
     private void EnsureWriter()
     {
-        if (_writer != null) return;
+        if (_writer is not null) return;
 
         lock (_lock)
         {
-            if (_writer != null) return;
+            if (_writer is not null) return;
 
             try
             {
                 var path = _config.GetLogFilePath();
                 var dir = Path.GetDirectoryName(path);
-                if (dir != null)
+                if (dir is not null)
                     Directory.CreateDirectory(dir);
 
                 _writer = new StreamWriter(path, append: true, Encoding.UTF8)
@@ -86,22 +81,13 @@ public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
     }
 }
 
-internal sealed class DebugFileLogger : ILogger
+internal sealed class DebugFileLogger(string category, DebugFileLoggerProvider provider) : ILogger
 {
-    private readonly string _category;
-    private readonly DebugFileLoggerProvider _provider;
-
-    public DebugFileLogger(string category, DebugFileLoggerProvider provider)
-    {
-        _category = category;
-        _provider = provider;
-    }
-
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
         => NullScope.Instance;
 
     public bool IsEnabled(LogLevel logLevel) =>
-        _provider._config.Enabled && logLevel >= _provider._config.MinimumLevel;
+        provider._config.Enabled && logLevel >= provider._config.MinimumLevel;
 
     public void Log<TState>(
         LogLevel logLevel,
@@ -110,13 +96,13 @@ internal sealed class DebugFileLogger : ILogger
         Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
-        if (formatter == null) return;
+        if (formatter is null) return;
 
         var message = formatter(state, exception);
-        if (exception != null)
+        if (exception is not null)
             message += Environment.NewLine + exception;
 
-        _provider.Write(_category, logLevel, message);
+        provider.Write(category, logLevel, message);
     }
 
     private sealed class NullScope : IDisposable

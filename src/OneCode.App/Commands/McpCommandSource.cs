@@ -7,20 +7,16 @@ namespace OneCode.App.Commands;
 /// 从已连接的 MCP 服务器生成 /mcp:{server} 命令，
 /// 用户可通过该命令与指定 MCP 服务器进行交互。
 /// </summary>
-public sealed class McpCommandSource : IDynamicCommandSource
+public sealed class McpCommandSource(IMcpConnectionManager connectionManager) : IDynamicCommandSource
 {
-    private readonly IMcpConnectionManager _connectionManager;
-
-    public McpCommandSource(IMcpConnectionManager connectionManager)
-    {
-        _connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-    }
+    private readonly IMcpConnectionManager _connectionManager =
+        connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
 
     public CommandSource Source => CommandSource.Mcp;
 
     public Task<IReadOnlyList<ICommand>> LoadCommandsAsync(CancellationToken ct)
     {
-        var commands = new List<ICommand>();
+        List<ICommand> commands = [];
 
         foreach (var serverName in _connectionManager.GetServerNames())
         {

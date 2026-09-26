@@ -16,7 +16,6 @@ public sealed class DiffView : View
     private static readonly Color HunkColor = TuiPalette.DiffHunk;
     private static readonly Color ContextColor = TuiPalette.DiffContext;
     private static readonly Color PrefixColor = TuiPalette.FgMuted;
-    private static readonly Color FileHeaderColor = TuiPalette.Accent;
 
     private readonly List<DiffLine> _lines = new();
     private int _scrollOffset;

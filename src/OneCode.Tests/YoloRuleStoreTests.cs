@@ -119,11 +119,15 @@ public sealed class YoloRuleStoreTests
         var store = new YoloRuleStore(logger: null);
         store.ClearRules();
 
-        store.AddRule(new UserRule("allow", "GIT", "desc"));
+        var rule = new UserRule("allow", "GIT", "desc");
+        store.AddRule(rule);
 
         var match = store.MatchRule("git status");
 
-        match.Should().NotBeNull();
+        match.Should().NotBeNull("模式匹配必须大小写不敏感");
+        match.Should().Be(rule, "命中并返回的必须是那条 allow 规则本身");
+        match!.Type.Should().Be("allow");
+        match.Pattern.Should().Be("GIT", "返回的是规则原对象，Pattern 不得被改写为命令原文");
     }
 
     [Fact]

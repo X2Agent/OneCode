@@ -183,9 +183,7 @@ public sealed class TaskService : ITaskService
                     : $"[projection:{outputKey}]";
                 if (marker is null || !outputLog.Contains(marker, StringComparison.Ordinal))
                 {
-                    outputLog += marker is null
-                        ? output + "\n"
-                        : marker + " " + output + "\n";
+                    outputLog += marker is null ? $"{output}\n" : $"{marker} {output}\n";
                 }
             }
 
@@ -268,7 +266,7 @@ public sealed class TaskService : ITaskService
             // must not remain only in an in-memory buffer when a durable store is configured.
             _tasks[id] = current with
             {
-                OutputLog = (current.OutputLog ?? "") + output + "\n",
+                OutputLog = $"{current.OutputLog}{output}\n",
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
         }

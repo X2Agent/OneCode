@@ -22,7 +22,8 @@ namespace OneCode.App.Services.Memory;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class MemoryService : IMemoryService
+public sealed class MemoryService(ILogger<MemoryService> logger, IMemoryEntryStore store)
+ : IMemoryService
 {
     private const int MaxSummaryValueChars = 80;
     private const int MaxRelevantMemories = 6;
@@ -44,14 +45,8 @@ public sealed class MemoryService : IMemoryService
         "make", "uses", "using", "used", "继续", "实现", "支持", "接入", "相关", "这个", "那个", "需要"
     };
 
-    private readonly ILogger<MemoryService> _logger;
-    private readonly IMemoryEntryStore _store;
-
-    public MemoryService(ILogger<MemoryService> logger, IMemoryEntryStore store)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _store = store ?? throw new ArgumentNullException(nameof(store));
-    }
+    private readonly ILogger<MemoryService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IMemoryEntryStore _store = store ?? throw new ArgumentNullException(nameof(store));
 
     /// <summary>
     /// Loads memory entries from both user-level and project-level scopes and builds a
@@ -151,7 +146,7 @@ public sealed class MemoryService : IMemoryService
         var userEntries = await _store.LoadAllAsync(MemoryScope.User, ct).ConfigureAwait(false);
         var projectEntries = await _store.LoadAllAsync(MemoryScope.Project, ct).ConfigureAwait(false);
 
-        var results = new List<MemoryEntryInfo>();
+        List<MemoryEntryInfo> results = [];
         var index = 1;
 
         foreach (var entry in userEntries)

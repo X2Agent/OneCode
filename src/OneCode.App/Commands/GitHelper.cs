@@ -6,16 +6,10 @@ namespace OneCode.App.Commands;
 /// <summary>
 /// Git 辅助服务。Registered as Singleton in DI.
 /// </summary>
-public sealed class GitHelper : IGitHelper
+public sealed class GitHelper(IProcessRunner processRunner, ILogger<GitHelper>? logger = null) : IGitHelper
 {
-    private readonly IProcessRunner _processRunner;
-    private readonly ILogger<GitHelper>? _logger;
-
-    public GitHelper(IProcessRunner processRunner, ILogger<GitHelper>? logger = null)
-    {
-        _processRunner = processRunner;
-        _logger = logger;
-    }
+    private readonly IProcessRunner _processRunner = processRunner;
+    private readonly ILogger<GitHelper>? _logger = logger;
 
     /// <inheritdoc />
     public async Task<string?> GetVersionAsync(CancellationToken ct = default)

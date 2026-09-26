@@ -46,13 +46,12 @@ public static partial class ChatBlockRenderers
             _ => (TuiGlyphs.Failed, "任务执行失败", TuiPalette.Error),
         };
 
-        var lines = new List<FormattedLine>
-        {
+        List<FormattedLine> lines = [
             FormattedLine.FromSegments([
                 new LineSegment($"  {glyph} ", color),
                 new LineSegment(message, color),
             ]),
-        };
+        ];
         if (state.State is BuildRunState.Failed or BuildRunState.Blocked
             && !string.IsNullOrWhiteSpace(state.FailureSummary))
         {
@@ -64,7 +63,7 @@ public static partial class ChatBlockRenderers
 
     private static string BuildCompletionMessage(TuiBuildRunState state)
     {
-        var details = new List<string>();
+        List<string> details = [];
         if (state.ChangedFiles > 0)
             details.Add($"修改 {state.ChangedFiles} 个文件");
         if (state.ValidationStatus == BuildValidationStatus.Passed)
@@ -84,8 +83,7 @@ public static partial class ChatBlockRenderers
         var passedAcceptance = requiredAcceptance.Count(item => item.Status == AcceptanceStatus.Passed);
         var incompleteTasks = result.Tasks.Count(task => task.Status is not (BuildTaskStatus.Completed or BuildTaskStatus.Skipped));
         var commitLabel = result.TransactionCommitted ? "committed" : result.TransactionRolledBack ? "rolled back" : "not committed";
-        var lines = new List<FormattedLine>
-        {
+        List<FormattedLine> lines = [
             FormattedLine.Plain("", TuiPalette.BgPrimary),
             FormattedLine.WithBackground(
                 $"  BUILD DELIVERY  ·  {result.State.ToString().ToUpperInvariant()}",
@@ -98,7 +96,7 @@ public static partial class ChatBlockRenderers
             FormattedLine.Plain($"  Acceptance  {passedAcceptance}/{requiredAcceptance.Length}", TuiPalette.FgPrimary),
             FormattedLine.Plain($"  Incomplete  {incompleteTasks}", incompleteTasks == 0 ? TuiPalette.Success : TuiPalette.Warning),
             FormattedLine.Plain($"  Transaction {commitLabel}", result.TransactionCommitted ? TuiPalette.Success : TuiPalette.Warning),
-        };
+        ];
         if (!string.IsNullOrWhiteSpace(result.Summary))
             AddWrappedField(lines, "Summary", result.Summary, viewWidth, TuiPalette.FgPrimary);
         if (result.KnownRisks.Count > 0)
@@ -178,12 +176,11 @@ public static partial class ChatBlockRenderers
         var displayTitle = TextWidthHelper.GetDisplayWidth(title) > titleBudget
             ? TextWidthHelper.TruncateByWidth(title, titleBudget)
             : title;
-        var list = new List<FormattedLine>
-        {
+        List<FormattedLine> list = [
             FormattedLine.Plain("", TuiPalette.BgPrimary),
             FormattedLine.WithBackground($"{headerPrefix}{displayTitle}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader),
             FormattedLine.Plain("", TuiPalette.BgPrimary),
-        };
+        ];
         if (!string.IsNullOrWhiteSpace(documentPath))
         {
             const string pathPrefix = "  📄 计划文档: ";

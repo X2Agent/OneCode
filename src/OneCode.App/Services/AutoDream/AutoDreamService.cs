@@ -419,10 +419,10 @@ public sealed class AutoDreamService : BackgroundService
                 .ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
 
         // Group by scope to batch-write each MEMORY.md
-        var userEntries = new List<MemoryEntry>();
-        var projectEntries = new List<MemoryEntry>();
-        var userDeleteKeys = new List<string>();
-        var projectDeleteKeys = new List<string>();
+        List<MemoryEntry> userEntries = [];
+        List<MemoryEntry> projectEntries = [];
+        List<string> userDeleteKeys = [];
+        List<string> projectDeleteKeys = [];
         var written = 0;
         var skipped = 0;
 

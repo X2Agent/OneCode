@@ -11,24 +11,16 @@ namespace OneCode.App.Services.Agent;
 /// provider 私有状态（<see cref="ProviderSessionState{T}"/>）存于 session StateBag，
 /// 随快照序列化进 conversation header，跨进程重启可恢复。
 /// </summary>
-public sealed class AgentSessionPersistence
+public sealed class AgentSessionPersistence(
+    ISessionConversationAccess sessionManager,
+    ISessionChatHistoryReader chatHistoryReader,
+    ILogger<AgentSessionPersistence> logger)
 {
     private const string MafSessionMetadataKey = "mafSession";
 
-    private readonly ISessionConversationAccess _sessionManager;
-    private readonly ISessionChatHistoryReader _chatHistoryReader;
-    private readonly ILogger<AgentSessionPersistence> _logger;
-
-    public AgentSessionPersistence(
-        ISessionConversationAccess sessionManager,
-        ISessionChatHistoryReader chatHistoryReader,
-        ILogger<AgentSessionPersistence> logger)
-    {
-        _sessionManager = sessionManager;
-        _chatHistoryReader = chatHistoryReader;
-        _logger = logger;
-    }
-
+    private readonly ISessionConversationAccess _sessionManager = sessionManager;
+    private readonly ISessionChatHistoryReader _chatHistoryReader = chatHistoryReader;
+    private readonly ILogger<AgentSessionPersistence> _logger = logger;
     /// <summary>创建桥接会话转录的 <see cref="ChatHistoryProvider"/>：历史读经框架契约，写仍归事件溯源转录。</summary>
     public ChatHistoryProvider CreateChatHistoryProvider(SessionId conversationId)
         => new TranscriptChatHistoryProvider(_chatHistoryReader, conversationId);

@@ -21,7 +21,11 @@ public sealed class PathsHelperTests
         var result = PathsHelper.SafeResolve("../../etc/passwd", workDir);
 
         result.IsSuccess.Should().BeFalse();
-        result.Error.Should().NotBeNullOrEmpty();
+        // Temp 沙箱下该输入实际命中受保护目录拦截（而非一般的工作目录越界分支），
+        // 错误文案必须显式说明 Access denied 并回显被拒绝的路径。
+        result.Error.Should().Contain("Access denied", "拒绝原因必须显式可见")
+            .And.Contain("protected system directory", "真实失败分支是受保护目录拦截")
+            .And.Contain("../../etc/passwd", "错误文案必须回显被拒绝的路径");
     }
 
     [Fact]

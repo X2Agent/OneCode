@@ -7,7 +7,10 @@ using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Lsp;
 
-public sealed class LspNotifier : ILspNotifier
+public sealed class LspNotifier(
+    IEnhancedLspService lspService,
+    LspDiagnosticRegistry diagnosticRegistry,
+    ILogger<LspNotifier> logger) : ILspNotifier
 {
     /// <summary>
     /// didChange 后诊断发布等待的轮询节奏（可注入先例同 <c>McpConnectionManager.AutoReconnectInterval</c>）：
@@ -24,19 +27,9 @@ public sealed class LspNotifier : ILspNotifier
     /// </summary>
     internal static int IndexingWaitTotalMs = 10_000;
 
-    private readonly IEnhancedLspService _lspService;
-    private readonly LspDiagnosticRegistry _diagnosticRegistry;
-    private readonly ILogger<LspNotifier> _logger;
-
-    public LspNotifier(
-        IEnhancedLspService lspService,
-        LspDiagnosticRegistry diagnosticRegistry,
-        ILogger<LspNotifier> logger)
-    {
-        _lspService = lspService;
-        _diagnosticRegistry = diagnosticRegistry;
-        _logger = logger;
-    }
+    private readonly IEnhancedLspService _lspService = lspService;
+    private readonly LspDiagnosticRegistry _diagnosticRegistry = diagnosticRegistry;
+    private readonly ILogger<LspNotifier> _logger = logger;
 
     public async Task NotifyFileUpdatedAsync(string fullPath, CancellationToken ct = default)
     {
@@ -132,7 +125,7 @@ public sealed class LspNotifier : ILspNotifier
             var warnings = fresh.Count(d => d.Severity == LspDiagnosticSeverity.Warning);
             var hints = fresh.Count(d => d.Severity is LspDiagnosticSeverity.Information or LspDiagnosticSeverity.Hint);
 
-            var parts = new List<string>();
+            List<string> parts = [];
             if (errors > 0) parts.Add($"{errors} error(s)");
             if (warnings > 0) parts.Add($"{warnings} warning(s)");
             if (hints > 0) parts.Add($"{hints} hint(s)");

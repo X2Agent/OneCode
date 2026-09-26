@@ -8,21 +8,14 @@ namespace OneCode.App.Services.Context;
 /// <summary>
 /// Builds system and user context for prompts.
 /// </summary>
-public sealed class ContextBuilder
+public sealed class ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner, ILogger<ContextBuilder> logger)
 {
     private const int MaxSystemContextChars = 2000; // Cap injected OS/git/platform context size
     private const int MaxRecentCommits = 5;
 
-    private readonly GitInfo _gitInfo;
-    private readonly IProcessRunner _processRunner;
-    private readonly ILogger<ContextBuilder> _logger;
-
-    public ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner, ILogger<ContextBuilder> logger)
-    {
-        _gitInfo = gitInfo;
-        _processRunner = processRunner;
-        _logger = logger;
-    }
+    private readonly GitInfo _gitInfo = gitInfo;
+    private readonly IProcessRunner _processRunner = processRunner;
+    private readonly ILogger<ContextBuilder> _logger = logger;
 
     public async Task<string> BuildSystemContextAsync(
         string workingDirectory,
@@ -37,7 +30,7 @@ public sealed class ContextBuilder
         try
         {
             var status = await _gitInfo.GetStatusAsync(workingDirectory, ct).ConfigureAwait(false);
-            if (status != null)
+            if (status is not null)
             {
                 List<string> gitParts = [];
                 if (!string.IsNullOrWhiteSpace(status.Branch))
@@ -136,7 +129,7 @@ public sealed class ContextBuilder
             if (string.Equals(currentDir, root, StringComparison.OrdinalIgnoreCase))
                 break;
             var parent = Path.GetDirectoryName(currentDir);
-            if (parent == null || string.Equals(parent, currentDir, StringComparison.OrdinalIgnoreCase))
+            if (parent is null || string.Equals(parent, currentDir, StringComparison.OrdinalIgnoreCase))
                 break;
             currentDir = parent;
         }
@@ -149,7 +142,7 @@ public sealed class ContextBuilder
         }
 
         // Additional directories (from --add-dir)
-        if (additionalDirectories != null)
+        if (additionalDirectories is not null)
         {
             foreach (var addDir in additionalDirectories)
             {
@@ -255,7 +248,7 @@ public sealed class ContextBuilder
                 workingDirectory: workingDir,
                 ct: ct).ConfigureAwait(false);
 
-            if (result != null && result.Success)
+            if (result is not null && result.Success)
             {
                 commits = result.Stdout
                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

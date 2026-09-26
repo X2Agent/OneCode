@@ -21,11 +21,13 @@ public sealed class FileOperationLedger : IOperationLedger
     };
 
     private readonly string _root;
+    private readonly ILogger<FileOperationLedger>? _logger;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
 
-    public FileOperationLedger(string? basePath = null)
+    public FileOperationLedger(string? basePath = null, ILogger<FileOperationLedger>? logger = null)
     {
         _root = basePath ?? Path.Combine(PathsHelper.GetUserConfigDir(), "operation-ledger");
+        _logger = logger;
         Directory.CreateDirectory(_root);
     }
 
@@ -165,8 +167,10 @@ public sealed class FileOperationLedger : IOperationLedger
 
                     rolledBack.Add(intent.Path);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    // 回滚失败绝不能静默：残留文件会污染工作区，必须留下可追查的记录。
+                    _logger?.LogError(ex, "Rollback failed for '{Path}'", intent.Path);
                     failed.Add(intent.Path);
                 }
             }

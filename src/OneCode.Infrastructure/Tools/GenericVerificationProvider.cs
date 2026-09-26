@@ -12,35 +12,41 @@ namespace OneCode.Infrastructure.Tools;
 /// 按 modifiedFiles 扩展名 + 工作目录项目标记文件双重判断，匹配到的 profile 执行验证命令并解析错误。
 /// 编译器/构建工具的单行输出格式由 profile.ErrorPattern 描述（多行输出应使用 --message-format=short 等 flag）。
 /// </remarks>
-public sealed class GenericVerificationProvider : IVerificationProvider
+public sealed class GenericVerificationProvider(
+    IProcessRunner processRunner,
+    ILogger<GenericVerificationProvider> logger,
+    IReadOnlyList<VerificationProfile>? profiles = null) : IVerificationProvider
 {
-    private readonly IProcessRunner _processRunner;
-    private readonly ILogger<GenericVerificationProvider> _logger;
-    private readonly IReadOnlyList<VerificationProfile> _profiles;
-    private readonly Dictionary<string, VerificationProfile> _extensionMap;
-    private readonly Dictionary<string, Regex> _errorRegexByProfileName;
+    private readonly IProcessRunner _processRunner = processRunner;
+    private readonly ILogger<GenericVerificationProvider> _logger = logger;
+    private readonly IReadOnlyList<VerificationProfile> _profiles = profiles ?? VerificationProfile.BuiltIn;
+    private readonly Dictionary<string, VerificationProfile> _extensionMap = CreateExtensionMap(profiles ?? VerificationProfile.BuiltIn);
+    private readonly Dictionary<string, Regex> _errorRegexByProfileName = CreateErrorRegexMap(profiles ?? VerificationProfile.BuiltIn);
 
-    public GenericVerificationProvider(
-        IProcessRunner processRunner,
-        ILogger<GenericVerificationProvider> logger,
-        IReadOnlyList<VerificationProfile>? profiles = null)
+    private static Dictionary<string, VerificationProfile> CreateExtensionMap(
+        IReadOnlyList<VerificationProfile> profiles)
     {
-        _processRunner = processRunner;
-        _logger = logger;
-        _profiles = profiles ?? VerificationProfile.BuiltIn;
-
-        _extensionMap = new Dictionary<string, VerificationProfile>(StringComparer.OrdinalIgnoreCase);
-        _errorRegexByProfileName = new Dictionary<string, Regex>(StringComparer.Ordinal);
-        foreach (var profile in _profiles)
+        var map = new Dictionary<string, VerificationProfile>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in profiles)
         {
             foreach (var ext in profile.FileExtensions)
-                _extensionMap[ext.ToLowerInvariant()] = profile;
+                map[ext.ToLowerInvariant()] = profile;
+        }
+        return map;
+    }
 
-            // 预编译错误解析正则，避免每次 VerifyAsync 调用时重新编译
-            _errorRegexByProfileName[profile.Name] = new Regex(
+    // 预编译错误解析正则，避免每次 VerifyAsync 调用时重新编译
+    private static Dictionary<string, Regex> CreateErrorRegexMap(
+        IReadOnlyList<VerificationProfile> profiles)
+    {
+        var map = new Dictionary<string, Regex>(StringComparer.Ordinal);
+        foreach (var profile in profiles)
+        {
+            map[profile.Name] = new Regex(
                 profile.ErrorPattern,
                 RegexOptions.Multiline | RegexOptions.Compiled);
         }
+        return map;
     }
 
     /// <inheritdoc />
@@ -270,7 +276,7 @@ public sealed class GenericVerificationProvider : IVerificationProvider
         string stderr,
         string stage)
     {
-        var combined = string.IsNullOrEmpty(stderr) ? stdout : stdout + "\n" + stderr;
+        var combined = string.IsNullOrEmpty(stderr) ? stdout : $"{stdout}\n{stderr}";
         if (string.IsNullOrWhiteSpace(combined))
             return [];
 

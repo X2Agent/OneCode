@@ -94,12 +94,13 @@ public sealed record SshCommandResult(
     public bool Success => ExitCode == 0;
 }
 
-public sealed class SshRemoteService : IAsyncDisposable
+public sealed class SshRemoteService(ILogger<SshRemoteService> logger) : IAsyncDisposable
 {
     private SshClient? _client;
     private SftpClient? _sftpClient;
+    // ConnectAsync 中会被重新赋值，不能用 primary ctor 参数直接引用，保留字段
     private SshConnectionConfig? _config;
-    private readonly ILogger<SshRemoteService> _logger;
+    private readonly ILogger<SshRemoteService> _logger = logger;
     private readonly object _lock = new();
 
     public bool IsConnected
@@ -114,11 +115,6 @@ public sealed class SshRemoteService : IAsyncDisposable
     }
 
     public SshConnectionConfig? Config => _config;
-
-    public SshRemoteService(ILogger<SshRemoteService> logger)
-    {
-        _logger = logger;
-    }
 
     public async Task<bool> ConnectAsync(SshConnectionConfig config, CancellationToken ct = default)
     {
@@ -197,7 +193,7 @@ public sealed class SshRemoteService : IAsyncDisposable
         int timeoutMs = 30_000,
         CancellationToken ct = default)
     {
-        if (!IsConnected || _client == null)
+        if (!IsConnected || _client is null)
             throw new InvalidOperationException("SSH not connected");
 
         var cwd = workingDirectory ?? _config?.EffectiveWorkingDirectory ?? "/";
@@ -247,7 +243,7 @@ public sealed class SshRemoteService : IAsyncDisposable
 
     public async Task<string?> ReadFileAsync(string remotePath, CancellationToken ct = default)
     {
-        if (_sftpClient == null || !_sftpClient.IsConnected)
+        if (_sftpClient is null || !_sftpClient.IsConnected)
             return null;
 
         try
@@ -268,7 +264,7 @@ public sealed class SshRemoteService : IAsyncDisposable
 
     public async Task<bool> WriteFileAsync(string remotePath, string content, CancellationToken ct = default)
     {
-        if (_sftpClient == null || !_sftpClient.IsConnected)
+        if (_sftpClient is null || !_sftpClient.IsConnected)
             return false;
 
         try

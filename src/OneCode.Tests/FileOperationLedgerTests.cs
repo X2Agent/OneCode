@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.Tests;
@@ -29,6 +30,8 @@ public sealed class FileOperationLedgerTests : IDisposable
         loaded.FileIntents.Should().ContainSingle().Which.Path.Should().Be(Path.GetFullPath(file));
         loaded.FileIntents[0].BeforeContent.Should().BeEquivalentTo("before"u8.ToArray());
         loaded.FileIntents[0].AfterHash.Should().NotBeNull();
+        var expectedAfterHash = Convert.ToHexString(SHA256.HashData("after"u8.ToArray())).ToLowerInvariant();
+        loaded.FileIntents[0].AfterHash.Should().Be(expectedAfterHash, "AfterHash 必须等于提交时文件（after）内容的 SHA-256");
     }
 
     [Fact]

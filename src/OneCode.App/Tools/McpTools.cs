@@ -23,7 +23,7 @@ public sealed class ListMcpResourcesTool
         if (!string.IsNullOrEmpty(server))
         {
             var client = _connectionManager.GetClient(server);
-            if (client != null)
+            if (client is not null)
             {
                 var list = await client.ListResourcesAsync(ct).ConfigureAwait(false);
                 resources.AddRange(list.Select(r => new { server, uri = r.Uri, name = r.Name, description = r.Description }));
@@ -73,7 +73,7 @@ public sealed class ReadMcpResourceTool
             return ToolResult.Error(AgentProblemDetails.ToolExecutionFailed("server and uri are required", toolName: "McpTool"));
 
         var client = _connectionManager.GetClient(server);
-        if (client == null)
+        if (client is null)
             return ToolResult.Error(AgentProblemDetails.ServiceUnavailable($"MCP server '{server}' not connected", toolName: "McpTool"));
 
         try

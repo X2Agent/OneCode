@@ -19,12 +19,16 @@ namespace OneCode.App.Services.Context;
 /// context budget on backend-only tasks.
 /// </para>
 /// </summary>
-public sealed class DesignContextProvider : ReadOnlyAIContextProviderBase
+public sealed class DesignContextProvider(
+    ISessionConversationAccess? sessionManager,
+    ILogger<DesignContextProvider> logger,
+    string workingDirectory,
+    SessionId? conversationId = null) : ReadOnlyAIContextProviderBase
 {
-    private readonly ISessionConversationAccess? _sessionManager;
-    private readonly ILogger<DesignContextProvider> _logger;
-    private readonly string _workingDirectory;
-    private readonly SessionId? _conversationId;
+    private readonly ISessionConversationAccess? _sessionManager = sessionManager;
+    private readonly ILogger<DesignContextProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string _workingDirectory = workingDirectory ?? throw new ArgumentNullException(nameof(workingDirectory));
+    private readonly SessionId? _conversationId = conversationId;
 
     // Keywords that signal a design-related task. Mixed CN/EN to match the project's bilingual usage.
     private static readonly string[] DesignKeywords =
@@ -51,18 +55,6 @@ public sealed class DesignContextProvider : ReadOnlyAIContextProviderBase
 
     private const int RecentUserMessageScanCount = 3;
     private const int RecentAssistantMessageScanCount = 6;
-
-    public DesignContextProvider(
-        ISessionConversationAccess? sessionManager,
-        ILogger<DesignContextProvider> logger,
-        string workingDirectory,
-        SessionId? conversationId = null)
-    {
-        _sessionManager = sessionManager;
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _workingDirectory = workingDirectory ?? throw new ArgumentNullException(nameof(workingDirectory));
-        _conversationId = conversationId;
-    }
 
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         AIContextProvider.InvokingContext context,

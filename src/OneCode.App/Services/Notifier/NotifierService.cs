@@ -12,14 +12,9 @@ public interface INotifierService
 /// 与 hooks.json 配置的外部通知（飞书/企业微信）互补并存——hook 通知走外部 SaaS，
 /// 本服务走本地 OS 桌面通知，适合"长任务完成"等本地用户体验场景。
 /// </summary>
-public sealed class NotifierService : INotifierService
+public sealed class NotifierService(ILogger<NotifierService>? logger = null) : INotifierService
 {
-    private readonly ILogger<NotifierService>? _logger;
-
-    public NotifierService(ILogger<NotifierService>? logger = null)
-    {
-        _logger = logger;
-    }
+    private readonly ILogger<NotifierService>? _logger = logger;
 
     public bool IsSupported => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux();
 
@@ -63,7 +58,7 @@ public sealed class NotifierService : INotifierService
             $"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('OneCode').Show($toast);");
 
         using var proc = Process.Start(psi);
-        if (proc != null)
+        if (proc is not null)
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
     }
 
@@ -80,7 +75,7 @@ public sealed class NotifierService : INotifierService
         psi.ArgumentList.Add($"display notification \"{Escape(message)}\" with title \"{Escape(title)}\"");
 
         using var proc = Process.Start(psi);
-        if (proc != null)
+        if (proc is not null)
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
     }
 
@@ -97,7 +92,7 @@ public sealed class NotifierService : INotifierService
         psi.ArgumentList.Add(Escape(message));
 
         using var proc = Process.Start(psi);
-        if (proc != null)
+        if (proc is not null)
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
     }
 

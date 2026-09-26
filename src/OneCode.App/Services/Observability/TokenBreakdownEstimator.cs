@@ -92,21 +92,14 @@ public sealed record TokenBreakdown(
 /// 分场景 Token 估算器 — 使用 TokenEstimator 估算各部分 token 数。
 /// 支持校准系数：从 TokenUsageTracker 获取校准系数，将估算值乘以系数后逼近 API 真实值。
 /// </summary>
-public sealed partial class TokenBreakdownEstimator : ITokenBreakdownEstimator
+public sealed partial class TokenBreakdownEstimator(
+    ITokenEstimator estimator,
+    ITokenUsageTracker? tracker = null,
+    ILogger<TokenBreakdownEstimator>? logger = null) : ITokenBreakdownEstimator
 {
-    private readonly ITokenEstimator _estimator;
-    private readonly ITokenUsageTracker? _tracker;
-    private readonly ILogger<TokenBreakdownEstimator> _logger;
-
-    public TokenBreakdownEstimator(
-        ITokenEstimator estimator,
-        ITokenUsageTracker? tracker = null,
-        ILogger<TokenBreakdownEstimator>? logger = null)
-    {
-        _estimator = estimator ?? throw new ArgumentNullException(nameof(estimator));
-        _tracker = tracker;
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<TokenBreakdownEstimator>.Instance;
-    }
+    private readonly ITokenEstimator _estimator = estimator ?? throw new ArgumentNullException(nameof(estimator));
+    private readonly ITokenUsageTracker? _tracker = tracker;
+    private readonly ILogger<TokenBreakdownEstimator> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<TokenBreakdownEstimator>.Instance;
 
     /// <summary>
     /// 估算分场景 token 数。

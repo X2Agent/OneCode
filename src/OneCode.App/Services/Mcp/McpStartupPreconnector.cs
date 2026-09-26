@@ -81,7 +81,10 @@ public sealed class McpStartupPreconnector(
         {
             await onCompleted().ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            // 预连接取消，属正常退出。
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "MCP post-preconnect callback failed");

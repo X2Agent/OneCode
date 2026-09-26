@@ -44,7 +44,7 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
     /// <summary>预算快照文案：仅显示启用了上限的维度（null = 不限制，自动省略）。</summary>
     private string FormatBudget(GoalBudgetUsage usage)
     {
-        var parts = new List<string>();
+        List<string> parts = [];
         if (budget.MaxSubGoalAttempts > 0)
             parts.Add($"{usage.TotalAttempts}/{budget.MaxSubGoalAttempts} 次");
         if (budget.MaxTotalTokens is { } maxTokens)

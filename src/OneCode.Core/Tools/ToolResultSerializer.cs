@@ -70,7 +70,7 @@ public static class ToolResultSerializer
                 .Select(kv => $"  {kv.Key}: {kv.Value}");
             var telemetryList = string.Join("\n", telemetryParts);
             if (telemetryList.Length > 0)
-                parts.Add("Telemetry:\n" + telemetryList);
+                parts.Add($"Telemetry:\n{telemetryList}");
         }
 
         return string.Join("\n", parts);

@@ -7,21 +7,14 @@ namespace OneCode.App.Tui;
 ///   2. File paths  (read "path → read "path/to/file.cs")
 ///   3. Tool names   (@Tool → @WebFetch, @Read, ...)
 /// </summary>
-public sealed class TypeaheadCompletionEngine
+public sealed class TypeaheadCompletionEngine(
+    IReadOnlyList<SlashCommandEntry> commands,
+    string workingDirectory,
+    Func<IReadOnlyCollection<string>> toolNameProvider)
 {
-    private IReadOnlyList<SlashCommandEntry> _commands;
-    private readonly string _workingDirectory;
-    private readonly Func<IReadOnlyCollection<string>> _toolNameProvider;
-
-    public TypeaheadCompletionEngine(
-        IReadOnlyList<SlashCommandEntry> commands,
-        string workingDirectory,
-        Func<IReadOnlyCollection<string>> toolNameProvider)
-    {
-        _commands = commands;
-        _workingDirectory = workingDirectory;
-        _toolNameProvider = toolNameProvider;
-    }
+    private IReadOnlyList<SlashCommandEntry> _commands = commands;
+    private readonly string _workingDirectory = workingDirectory;
+    private readonly Func<IReadOnlyCollection<string>> _toolNameProvider = toolNameProvider;
 
     private IReadOnlyCollection<string> GetToolNames()
         => _toolNameProvider.Invoke();
@@ -114,10 +107,7 @@ public sealed class TypeaheadCompletionEngine
         // @-prefixed completions: show only the part after the last @
         var lastAt = completion.LastIndexOf('@');
         if (lastAt >= 0)
-        {
-            var afterAt = completion[(lastAt + 1)..];
-            return afterAt;
-        }
+            return completion[(lastAt + 1)..];
 
         // Quoted path completions: show without surrounding text
         if (completion.StartsWith('"'))

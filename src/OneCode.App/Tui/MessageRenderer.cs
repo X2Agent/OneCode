@@ -46,7 +46,7 @@ internal static class MessageRenderer
     public static List<LineEntry> BuildToolDetailLines(ToolLineTag tag, int viewportWidth)
     {
         const string detailIndent = "      ";
-        var lines = new List<LineEntry>();
+        List<LineEntry> lines = [];
         var marker = new ToolDetailLineTag();
         var maxContentWidth = Math.Max(20, viewportWidth - detailIndent.Length);
 

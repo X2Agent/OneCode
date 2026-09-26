@@ -68,7 +68,7 @@ public sealed class KeybindingMigrationTests
         shell.ChatInput.DispatchInputKey(Key.Tab);
         shell.ChatInput.IsCompletionActive.Should().BeTrue();
         shell.ModeController.Mode.Should().Be(WorkingMode.Build, "补全期间 Tab 不得切模式");
-        shell.ChatInput.SelectedSuggestionIndex.Should().BeGreaterThan(before - 1, "循环仍发生");
+        shell.ChatInput.SelectedSuggestionIndex.Should().Be(before + 1, "循环仍发生");
     }
 
     // —— InlineSelector：selector:* 迁移 ——
@@ -190,7 +190,7 @@ public sealed class KeybindingMigrationTests
             version: "test",
             model: "test-model",
             sshHost: null,
-            slashCommands: [new SlashCommandEntry("help", "帮助")],
+            slashCommands: [new SlashCommandEntry("help", "帮助"), new SlashCommandEntry("hello", "测试命令二")],
             modeController: new WorkingModeController(),
             keyResolver: resolver,
             keyContextManager: keyContextManager,

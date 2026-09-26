@@ -311,18 +311,18 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
 
     private void EnsureVisible(View? target)
     {
-        if (target == null || _formContent.Viewport.Height <= 0)
+        if (target is null || _formContent.Viewport.Height <= 0)
             return;
 
         var current = target;
         var relY = 0;
-        while (current != null && current != _formContent)
+        while (current is not null && current != _formContent)
         {
             relY += current.Frame.Y;
             current = current.SuperView;
         }
 
-        if (current == null)
+        if (current is null)
             return;
 
         var targetHeight = Math.Max(1, target.Frame.Height);
