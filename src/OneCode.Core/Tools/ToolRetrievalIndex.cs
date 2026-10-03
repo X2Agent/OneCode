@@ -10,14 +10,14 @@ public sealed record ToolSearchMatch(string ToolName, double Score);
 /// <summary>
 /// 工具检索倒排索引——为本地模型的工具分层选择
 /// （<see cref="ToolMetadataRegistry.SelectToolsForLocalModel"/>）与 ToolSearch 工具
-/// 提供统一的相关度评分，替代原先的裸子串匹配。
+/// 提供统一的相关度评分。
 /// </summary>
 /// <remarks>
-/// PR-17 评估：简化为「精确匹配 + 别名 + 子串兜底」(~50 行) 会回归
+/// 完整评分模型不可简化为「精确匹配 + 别名 + 子串兜底」(~50 行)：那会回归
 /// ContextualScoreThreshold 语义（IDF 抑制 "plan" 误命中 "planetary"、CJK bigram 分词），
-/// 且无独立 ToolSearch 命中率测试可锁定行为——暂保留完整评分模型。
+/// 且无独立 ToolSearch 命中率测试可锁定行为。
 /// </remarks>
-public sealed partial class ToolRetrievalIndex
+public sealed class ToolRetrievalIndex
 {
     // 字段权重：名称/别名/关键词命中比描述命中更能代表用户意图
     private const double NameFieldWeight = 3.0;
@@ -211,12 +211,6 @@ public sealed partial class ToolRetrievalIndex
         }
         return tokens;
     }
-
-    private static string StripPluralSuffix(string word)
-        // "ss" 结尾（class/access）的 s 不是复数后缀，不能去
-        => word.Length > 3 && word.EndsWith('s') && !word.EndsWith("ss", StringComparison.Ordinal)
-            ? word[..^1]
-            : word;
 
     private sealed record FieldTokens(HashSet<string> Tokens, string JoinedText);
 

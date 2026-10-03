@@ -186,16 +186,11 @@ public sealed class KeybindingMigrationTests
         };
 
         return new ReplShell(
-            app,
-            version: "test",
-            model: "test-model",
-            sshHost: null,
-            slashCommands: [new SlashCommandEntry("help", "帮助"), new SlashCommandEntry("hello", "测试命令二")],
-            modeController: new WorkingModeController(),
-            keyResolver: resolver,
-            keyContextManager: keyContextManager,
-            clipboard: null,
-            historyProvider: null,
-            toolNameProvider: () => []);
+            new ReplShellEnvironment(app, "test-model"),
+            new WorkingModeController(),
+            new ReplShellKeyServices(resolver, keyContextManager),
+            new ReplShellInputSources(
+                [new SlashCommandEntry("help", "帮助"), new SlashCommandEntry("hello", "测试命令二")],
+                () => []));
     }
 }

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace OneCode.Core.Permissions.Yolo;
 
 /// <summary>
@@ -12,7 +14,7 @@ public sealed class YoloRuleStore
     /// Cache compiled regexes to avoid recompilation on every MatchRule call.
     /// Keyed by rule pattern string. Invalidated when rules are reloaded.
     /// </summary>
-    private readonly Dictionary<string, System.Text.RegularExpressions.Regex> _compiledRegexCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Regex> _compiledRegexCache = new(StringComparer.Ordinal);
     private readonly ILogger<YoloRuleStore>? _logger;
     private readonly object _lock = new();
 
@@ -45,9 +47,9 @@ public sealed class YoloRuleStore
                 {
                     if (!_compiledRegexCache.TryGetValue(rule.Pattern, out var regex))
                     {
-                        regex = new System.Text.RegularExpressions.Regex(
+                        regex = new Regex(
                             rule.Pattern,
-                            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
+                            RegexOptions.IgnoreCase | RegexOptions.Compiled,
                             matchTimeout: RegexMatchTimeout);
                         _compiledRegexCache[rule.Pattern] = regex;
                     }
@@ -55,11 +57,11 @@ public sealed class YoloRuleStore
                     if (regex.IsMatch(command))
                         return rule;
                 }
-                catch (System.Text.RegularExpressions.RegexParseException ex)
+                catch (RegexParseException ex)
                 {
                     _logger?.LogWarning(ex, "Invalid regex pattern in rule: {Pattern}", rule.Pattern);
                 }
-                catch (System.Text.RegularExpressions.RegexMatchTimeoutException ex)
+                catch (RegexMatchTimeoutException ex)
                 {
                     _logger?.LogWarning(ex, "Regex timeout in rule: {Pattern} - possible ReDoS attempt", rule.Pattern);
                 }

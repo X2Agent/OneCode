@@ -1,6 +1,5 @@
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Middleware.Contracts;
 
 namespace OneCode.App.Services.Agent;
 
@@ -56,7 +55,6 @@ public sealed class AgentPipelineAssembly(
             fileChangeCallback: options.FileChangeCallback,
             modelId: modelId,
             providerId: providerId,
-            behaviorContracts: CreateDefaultBehaviorContracts(cwd),
             editTransaction: transaction,
             conversationId: options.ConversationId,
             maxBudgetTokens: options.MaxBudgetTokens);
@@ -83,14 +81,6 @@ public sealed class AgentPipelineAssembly(
                 || modeProvider.CurrentMode == PermissionMode.GoalAuto)
                 && !options.SuppressToolApproval);
     }
-
-    /// <summary>
-    /// Creates default behavior contracts (FileEdit) shared by Main and Team paths.
-    /// </summary>
-    internal static IReadOnlyList<FileEditContract> CreateDefaultBehaviorContracts(string workingDirectory) =>
-    [
-        new FileEditContract(workingDirectory),
-    ];
 
     private Dictionary<string, AdditionalWorkingDirectory>? BuildAdditionalWorkingDirectories()
     {

@@ -17,12 +17,30 @@ public sealed class ToolProtocolValidatorTests
                 new FunctionCallContent("call-1", "Read", null),
                 new FunctionCallContent("call-2", "Glob", null),
             ]),
-            new(ChatRole.User, [new FunctionResultContent("call-1", "one")]),
-            new(ChatRole.User, [new FunctionResultContent("call-2", "two")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-1", "one")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-2", "two")]),
             new(ChatRole.Assistant, "done"),
         };
 
         _sut.Validate(messages).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_UserRoleResults_AreRejected()
+    {
+        // 回放约定统一为 Tool 角色（M.E.AI 标准）：User 角色的 FunctionResultContent
+        // 会被 OpenAI 适配器静默丢弃，造成 assistant tool_calls 无 tool 结果的畸形历史。
+        var messages = new ChatMessage[]
+        {
+            new(ChatRole.Assistant, [new FunctionCallContent("call-1", "Read", null)]),
+            new(ChatRole.User, [new FunctionResultContent("call-1", "one")]),
+        };
+
+        var result = _sut.Validate(messages);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            error.Code == ToolProtocolErrorCode.InvalidRole && error.CallId == "call-1");
     }
 
     [Fact]
@@ -35,7 +53,7 @@ public sealed class ToolProtocolValidatorTests
                 new FunctionCallContent("call-1", "Read", null),
                 new FunctionCallContent("call-2", "Glob", null),
             ]),
-            new(ChatRole.User, [new FunctionResultContent("call-1", "one")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-1", "one")]),
         };
 
         var result = _sut.Validate(messages);
@@ -52,7 +70,7 @@ public sealed class ToolProtocolValidatorTests
         {
             new(ChatRole.Assistant, [new FunctionCallContent("call-1", "Read", null)]),
             new(ChatRole.Assistant, "illegal interruption"),
-            new(ChatRole.User, [new FunctionResultContent("call-1", "late")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-1", "late")]),
         };
 
         var result = _sut.Validate(messages);
@@ -66,7 +84,7 @@ public sealed class ToolProtocolValidatorTests
         var messages = new ChatMessage[]
         {
             new(ChatRole.Assistant, [new FunctionCallContent("call-1", "Read", null)]),
-            new(ChatRole.User,
+            new(ChatRole.Tool,
             [
                 new FunctionResultContent("call-1", "one"),
                 new FunctionResultContent("call-1", "duplicate"),

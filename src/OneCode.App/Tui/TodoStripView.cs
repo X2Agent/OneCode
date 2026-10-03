@@ -58,7 +58,7 @@ internal sealed class TodoStripView : View
 
         // 头部：反色条，与 AgentStatusBar 的曲面底色一致，视觉上属于同一层状态区。
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
+        SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
         var header = $" {TuiGlyphs.BrandMark} 待办 ({_items.Count - remaining}/{_items.Count})";
         AddStr(PadOrTruncate(header, width));
 
@@ -69,12 +69,12 @@ internal sealed class TodoStripView : View
             Move(0, row);
             if (item.IsComplete)
             {
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
                 AddStr(PadOrTruncate($"  {TuiGlyphs.Complete} #{item.Id} {item.Title}", width));
             }
             else
             {
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
                 AddStr(PadOrTruncate($"  {TuiGlyphs.Pending} #{item.Id} {item.Title}", width));
             }
         }
@@ -82,7 +82,7 @@ internal sealed class TodoStripView : View
         if (_items.Count > MaxItems)
         {
             Move(0, row);
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
             AddStr(PadOrTruncate($"  {TuiGlyphs.Ellipsis} 其余 {_items.Count - MaxItems} 项", width));
         }
 

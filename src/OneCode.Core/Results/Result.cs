@@ -37,29 +37,4 @@ public sealed class Result<T>
         error = Error;
     }
 
-    /// <summary>
-    /// Get the value or throw if failure.
-    /// </summary>
-    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
-    public T GetValueOrThrow() => IsSuccess && Value is not null
-        ? Value
-        : throw new InvalidOperationException(Error ?? "Result is not successful");
-}
-
-/// <summary>
-/// Non-generic result for operations without a return value.
-/// </summary>
-public sealed class Result
-{
-    public bool IsSuccess { get; }
-    public string? Error { get; }
-
-    private Result(bool isSuccess, string? error)
-    {
-        IsSuccess = isSuccess;
-        Error = error;
-    }
-
-    public static Result Success() => new(true, null);
-    public static Result Failure(string error) => new(false, error);
 }

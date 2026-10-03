@@ -17,7 +17,6 @@ public static class PermissionServiceCollectionExtensions
         services.AddSingleton<YoloRuleFileStore>();
         services.AddSingleton<IYoloRuleFileStore>(sp => sp.GetRequiredService<YoloRuleFileStore>());
         services.AddSingleton<YoloClassifier>();
-        services.AddSingleton<IYoloClassifier>(sp => sp.GetRequiredService<YoloClassifier>());
         services.AddSingleton<IPermissionChecker, PermissionChecker>();
         services.AddYoloRuleStoreLoader();
 

@@ -118,15 +118,6 @@ public sealed class McpElicitationHandler(
         return await _promptFunc(prompt, cancellationToken).ConfigureAwait(false);
     }
 
-    public static McpElicitationHandler CreateWithUserPrompt(
-        Func<string, CancellationToken, Task<string?>> promptFunc)
-    {
-        ArgumentNullException.ThrowIfNull(promptFunc);
-
-        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<McpElicitationHandler>.Instance;
-        return new McpElicitationHandler(logger, promptFunc: promptFunc);
-    }
-
     private async Task OpenBrowserAsync(string url)
     {
         if (_openBrowserFunc is null)

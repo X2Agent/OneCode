@@ -31,24 +31,24 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderBuildRunPanel_Clarifying_HidesInternalStateAndQuestions()
+    public void RenderBuildRunPanel_Planning_HidesInternalStateAndQuestions()
     {
         var state = new TuiBuildRunState(
             new OneCode.Core.Build.BuildRunId("br-1"),
-            OneCode.Core.Build.BuildRunState.Clarifying,
+            OneCode.Core.Build.BuildRunState.Planning,
             4,
             ["明确目标", "确认验收"],
             0,
             1,
-            OneCode.Core.Workflows.RunTerminalReason.ClarificationRequired);
+            TerminalReason: null);
 
         var lines = ChatBlockRenderers.RenderBuildRunPanel(state);
         var text = string.Join("\n", lines.Select(line => line.FullText));
 
         lines.Should().ContainSingle();
-        text.Should().Contain("等待补充任务信息");
+        text.Should().Contain("正在准备执行");
         text.Should().NotContain("br-1");
-        text.Contains("Clarifying", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+        text.Contains("Planning", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
         text.Should().NotContain("明确目标");
         text.Should().NotContain("确认验收");
     }

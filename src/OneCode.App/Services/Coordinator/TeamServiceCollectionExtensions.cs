@@ -57,19 +57,20 @@ public static class TeamServiceCollectionExtensions
             sp.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(TeamRegistry).FullName!)));
         // Factory: ctor is internal (takes internal TeamWorkflowRunner); DI cannot auto-bind it.
         services.AddSingleton(sp => new TeamOrchestrationService(
-            sp.GetRequiredService<TeamWorkflowRunner>(),
-            sp.GetRequiredService<ILoggerFactory>(),
-            sp.GetRequiredService<ILogger<TeamOrchestrationService>>(),
-            sp.GetRequiredService<TeamRunApplicationService>(),
-            sp.GetRequiredService<TeamRequirementService>(),
-            sp.GetRequiredService<IClarificationInteractionService>(),
-            sp.GetRequiredService<Core.Tools.IWorkingDirectoryAccessor>(),
-            sp.GetRequiredService<TeamTaskWorkflowHost>(),
-            sp.GetRequiredService<TeamClarificationWorkflowHost>(),
-            sp.GetRequiredService<RequestPortGate>(),
-            sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
-            sp.GetRequiredService<TeamRegistry>(),
-            sp.GetService<Core.Workflows.IOperationLedger>()));
+            new TeamWorkflowHostDependencies(
+                sp.GetRequiredService<TeamWorkflowRunner>(),
+                sp.GetRequiredService<TeamTaskWorkflowHost>(),
+                sp.GetRequiredService<TeamClarificationWorkflowHost>(),
+                sp.GetRequiredService<RequestPortGate>(),
+                sp.GetService<Core.Workflows.IOperationLedger>()),
+            new TeamOrchestrationDependencies(
+                sp.GetRequiredService<TeamRunApplicationService>(),
+                sp.GetRequiredService<TeamRequirementService>(),
+                sp.GetRequiredService<Core.Coordinator.ITeamRunStore>(),
+                sp.GetRequiredService<IClarificationInteractionService>(),
+                sp.GetRequiredService<Core.Tools.IWorkingDirectoryAccessor>(),
+                sp.GetRequiredService<ILogger<TeamOrchestrationService>>(),
+                sp.GetRequiredService<TeamRegistry>())));
         services.AddSingleton<Core.Coordinator.ITeamOrchestrationService>(sp =>
             sp.GetRequiredService<TeamOrchestrationService>());
         services.AddSingleton<WorkerAgentService>();

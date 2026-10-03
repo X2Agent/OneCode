@@ -24,22 +24,8 @@ public sealed class FileIgnoreTests
             File.WriteAllText(Path.Combine(root, ".onecodeignore"), "cache/\n!cache/keep.txt\nnotes/*.md");
             var workingDirectory = Substitute.For<IWorkingDirectoryAccessor>();
             workingDirectory.WorkingDirectory.Returns(root);
-            var fileSystem = Substitute.For<IFileSystem>();
-            fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
-            {
-                var path = call.Arg<string>();
-                return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
-            });
-            fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
-                {
-                    var path = call.Arg<string>();
-                    return File.Exists(path)
-                        ? Task.FromResult<string?>(File.ReadAllText(path))
-                        : Task.FromResult<string?>(null);
-                });
 
-            var snapshot = await new WorkspaceIgnoreProvider(workingDirectory, fileSystem).GetSnapshotAsync();
+            var snapshot = await new WorkspaceIgnoreProvider(workingDirectory).GetSnapshotAsync();
 
             snapshot.IsIgnored("cache/data.txt").Should().BeTrue();
             // gitignore 语义：`cache/` 排除目录本身后，`!cache/keep.txt` 无法恢复其下文件
@@ -66,22 +52,8 @@ public sealed class FileIgnoreTests
             File.WriteAllText(Path.Combine(root, ".onecodeignore"), ".env.*\n!.env.example\n/generated/\nnotes/*.md");
             var workingDirectory = Substitute.For<IWorkingDirectoryAccessor>();
             workingDirectory.WorkingDirectory.Returns(root);
-            var fileSystem = Substitute.For<IFileSystem>();
-            fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
-            {
-                var path = call.Arg<string>();
-                return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
-            });
-            fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(call =>
-                {
-                    var path = call.Arg<string>();
-                    return File.Exists(path)
-                        ? Task.FromResult<string?>(File.ReadAllText(path))
-                        : Task.FromResult<string?>(null);
-                });
 
-            var snapshot = await new WorkspaceIgnoreProvider(workingDirectory, fileSystem).GetSnapshotAsync();
+            var snapshot = await new WorkspaceIgnoreProvider(workingDirectory).GetSnapshotAsync();
 
             snapshot.IsIgnored(".env.local").Should().BeTrue();
             snapshot.IsIgnored("src/.env.local").Should().BeTrue();
@@ -100,23 +72,14 @@ public sealed class FileIgnoreTests
     private static async Task<WorkspaceIgnoreSnapshot> LoadIgnoreAsync(string root, string ignoreContent)
     {
         File.WriteAllText(Path.Combine(root, ".onecodeignore"), ignoreContent);
-        return await LoadIgnoreFromContentAsync(root, ignoreContent);
+        return await new WorkspaceIgnoreProvider(CreateWd(root)).GetSnapshotAsync();
     }
 
-    /// <summary>按给定内容构造 ignore 快照（不要求磁盘上真实存在 ignore 文件）。</summary>
-    private static async Task<WorkspaceIgnoreSnapshot> LoadIgnoreFromContentAsync(string root, string ignoreContent)
+    private static IWorkingDirectoryAccessor CreateWd(string root)
     {
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(root);
-        var fileSystem = Substitute.For<IFileSystem>();
-        fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
-        {
-            var path = call.Arg<string>();
-            return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
-        });
-        fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<string?>(ignoreContent));
-        return await new WorkspaceIgnoreProvider(wd, fileSystem).GetSnapshotAsync();
+        return wd;
     }
 
     /// <summary>
@@ -230,21 +193,8 @@ public sealed class FileIgnoreTests
 
             var request = new TextSearchRequest(
                 SearchPath: root, Pattern: "needle", OutputMode: "files_with_matches", WorkspaceRoot: root);
-            var provider = new StubIgnoreProvider(root);
-            var fs = Substitute.For<IFileSystem>();
-            fs.FindFiles(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string[]?>())
-                .Returns(call =>
-                {
-                    // FindFiles(string, string?, string[]?) 有两个 string 参数：用位置索引取参，
-                    // 避免 NSubstitute 的 Arg<string>() 歧义异常。
-                    var dir = call.ArgAt<string>(0);
-                    var patterns = call.ArgAt<string?>(1);
-                    var excludeDirs = call.ArgAt<string[]?>(2);
-                    var wd = Substitute.For<IWorkingDirectoryAccessor>();
-                    wd.WorkingDirectory.Returns(root);
-                    IFileSystem realFs = new LocalAgentFileStore(wd);
-                    return realFs.FindFiles(dir, patterns, excludeDirs);
-                });
+            var provider = new WorkspaceIgnoreProvider(CreateWd(root));
+            var fs = new LocalAgentFileStore(CreateWd(root));
 
             // 1) 无 rg 环境也能验证的双向断言：C# fallback 遵循 gitignore 语义
             // （`/generated/` 不匹配 src/generated/，`!keep.dump` 恢复），且跨平台先归一化再比较。
@@ -299,7 +249,7 @@ public sealed class FileIgnoreTests
             var ignoreProvider = Substitute.For<IWorkspaceIgnoreProvider>();
             ignoreProvider.GetSnapshotAsync(Arg.Any<CancellationToken>()).Returns(noIgnore);
 
-            var results = await new TextSearchService(processRunner, Substitute.For<IFileSystem>(),
+            var results = await new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd(root)),
                 NullLogger<TextSearchService>.Instance, ignoreProvider).SearchAsync(request, ct);
 
             results.Should().BeEquivalentTo(["rg.cs:1:found"]);
@@ -307,16 +257,6 @@ public sealed class FileIgnoreTests
         finally
         {
             try { Directory.Delete(root, recursive: true); } catch { /* best effort */ }
-        }
-    }
-
-    /// <summary>读取真实 `.onecodeignore` 并复用生产解析器构造快照的测试桩。</summary>
-    private sealed class StubIgnoreProvider(string root) : IWorkspaceIgnoreProvider
-    {
-        public async Task<WorkspaceIgnoreSnapshot> GetSnapshotAsync(CancellationToken ct = default)
-        {
-            var content = await File.ReadAllTextAsync(Path.Combine(root, ".onecodeignore"), ct);
-            return await LoadIgnoreFromContentAsync(root, content);
         }
     }
 

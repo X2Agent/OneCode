@@ -15,10 +15,11 @@ public interface ISessionStore
 
 /// <summary>
 /// Header-level summary of a persisted session, for listing and resume choosers.
+/// <see cref="Title"/> 为显示标题（用户命名优先，否则首条用户消息截断），可能为 null。
 /// </summary>
 public sealed record ConversationSummary(
     SessionId Id,
-    string Name,
+    string? Title,
     string Model,
     int MessageCount,
     DateTimeOffset CreatedAt,

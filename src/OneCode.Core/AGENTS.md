@@ -92,7 +92,7 @@ public interface IMyFeature : IMyFeatureCore, IMyFeatureValidation, IMyFeaturePe
 
 ## Result\<T> 类型
 
-`Result<T>` / `Result` 是 Core 中定义的操作结果类型，位于 `OneCode.Core.Results` 命名空间。
+`Result<T>` 是 Core 中定义的操作结果类型，位于 `OneCode.Core.Results` 命名空间。
 
 ```csharp
 // 用法（非 BCL 内置，是自定义类型）
@@ -131,7 +131,7 @@ public Result<int> ParseNumber(string input)
 dotnet build src/OneCode.Core/OneCode.Core.csproj
 
 # 运行 Core 相关测试
-dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~ResultTests"
+dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~PermissionCheckerTests"
 
 # 运行所有 Core 命名空间下的测试
 dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~OneCode.Core"

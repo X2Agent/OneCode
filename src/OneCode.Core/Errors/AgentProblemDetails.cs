@@ -4,8 +4,8 @@ namespace OneCode.Core.Errors;
 /// 结构化错误契约 — 跨边界传递的机器可读错误详情。
 /// </summary>
 /// <remarks>
-/// ERR-1: 替代裸字符串 <c>ToolResult.Error(string)</c>，使子 Agent 失败
-/// 可在主会话日志中用 <see cref="TraceId"/> 关联。遵循 RFC 9457 (Problem Details) 语义。
+/// 使子 Agent 失败可在主会话日志中用 <see cref="TraceId"/> 关联。
+/// 遵循 RFC 9457 (Problem Details) 语义。
 /// </remarks>
 public sealed record AgentProblemDetails(
     string Type,           // "https://onecode/errors/permission-denied" 等
@@ -17,7 +17,7 @@ public sealed record AgentProblemDetails(
     string? SuggestedNextAction = null,
     IReadOnlyDictionary<string, object?>? Extensions = null)
 {
-    /// <summary>从当前 Activity 提取 TraceId（与 OBS-1.1 协同）。</summary>
+    /// <summary>从当前 Activity 提取 TraceId。</summary>
     public static string? CurrentTraceId =>
         System.Diagnostics.Activity.Current?.TraceId.ToHexString();
 

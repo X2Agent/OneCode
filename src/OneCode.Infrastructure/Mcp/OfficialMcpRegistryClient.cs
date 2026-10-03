@@ -171,22 +171,22 @@ public sealed class OfficialMcpRegistryClient
 // 防止把缺失的可选字段当空串回写。
 
 /// <summary>A single server's metadata (name is reverse-DNS, e.g. "io.github.user/server").</summary>
-public sealed class OfficialRegistryServer
+public sealed record OfficialRegistryServer
 {
     [JsonPropertyName("name")]
-    public string Name { get; set; } = "";
+    public required string Name { get; init; }
 
     [JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Title { get; set; }
+    public string? Title { get; init; }
 
     [JsonPropertyName("description"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Description { get; set; }
+    public string? Description { get; init; }
 
     [JsonPropertyName("version"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Version { get; set; }
+    public string? Version { get; init; }
 
     [JsonPropertyName("websiteUrl"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? WebsiteUrl { get; set; }
+    public string? WebsiteUrl { get; init; }
 
     /// <summary>Registry lifecycle status (active/deprecated/deleted) — 已废弃时展示打标。</summary>
     [JsonIgnore]
@@ -194,80 +194,80 @@ public sealed class OfficialRegistryServer
 
     /// <summary>Local install packages (npm/pypi/nuget/oci/mcpb) — present for stdio servers.</summary>
     [JsonPropertyName("packages"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<OfficialRegistryPackage>? Packages { get; set; }
+    public List<OfficialRegistryPackage>? Packages { get; init; }
 
     /// <summary>Remote endpoints (streamable-http/sse) — present for hosted servers.</summary>
     [JsonPropertyName("remotes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<OfficialRegistryRemote>? Remotes { get; set; }
+    public List<OfficialRegistryRemote>? Remotes { get; init; }
 }
 
 /// <summary>A package that can be installed and run locally over stdio.</summary>
-public sealed class OfficialRegistryPackage
+public sealed record OfficialRegistryPackage
 {
     /// <summary>npm | pypi | nuget | oci | mcpb.</summary>
     [JsonPropertyName("registryType")]
-    public string RegistryType { get; set; } = "";
+    public required string RegistryType { get; init; }
 
     [JsonPropertyName("identifier")]
-    public string Identifier { get; set; } = "";
+    public required string Identifier { get; init; }
 
     [JsonPropertyName("version"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Version { get; set; }
+    public string? Version { get; init; }
 
     [JsonPropertyName("transport"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public OfficialRegistryTransport? Transport { get; set; }
+    public OfficialRegistryTransport? Transport { get; init; }
 
     /// <summary>SHA-256 of the artifact (mcpb only); clients must verify before install.</summary>
     [JsonPropertyName("fileSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? FileSha256 { get; set; }
+    public string? FileSha256 { get; init; }
 }
 
-public sealed class OfficialRegistryTransport
+public sealed record OfficialRegistryTransport
 {
     /// <summary>stdio | streamable-http | sse。</summary>
     [JsonPropertyName("type")]
-    public string? Type { get; set; }
+    public string? Type { get; init; }
 }
 
-public sealed class OfficialRegistryRemote
+public sealed record OfficialRegistryRemote
 {
     /// <summary>streamable-http | sse。</summary>
     [JsonPropertyName("type")]
-    public string? Type { get; set; }
+    public string? Type { get; init; }
 
     [JsonPropertyName("url")]
-    public string Url { get; set; } = "";
+    public required string Url { get; init; }
 }
 
-public sealed class OfficialRegistryServerEntry
+public sealed record OfficialRegistryServerEntry
 {
     [JsonPropertyName("server")]
-    public OfficialRegistryServer? Server { get; set; }
+    public OfficialRegistryServer? Server { get; init; }
 
     [JsonPropertyName("_meta")]
-    public JsonElement? Meta { get; set; }
+    public JsonElement? Meta { get; init; }
 }
 
-public sealed class OfficialRegistryListResponse
+public sealed record OfficialRegistryListResponse
 {
     [JsonPropertyName("servers")]
-    public List<OfficialRegistryServerEntry> Servers { get; set; } = [];
+    public List<OfficialRegistryServerEntry> Servers { get; init; } = [];
 
     [JsonPropertyName("metadata")]
-    public OfficialRegistryListMetadata? Metadata { get; set; }
+    public OfficialRegistryListMetadata? Metadata { get; init; }
 }
 
-public sealed class OfficialRegistryListMetadata
+public sealed record OfficialRegistryListMetadata
 {
     [JsonPropertyName("nextCursor")]
-    public string? NextCursor { get; set; }
+    public string? NextCursor { get; init; }
 
     [JsonPropertyName("count")]
-    public int Count { get; set; }
+    public int Count { get; init; }
 }
 
-public sealed class OfficialRegistryLatestResponse
+public sealed record OfficialRegistryLatestResponse
 {
     [JsonPropertyName("server")]
-    public OfficialRegistryServer? Server { get; set; }
+    public OfficialRegistryServer? Server { get; init; }
 }

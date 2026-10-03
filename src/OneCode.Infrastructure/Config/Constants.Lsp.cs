@@ -49,6 +49,5 @@ public static partial class Constants
 
         // FindReferencesTool
         public const int DeclarationSearchMax = 5;
-        public const int RipgrepMaxColumns = 500;
     }
 }

@@ -55,8 +55,6 @@ public sealed class OneCodeApp(
         var builder = Host.CreateApplicationBuilder(args);
         startupTimer.Mark("builder-created");
 
-        var debugConfig = GetDebugConfig();
-
         builder.Services
             .AddSkillServices(workingDir)
             .AddChatClientServices()
@@ -91,7 +89,7 @@ public sealed class OneCodeApp(
             .AddCommands()
             .AddInteractiveServices();
 
-        builder.ConfigureApplicationLogging(debugConfig);
+        builder.ConfigureApplicationLogging();
         startupTimer.Mark("services-registered");
 
         var host = builder.Build();
@@ -102,7 +100,7 @@ public sealed class OneCodeApp(
 
         var logger = host.Services.GetRequiredService<ILogger<OneCodeApp>>();
         logger.LogDebug("Startup timing:\n{Summary}", startupTimer.FormatSummary());
-        WriteDebugLogHint(debugConfig);
+        WriteDebugLogHint();
 
         return new OneCodeApp(
             host,
@@ -150,15 +148,13 @@ public sealed class OneCodeApp(
         _host.Dispose();
     }
 
-    private static void WriteDebugLogHint(DebugLogConfig debugConfig)
+    /// <summary>
+    /// 只在 DEBUG 构建提示日志路径：Release 构建正常启动不产生非 warning/error 输出，
+    /// 其日志文件位置记录在 <c>docs/settings.md</c>。
+    /// </summary>
+    private static void WriteDebugLogHint()
     {
-        if (debugConfig.Enabled)
-            Console.Error.WriteLine($"Log file: {debugConfig.GetLogFilePath()}");
-    }
-
-    private static DebugLogConfig GetDebugConfig()
-    {
-        var levelEnv = Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.LogLevel);
-        return DebugLogConfig.Resolve(DebugLogConfig.DebugBuild, levelEnv);
+        if (DebugFileLoggerProvider.IsDebugBuild)
+            Console.Error.WriteLine($"Log file: {DebugFileLoggerProvider.GetLogFilePath()}");
     }
 }

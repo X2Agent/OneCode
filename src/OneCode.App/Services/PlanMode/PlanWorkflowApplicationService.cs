@@ -279,20 +279,24 @@ public sealed partial class PlanWorkflowApplicationService(IPlanAggregateStore a
             var current = await RequireWorkflowAsync(command.SessionId, command.PlanId, ct).ConfigureAwait(false);
             if (CommandIdempotency.IsReplay(current, command.CommandId))
                 return new PlanTransitionResult(current, IsDuplicateCommand: true);
+            // 同 run 重绑幂等先行：执行收尾时 BuildRun 的 Verifying 投影会对已绑定的 run
+            // 再发一次绑定事件，而此时 plan workflow 往往已验证完成（Completed、ActiveRunId
+            // 已清空）——若先过状态守卫必然误报 "cannot bind a BuildRun in state 'Completed'"。
+            // 绑定关系未变化时任何状态都直接幂等返回；异 run 冲突仍拒绝。
+            if (!string.IsNullOrWhiteSpace(current.BuildRunId)
+                && string.Equals(current.BuildRunId, command.BuildRunId, StringComparison.Ordinal))
+                return new PlanTransitionResult(current, IsDuplicateCommand: true);
             if (current.State is not (PlanWorkflowState.Executing or PlanWorkflowState.Verifying))
                 throw new PlanTransitionException(
                     $"Plan workflow '{current.Id}' cannot bind a BuildRun in state '{current.State}'.");
             if (!string.Equals(current.ActiveRunId, command.RunId, StringComparison.Ordinal))
                 throw new PlanTransitionException(
                     $"Run '{command.RunId}' does not match active run '{current.ActiveRunId}'.");
-            if (!string.IsNullOrWhiteSpace(current.BuildRunId)
-                && !string.Equals(current.BuildRunId, command.BuildRunId, StringComparison.Ordinal))
+            if (!string.IsNullOrWhiteSpace(current.BuildRunId))
             {
                 throw new PlanTransitionException(
                     $"Plan workflow '{current.Id}' is already bound to BuildRun '{current.BuildRunId}'.");
             }
-            if (string.Equals(current.BuildRunId, command.BuildRunId, StringComparison.Ordinal))
-                return new PlanTransitionResult(current, IsDuplicateCommand: true);
 
             var updated = current with
             {

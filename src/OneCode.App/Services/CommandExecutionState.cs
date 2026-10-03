@@ -1,13 +1,12 @@
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Shared mutable state for the slash-command pipeline, extracted to eliminate
-/// closure captures so <c>TryResolvePromptCommandAsync</c> / <c>ExecuteCommandAsync</c>
-/// can live as instance methods on <see cref="InteractiveModeExecutor"/> rather
-/// than as local functions inside <c>ExecuteAsync</c>.
+/// Shared mutable state for the slash-command pipeline, letting
+/// <c>TryResolvePromptCommandAsync</c> / <c>ExecuteCommandAsync</c> live as
+/// instance methods on <see cref="InteractiveModeExecutor"/>.
 /// </summary>
 /// <remarks>
-/// Holds two pieces of state that previously lived as locals captured by closures:
+/// Holds two pieces of state shared between the resolution and execution halves:
 /// <list type="bullet">
 /// <item><c>_cachedNonPromptResult</c> — caches a non-PromptResult command result
 /// produced by <c>TryResolvePromptCommandAsync</c> so <c>ExecuteCommandAsync</c>

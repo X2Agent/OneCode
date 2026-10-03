@@ -17,11 +17,12 @@ namespace OneCode.App.Query;
 /// Streaming orchestration core for interactive chat and workflow runs: Build 门禁前置
 /// (clarification → plan approval → durable attempt)、MAF agent run 驱动、事件消化与终结记账。
 ///
-/// 组合说明：<see cref="ChatService"/> 是对外契约门面；本类由其在构造函数内组装
-/// （与 <see cref="BuildRunGate"/> 相同的组合根模式），不单独注册 DI，也绝不反向引用
-/// <see cref="ChatService"/>。可变流式状态收敛在 <see cref="StreamingSession"/>。
+/// 组合说明：本类是查询领域的对外实现，直接以 <see cref="IConversationRunner"/> +
+/// <see cref="ICacheSafeParamsProvider"/> 暴露给 TUI 与 headless 触发器（Cron/AutoDream），
+/// 接口化消费保证构造图保持 DAG（工具实例反向依赖本接口的消费者，若以具体类型互引，
+/// 构造期 DI 会无限递归）。可变流式状态收敛在 <see cref="StreamingSession"/>。
 /// </summary>
-internal sealed class QueryStreamEngine
+public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsProvider
 {
     private readonly ILogger _logger;
     private readonly IMainAgentRunner _mainAgentRunner;
@@ -40,8 +41,11 @@ internal sealed class QueryStreamEngine
     private readonly BuildPreambleRunner _buildPreambleRunner;
     private readonly HookDispatcher _hookDispatcher;
 
-    /// <summary>Latest cache-safe snapshot for sub-agent spawning; owned here so the facade can delegate.</summary>
+    /// <summary>Latest cache-safe snapshot for sub-agent spawning.</summary>
     public CacheSafeParams? LastCacheSafeParams { get; private set; }
+
+    /// <inheritdoc />
+    public CacheSafeParams? Current => LastCacheSafeParams;
 
     // A compact trailer avoids a second inference solely to populate the TUI suggestion.
     // It is stripped before transcript persistence and emitted as SuggestionsEvent.
@@ -91,6 +95,31 @@ internal sealed class QueryStreamEngine
         _hookDispatcher = new HookDispatcher(_hookExecutionService, _configManager, _notifierService);
     }
 
+    /// <inheritdoc />
+    public async IAsyncEnumerable<QueryEvent> StreamQueryAsync(
+        string prompt,
+        string systemPrompt,
+        string modelId,
+        int? thinkingBudget = null,
+        [EnumeratorCancellation] CancellationToken ct = default,
+        WorkingMode workingMode = WorkingMode.Build,
+        Action<FileChange>? fileChangeCallback = null,
+        IReadOnlyList<string>? imagePaths = null,
+        string? harnessPrompt = null)
+    {
+        var userMessage = QueryStreamHelpers.BuildUserMessage(prompt, imagePaths, _logger);
+        await foreach (var evt in StreamInteractiveAsync(
+            [userMessage], systemPrompt, modelId, thinkingBudget,
+            sessionId: null, workingDirectory: null, ct, workingMode, fileChangeCallback, harnessPrompt))
+            yield return evt;
+    }
+
+    /// <inheritdoc />
+    public IAsyncEnumerable<QueryEvent> StreamWorkflowRunAsync(
+        WorkflowRunRequest request,
+        CancellationToken ct = default)
+        => StreamWorkflowAsync(request, ct);
+
     /// <summary>
     /// Starts an interactive streaming query — appends the user message to the session,
     /// assembles history/tools, wraps the run in the ambient activation context and
@@ -127,7 +156,7 @@ internal sealed class QueryStreamEngine
             sessionId,
             workingDirectory,
             ct,
-            configure: p => p.UserMessage = userPrompt).ConfigureAwait(false);
+            configure: p => p with { UserMessage = userPrompt }).ConfigureAwait(false);
         if (promptHook?.BlockingErrors is { Count: > 0 } promptBlocks)
         {
             _logger.LogInformation("input hook blocked prompt: {Error}", promptBlocks[0].Error);
@@ -306,7 +335,7 @@ internal sealed class QueryStreamEngine
                 request.SessionId,
                 request.WorkingDirectory,
                 ct,
-                configure: p => p.OutputText = session.FinalText).ConfigureAwait(false);
+                configure: p => p with { OutputText = session.FinalText }).ConfigureAwait(false);
             if (outputResult?.BlockingErrors is { Count: > 0 } outputBlocks)
             {
                 _logger.LogInformation("output hook blocked final response: {Error}", outputBlocks[0].Error);

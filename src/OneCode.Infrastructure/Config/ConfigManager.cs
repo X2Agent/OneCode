@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.Core.Config;
 
 namespace OneCode.Infrastructure.Config;
@@ -18,13 +19,15 @@ public sealed class ConfigManager : IConfigManager, IDisposable
     private FileSystemWatcher? _globalWatcher;
     private FileSystemWatcher? _projectWatcher;
     private DateTime _lastReloadTime;
+    private readonly ILogger _logger;
 
-    public ConfigManager(string? configDir = null, string? projectConfigDir = null)
+    public ConfigManager(string? configDir = null, string? projectConfigDir = null, ILogger? logger = null)
     {
         configDir ??= GetDefaultConfigDir();
         ArgumentException.ThrowIfNullOrWhiteSpace(configDir);
         _configDir = configDir;
         _projectConfigDir = string.IsNullOrWhiteSpace(projectConfigDir) ? null : projectConfigDir;
+        _logger = logger ?? NullLogger.Instance;
         Reload();
     }
 
@@ -170,9 +173,10 @@ public sealed class ConfigManager : IConfigManager, IDisposable
             watcher.Created += OnSettingsFileChanged;
             watcher.Renamed += OnSettingsFileChanged;
         }
-        catch
+        catch (Exception ex)
         {
             // 热重载是可选能力；初始化失败不影响配置读写。
+            _logger.LogDebug(ex, "Failed to initialize settings watcher for {FilePath}", filePath);
         }
     }
 

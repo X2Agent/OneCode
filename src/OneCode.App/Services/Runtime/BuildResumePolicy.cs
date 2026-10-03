@@ -21,9 +21,6 @@ public enum BuildResumeAction
     /// <summary>Clarifying 但已有持久化计划——计划即已批准的契约，直接进入执行准备。</summary>
     ResumePrescribedPlan,
 
-    /// <summary>Clarifying 无计划——继续澄清对话。</summary>
-    ContinueClarification,
-
     /// <summary>ScopeConfirmed/Planning——按已确认范围准备执行。</summary>
     PrepareFromScope,
 
@@ -75,10 +72,10 @@ public static class BuildResumePolicy
             BuildRunState.Intake or BuildRunState.Assessing => new(BuildResumeAction.ContinueAssessment),
 
             // 持久化计划即已批准的范围契约。旧检查点可能在强制前进入 Clarifying；
-            // 直接恢复而不是让用户对同一份计划重复批准。
+            // 直接恢复而不是让用户对同一份计划重复批准。无计划的 Clarifying 遗留
+            // run 落到 ParkAtGate 停靠——澄清对话入口已移除，不存在继续路径。
             BuildRunState.Clarifying when existing.Plan is not null
                 => new(BuildResumeAction.ResumePrescribedPlan),
-            BuildRunState.Clarifying => new(BuildResumeAction.ContinueClarification),
             BuildRunState.ScopeConfirmed or BuildRunState.Planning
                 => new(BuildResumeAction.PrepareFromScope),
 

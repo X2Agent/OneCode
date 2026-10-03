@@ -11,8 +11,7 @@ namespace OneCode.App.Services;
 
 /// <summary>
 /// Encapsulates the <see cref="TuiHost.Run"/> factory and all TUI overlay
-/// routing that previously lived inline in
-/// <see cref="InteractiveModeExecutor.ExecuteAsync"/>.
+/// routing (Plan card 审批、overlay 委托、动态命令刷新等) orthogonal to query streaming.
 /// </summary>
 /// <remarks>
 /// Owns five overlay concerns that are orthogonal to query streaming:
@@ -62,59 +61,27 @@ public sealed class TuiHostConfigurator(
             // 工作模式切换时刷新斜杠命令列表，使依赖 ICommand.IsEnabled() 动态启用的命令
             // （如仅在 BUILD 模式可用的 /permissions）能实时出现/消失。
             session.ModeController.ModeChanged += (_, _) => updateCommandsUi(
-                commandSurface.CommandRegistry.GetAll()
-                    .Select(c => new SlashCommandEntry(
-                        c.Name, c.Description, c.Source, c.ArgumentHint))
-                    .ToList());
+                ProjectSlashCommands(commandSurface.CommandRegistry));
 
-            // Skill file change hot-reload
-            async void OnSkillsChanged()
+            // 动态命令源热重载（skill 文件变更 / MCP 服务器连接变化）：刷新命中的源并重发命令列表。
+            async void OnDynamicCommandsChanged<TSource>(string sourceKind)
+                where TSource : IDynamicCommandSource
             {
-                var skillSource = commandSurface.DynamicCommandSources.OfType<SkillCommandSource>().FirstOrDefault();
-                if (skillSource is null) return;
+                var source = commandSurface.DynamicCommandSources.OfType<TSource>().FirstOrDefault();
+                if (source is null) return;
                 try
                 {
-                    await commandSurface.CommandRegistry.RefreshDynamicCommandsAsync([skillSource], ct).ConfigureAwait(false);
-                    var updated = commandSurface.CommandRegistry.GetAll()
-                        .Select(c => new SlashCommandEntry(
-                            c.Name,
-                            c.Description,
-                            c.Source,
-                            c.ArgumentHint))
-                        .ToList();
-                    updateCommandsUi?.Invoke(updated);
+                    await commandSurface.CommandRegistry.RefreshDynamicCommandsAsync([source], ct).ConfigureAwait(false);
+                    updateCommandsUi?.Invoke(ProjectSlashCommands(commandSurface.CommandRegistry));
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Failed to refresh skill commands after file change");
+                    logger.LogWarning(ex, "Failed to refresh {SourceKind} commands after change", sourceKind);
                 }
             }
 
-            // MCP server connection change hot-reload
-            async void OnMcpServersChanged()
-            {
-                var mcpSource = commandSurface.DynamicCommandSources.OfType<McpCommandSource>().FirstOrDefault();
-                if (mcpSource is null) return;
-                try
-                {
-                    await commandSurface.CommandRegistry.RefreshDynamicCommandsAsync([mcpSource], ct).ConfigureAwait(false);
-                    var updated = commandSurface.CommandRegistry.GetAll()
-                        .Select(c => new SlashCommandEntry(
-                            c.Name,
-                            c.Description,
-                            c.Source,
-                            c.ArgumentHint))
-                        .ToList();
-                    updateCommandsUi?.Invoke(updated);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to refresh MCP commands after server connection change");
-                }
-            }
-
-            overlay.SkillFilesWatcher.SkillsChanged += OnSkillsChanged;
-            mcpConnectionManager.ServersChanged += OnMcpServersChanged;
+            overlay.SkillFilesWatcher.SkillsChanged += () => OnDynamicCommandsChanged<SkillCommandSource>("skill");
+            mcpConnectionManager.ServersChanged += () => OnDynamicCommandsChanged<McpCommandSource>("MCP");
 
             overlay.PlanExecutionRecovery.AttachSession(session);
             WirePlanCard(toplevel, session, app);
@@ -178,6 +145,12 @@ public sealed class TuiHostConfigurator(
             app.Invoke(() => toplevel.Transcript.AddSystem(captured.Message));
         };
     }
+
+    /// <summary>将命令注册表投影为 TUI 输入框的斜杠命令条目。</summary>
+    private static List<SlashCommandEntry> ProjectSlashCommands(ICommandRegistry registry) =>
+        registry.GetAll()
+            .Select(c => new SlashCommandEntry(c.Name, c.Description, c.Source, c.ArgumentHint))
+            .ToList();
 
     /// <summary>
     /// Subscribes the unified OrchestrationEvent bus: the plan

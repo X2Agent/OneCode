@@ -94,7 +94,7 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
 
             summaries.Add(new ConversationSummary(
                 conversation.Id,
-                conversation.Name,
+                conversation.DisplayTitle(),
                 conversation.Model,
                 conversation.Messages.Count,
                 conversation.CreatedAt,
@@ -133,7 +133,6 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
             lastMessage?.Role switch
             {
                 MessageRole.User => InterruptionState.InterruptedPrompt,
-                MessageRole.Attachment => InterruptionState.InterruptedTurn,
                 _ => InterruptionState.None,
             },
             conversation.LastActivityAt,
@@ -191,8 +190,6 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
         SystemMessageEvent item => item.Message.Id,
         AssistantMessageEvent item => item.Message.Id,
         ToolResultEvent item => item.Message.Id,
-        AttachmentMessageEvent item => item.Message.Id,
-        TombstoneMessageEvent item => item.Message.Id,
         _ => null,
     };
 

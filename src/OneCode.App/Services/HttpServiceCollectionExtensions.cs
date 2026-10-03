@@ -8,8 +8,7 @@ namespace OneCode.App.Services;
 
 /// <summary>
 /// 具名 HttpClient 注册——App 层全部出站 HTTP 客户端在此一处配置：统一经
-/// <see cref="CreateTransportHandler"/> 应用 mTLS，VCR 录制回放经
-/// <c>VcrDelegatingHandler</c> 按需挂载。
+/// <see cref="CreateTransportHandler"/> 应用 mTLS。
 /// 消费方一律通过 <c>IHttpClientFactory.CreateClient(Constants.HttpClientNames.Xxx)</c> 取用。
 /// 由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
 /// </summary>
@@ -45,8 +44,7 @@ public static class HttpServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(Constants.Timeouts.WebSearch);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/html;q=0.9, */*;q=0.1");
-        })
-        .AddHttpMessageHandler<VcrDelegatingHandler>();
+        });
 
         // 升级检查与 Release Notes 获取（GitHub API）。
         services.AddHttpClient(Constants.HttpClientNames.Upgrade, client =>
@@ -68,8 +66,7 @@ public static class HttpServiceCollectionExtensions
             var handler = CreateTransportHandler();
             handler.AllowAutoRedirect = false;
             return handler;
-        })
-        .AddHttpMessageHandler<VcrDelegatingHandler>();
+        });
 
         // models.dev 模型目录客户端（能力元数据刷新）。
         services.AddHttpClient(Constants.HttpClientNames.ModelsDev, client =>

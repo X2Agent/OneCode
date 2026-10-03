@@ -174,16 +174,9 @@ public sealed class ModeDirectKeybindingTests
         };
 
         return new ReplShell(
-            app,
-            version: "test",
-            model: "test-model",
-            sshHost: null,
-            slashCommands: slashCommands ?? [],
-            modeController: new WorkingModeController(),
-            keyResolver: resolver,
-            keyContextManager: keyContextManager,
-            clipboard: null,
-            historyProvider: null,
-            toolNameProvider: () => []);
+            new ReplShellEnvironment(app, "test-model"),
+            new WorkingModeController(),
+            new ReplShellKeyServices(resolver, keyContextManager),
+            new ReplShellInputSources(slashCommands ?? [], () => []));
     }
 }

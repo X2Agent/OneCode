@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using OneCode.Core.Coordinator;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.Infrastructure.Teams;
 
@@ -110,14 +111,7 @@ public sealed class JsonTeamRunStore(string baseDirectory) : ITeamRunStore
     {
         Directory.CreateDirectory(_baseDirectory);
         var path = GetPath(run.Id);
-        var lockPath = path + ".lock";
-        await using var lease = new FileStream(
-            lockPath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 1,
-            FileOptions.DeleteOnClose);
+        await using var lease = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
 
         var current = await LoadAsync(run.Id, ct).ConfigureAwait(false);
         if ((current?.Version ?? 0) != expectedVersion)
@@ -159,14 +153,7 @@ public sealed class JsonTeamRunStore(string baseDirectory) : ITeamRunStore
 
         Directory.CreateDirectory(_baseDirectory);
         var path = GetPath(runId);
-        var lockPath = path + ".lock";
-        await using var lease = new FileStream(
-            lockPath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 1,
-            FileOptions.DeleteOnClose);
+        await using var lease = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
 
         var current = await LoadAsync(runId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"TeamRun '{runId}' was not found.");
@@ -202,14 +189,7 @@ public sealed class JsonTeamRunStore(string baseDirectory) : ITeamRunStore
 
         Directory.CreateDirectory(_baseDirectory);
         var path = GetPath(run.Id);
-        var lockPath = path + ".lock";
-        await using var lease = new FileStream(
-            lockPath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 1,
-            FileOptions.DeleteOnClose);
+        await using var lease = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
 
         var current = await LoadAsync(run.Id, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"TeamRun '{run.Id}' was not found.");
@@ -229,52 +209,25 @@ public sealed class JsonTeamRunStore(string baseDirectory) : ITeamRunStore
 
     private async Task WriteAtomicAsync(string path, TeamRun run, CancellationToken ct)
     {
-        var tempPath = path + ".tmp";
-        try
+        // Serialize payload and compute SHA256 checksum for integrity verification.
+        byte[] payload;
+        using (var memoryStream = new MemoryStream())
         {
-            // Serialize payload and compute SHA256 checksum for integrity verification.
-            byte[] payload;
-            using (var memoryStream = new MemoryStream())
-            {
-                await JsonSerializer.SerializeAsync(memoryStream, run, Options, ct).ConfigureAwait(false);
-                payload = memoryStream.ToArray();
-            }
-            var checksum = ComputeChecksum(payload);
-
-            await using (var stream = new FileStream(
-                             tempPath,
-                             FileMode.Create,
-                             FileAccess.Write,
-                             FileShare.None,
-                             bufferSize: 4096,
-                             FileOptions.WriteThrough))
-            {
-                // Write checksum header line followed by the JSON payload.
-                var header = Encoding.UTF8.GetBytes($"# checksum:{checksum}\n");
-                await stream.WriteAsync(header, ct).ConfigureAwait(false);
-                await stream.WriteAsync(payload, ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-
-            // Backup the previous valid file before replacing it.
-            if (File.Exists(path))
-            {
-                var backupPath = path + ".bak";
-                File.Copy(path, backupPath, overwrite: true);
-            }
-
-            File.Move(tempPath, path, overwrite: true);
-
-            // Write-after-read verification: reload and validate checksum to detect
-            // partial writes, disk corruption, or filesystem anomalies.
-            await VerifyWrittenFileAsync(path, ct).ConfigureAwait(false);
+            await JsonSerializer.SerializeAsync(memoryStream, run, Options, ct).ConfigureAwait(false);
+            payload = memoryStream.ToArray();
         }
-        finally
-        {
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
-        }
+
+        // Write checksum header line followed by the JSON payload.
+        var header = Encoding.UTF8.GetBytes($"# checksum:{ComputeChecksum(payload)}\n");
+        var content = new byte[header.Length + payload.Length];
+        Buffer.BlockCopy(header, 0, content, 0, header.Length);
+        Buffer.BlockCopy(payload, 0, content, header.Length, payload.Length);
+
+        await DurableFile.WriteAtomicAsync(path, content, ct).ConfigureAwait(false);
+
+        // Write-after-read verification: reload and validate checksum to detect
+        // partial writes, disk corruption, or filesystem anomalies.
+        await VerifyWrittenFileAsync(path, ct).ConfigureAwait(false);
     }
 
     private static string ComputeChecksum(byte[] payload)

@@ -10,8 +10,6 @@ internal sealed class StartupTimer
         _phases.Add((phase, _sw.Elapsed.TotalMilliseconds));
     }
 
-    public IReadOnlyList<(string Phase, double Ms)> GetPhases() => _phases;
-
     public double TotalMs => _sw.Elapsed.TotalMilliseconds;
 
     public string FormatSummary()

@@ -6,11 +6,11 @@ using OneCode.Core.Tools;
 namespace OneCode.Infrastructure;
 
 /// <summary>
-/// Local filesystem implementation of <see cref="IFileSystem"/>.
+/// 工作区文件系统访问器：glob 文件枚举 + 工作目录边界校验。
 ///
 /// <para>
-/// Paths are resolved against the working directory from <see cref="IWorkingDirectoryAccessor"/>
-/// and validated against the working directory and any additional directories.
+/// 路径基于 <see cref="IWorkingDirectoryAccessor"/> 的工作目录解析，
+/// 并校验落在工作目录与附加目录（/add-dir）之内，越界抛 <see cref="UnauthorizedAccessException"/>。
 /// </para>
 /// <para>
 /// This type deliberately does <b>not</b> implement MAF's <c>AgentFileStore</c>: no MAF component
@@ -21,44 +21,20 @@ namespace OneCode.Infrastructure;
 /// </summary>
 public sealed class LocalAgentFileStore(
     IWorkingDirectoryAccessor wd,
-    ILogger<LocalAgentFileStore>? logger = null) : IFileSystem
+    ILogger<LocalAgentFileStore>? logger = null)
 {
     private readonly string _workingDirectory = wd.WorkingDirectory;
     private readonly IReadOnlyList<string>? _additionalDirectories = wd.AdditionalDirectories;
     private readonly ILogger<LocalAgentFileStore>? _logger = logger;
 
-    // IFileSystem methods
-
-    async Task<string?> IFileSystem.ReadTextFileAsync(string path, CancellationToken ct)
-    {
-        var resolved = ResolvePath(path);
-        try
-        {
-            return await File.ReadAllTextAsync(resolved, ct).ConfigureAwait(false);
-        }
-        catch (FileNotFoundException)
-        {
-            return null;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return null;
-        }
-    }
-
-    async Task IFileSystem.WriteTextFileAsync(string path, string content, CancellationToken ct)
-    {
-        var resolved = ResolvePath(path);
-        var dir = Path.GetDirectoryName(resolved);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(resolved, content, ct).ConfigureAwait(false);
-    }
-
-    IReadOnlyList<string> IFileSystem.FindFiles(
+    /// <summary>
+    /// Enumerates files under <paramref name="directory"/> matching comma-separated glob
+    /// <paramref name="patterns"/>, excluding the given directory names.
+    /// </summary>
+    public IReadOnlyList<string> FindFiles(
         string directory,
-        string? patterns,
-        string[]? excludeDirs)
+        string? patterns = null,
+        string[]? excludeDirs = null)
     {
         var resolved = ResolvePath(directory);
         if (!Directory.Exists(resolved))
@@ -98,25 +74,6 @@ public sealed class LocalAgentFileStore(
             return [];
         }
     }
-
-    bool IFileSystem.MatchesGlob(string filePath, string pattern)
-    {
-        var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-        var normalised = pattern.Replace('\\', '/');
-        var addPattern = normalised.Contains('/') ? normalised : $"**/{normalised}";
-        matcher.AddInclude(addPattern);
-        return matcher.Match(filePath.Replace('\\', '/')).HasMatches;
-    }
-
-    long IFileSystem.GetMtimeMs(string path)
-    {
-        var resolved = ResolvePath(path);
-        if (File.Exists(resolved))
-            return new DateTimeOffset(File.GetLastWriteTimeUtc(resolved)).ToUnixTimeMilliseconds();
-        return 0;
-    }
-
-    // Path resolution
 
     /// <summary>
     /// Resolves a path (relative or absolute) against the working directory and validates

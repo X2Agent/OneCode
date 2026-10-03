@@ -5,6 +5,14 @@ namespace OneCode.App.Session;
 /// <summary>
 /// Maps domain transcript messages to <see cref="ChatMessage"/> for agent replay.
 /// </summary>
+/// <remarks>
+/// 工具结果必须映射为 <see cref="ChatRole.Tool"/>（M.E.AI 标准约定，运行内
+/// FunctionInvokingChatClient 亦然）：OpenAI 适配器对 User 角色消息里的
+/// <see cref="FunctionResultContent"/> 静默丢弃（只有 Tool 角色才序列化为
+/// <c>tool</c> wire 消息），按 User 角色回放会让恢复后的历史出现"assistant 带
+/// tool_calls 但没有任何 tool 结果"的畸形结构；Anthropic / Ollama 适配器对
+/// Tool 角色的结果均正确转换。空消息一律跳过，不进回放历史。
+/// </remarks>
 internal static class ConversationMessageMapper
 {
     public static IReadOnlyList<ChatMessage> ToChatHistory(IEnumerable<Message> messages, ILogger? logger = null)
@@ -24,15 +32,13 @@ internal static class ConversationMessageMapper
     {
         UserMessage um when !um.IsMeta && !string.IsNullOrWhiteSpace(um.Content)
             => new ChatMessage(ChatRole.User, um.Content),
-        AssistantMessage am => MapAssistantMessage(am, logger),
+        AssistantMessage am when am.Content.Count > 0 => MapAssistantMessage(am, logger),
         SystemMessage sm when !string.IsNullOrWhiteSpace(sm.Content)
             => new ChatMessage(ChatRole.System, sm.Content),
         ToolResultMessage trm when !string.IsNullOrWhiteSpace(trm.Content)
             => new ChatMessage(
-                ChatRole.User,
+                ChatRole.Tool,
                 [new FunctionResultContent(trm.ToolUseId, trm.Content)]),
-        AttachmentMessage attachment when !string.IsNullOrWhiteSpace(attachment.Content)
-            => new ChatMessage(ChatRole.User, attachment.Content),
         _ => null,
     };
 

@@ -1,3 +1,5 @@
+using CoreConstants = OneCode.Core.Constants;
+
 namespace OneCode.Core.Goals;
 
 /// <summary>
@@ -21,19 +23,19 @@ public sealed record GoalBudget
     /// 每个 attempt = 一次 MainAgentRunner.RunStreamingAsync 调用。
     /// 默认 20（配合 MaxAttemptsPerSubGoal=3，可完成约 6-7 个子目标）。
     /// </summary>
-    public int MaxSubGoalAttempts { get; init; } = 20;
+    public int MaxSubGoalAttempts { get; init; } = CoreConstants.Session.GoalMaxSubGoalAttemptsDefault;
 
     /// <summary>
     /// 累计输入 + 输出 token 总量上限。null 表示不限制。
     /// 默认 200k（约 Claude Sonnet 单次会话合理上限）。
     /// </summary>
-    public long? MaxTotalTokens { get; init; } = 200_000;
+    public long? MaxTotalTokens { get; init; } = CoreConstants.Session.GoalMaxTotalTokensDefault;
 
     /// <summary>
     /// 墙钟时间上限。null 表示不限制。
     /// 默认 2 小时（防止用户启动后忘记，后台持续消耗 token 与 API 配额）。
     /// </summary>
-    public TimeSpan? MaxWallClock { get; init; } = TimeSpan.FromHours(2);
+    public TimeSpan? MaxWallClock { get; init; } = TimeSpan.FromHours(CoreConstants.Session.GoalMaxWallClockHoursDefault);
 
     /// <summary>
     /// 计算当前预算消耗比例（0.0 ~ 1.0）。

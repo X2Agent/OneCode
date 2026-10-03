@@ -1,5 +1,6 @@
 using OneCode.Core.Goals;
 using OneCode.Core.Workflows;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.Infrastructure.Goals;
 
@@ -98,7 +99,7 @@ public sealed class JsonGoalRunStore : IGoalRunStore
         try
         {
             var path = GetRunFilePath(run.SessionId);
-            await using var fileLock = await AcquireFileLockAsync(path + ".lock", ct).ConfigureAwait(false);
+            await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
             var current = LoadCurrent(path);
             var actualVersion = current?.Version ?? 0;
             if (actualVersion != expectedVersion)
@@ -187,37 +188,10 @@ public sealed class JsonGoalRunStore : IGoalRunStore
 
     private static void WriteAtomic(string path, GoalRun run)
     {
-        var temporary = path + ".tmp";
-        var backup = path + ".bak";
         var json = JsonSerializer.Serialize(run, s_jsonOptions);
-        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-        using (var writer = new StreamWriter(stream))
-        {
-            writer.Write(json);
-            writer.Flush();
-            stream.Flush(flushToDisk: true);
-        }
-        if (File.Exists(path))
-            File.Replace(temporary, path, backup, ignoreMetadataErrors: true);
-        else
-            File.Move(temporary, path);
-        _ = LoadCurrent(path);
-    }
-
-    private static async Task<FileStream> AcquireFileLockAsync(string path, CancellationToken ct)
-    {
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            catch (IOException) when (attempt < 49)
-            {
-                await Task.Delay(20, ct).ConfigureAwait(false);
-            }
-        }
-        throw new IOException($"Could not acquire GoalRun lock '{path}'.");
+        DurableFile.WriteAtomic(
+            path,
+            Encoding.UTF8.GetBytes(json),
+            validateWritten: written => _ = LoadCurrent(written));
     }
 }

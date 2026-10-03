@@ -107,7 +107,7 @@ public sealed partial class ChatInputView
             return false;
 
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+        SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
         for (var row = 0; row < Viewport.Height; row++)
         {
             Move(0, row);
@@ -117,7 +117,7 @@ public sealed partial class ChatInputView
         _separatorLabel.Width = width;
         _separatorLabel.SetScheme(TuiStyles.MakeScheme(
             HasInputFocus ? TuiPalette.Accent : TuiPalette.FgMuted,
-            TuiPalette.BgSurface));
+            TuiPalette.BgInput));
         var editorWidth = Math.Max(1, width - 2);
         _input.X = 1;
         _input.Y = 1;

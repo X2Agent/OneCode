@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using OneCode.Core.Workflows;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.Infrastructure.Workflows;
 
@@ -324,36 +325,8 @@ public sealed class JsonWorkflowRunRegistry : IWorkflowRunRegistry
     {
         var payload = JsonSerializer.Serialize(record, s_jsonOptions);
         var envelope = new WorkflowRunEnvelope(SchemaVersion, ComputeChecksum(payload), record);
-        var content = JsonSerializer.Serialize(envelope, s_jsonOptions);
-        var path = GetRecordPath(record.RunId);
-        var temporaryPath = path + $".{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            await using (var stream = new FileStream(
-                             temporaryPath,
-                             FileMode.CreateNew,
-                             FileAccess.Write,
-                             FileShare.None,
-                             bufferSize: 4096,
-                             FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
-                await writer.WriteAsync(content.AsMemory(), ct).ConfigureAwait(false);
-                await writer.FlushAsync(ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-
-            if (File.Exists(path))
-                File.Replace(temporaryPath, path, path + ".bak", ignoreMetadataErrors: true);
-            else
-                File.Move(temporaryPath, path);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
+        var content = JsonSerializer.SerializeToUtf8Bytes(envelope, s_jsonOptions);
+        await DurableFile.WriteAtomicAsync(GetRecordPath(record.RunId), content, ct).ConfigureAwait(false);
     }
 
     private SemaphoreSlim GetGate(string runId) => _gates.GetOrAdd(runId, _ => new SemaphoreSlim(1, 1));

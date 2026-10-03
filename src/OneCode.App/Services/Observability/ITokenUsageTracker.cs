@@ -2,7 +2,7 @@ namespace OneCode.App.Services.Observability;
 
 /// <summary>
 /// Token 使用量统计接口——供 /status stats 命令读取累积统计和分场景估算。
-/// 由 <see cref="TokenUsageTracker"/> 实现，由 ChatService 在每次 LLM 调用后更新。
+/// 由 <see cref="TokenUsageTracker"/> 实现，由 QueryStreamEngine 在每次 LLM 调用后更新。
 /// </summary>
 public interface ITokenUsageTracker
 {

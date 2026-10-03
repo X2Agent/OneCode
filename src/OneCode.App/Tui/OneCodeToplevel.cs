@@ -81,9 +81,11 @@ public sealed partial class OneCodeToplevel : Window
         var keyContextManager = ctx.KeyContextManager ?? new KeybindingContextManager();
         var toolNameProvider = ctx.GetToolNames ?? (() => []);
 
-        _shell = new ReplShell(app, ctx.Version, ctx.GetModel(), ctx.SshHost, ctx.SlashCommands,
-            modeController, keyResolver, keyContextManager, ctx.Clipboard, ctx.GetSessionUserPrompts,
-            toolNameProvider, gitHelper: ctx.GitHelper);
+        _shell = new ReplShell(
+            new ReplShellEnvironment(app, ctx.GetModel(), ctx.Clipboard, ctx.GitHelper),
+            modeController,
+            new ReplShellKeyServices(keyResolver, keyContextManager),
+            new ReplShellInputSources(ctx.SlashCommands, toolNameProvider, ctx.GetSessionUserPrompts));
         _transcriptPresenter = new TranscriptEventPresenter(_shell.Transcript);
         _shell.ChatInput.Submitted += OnUserSubmitted;
         _shell.ChatInput.QuitRequested += OnQuitRequested;
@@ -260,7 +262,6 @@ public sealed partial class OneCodeToplevel : Window
 
             // Refresh the session context bar (git branch/worktree) once on startup.
             _ = _shell.RefreshSessionContextBarAsync();
-            RefreshSessionName();
 
             // Post-TUI trust check: if the pre-TUI startup path silently accepted
             // trust (because IApplication wasn't ready yet), re-prompt now that
@@ -322,13 +323,6 @@ public sealed partial class OneCodeToplevel : Window
             _app.Invoke(() => _shell.Transcript.AddError(
                 $"Failed to replay BuildRun state: {ex.Message}"));
         }
-    }
-
-    /// <summary>同步 SessionContextBar 上的会话名（Name 优先，否则短 Id）。</summary>
-    private void RefreshSessionName()
-    {
-        var name = _ctx.GetSessionName?.Invoke();
-        _shell.SessionContextBar.SetSessionName(name);
     }
 
     private async Task ShowPostTuiTrustAsync(TrustService trustService, Action? onAccepted = null)

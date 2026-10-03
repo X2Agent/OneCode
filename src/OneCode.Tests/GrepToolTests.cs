@@ -320,7 +320,7 @@ public sealed class GrepToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:found", "", false));
 
-        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()), NullLogger<TextSearchService>.Instance);
         var tool = new GrepTool(textSearch, CreateWd());
 
         var result = await tool.SearchAsync("found", path: "src", output_mode: "content", ct: ct);
@@ -341,7 +341,7 @@ public sealed class GrepToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(2, "", "ripgrep error: invalid regex", false));
 
-        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()), NullLogger<TextSearchService>.Instance);
         var tool = new GrepTool(textSearch, CreateWd());
 
         var result = await tool.SearchAsync("pattern", path: "src", output_mode: "content", ct: ct);
@@ -359,8 +359,7 @@ public sealed class GrepToolTests : IDisposable
         processRunner.CommandExistsAsync("rg").Returns(false);
 
         var wd = CreateWd();
-        IFileSystem fs = new LocalAgentFileStore(wd);
-        var textSearch = new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(wd), NullLogger<TextSearchService>.Instance);
         var tool = new GrepTool(textSearch, wd);
 
         var result = await tool.SearchAsync("needle", path: "src/target.cs", output_mode: "content", ct: ct);
@@ -381,7 +380,7 @@ public sealed class GrepToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Do<string[]>(args => capturedArgs = args), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, "src/sample.cs:1:content", "", false));
 
-        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()), NullLogger<TextSearchService>.Instance);
         var tool = new GrepTool(textSearch, CreateWd());
 
         await tool.SearchAsync("content", path: "src", output_mode: "content", ct: ct);

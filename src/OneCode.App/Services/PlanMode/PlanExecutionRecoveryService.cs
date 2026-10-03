@@ -129,7 +129,7 @@ public sealed class PlanExecutionRecoveryService(
             }
 
             // The process may have stopped after BuildRunStarted was persisted but before
-            // ChatService created the first BuildRun checkpoint. Re-entering the existing
+            // the conversation runner created the first BuildRun checkpoint. Re-entering the existing
             // dispatcher is safe: the prescribed approved snapshot creates the missing run.
             await dispatcher.ResumeBuildAsync(session, workflow, ct).ConfigureAwait(false);
             return;

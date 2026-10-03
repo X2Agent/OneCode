@@ -169,7 +169,7 @@ public sealed class ForkedAgentRunnerTests
             ctx,
             new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "limit"));
 
-        options.EnableBehaviorContracts.Should().BeFalse();
+        options.EnableEditPreChecks.Should().BeFalse();
         options.EnableVerification.Should().BeFalse();
         options.IsToolAllowed.Should().NotBeNull();
         options.IsToolAllowed!("Write").Should().BeFalse();

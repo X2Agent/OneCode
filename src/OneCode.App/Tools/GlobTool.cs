@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using OneCode.Infrastructure;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 
@@ -36,11 +35,8 @@ public sealed class GlobTool
         if (string.IsNullOrWhiteSpace(pattern))
             return ToolResult.Error("Pattern is required");
 
-        var workingDir = _wd.WorkingDirectory;
-        var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
-        if (!resolveResult.IsSuccess)
-            return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
-        var fullPath = resolveResult.Value;
+        if (ToolPathGuard.Resolve(path ?? ".", _wd, out var fullPath) is { } resolveError)
+            return resolveError;
 
         if (!Directory.Exists(fullPath))
             return ToolResult.Error($"Directory not found: {path}");

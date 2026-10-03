@@ -112,6 +112,26 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_WithoutName_LeavesNameEmpty()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var conversation = await _manager.CreateAsync(new ConversationOptions(_tempDir), ct);
+
+        conversation.Name.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithName_PassesNameThrough()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var conversation = await _manager.CreateAsync(new ConversationOptions(_tempDir, Name: "my task"), ct);
+
+        conversation.Name.Should().Be("my task");
+    }
+
+    [Fact]
     public async Task AppendUserMessageAsync_FirstMessage_PersistsSessionFile()
     {
         var ct = TestContext.Current.CancellationToken;

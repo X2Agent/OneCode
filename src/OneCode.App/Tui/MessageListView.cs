@@ -435,6 +435,9 @@ public sealed partial class MessageListView : View
 
     public void PageUp() => _scroll.PageUp();
 
+    /// <summary>内容替换后钳制恢复阅读偏移（侧栏更新保留阅读位置用）。</summary>
+    public void RestoreOffset(int preferredOffset) => _scroll.RestoreOffset(preferredOffset);
+
     public void PageDown() => _scroll.PageDown();
 
     /// <summary>滚动到指定行索引（居中显示）。</summary>

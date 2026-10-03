@@ -75,14 +75,11 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
 
     // Middleware-axis projections (consumed by AgentPipelineOptionsFactory).
 
-    /// <summary>Failure-tracking state machine; only Full keeps it (W2-A).</summary>
+    /// <summary>Failure-tracking state machine; only Full keeps it.</summary>
     public bool EnableStateMachine => Has(AgentCapability.StateMachine);
 
-    /// <summary>Three-strike recovery guidance emitted by the state machine.</summary>
-    public bool EnableTaskRecovery => Has(AgentCapability.TaskRecovery);
-
-    /// <summary>Post-edit behavior contracts (mandatory file-edit validation).</summary>
-    public bool EnableBehaviorContracts => Has(AgentCapability.BehaviorContracts);
+    /// <summary>Edit-target pre-check: Edit must target an existing file.</summary>
+    public bool EnableEditPreChecks => Has(AgentCapability.EditPreChecks);
 
     /// <summary>MAF tool-approval flow.</summary>
     public bool EnableToolApproval => Has(AgentCapability.ToolApproval);
@@ -103,13 +100,12 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
         // Full is the baseline: everything except the read-only restriction.
         PipelineProfile.Full => new(AllExcept(AgentCapability.ReadOnlyTools)),
 
-        // Worker: inherits parent permissions; no state machine / 3-strike, and no LSP or shell
+        // Worker: inherits parent permissions; no state machine, and no LSP or shell
         // context (those are interactive-Main affordances). Working memory is withheld until private
         // sessions and artefact delivery are verified — a shared writable directory would be worse
         // than none. The agent's own checklist is independent per session, so it stays.
         PipelineProfile.Worker => new(AllExcept(
             AgentCapability.StateMachine,
-            AgentCapability.TaskRecovery,
             AgentCapability.LspDiagnostics,
             AgentCapability.ShellEnvironment,
             AgentCapability.FileMemory,
@@ -121,23 +117,21 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
         // No working memory: members would share one writable directory across concurrent members.
         PipelineProfile.TeamMember => new(AllExcept(
             AgentCapability.StateMachine,
-            AgentCapability.TaskRecovery,
             AgentCapability.CodeAct,
             AgentCapability.Verification,
             AgentCapability.FileMemory,
             AgentCapability.ReadOnlyTools)),
 
-        // Read-only agents: no post-edit verification, contracts or 3-strike recovery, plus the tool
+        // Read-only agents: no post-edit verification, edit pre-checks or 3-strike recovery, plus the tool
         // whitelist. No working memory either — a read-only agent must not be handed a write surface,
         // even one confined to its own scratch directory. The checklist is withheld for the same
         // reason: `todos_*` are write tools, and the read-only whitelist would reject them anyway,
         // leaving the agent with a prompt that advertises tools it cannot call.
         PipelineProfile.Explore or PipelineProfile.Plan => new(AllExcept(
             AgentCapability.StateMachine,
-            AgentCapability.TaskRecovery,
             AgentCapability.LspDiagnostics,
             AgentCapability.ShellEnvironment,
-            AgentCapability.BehaviorContracts,
+            AgentCapability.EditPreChecks,
             AgentCapability.Verification,
             AgentCapability.FileMemory,
             AgentCapability.Todo)),

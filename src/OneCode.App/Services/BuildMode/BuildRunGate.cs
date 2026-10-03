@@ -111,17 +111,15 @@ public sealed class BuildRunGate(
     }
 
     public static RunTerminalReason ResolveTerminalReason(BuildRun run)
-        => run.State == BuildRunState.Clarifying
-            ? RunTerminalReason.ClarificationRequired
-            : run.TerminalReason ?? run.State switch
-            {
-                BuildRunState.Completed => RunTerminalReason.Completed,
-                BuildRunState.Blocked => RunTerminalReason.Blocked,
-                BuildRunState.Cancelled => RunTerminalReason.Cancelled,
-                BuildRunState.LimitReached => RunTerminalReason.TurnLimitReached,
-                BuildRunState.BudgetExceeded => RunTerminalReason.BudgetExceeded,
-                _ => RunTerminalReason.AgentException,
-            };
+        => run.TerminalReason ?? run.State switch
+        {
+            BuildRunState.Completed => RunTerminalReason.Completed,
+            BuildRunState.Blocked => RunTerminalReason.Blocked,
+            BuildRunState.Cancelled => RunTerminalReason.Cancelled,
+            BuildRunState.LimitReached => RunTerminalReason.TurnLimitReached,
+            BuildRunState.BudgetExceeded => RunTerminalReason.BudgetExceeded,
+            _ => RunTerminalReason.AgentException,
+        };
 
     public static BuildRunResult CreateBuildRunResult(BuildRun run, string? summary) =>
         new(

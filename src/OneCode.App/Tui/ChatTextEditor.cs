@@ -67,7 +67,7 @@ internal sealed class ChatTextEditor : View
             TabStop = TabBehavior.TabStop,
         };
         // 内部 Editor 必须显式取 ChatInput Scheme：TG 默认 Scheme 是黑底，
-        // 会盖掉外层 ChatInputView 的 BgSurface 背景（底部配色割裂的根因）。
+        // 会盖掉外层 ChatInputView 的 BgInput 背景（底部配色割裂的根因）。
         _editor.SetScheme(TuiStyles.ChatInput);
         SetScheme(TuiStyles.ChatInput);
 
@@ -94,6 +94,8 @@ internal sealed class ChatTextEditor : View
         _editor.KeyBindings.Remove(Key.PageDown.WithCtrl);
         _editor.KeyBindings.Remove(Key.CursorUp.WithShift);
         _editor.KeyBindings.Remove(Key.CursorDown.WithShift);
+        _editor.KeyBindings.Remove(Key.PageUp.WithShift);
+        _editor.KeyBindings.Remove(Key.PageDown.WithShift);
 
         _editor.KeyDown += (_, e) =>
         {
@@ -543,7 +545,8 @@ internal sealed class ChatTextEditor : View
         return bare == Key.PageUp
             || bare == Key.PageDown
             || (e.IsCtrl && (bare == Key.PageUp || bare == Key.PageDown))
-            || (e.IsShift && (bare == Key.CursorUp || bare == Key.CursorDown));
+            || (e.IsShift && (bare == Key.CursorUp || bare == Key.CursorDown))
+            || (e.IsShift && (bare == Key.PageUp || bare == Key.PageDown));
     }
 
     /// <summary>

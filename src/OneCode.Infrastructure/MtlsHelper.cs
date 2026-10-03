@@ -106,9 +106,10 @@ public static class MtlsHelper
                 var cert = X509Certificate2.CreateFromPem(pemBlock.AsSpan());
                 certs.Add(cert);
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip invalid PEM blocks
+                // PEM bundle 可含非证书内容（如私钥段被分隔符切开），跳过属预期路径。
+                Debug.WriteLine($"mTLS: Skipping invalid PEM block: {ex.Message}");
             }
         }
 

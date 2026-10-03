@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using OneCode.App.Services.Search;
-using OneCode.Infrastructure;
 
 namespace OneCode.App.Tools;
 
@@ -45,11 +44,8 @@ public sealed class GrepTool
         var om = output_mode ?? "files_with_matches";
         var contextSymmetric = C;
 
-        var workingDir = _wd.WorkingDirectory;
-        var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
-        if (!resolveResult.IsSuccess)
-            return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
-        var searchPath = resolveResult.Value;
+        if (ToolPathGuard.Resolve(path ?? ".", _wd, out var searchPath) is { } resolveError)
+            return resolveError;
 
         if (!Directory.Exists(searchPath) && !File.Exists(searchPath))
             return ToolResult.Error($"Path does not exist: {path}");
@@ -67,7 +63,7 @@ public sealed class GrepTool
                 OutputMode: om,
                 ContextBefore: contextSymmetric ?? (B ?? 0),
                 ContextAfter: contextSymmetric ?? (A ?? 0),
-                WorkspaceRoot: workingDir);
+                WorkspaceRoot: _wd.WorkingDirectory);
 
             results = [.. await _textSearch.SearchAsync(request, ct).ConfigureAwait(false)];
         }

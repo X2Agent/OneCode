@@ -24,6 +24,9 @@ internal sealed class StreamingSession(
 {
     private readonly StringBuilder _textBuilder = new();
     private readonly Dictionary<string, string> _toolNamesByCallId = new(StringComparer.Ordinal);
+    // CallId → 完整参数 JSON：ToolDoneEvent 需要它恢复 target（搜索词/路径/命令），
+    // 否则完成行只剩结果摘要，同类调用无法区分。
+    private readonly Dictionary<string, string> _toolArgsByCallId = new(StringComparer.Ordinal);
     // MAF may replay the same FunctionCallContent/FunctionResultContent across AgentResponseUpdate
     // boundaries (turn history replay). Without CallId-based dedup the same ToolStart/ToolDone event
     // is yielded twice, producing duplicated tool rows in the message list.
@@ -118,7 +121,11 @@ internal sealed class StreamingSession(
                     // Serialization failure must not forge "{}" — skip persistence of that block.
                     var serializedArgs = AgentEventDigester.SerializeArguments(fcc.Arguments, _logger);
                     if (serializedArgs is not null)
+                    {
                         ToolBatchCollector.AddCall(fcc, serializedArgs);
+                        if (fcc.CallId is not null)
+                            _toolArgsByCallId[fcc.CallId] = serializedArgs;
+                    }
                     yield return new ToolStartEvent(
                         fcc.CallId ?? "",
                         toolName,
@@ -132,6 +139,7 @@ internal sealed class StreamingSession(
                     var (isError, resultText) = AgentEventDigester.ExtractToolResult(frc, _logger);
                     var name = (frc.CallId is not null
                         && _toolNamesByCallId.TryGetValue(frc.CallId, out var n)) ? n : "(unknown)";
+                    _toolArgsByCallId.TryGetValue(frc.CallId ?? "", out var doneToolInput);
                     ToolBatchCollector.AddResult(
                         frc,
                         name,
@@ -142,7 +150,8 @@ internal sealed class StreamingSession(
                         frc.CallId ?? "",
                         name,
                         isError,
-                        resultText);
+                        resultText,
+                        doneToolInput);
                     _pendingTurnBoundary = true;
                 }
                 else if (c is TextReasoningContent trc && !string.IsNullOrEmpty(trc.Text))

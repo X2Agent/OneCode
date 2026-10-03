@@ -2,7 +2,6 @@ using OneCode.Core.Mcp;
 using OneCode.Core.Config;
 using System.Text;
 using OneCode.Core.Prompt;
-using OneCode.Core.IO;
 
 
 namespace OneCode.App.Commands;
@@ -12,7 +11,6 @@ namespace OneCode.App.Commands;
 /// Supports website cloning mode (with URL) and project introspection mode (without URL).
 /// </summary>
 public sealed class DesignInitCommand(
-    IFileSystem fileSystem,
     IConfigManager configManager,
     IPromptManager promptManager,
     ILogger<DesignInitCommand>? logger = null,
@@ -85,7 +83,7 @@ public sealed class DesignInitCommand(
         if (noLlm || !IsApiKeyAvailable())
         {
             var template = BuildStaticTemplate(url);
-            await fileSystem.WriteTextFileAsync(designPath, template, ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(designPath, template, ct).ConfigureAwait(false);
             var suffix = noLlm ? " (static template, --no-llm)" : " (static template, no API key)";
             return CommandResult.Text($"Created DESIGN.md at {designPath}{suffix}");
         }
@@ -115,7 +113,7 @@ public sealed class DesignInitCommand(
         var variables = BuildVariables(context);
         var prompt = await LoadPromptAsync(promptManager, "system/design-init", variables, ct).ConfigureAwait(false);
         if (prompt is null)
-            return CommandResult.Error("Prompt 'system/design-init' is not available. Verify prompts/system/design-init.prompt exists.");
+            return PromptMissingError("system/design-init");
         return CommandResult.Prompt(prompt, BuildAllowedTools(designPath));
     }
 
@@ -137,7 +135,7 @@ public sealed class DesignInitCommand(
         string? existing = null;
         if (File.Exists(designPath))
         {
-            existing = await fileSystem.ReadTextFileAsync(designPath, ct).ConfigureAwait(false);
+            existing = await File.ReadAllTextAsync(designPath, ct).ConfigureAwait(false);
             if (existing is { Length: > 6000 })
                 existing = existing[..6000] + "\n... (truncated)";
         }

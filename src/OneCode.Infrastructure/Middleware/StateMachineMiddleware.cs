@@ -11,28 +11,23 @@ using Microsoft.Extensions.AI;
 namespace OneCode.Infrastructure.Middleware;
 
 /// <summary>
-/// 状态机中间件：管理错误恢复流程、注入 3-strike 修复指导。
+/// 状态机中间件：管理错误恢复流程（Active → Recovering → Blocked）。
 ///
 /// 职责边界：
-/// - 状态机负责错误恢复（Active → Recovering → Blocked）。
-/// - 当 enableStrikeGuidance=true 时，在失败后注入递进式修复指导
-///   （Strike 1→重试提示, Strike 2→聚焦修复, Strike 3→Blocked）。
+/// - 状态转移由 <see cref="StateMachine.Transition"/> 纯函数推进；
+///   Blocked 后非干预类工具被闸门拦截，等待用户介入（见 <see cref="ShouldBlockTool"/>）。
 /// - Plan 模式的只读约束由权限层（PlanModePermissionStrategy）负责，不在此重复。
 /// - 工具调用时序观测不在此重复实现：框架侧有 span 埋点，但产品未注册 OpenTelemetry
 ///   订阅者（`src/` 内无 `AddSource` / `TracerProvider`），当前 span 全部为 `null`、不可观测。
 /// </summary>
 public static class StateMachineMiddleware
 {
-    private const int RecoveringThreshold = 2;
-    private const int BlockedThreshold = 3;
-
     /// <summary>创建 MAF 中间件委托。</summary>
     /// <param name="logger">日志器（可选）。</param>
-    /// <param name="enableStrikeGuidance">是否注入 3-strike 修复指导。Main 路径开启，Worker/Team 关闭。</param>
     public static Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
             CancellationToken, ValueTask<object?>>
-        Create(ILogger? logger = null, bool enableStrikeGuidance = false)
+        Create(ILogger? logger = null)
     {
         return async (_, ctx, next, ct) =>
         {
@@ -67,6 +62,7 @@ public static class StateMachineMiddleware
                 ToolResult tr => tr.IsError,
                 _ => execCtx.IsError,
             };
+            // Guidance 已注入（Recovery 等）视为成功，避免恢复引导本身再推高失败计数。
             var isGuidance = execCtx.Guidance != GuidanceKind.None;
             var isSuccess = isGuidance || !isFailure;
             var isVerificationFailure = !isSuccess && execCtx.IsVerificationFailure;
@@ -75,44 +71,6 @@ public static class StateMachineMiddleware
 
             if (toolName is "Bash")
                 stateBag.ResetEditsSinceLastBuild();
-
-            // 3-strike guidance injection (Main path only).
-            // Skip for verification failures: the verification error itself is appended
-            // to the tool result by EditGuardMiddleware, providing specific repair
-            // guidance. Adding strike noise on top is redundant. The IsVerificationFailure
-            // flag already triggered Active→Recovering via StateMachine.Transition.
-            if (enableStrikeGuidance && !isSuccess && !isVerificationFailure)
-            {
-                var strikes = stateBag.GetConsecutiveFailures(); // post-increment value
-                if (strikes >= BlockedThreshold)
-                {
-                    stateBag.SetCurrentState(AgentState.Blocked);
-                    stateBag.GetOrInitializeToolExecutionContext().Guidance = GuidanceKind.TaskRecovery;
-                    logger?.LogWarning("State machine: {Strikes} strikes reached, agent blocked. Tool: {Tool}",
-                        strikes, toolName);
-                    return FormatGuidance(strikes, toolName,
-                        "Agent entering Blocked state. Please review failures and intervene.",
-                        result);
-                }
-
-                if (strikes >= RecoveringThreshold)
-                {
-                    logger?.LogWarning("State machine: Strike {Strike}/{Max}. Tool: {Tool}. Generating focused repair guidance.",
-                        strikes, BlockedThreshold, toolName);
-                    stateBag.GetOrInitializeToolExecutionContext().Guidance = GuidanceKind.TaskRecovery;
-                    return FormatGuidance(strikes, toolName,
-                        "Please carefully analyze the failure, re-read the target file, " +
-                        "and try a different approach. Next failure will block the agent.",
-                        result);
-                }
-
-                logger?.LogInformation("State machine: Strike {Strike}/{Max}. Tool: {Tool}. Injecting retry feedback.",
-                    strikes, BlockedThreshold, toolName);
-                stateBag.GetOrInitializeToolExecutionContext().Guidance = GuidanceKind.TaskRecovery;
-                return FormatGuidance(strikes, toolName,
-                    "Review the error and retry with adjustments.",
-                    result);
-            }
 
             return result;
         };
@@ -124,19 +82,6 @@ public static class StateMachineMiddleware
 
     internal static bool ShouldBlockTool(AgentState state, string? toolName)
         => state == AgentState.Blocked && !IsUserInterventionTool(toolName);
-
-    private static string FormatGuidance(int strikes, string toolName, string guidance, object? originalResult)
-    {
-        var originalText = originalResult switch
-        {
-            ToolResult tr => tr.Content ?? tr.ToString() ?? "",
-            string s => s,
-            _ => originalResult?.ToString() ?? "",
-        };
-        return $"[STATE MACHINE - Strike {strikes}/{BlockedThreshold}] " +
-               $"Tool '{toolName}' failed. {guidance}\n\n" +
-               $"--- Original error ---\n{originalText}";
-    }
 }
 
 /// <summary>
@@ -149,7 +94,7 @@ public static class StateMachine
     /// <param name="toolName">Name of the tool that was executed.</param>
     /// <param name="isSuccess">Whether the tool execution succeeded.</param>
     /// <param name="isVerificationFailure">
-    /// 验证失败（编译/类型检查）立即转 Recovering，不等 3-strike。
+    /// 验证失败（编译/类型检查）立即转 Recovering，不等连续失败阈值。
     /// 由 EditGuardMiddleware 写入 ToolExecutionContext.IsVerificationFailure=true 触发。
     /// </param>
     public static void Transition(AgentSessionStateBag stateBag, string toolName, bool isSuccess,

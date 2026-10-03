@@ -7,19 +7,10 @@ public static class Constants
         public const string OneCodeApiKey = "ONECODE_API_KEY";
         public const string OneCodeBaseUrl = "ONECODE_BASE_URL";
         public const string OneCodeModel = "ONECODE_MODEL";
-        /// <summary>VCR 录像/回放模式开关。值为 off/空(不激活)、replay(回放)、record(录像)。</summary>
-        public const string Vcr = "ONECODE_VCR";
         /// <summary>Tavily 搜索 API Key（webSearchApiKeys.tavily 的环境变量映射，免费额度注册即得）。</summary>
         public const string TavilyApiKey = "TAVILY_API_KEY";
         /// <summary>WebSearch 主提供方（tavily | duckduckgo）。</summary>
         public const string OneCodeWebSearchProvider = "ONECODE_WEB_SEARCH_PROVIDER";
-        /// <summary>
-        /// 调试日志级别（单开关）：off | debug | trace。
-        /// 空/未设置 → 按构建默认（DEBUG 构建开、Release 关）；显式 off/0/false 可关闭（含 DEBUG 构建）；
-        /// debug/1 → Debug 级别；trace/2 → Trace 级别（隐含开启调试），在 Release 构建也强制生效。
-        /// 其他未知值回退到构建默认。
-        /// </summary>
-        public const string LogLevel = "ONECODE_LOG_LEVEL";
         /// <summary>Worker 子代理标志：为 1/true 时表示为 Worker 进程。</summary>
         public const string IsWorker = "ONECODE_IS_WORKER";
         /// <summary>覆盖上下文窗口上限（token 数，最终覆盖手段）。</summary>
@@ -66,18 +57,23 @@ public static class Constants
     {
         public const int MaxTurnsDefault = 100;
         public const long MaxBudgetTokensDefault = 5_000_000;
-        public const string SessionFileExtension = ".jsonl";
+        /// <summary>会话事件 JSONL 文件扩展名（不含点）。</summary>
+        public const string EventsFileExtension = "jsonl";
+        /// <summary>GOAL：跨子目标总 attempt 上限默认值（<c>goal.maxSubGoalAttempts</c>）。</summary>
+        public const int GoalMaxSubGoalAttemptsDefault = 20;
+        /// <summary>GOAL：单子目标轮数上限默认值（<c>goal.maxTurnsPerSubGoal</c>）。</summary>
+        public const int GoalMaxTurnsPerSubGoalDefault = 50;
+        /// <summary>GOAL：累计 token 上限默认值（<c>goal.maxTotalTokens</c>，≤0 表示不限制）。</summary>
+        public const long GoalMaxTotalTokensDefault = 200_000;
+        /// <summary>GOAL：墙钟上限小时数默认值（<c>goal.maxWallClockHours</c>，≤0 表示不限制）。</summary>
+        public const double GoalMaxWallClockHoursDefault = 2.0;
+        /// <summary>/loop 单次循环调用 inner agent 次数默认值（<c>loop.maxIterations</c>）。</summary>
+        public const int LoopMaxIterationsDefault = 3;
     }
 
     public static class PermissionModes
     {
         public const string Default = "default";
-        public const string BypassPermissions = "bypassPermissions";
-        public const string Plan = "plan";
-        /// <summary>YOLO 自动分类模式（启用 LLM 安全分类器）。</summary>
-        public const string Auto = "auto";
-        /// <summary>AcceptEdits 模式（文件写入 + 常规 Shell 自动放行）。</summary>
-        public const string AcceptEdits = "acceptEdits";
     }
 
 

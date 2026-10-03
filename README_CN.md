@@ -60,7 +60,7 @@ src/
 │   ├── Tools/                  #   31 个工具（通过 AddToolInstance<T> 注册）
 │   ├── Commands/               #   44 斜杠命令
 │   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 22 子模块，各带 XxxServiceCollectionExtensions）
-│   ├── Query/                  #   查询编排（ChatService / QueryStreamEngine / StreamingSession）
+│   ├── Query/                  #   查询编排（QueryStreamEngine / StreamingSession）
 │   ├── Tui/                    #   Terminal.Gui v2 全屏界面
 │   └── Session/                #   会话上下文与事件溯源存储
 │
@@ -434,7 +434,7 @@ HarnessAgent
 │              （BUILD / PLAN / TEAM / GOAL 共享）        │
 │                                                       │
 ├─ Status Bar ─────────────────────────────────────────┤  1 row
-│  Opus · $0.04 · Sandbox          BUILD · 13:19       │
+│  Opus · 🔒 Sandbox               BUILD · 13:19       │
 ├─ Input Line ─────────────────────────────────────────┤  3+ rows
 │ BUILD ❯ _                                  Tab切模式  │
 └──────────────────────────────────────────────────────┘
@@ -517,7 +517,6 @@ HarnessAgent
 | **自包含单文件发布** | .NET 10 self-contained + single-file |
 | **多级上下文压缩** | MAF 自动压缩 + 手动 `/compact`（全文/部分）|
 | **Token 精确估算** | `TokenBreakdownEstimator` 多模型 token 精确计算 |
-| **VCR 录制回放** | `VcrService` API 调用录制与回放 |
 | **SSH 远程执行** | `SshRemoteService` 基于 SSH.NET 的远程命令执行 |
 | **飞书/企业微信通知** | Hook 通知支持飞书和企业微信 |
 

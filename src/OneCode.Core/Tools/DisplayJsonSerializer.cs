@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 
@@ -41,12 +43,14 @@ public static partial class DisplayJsonSerializer
         try
         {
             using var document = JsonDocument.Parse(trimmed);
-            var builder = new System.Text.StringBuilder();
+            var builder = new StringBuilder();
             WriteForDisplay(builder, document.RootElement, writeIndented, depth: 0);
             return builder.ToString();
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            // 以 { 或 [ 开头但并非合法 JSON 的普通文本是常态输入，原样返回
+            Debug.WriteLine($"FormatIfJson: not valid JSON, returning original. {ex.Message}");
             return value;
         }
     }
@@ -74,13 +78,61 @@ public static partial class DisplayJsonSerializer
                     return FormatIfJson(decoded, writeIndented);
                 }
 
-                var builder = new System.Text.StringBuilder();
+                var builder = new StringBuilder();
                 WriteForDisplay(builder, root.RootElement, writeIndented, depth: 0);
                 return builder.ToString();
             }
         }
 
         return StripAnsiEscapeSequences(DecodeUnicodeEscapes(value));
+    }
+
+    /// <summary>
+    /// 循环解包 JSON-in-string 信封：根值本身是 JSON 字符串、或 JSON 对象的
+    /// <c>content</c>/<c>Content</c> 字段整体是字符串时，取出该字段再试，最多 3 层
+    /// （ToolResult 序列化信封 → 工具内层 → 防御一层）。任一层不是合法 JSON
+    /// 或没有可解的字符串信封字段即停止，返回 false（<paramref name="unwrapped"/> 保持原值）。
+    /// </summary>
+    public static bool TryUnwrapEnvelope(string value, out string unwrapped)
+    {
+        unwrapped = value;
+        for (var depth = 0; depth < 3; depth++)
+        {
+            var trimmed = unwrapped.TrimStart();
+            if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '"'))
+                return depth > 0;
+
+            if (!TryParseJson(trimmed, out var doc))
+                return depth > 0;
+
+            using (doc)
+            {
+                var next = doc.RootElement.ValueKind switch
+                {
+                    JsonValueKind.String => doc.RootElement.GetString(),
+                    JsonValueKind.Object => FindContentStringField(doc.RootElement),
+                    _ => null,
+                };
+                if (string.IsNullOrEmpty(next))
+                    return depth > 0;
+                unwrapped = next;
+            }
+        }
+
+        return true;
+    }
+
+    private static string? FindContentStringField(JsonElement root)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String)
+                continue;
+            // camelCase（MAF Web 默认序列化）与 PascalCase（ToolResultSerializer）两种信封
+            if (property.Name is "content" or "Content")
+                return property.Value.GetString();
+        }
+        return null;
     }
 
     /// <summary>
@@ -93,7 +145,7 @@ public static partial class DisplayJsonSerializer
     /// 显示层需要真实换行/<c>Tab</c>，故此处自行写出结构符号与字符串值。
     /// </summary>
     private static void WriteForDisplay(
-        System.Text.StringBuilder builder, JsonElement element, bool writeIndented, int depth)
+        StringBuilder builder, JsonElement element, bool writeIndented, int depth)
     {
         switch (element.ValueKind)
         {
@@ -161,7 +213,7 @@ public static partial class DisplayJsonSerializer
         }
     }
 
-    private static void AppendIndent(System.Text.StringBuilder builder, bool writeIndented, int depth)
+    private static void AppendIndent(StringBuilder builder, bool writeIndented, int depth)
     {
         if (!writeIndented)
             return;
@@ -176,7 +228,7 @@ public static partial class DisplayJsonSerializer
     private static string QuoteForDisplay(string text)
     {
         var decoded = ReplaceLoneSurrogates(StripAnsiEscapeSequences(DecodeUnicodeEscapes(text)));
-        var builder = new System.Text.StringBuilder(decoded.Length + 2);
+        var builder = new StringBuilder(decoded.Length + 2);
         builder.Append('"');
         foreach (var ch in decoded)
         {
@@ -231,7 +283,7 @@ public static partial class DisplayJsonSerializer
         if (!needsRewrite)
             return value;
 
-        var builder = new System.Text.StringBuilder(value.Length);
+        var builder = new StringBuilder(value.Length);
         for (var i = 0; i < value.Length; i++)
         {
             var c = value[i];
@@ -255,9 +307,11 @@ public static partial class DisplayJsonSerializer
             document = JsonDocument.Parse(value);
             return true;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            // 失败路径下调用方不读取 document，null! 仅为满足 out 参数非空约定
             document = null!;
+            Debug.WriteLine($"TryParseJson: {ex.Message}");
             return false;
         }
     }
@@ -268,7 +322,7 @@ public static partial class DisplayJsonSerializer
         if (firstEscape < 0)
             return value;
 
-        var builder = new System.Text.StringBuilder(value.Length);
+        var builder = new StringBuilder(value.Length);
         builder.Append(value, 0, firstEscape);
 
         for (var i = firstEscape; i < value.Length; i++)

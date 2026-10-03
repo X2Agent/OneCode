@@ -59,7 +59,7 @@ public sealed class StatusCommand(
         else
         {
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Session:     {conv.Id}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Name:        {conv.Name}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  标题:        {conv.DisplayTitle() ?? "(未命名)"}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Conv status: {conv.Status}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Background:  {sessionManager.BackgroundSessionCount}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Created:     {conv.CreatedAt:yyyy-MM-dd HH:mm:ss}");

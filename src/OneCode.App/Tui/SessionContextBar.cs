@@ -11,6 +11,7 @@ using OneCode.Core.Commands;
 ///
 /// Left: workspace name, git branch/worktree (where am I).
 /// Right: turn number, token usage, context-window visual bar (how much used).
+/// 会话名不在此显示——辨认会话是恢复选择器（/session）的职责。
 /// </summary>
 public sealed class SessionContextBar : View
 {
@@ -24,7 +25,6 @@ public sealed class SessionContextBar : View
     private int _outputTokens;
     private int _maxContextTokens;
     private int _currentContextTokens;
-    private string? _sessionName;
     private WorkingMode _mode = WorkingMode.Build;
 
     public SessionContextBar()
@@ -58,13 +58,6 @@ public sealed class SessionContextBar : View
     /// <summary>TEAM/GOAL 模式不显示上下文占用进度条（internal 便于单测）。</summary>
     internal static bool ShowsContextGauge(WorkingMode mode)
         => mode is not (WorkingMode.Team or WorkingMode.Goal);
-
-    /// <summary>设置当前会话名，显示在 workspace 旁边。传 null 隐藏。</summary>
-    public void SetSessionName(string? name)
-    {
-        _sessionName = name;
-        SetNeedsDraw();
-    }
 
     /// <summary>
     /// Refresh git context. Called once on startup (or on directory/worktree change).
@@ -163,7 +156,7 @@ public sealed class SessionContextBar : View
         if (w <= 0) return false;
 
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
+        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
         AddStr(new string(' ', w));
 
         var rightSegs = BuildRightSegments(w);
@@ -186,42 +179,42 @@ public sealed class SessionContextBar : View
         if (col + 3 + TextWidthHelper.GetDisplayWidth(displayWs) <= maxLeftCol || col == 1)
         {
             Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
             AddStr("\U0001f4c1 ");
-            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
             AddStr(displayWs);
-            col += 2 + TextWidthHelper.GetDisplayWidth(displayWs);
+            col += 3 + TextWidthHelper.GetDisplayWidth(displayWs); // emoji 2 列 + 空格 1 列
         }
 
         // 🌿 branch (if git available)
         if (_gitAvailable && !string.IsNullOrEmpty(_branch))
         {
-            var branchWidth = 4 + 2 + TextWidthHelper.GetDisplayWidth(_branch);
+            var branchWidth = 6 + TextWidthHelper.GetDisplayWidth(_branch); // " · " + emoji + 空格
             if (col + branchWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
                 AddStr("\U0001f33f ");
-                col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+                col += 3; // emoji 2 列 + 空格 1 列
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
                 AddStr(_branch);
                 col += TextWidthHelper.GetDisplayWidth(_branch);
             }
             else if (maxLeftCol - col >= 10)
             {
-                var availBranch = maxLeftCol - col - 5;
+                var availBranch = maxLeftCol - col - 6;
                 var shortBranch = TextWidthHelper.TruncateByWidth(_branch, availBranch);
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
                 AddStr("\U0001f33f ");
-                col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface));
+                col += 3; // emoji 2 列 + 空格 1 列
+                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
                 AddStr(shortBranch);
                 col += TextWidthHelper.GetDisplayWidth(shortBranch);
             }
@@ -230,38 +223,19 @@ public sealed class SessionContextBar : View
         // 📦 worktree (only if inside a linked worktree AND terminal is wide enough)
         if (_gitAvailable && !string.IsNullOrEmpty(_worktree) && w >= 90)
         {
-            var wtWidth = 5 + TextWidthHelper.GetDisplayWidth(_worktree);
+            var wtWidth = 6 + TextWidthHelper.GetDisplayWidth(_worktree); // " · " + emoji + 空格
             if (col + wtWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgInput));
                 AddStr("\U0001f4e6 ");
-                col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
+                col += 3; // emoji 2 列 + 空格 1 列
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
                 AddStr(_worktree);
                 col += TextWidthHelper.GetDisplayWidth(_worktree);
-            }
-        }
-
-        // Session name (if set and terminal is wide enough)
-        if (!string.IsNullOrEmpty(_sessionName) && w >= 80)
-        {
-            var snWidth = 5 + TextWidthHelper.GetDisplayWidth(_sessionName);
-            if (col + snWidth <= maxLeftCol)
-            {
-                Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface));
-                AddStr(" \u00b7 ");
-                col += 3;
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgSurface));
-                AddStr("\U0001f4dd ");
-                col += 2;
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface));
-                AddStr(_sessionName);
-                col += TextWidthHelper.GetDisplayWidth(_sessionName);
             }
         }
 
@@ -271,7 +245,7 @@ public sealed class SessionContextBar : View
             Move(rightCol, 0);
             foreach (var (text, color) in rightSegs)
             {
-                SetAttribute(new Attribute(color, TuiPalette.BgSurface));
+                SetAttribute(new Attribute(color, TuiPalette.BgInput));
                 AddStr(text);
             }
         }

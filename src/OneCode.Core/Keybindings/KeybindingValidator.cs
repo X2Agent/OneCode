@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace OneCode.Core.Keybindings;
 
 /// <summary>
@@ -311,10 +313,11 @@ public static class KeybindingValidator
                 }
             }
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
             // JSON 语法错误——忽略，其他验证器会报语法问题。
             // 此方法只负责重复键检测，畸形 JSON 由 JsonSerializer.Deserialize 在其他路径报告。
+            Debug.WriteLine($"Duplicate-key scan skipped malformed JSON: {ex.Message}");
         }
 
         return warnings;

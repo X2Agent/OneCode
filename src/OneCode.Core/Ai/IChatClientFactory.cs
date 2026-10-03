@@ -21,6 +21,5 @@ public interface IChatClientFactory
         string? baseUrl = null,
         string? model = null,
         ILoggerFactory? loggerFactory = null,
-        VcrMode? vcrMode = null,
         int? ollamaNumCtx = null);
 }

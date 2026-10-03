@@ -47,8 +47,8 @@ public sealed class PromptConfigBuilder(
 
     /// <summary>
     /// Builds the runtime system prompt and bootstraps MCP + skills.
-    /// Callers inject <see cref="Query.ChatService"/> / <see cref="Query.IConversationRunner"/> separately —
-    /// this builder no longer returns a conversation runner (breaks the PromptConfigBuilder ↔ ChatService cycle).
+    /// Callers inject the conversation runner (<see cref="Query.IConversationRunner"/>) separately —
+    /// this builder does not return a conversation runner.
     /// </summary>
     /// <remarks>
     /// Memory strategy: the system prompt only includes the MEMORY.md entrypoint index so the LLM

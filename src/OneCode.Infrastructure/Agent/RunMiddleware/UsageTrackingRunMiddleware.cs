@@ -36,7 +36,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 /// <para>
 /// <b>Streaming 去重策略</b>：MAF 可能在 turn 边界重放 <see cref="UsageContent"/>
 /// （与 <see cref="FunctionCallContent"/> 行为一致）。本中间件取最后一个有效的
-/// <see cref="UsageContent"/>（与 <c>ChatService.TryExtractUsage</c> 行为一致），
+/// <see cref="UsageContent"/>（与 Agent 事件消费侧同规则），
 /// 避免重复累加。MAF 在 streaming 中的 <see cref="UsageContent"/> 通常包含
 /// 当前 agent run 的累积 usage。
 /// </para>
@@ -101,7 +101,7 @@ public static class UsageTrackingRunMiddleware
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, [EnumeratorCancellation] CancellationToken ct)
         {
-            // 取最后一个有效的 UsageContent（与 ChatService.TryExtractUsage 行为一致）。
+            // 取最后一个有效的 UsageContent（与 Agent 事件消费侧同规则）。
             // MAF streaming 中的 UsageContent 通常包含当前 agent run 的累积 usage。
             UsageDetails? lastUsage = null;
 

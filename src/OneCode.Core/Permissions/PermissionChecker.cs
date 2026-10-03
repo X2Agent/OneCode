@@ -3,7 +3,7 @@ using OneCode.Core.Permissions.Yolo;
 namespace OneCode.Core.Permissions;
 
 /// <summary>
-/// 主权限检查器。Auto 模式下委托给 <see cref="IYoloClassifier"/> 做规则匹配，
+/// 主权限检查器。Auto 模式下委托给 <see cref="YoloClassifier"/> 做规则匹配，
 /// 未匹配规则时 fallback 到 Auto 模式的 ReadOnlyAndEvaluate 逻辑；
 /// 其余模式直接查表 <see cref="PermissionProfiles"/>。
 ///
@@ -18,7 +18,7 @@ namespace OneCode.Core.Permissions;
 ///      （走 EvaluateRules → 无规则则 Ask，保证安全兜底）
 /// </summary>
 public sealed class PermissionChecker(
-    IYoloClassifier yoloClassifier,
+    YoloClassifier yoloClassifier,
     ILogger<PermissionChecker>? logger = null) : IPermissionChecker
 {
     public async Task<PermissionCheckResult> CheckAsync(

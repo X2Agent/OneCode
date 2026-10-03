@@ -15,24 +15,24 @@ public sealed record ModeBudgetSettings
     /// <summary>Build/Team 的全局 turns 上限（<c>maxTurns</c>，默认 100；Team 的 team.yaml 每团队配置优先）。</summary>
     public int MaxTurns { get; init; } = CoreConstants.Session.MaxTurnsDefault;
 
-    /// <summary>跨所有子目标的总 attempt 上限（<c>goal.maxSubGoalAttempts</c>，默认 20）。</summary>
-    public int MaxSubGoalAttempts { get; init; } = 20;
+    /// <summary>跨所有子目标的总 attempt 上限（<c>goal.maxSubGoalAttempts</c>）。</summary>
+    public int MaxSubGoalAttempts { get; init; } = CoreConstants.Session.GoalMaxSubGoalAttemptsDefault;
 
-    /// <summary>单子目标轮数上限（<c>goal.maxTurnsPerSubGoal</c>，默认 50）。</summary>
-    public int MaxTurnsPerSubGoal { get; init; } = 50;
+    /// <summary>单子目标轮数上限（<c>goal.maxTurnsPerSubGoal</c>）。</summary>
+    public int MaxTurnsPerSubGoal { get; init; } = CoreConstants.Session.GoalMaxTurnsPerSubGoalDefault;
 
-    /// <summary>累计 token 上限（<c>goal.maxTotalTokens</c>，默认 200000；≤0 表示不限制）。</summary>
-    public long MaxTotalTokens { get; init; } = 200_000;
+    /// <summary>累计 token 上限（<c>goal.maxTotalTokens</c>，≤0 表示不限制）。</summary>
+    public long MaxTotalTokens { get; init; } = CoreConstants.Session.GoalMaxTotalTokensDefault;
 
-    /// <summary>墙钟上限小时数（<c>goal.maxWallClockHours</c>，默认 2.0；≤0 表示不限制）。</summary>
-    public double MaxWallClockHours { get; init; } = 2.0;
+    /// <summary>墙钟上限小时数（<c>goal.maxWallClockHours</c>，≤0 表示不限制）。</summary>
+    public double MaxWallClockHours { get; init; } = CoreConstants.Session.GoalMaxWallClockHoursDefault;
 
     /// <summary>
-    /// <c>/loop</c> 运行时循环调用 inner agent 的硬上限（<c>loop.maxIterations</c>，默认 3）。
+    /// <c>/loop</c> 运行时循环调用 inner agent 的硬上限（<c>loop.maxIterations</c>）。
     /// 对应 <c>LoopAgentOptions.MaxIterations</c>，评估器无法突破。
     /// 配置值被夹在 1..<see cref="MaxLoopIterationsUpperBound"/>。
     /// </summary>
-    public int MaxLoopIterations { get; init; } = 3;
+    public int MaxLoopIterations { get; init; } = CoreConstants.Session.LoopMaxIterationsDefault;
 
     /// <summary>
     /// <c>loop.maxIterations</c> 与 <c>/loop --max</c> 的硬上界，取 GOAL 单子目标重试上限（20）。
@@ -59,12 +59,12 @@ public sealed record ModeBudgetSettings
     public static ModeBudgetSettings FromSettings(AppSettings settings) => new()
     {
         MaxTurns = settings.MaxTurns,
-        MaxSubGoalAttempts = settings.Get(CoreConstants.ConfigKeys.GoalMaxSubGoalAttempts, 20),
-        MaxTurnsPerSubGoal = settings.Get(CoreConstants.ConfigKeys.GoalMaxTurnsPerSubGoal, 50),
-        MaxTotalTokens = settings.Get(CoreConstants.ConfigKeys.GoalMaxTotalTokens, 200_000L),
-        MaxWallClockHours = settings.Get(CoreConstants.ConfigKeys.GoalMaxWallClockHours, 2.0),
+        MaxSubGoalAttempts = settings.Get(CoreConstants.ConfigKeys.GoalMaxSubGoalAttempts, CoreConstants.Session.GoalMaxSubGoalAttemptsDefault),
+        MaxTurnsPerSubGoal = settings.Get(CoreConstants.ConfigKeys.GoalMaxTurnsPerSubGoal, CoreConstants.Session.GoalMaxTurnsPerSubGoalDefault),
+        MaxTotalTokens = settings.Get(CoreConstants.ConfigKeys.GoalMaxTotalTokens, CoreConstants.Session.GoalMaxTotalTokensDefault),
+        MaxWallClockHours = settings.Get(CoreConstants.ConfigKeys.GoalMaxWallClockHours, CoreConstants.Session.GoalMaxWallClockHoursDefault),
         MaxLoopIterations = Math.Clamp(
-            settings.Get(CoreConstants.ConfigKeys.LoopMaxIterations, 3),
+            settings.Get(CoreConstants.ConfigKeys.LoopMaxIterations, CoreConstants.Session.LoopMaxIterationsDefault),
             1,
             MaxLoopIterationsUpperBound),
     };

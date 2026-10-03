@@ -14,7 +14,7 @@ public sealed record PermissionProfile
 }
 
 /// <summary>High-level CheckAsync flow for a permission mode.</summary>
-public enum PermissionCheckFlow
+internal enum PermissionCheckFlow
 {
     AlwaysAllow,
     ReadOnlyAndEvaluate,
@@ -23,7 +23,7 @@ public enum PermissionCheckFlow
 }
 
 /// <summary>How destructive shell commands are handled in AutoAllowFileWriteAndShell flow.</summary>
-public enum DestructiveShellPolicy
+internal enum DestructiveShellPolicy
 {
     /// <summary>Fall through to EvaluateRules (AcceptEdits).</summary>
     EvaluateRules,
@@ -36,14 +36,14 @@ public enum DestructiveShellPolicy
 }
 
 /// <summary>How unknown (non-shell, non-write) tools are handled after AutoAllowFileWriteAndShell.</summary>
-public enum UnknownToolPolicy
+internal enum UnknownToolPolicy
 {
     EvaluateRules,
     AllowWithPathValidation,
 }
 
 /// <summary>How Ask decisions from EvaluateRules are post-processed (Default/DontAsk variants).</summary>
-public enum AskDecisionPolicy
+internal enum AskDecisionPolicy
 {
     Standard,
     DenyAsk,
@@ -52,7 +52,7 @@ public enum AskDecisionPolicy
 /// <summary>
 /// Full declarative config for one <see cref="PermissionMode"/> — profile + CheckAsync behavior.
 /// </summary>
-public sealed record PermissionModeConfig
+internal sealed record PermissionModeConfig
 {
     public required PermissionProfile Profile { get; init; }
     public required PermissionCheckFlow Flow { get; init; }
@@ -65,7 +65,6 @@ public sealed record PermissionModeConfig
 
 /// <summary>
 /// Static registry of all permission mode definitions.
-/// Replaces <c>PermissionStrategyRouter</c> and the seven strategy classes.
 /// </summary>
 public static class PermissionProfiles
 {

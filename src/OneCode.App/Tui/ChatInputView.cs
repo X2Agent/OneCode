@@ -133,6 +133,12 @@ public sealed partial class ChatInputView : View
     /// <summary>对话区页级向下滚动（PageDown）。</summary>
     public event Action? PageDownRequested;
 
+    /// <summary>侧栏（Plan/Team 计划卡）页级向上滚动（Shift+PageUp）。</summary>
+    public event Action? SidebarPageUpRequested;
+
+    /// <summary>侧栏（Plan/Team 计划卡）页级向下滚动（Shift+PageDown）。</summary>
+    public event Action? SidebarPageDownRequested;
+
     public event Action<bool, int>? CompletionStateChanged;
     public FrameView CompletionFrame => _completionFrame;
     public int SelectedSuggestionIndex => _completionList.SelectedItem ?? -1;

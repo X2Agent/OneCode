@@ -226,19 +226,27 @@ public sealed class PlanAgentRunDispatcher(
                 approvedSnapshot.Project(),
                 HarnessInstructions: session.HarnessPrompt);
 
+            // 绑定只需一次：BuildRunStateEvent 会在执行中多次投影（Implementing/Verifying…），
+            // 重复调用 BindBuildRunAsync 会被单槽幂等标记放行为新命令，且收尾事件到达时
+            // plan workflow 可能已 Completed——首绑成功后跳过后续绑定。
+            var buildRunBound = false;
             await foreach (var queryEvent in session.ConversationRunner
                 .StreamWorkflowRunAsync(request, ct).ConfigureAwait(false))
             {
                 if (queryEvent is BuildRunStateEvent buildState)
                 {
-                    var binding = await workflowService.BindBuildRunAsync(new BindPlanBuildRunCommand(
-                        $"bind-build-run-{current.Id}-{buildState.RunId}",
-                        current.SessionId,
-                        current.Id,
-                        runId,
-                        buildState.RunId.ToString(),
-                        fencingToken), ct).ConfigureAwait(false);
-                    current = binding.Workflow;
+                    if (!buildRunBound)
+                    {
+                        var binding = await workflowService.BindBuildRunAsync(new BindPlanBuildRunCommand(
+                            $"bind-build-run-{current.Id}-{buildState.RunId}",
+                            current.SessionId,
+                            current.Id,
+                            runId,
+                            buildState.RunId.ToString(),
+                            fencingToken), ct).ConfigureAwait(false);
+                        current = binding.Workflow;
+                        buildRunBound = true;
+                    }
                 }
                 if (TuiEventMapper.MapQueryEventToTuiEvent(queryEvent) is { } tuiEvent)
                     tui.EmitEvent?.Invoke(tuiEvent);

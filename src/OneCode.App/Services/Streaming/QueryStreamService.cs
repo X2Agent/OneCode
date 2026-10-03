@@ -99,7 +99,7 @@ public sealed class QueryStreamService(
     }
 
     /// <summary>
-    /// Normal mode streaming: ChatService.StreamQueryAsync with file-change
+    /// Normal mode streaming: IConversationRunner.StreamQueryAsync with file-change
     /// queue draining and next-prompt suggestion generation.
     /// </summary>
     public async IAsyncEnumerable<TuiEvent> StreamNormalAsync(
@@ -249,7 +249,7 @@ public sealed class QueryStreamService(
     }
 
     /// <summary>
-    /// Shared ChatService streaming loop: thinking params, file-change drain, auto-compact.
+    /// Shared conversation-runner streaming loop: thinking params, file-change drain, auto-compact.
     /// </summary>
     private async IAsyncEnumerable<TuiEvent> StreamChatCoreAsync(
         InteractiveSession session,

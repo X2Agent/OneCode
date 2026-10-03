@@ -14,13 +14,16 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
     private bool _turnStarted;
 
     public int TurnCount { get; private set; }
+    public int ToolCallCount { get; private set; }
     public int InputTokens { get; private set; }
     public int OutputTokens { get; private set; }
+    public ChatFinishReason? FinishReason { get; private set; }
     public bool BudgetExceeded { get; private set; }
     public IReadOnlyList<CompletedToolBatch> CompletedToolBatches => _toolBatches.CompletedBatches;
 
     public void Observe(AgentResponseUpdate update)
     {
+        FinishReason = update.FinishReason ?? FinishReason;
         ObserveUsage(update);
         if (update.Contents is { Count: > 0 })
         {
@@ -57,6 +60,7 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
         {
             return;
         }
+        ToolCallCount++;
         _toolNames[call.CallId] = call.Name ?? "(unknown)";
         var arguments = Serialize(call.Arguments);
         if (arguments is not null)

@@ -8,7 +8,7 @@ namespace OneCode.Core.Tools;
 /// <remarks>
 /// 工具方法应返回 <see cref="ToolResult"/> 而非裸 <c>string</c>，以便：
 /// <list type="bullet">
-///   <item><see cref="IsError"/> 字段让 ChatService/StateMachineMiddleware 准确识别错误</item>
+///   <item><see cref="IsError"/> 字段让调用方（引擎 / StateMachineMiddleware）准确识别错误</item>
 ///   <item><see cref="Severity"/> 让 UI 层按严重级别渲染</item>
 ///   <item><see cref="Telemetry"/> 记录文件路径/行数/耗时等结构化指标</item>
 ///   <item><see cref="SuggestedNextAction"/> 引导 LLM 下一步（如"修复编译错误后重试"）</item>

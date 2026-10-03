@@ -8,7 +8,7 @@ namespace OneCode.Infrastructure;
 /// Accessing them silently would be a privacy violation even when the binary has
 /// the OS-level permission to do so.
 /// </summary>
-public static class ProtectedPaths
+internal static class ProtectedPaths
 {
     /// <summary>
     /// Returns the set of absolute directory paths that are considered protected on the

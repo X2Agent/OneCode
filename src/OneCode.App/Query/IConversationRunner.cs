@@ -2,6 +2,13 @@ using OneCode.Core.Build;
 
 namespace OneCode.App.Query;
 
+/// <summary>
+/// 受控工作流 run 的请求：由批准计划驱动（PlanWorkflow 审批卡批准后派发/恢复）。
+/// </summary>
+/// <remarks>
+/// <paramref name="PrescribedBuildPlan"/> 是必填不变量：受控执行恒由上层批准的计划驱动，
+/// BuildRun 层不再有"模型自产计划 + 流内审批"的交互门。
+/// </remarks>
 public sealed record WorkflowRunRequest(
     string RunId,
     SessionId SessionId,
@@ -9,29 +16,19 @@ public sealed record WorkflowRunRequest(
     string SystemPrompt,
     string ModelId,
     WorkingMode WorkingMode,
-    string? WorkingDirectory = null,
-    BuildPlan? PrescribedBuildPlan = null,
+    string? WorkingDirectory,
+    BuildPlan PrescribedBuildPlan,
     string? HarnessInstructions = null);
 
 /// <summary>
 /// 把一段 prompt 当作用户输入提交给 LLM 跑一遍的契约。
 /// </summary>
 /// <remarks>
-/// 本接口是断开循环依赖的两步之一：
-/// <c>ChatService → ToolCatalog → CronTool → CronSchedulerService
-/// → ICronJobExecutor → CronJobExecutor → ChatService</c>。
-/// <list type="number">
-/// <item><b>本接口（解耦消费侧）</b>：<c>CronJobExecutor</c> 依赖 <see cref="IConversationRunner"/>
-/// 而非 <c>ChatService</c> 具体类。cron 只需要"跑一段 prompt"的能力，不需要会话持久化、
-/// hook 触发、token 统计等交互式职责。当前实现为 <c>ChatService</c>，未来可替换为更精简的
-/// headless executor，只需改 DI 绑定。</item>
-/// <item><b>ToolCatalog 惰性构建（消除构造期根因）</b>：环的根因是 <c>ToolCatalog</c> 构造期
-/// 急切调用 <c>BuildStaticTools</c> 解析全部工具 POCO（含 <c>CronTool</c>），递归回
-/// <c>ChatService</c>。<c>ToolCatalog</c> 已改为首次访问 <c>Tools</c> 时按需构建，构造图变 DAG，
-/// <c>ChatService</c> 得以恢复正常构造注入 <c>ToolCatalog</c>，无需 service locator。</item>
-/// </list>
-/// 两步缺一不可：单抽接口不改 ToolCatalog，构造期 DI 仍会无限递归；单 lazy 化不抽接口，
-/// <c>CronJobExecutor</c> 仍耦合 <c>ChatService</c> 具体类且不可单测。
+/// 交互式流式（TUI）与 headless 触发器（<see cref="OneCode.App.Services.Cron.CronJobExecutor"/>、
+/// AutoDream）都只依赖本接口，不依赖具体实现：cron 只需要"跑一段 prompt"的能力，不需要
+/// 会话持久化、hook 触发、token 统计等交互式职责。当前实现为 <see cref="QueryStreamEngine"/>；
+/// 该接口同时是构造图保持 DAG 的前提——<c>ToolCatalog</c> 解析的工具实例（含 <c>CronTool</c>）
+/// 间接依赖本接口的消费者，若实现方以具体类型被工具层反向引用，构造期 DI 将无限递归。
 /// </remarks>
 public interface IConversationRunner
 {

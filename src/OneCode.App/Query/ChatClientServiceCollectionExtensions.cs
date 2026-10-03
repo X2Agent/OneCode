@@ -9,7 +9,7 @@ using CoreConstants = OneCode.Core.Constants;
 namespace OneCode.App.Query;
 
 /// <summary>
-/// ChatClient 领域 DI 注册——与查询实现（<see cref="ChatService"/>）同目录维护；
+/// ChatClient 领域 DI 注册——与查询实现（<see cref="QueryStreamEngine"/>）同目录维护；
 /// SDK 特化代码（Anthropic.SDK / OpenAI SDK / 装饰器链）下沉在
 /// <see cref="ChatClientFactory"/>，本文件仅负责 DI 注册。
 /// 由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
@@ -60,14 +60,12 @@ public static class ChatClientServiceCollectionExtensions
             }
 
             var effectiveApiKey = apiKey ?? OllamaNoAuthPlaceholder;
-            // VCR 装饰器：未注册或未激活时工厂内部跳过，零影响生产路径。
-            var vcrMode = sp.GetService<VcrMode>();
             var isOllama = string.Equals(
                 providerId, CoreConstants.ModelProviders.Ollama, StringComparison.OrdinalIgnoreCase);
 
             var ollamaNumCtx = isOllama ? settings.OllamaContextWindow : (int?)null;
             return chatClientFactory.CreateWithDecorators(
-                providerId, effectiveApiKey, baseUrl, model, loggerFactory, vcrMode, ollamaNumCtx);
+                providerId, effectiveApiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
         });
 
         return services;

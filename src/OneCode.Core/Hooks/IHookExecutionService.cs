@@ -1,9 +1,8 @@
 namespace OneCode.Core.Hooks;
 
 /// <summary>
-/// Hook 执行服务契约。
-/// 从 App 层下沉到 Core 层，使 Infrastructure 层的 AgentPipelineBuilder
-/// 可通过此接口调用 Hook，避免反向依赖 App 层。
+/// Hook 执行服务契约，供 Infrastructure 层的 Agent 管线调用 Hook
+/// （Core 层契约，避免 Infrastructure 反向依赖 App）。
 /// </summary>
 public interface IHookExecutionService
 {

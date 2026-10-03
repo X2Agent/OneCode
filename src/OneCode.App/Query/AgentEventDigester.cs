@@ -120,18 +120,37 @@ internal static class AgentEventDigester
             }
             if (result is null)
                 return (false, null);
-            var json = System.Text.Json.JsonSerializer.Serialize(result, new System.Text.Json.JsonSerializerOptions
-            {
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                WriteIndented = false
-            });
-            return (false, json.Length > 500 ? json[..497] + "..." : json);
+
+            // MAF 会把非 string 的工具返回值经 Web 默认（camelCase）序列化后以 JsonElement
+            // 浮出：{"content":"<工具原始 JSON>","isError":false,...}。解出内层字符串——
+            // TUI 展示与持久化要的是工具原始输出。旧实现直接对信封整体做 500 字符截断，
+            // 半截 JSON 非法，NormalizeForDisplay 解析失败只能原样吐单行转义文本。
+            var json = System.Text.Json.JsonSerializer.Serialize(result, CompactRelaxedOptions);
+            if (Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(json, out var inner))
+                return (false, inner);
+
+            return (false, json.Length > 500 ? TruncateJson(json, 500) : json);
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "ExtractToolResult failed for call {CallId}", frc.CallId);
             return (false, null);
         }
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions CompactRelaxedOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = false,
+    };
+
+    /// <summary>防御性截断：优先回退到 JSON 结构边界再截（与 ToolExecutionBudgetMiddleware 同策略），
+    /// 避免半截 JSON 令下游解析/显示全部失效。</summary>
+    private static string TruncateJson(string json, int maxChars)
+    {
+        var boundary = json.LastIndexOfAny(['\n', '\r', ',', '}', ']'], maxChars - 1, maxChars);
+        var index = boundary > 0 ? boundary + 1 : maxChars;
+        return json[..index] + "...";
     }
 
     /// <summary>

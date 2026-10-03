@@ -2,11 +2,8 @@ using OneCode.Core.Config;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Hosting;
-using OneCode.Core.Memory;
 using OneCode.Core.Models;
-using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
-using System.Text;
 using System.Threading.Channels;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Memory;
@@ -40,9 +37,6 @@ public sealed class AutoDreamService : BackgroundService
     /// <summary>会话扫描节流：10 分钟内不重复扫描（IO 操作，避免频繁磁盘访问）。</summary>
     private static readonly TimeSpan SessionScanInterval = TimeSpan.FromMinutes(10);
 
-    /// <summary>JSON 反序列化选项：camelCase 属性名大小写不敏感，容忍 Agent 输出风格差异。</summary>
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     /// <summary>Agent 单次输出的最大 token 数。</summary>
     private const int MaxOutputTokens = 4096;
 
@@ -52,27 +46,13 @@ public sealed class AutoDreamService : BackgroundService
     /// <summary>AutoDream 允许使用的工具白名单（仅只读工具，用于扫描会话目录）。</summary>
     private static readonly string[] AllowedTools = ["Read", "Glob", "Grep"];
 
-    /// <summary>用户手写条目的来源标记；这些条目是用户显式意图，AutoDream 不得删除或改写。</summary>
-    private static readonly string ManualSource = "manual";
-
-    /// <summary>用户手写条目的 key 前缀；AutoDream 也不得以该前缀创建条目（否则分类语义混乱）。</summary>
-    private const string ManualKeyPrefix = "manual:";
-
-    /// <summary>
-    /// Upper bound on working-memory artefacts included in one consolidation prompt.
-    /// Working notes are unbounded in principle; the prompt is not.
-    /// </summary>
-    private const int MaxWorkingMemoryArtefacts = 20;
-
     // 依赖
 
     private readonly ILogger<AutoDreamService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IChatClient _chatClient;
     private readonly IToolCatalog _toolCatalog;
-    private readonly IMemoryEntryStore _entryStore;
     private readonly IModelManager _modelManager;
-    private readonly IPromptManager _promptManager;
     private readonly IConfigManager _configManager;
     private readonly IWorkingDirectoryAccessor _wdAccessor;
 
@@ -90,7 +70,8 @@ public sealed class AutoDreamService : BackgroundService
     private readonly string _globalConfigDir;
 
     private readonly AutoDreamSessionScanner _sessionScanner;
-    private readonly AutoDreamWorkingMemoryScanner _workingMemoryScanner;
+    private readonly AutoDreamMemoryApplier _memoryApplier;
+    private readonly AutoDreamConsolidationPromptBuilder _promptBuilder;
     private readonly AutoDreamStateStore _stateStore;
 
     public AutoDreamService(
@@ -102,18 +83,19 @@ public sealed class AutoDreamService : BackgroundService
     {
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _entryStore = storage.EntryStore;
         _chatClient = agent.ChatClient;
         _toolCatalog = agent.ToolCatalog;
         _modelManager = agent.ModelManager;
-        _promptManager = agent.PromptManager;
         _configManager = storage.ConfigManager;
         _wdAccessor = storage.WorkingDirectory;
         _globalConfigDir = globalConfigDirOverride ?? PathsHelper.GetUserConfigDir();
         _sessionScanner = new AutoDreamSessionScanner(logger, _globalConfigDir);
-        _workingMemoryScanner = new AutoDreamWorkingMemoryScanner(
-            loggerFactory.CreateLogger<AutoDreamWorkingMemoryScanner>());
         _stateStore = new AutoDreamStateStore(logger, GetProjectStateDir);
+        _memoryApplier = new AutoDreamMemoryApplier(storage.EntryStore, logger, GetCurrentProjectRoot);
+        _promptBuilder = new AutoDreamConsolidationPromptBuilder(
+            agent.PromptManager,
+            new AutoDreamWorkingMemoryScanner(loggerFactory.CreateLogger<AutoDreamWorkingMemoryScanner>()),
+            GetCurrentProjectRoot);
     }
 
     // BackgroundService 主循环
@@ -231,7 +213,7 @@ public sealed class AutoDreamService : BackgroundService
                 "Starting AutoDream consolidation: {Sessions} new sessions, {Hours:F1}h since last",
                 newSessionCount, hoursSinceLast);
 
-            var prompt = await BuildConsolidationPromptAsync(lastConsolidatedAt, newSessionCount, ct)
+            var prompt = await _promptBuilder.BuildConsolidationPromptAsync(lastConsolidatedAt, newSessionCount, ct)
                 .ConfigureAwait(false);
             var (inputTokens, outputTokens, entriesWritten) = await RunConsolidationAgentAsync(prompt, ct)
                 .ConfigureAwait(false);
@@ -311,7 +293,7 @@ public sealed class AutoDreamService : BackgroundService
     /// 使用 MAF HarnessAgent 执行记忆整合。
     /// 模型：fastModel → 主 model（无需单独配置）。
     /// 工具：仅 Read/Glob/Grep（只读，扫描会话目录）。
-    /// 输出：增量变更 JSON 数组，由 <see cref="ApplyConsolidationChangesAsync"/> 解析后合并写入 MEMORY.md。
+    /// 输出：增量变更 JSON 数组，由 <see cref="AutoDreamMemoryApplier.ApplyConsolidationChangesAsync"/> 解析后合并写入 MEMORY.md。
     ///
     /// <para><b>为何不设 ResponseFormat（结构化输出）</b>：本 Agent 带 Read/Glob/Grep 工具循环与
     /// 会话，schema 约束会作用于循环内每条助手消息——模型无法在工具调用之间自由叙述，与现有行为
@@ -358,226 +340,9 @@ public sealed class AutoDreamService : BackgroundService
             .LastOrDefault(m => m.Role == ChatRole.Assistant)
             ?.Text ?? string.Empty;
 
-        var entriesWritten = await ApplyConsolidationChangesAsync(outputText, ct).ConfigureAwait(false);
+        var entriesWritten = await _memoryApplier.ApplyConsolidationChangesAsync(outputText, ct).ConfigureAwait(false);
         return (inputTokens, outputTokens, entriesWritten);
     }
-
-    /// <summary>
-    /// 解析 Agent 输出的增量变更 JSON 数组，合并写入对应的 MEMORY.md 文件。
-    /// 容错：容忍 Agent 在 JSON 前后添加 markdown 围栏或额外说明文本。
-    /// 安全：Agent 输出为不可信内容，必须经过 <see cref="AutoDreamOutputSanitizer.SanitizeKey"/> / <see cref="AutoDreamOutputSanitizer.SanitizeValue"/>
-    /// 清洗，防止 MEMORY.md 结构注入（如 <c>## </c> 开头的行会被 <c>OneCode.Infrastructure.Memory.MemoryEntryStore.ParseEntries</c>
-    /// 误识别为新的 entry header，导致条目边界错乱、内容串入相邻条目）。
-    /// </summary>
-    private async Task<int> ApplyConsolidationChangesAsync(string outputText, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(outputText))
-            return 0;
-
-        var json = AutoDreamOutputSanitizer.ExtractJsonArray(outputText);
-        if (json is null)
-        {
-            _logger.LogWarning("AutoDream: failed to extract JSON array from agent output");
-            return 0;
-        }
-
-        List<ConsolidationChange>? changes;
-        try
-        {
-            changes = JsonSerializer.Deserialize<List<ConsolidationChange>>(json, JsonOptions);
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "AutoDream: failed to parse consolidation changes JSON");
-            return 0;
-        }
-
-        if (changes is null || changes.Count == 0)
-            return 0;
-
-        // 配额限制：防止 Agent 输出过多变更导致 MEMORY.md 膨胀或写入风暴。
-        // 50 条覆盖典型整合场景（事实/约定/教训/纠正），超出部分丢弃并记录。
-        if (changes.Count > AutoDreamOutputSanitizer.MaxChangesPerConsolidation)
-        {
-            _logger.LogWarning(
-                "AutoDream: agent output {Count} changes exceeds limit {Max}, truncating",
-                changes.Count, AutoDreamOutputSanitizer.MaxChangesPerConsolidation);
-            changes = changes.Take(AutoDreamOutputSanitizer.MaxChangesPerConsolidation).ToList();
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var projectRoot = GetCurrentProjectRoot();
-
-        // 载入现有条目（key → 条目），用于删除/覆盖前校验，保护用户手写记忆。
-        // PruneAsync 已对 manual 做淘汰豁免，此处是同一原则在写入路径上的落实。
-        // 用 LoadAllAsync（含过期）：过期的手写条目也须受保护，不能被 Agent 顺手清掉。
-        var userExisting = (await _entryStore.LoadAllAsync(MemoryScope.User, ct).ConfigureAwait(false))
-            .ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
-        var projectExisting = string.IsNullOrWhiteSpace(projectRoot)
-            ? new Dictionary<string, MemoryEntry>(StringComparer.OrdinalIgnoreCase)
-            : (await _entryStore.LoadAllAsync(MemoryScope.Project, ct).ConfigureAwait(false))
-                .ToDictionary(e => e.Key, StringComparer.OrdinalIgnoreCase);
-
-        // Group by scope to batch-write each MEMORY.md
-        List<MemoryEntry> userEntries = [];
-        List<MemoryEntry> projectEntries = [];
-        List<string> userDeleteKeys = [];
-        List<string> projectDeleteKeys = [];
-        var written = 0;
-        var skipped = 0;
-
-        foreach (var change in changes)
-        {
-            // 清洗 Key：strip 换行/前导#防止 entry header 注入，限制长度
-            var key = AutoDreamOutputSanitizer.SanitizeKey(change.Key);
-            if (string.IsNullOrEmpty(key))
-            {
-                skipped++;
-                continue;
-            }
-
-            // 安全闸：禁止使用 manual: 前缀。manual 是用户手写记忆的保留分类，
-            // AutoDream 写入的条目 Source 恒为 "autodream"，混用会让分类与 /memory 展示错乱。
-            if (key.StartsWith(ManualKeyPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning(
-                    "AutoDream: change with key '{Key}' uses the reserved '{Prefix}' prefix, skipping",
-                    key, ManualKeyPrefix);
-                skipped++;
-                continue;
-            }
-
-            // 显式 scope 校验：仅接受 "user"/"project"，其他值跳过。
-            if (!string.Equals(change.Scope, "user", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(change.Scope, "project", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("AutoDream: change with key '{Key}' has invalid scope '{Scope}', skipping",
-                    key, change.Scope);
-                skipped++;
-                continue;
-            }
-
-            var scope = string.Equals(change.Scope, "user", StringComparison.OrdinalIgnoreCase)
-                ? MemoryScope.User
-                : MemoryScope.Project;
-            var existing = scope == MemoryScope.User ? userExisting : projectExisting;
-
-            if (string.Equals(change.Action, "delete", StringComparison.OrdinalIgnoreCase))
-            {
-                // 安全闸：只允许删除 AutoDream 自己写入的条目。用户手写的 manual 条目是显式意图，
-                // 与 PruneAsync 的淘汰豁免一致——否则 Agent 幻觉一条 delete 就能抹掉用户记忆。
-                if (!existing.TryGetValue(key, out var deleteTarget))
-                {
-                    _logger.LogWarning(
-                        "AutoDream: delete target '{Key}' not found in {Scope} scope, skipping",
-                        key, change.Scope);
-                    skipped++;
-                    continue;
-                }
-
-                if (string.Equals(deleteTarget.Source, ManualSource, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning(
-                        "AutoDream: refusing to delete user-authored entry '{Key}' (source={Source})",
-                        key, deleteTarget.Source);
-                    skipped++;
-                    continue;
-                }
-
-                if (scope == MemoryScope.User)
-                    userDeleteKeys.Add(key);
-                else
-                    projectDeleteKeys.Add(key);
-                written++;
-                continue;
-            }
-
-            // 非 delete action 仅接受 upsert（默认）。其他 action 值跳过。
-            if (!string.IsNullOrEmpty(change.Action)
-                && !string.Equals(change.Action, "upsert", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("AutoDream: change with key '{Key}' has unknown action '{Action}', skipping",
-                    key, change.Action);
-                skipped++;
-                continue;
-            }
-
-            // 清洗 Value：strip 行首 ## 防止 entry header 注入，限制长度
-            var value = AutoDreamOutputSanitizer.SanitizeValue(change.Value);
-            if (string.IsNullOrEmpty(value))
-            {
-                skipped++;
-                continue;
-            }
-
-            // 安全闸：不得覆盖用户手写条目。manual 前缀已在上面拒绝，
-            // 但用户也可能直接编辑 MEMORY.md 写入其他 key——按 Source 兜底。
-            if (existing.TryGetValue(key, out var current)
-                && string.Equals(current.Source, ManualSource, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning(
-                    "AutoDream: refusing to overwrite user-authored entry '{Key}' (source={Source})",
-                    key, current.Source);
-                skipped++;
-                continue;
-            }
-
-            var category = MemoryEntry.DeriveCategory(key);
-            TimeSpan? ttl = change.TtlHours is > 0
-                ? TimeSpan.FromHours(change.TtlHours.Value)
-                : null;
-
-            var entry = new MemoryEntry
-            {
-                Key = key,
-                Value = value,
-                Source = "autodream",
-                Category = category,
-                CreatedAt = now,
-                UpdatedAt = now,
-                ExpiresAt = ttl.HasValue ? now.Add(ttl.Value) : null,
-            };
-
-            if (scope == MemoryScope.User)
-                userEntries.Add(entry);
-            else
-                projectEntries.Add(entry);
-            written++;
-        }
-
-        if (skipped > 0)
-            _logger.LogWarning("AutoDream: skipped {Count} invalid changes", skipped);
-
-        if (userEntries.Count > 0)
-        {
-            await _entryStore.UpsertAsync(MemoryScope.User, userEntries, ct).ConfigureAwait(false);
-        }
-        foreach (var key in userDeleteKeys)
-        {
-            await _entryStore.RemoveAsync(MemoryScope.User, key, ct).ConfigureAwait(false);
-        }
-
-        if (!string.IsNullOrWhiteSpace(projectRoot))
-        {
-            if (projectEntries.Count > 0)
-            {
-                await _entryStore.UpsertAsync(MemoryScope.Project, projectEntries, ct).ConfigureAwait(false);
-            }
-            foreach (var key in projectDeleteKeys)
-            {
-                await _entryStore.RemoveAsync(MemoryScope.Project, key, ct).ConfigureAwait(false);
-            }
-
-            // Prune expired entries after consolidation
-            await _entryStore.PruneAsync(MemoryScope.Project, ct).ConfigureAwait(false);
-        }
-
-        // Prune user-scope expired entries
-        await _entryStore.PruneAsync(MemoryScope.User, ct).ConfigureAwait(false);
-
-        return written;
-    }
-
 
     // 门控配置（settings.json 优先，环境变量覆盖，默认开）
 
@@ -620,56 +385,6 @@ public sealed class AutoDreamService : BackgroundService
 
     internal bool IsSessionForProject(string sessionFile, string projectRoot) =>
         _sessionScanner.IsSessionForProject(sessionFile, projectRoot);
-
-
-    // Prompt 构建
-
-    private async Task<string> BuildConsolidationPromptAsync(DateTimeOffset since, int sessionCount, CancellationToken ct)
-    {
-        var projectRoot = GetCurrentProjectRoot() ?? "(unknown)";
-
-        // Working-memory artefacts are the primary candidate source: they hold what the agent wrote
-        // down while working. Session events stay available for verification, but they only record
-        // that a conversation happened.
-        var artefacts = _workingMemoryScanner.Collect(projectRoot, since, MaxWorkingMemoryArtefacts, ct);
-        var variables = new Dictionary<string, string>
-        {
-            ["since"] = since.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-            ["session_count"] = sessionCount.ToString(CultureInfo.InvariantCulture),
-            ["project_root"] = projectRoot,
-            ["working_memory_root"] = FileMemoryStorePaths.ResolveRoot(projectRoot),
-            ["working_memory_section"] = FormatWorkingMemorySection(artefacts),
-        };
-        return await _promptManager.RenderPromptAsync("system/autodream-consolidation", variables, ct)
-            .ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Renders the snapshot as prompt text. The path and timestamp are included so every candidate can
-    /// be attributed back to the revision it came from.
-    /// </summary>
-    private static string FormatWorkingMemorySection(IReadOnlyList<WorkingMemoryArtefact> artefacts)
-    {
-        if (artefacts.Count == 0)
-        {
-            return "No working-memory artefacts were written since the last consolidation. " +
-                   "Fall back to reviewing the recent sessions below.";
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine(CultureInfo.InvariantCulture,
-            $"{artefacts.Count} artefact(s) were written since the last consolidation:");
-
-        foreach (var artefact in artefacts)
-        {
-            sb.AppendLine();
-            sb.AppendLine(CultureInfo.InvariantCulture,
-                $"### {artefact.RelativePath} (modified {artefact.LastModifiedAt:yyyy-MM-dd HH:mm:ss}Z)");
-            sb.AppendLine(artefact.Content.TrimEnd());
-        }
-
-        return sb.ToString().TrimEnd();
-    }
 
     // 路径工具
 

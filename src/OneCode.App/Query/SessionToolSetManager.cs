@@ -7,7 +7,7 @@ namespace OneCode.App.Query;
 /// 使 <see cref="ToolSearchTool"/> 等无状态工具能在运行时感知当前会话。
 /// </summary>
 /// <remarks>
-/// Session-scoped ambient bridge (not a DI defect): set by <c>ChatService</c> at run start
+/// Session-scoped ambient bridge (not a DI defect): set by <see cref="QueryStreamEngine"/> at run start
 /// and read by activation tools that lack an explicit conversationId parameter.
 /// Prefer migrating to MAF FunctionInvocationContext when the pipeline can carry it.
 /// </remarks>
@@ -16,7 +16,7 @@ public static class ToolActivationContext
     private static readonly AsyncLocal<string?> _conversationId = new();
     private static readonly AsyncLocal<ToolCapabilitySet?> _capabilities = new();
 
-    /// <summary>当前会话 ID（由 <see cref="ChatService"/> 在每次 run 开始时设置）。</summary>
+    /// <summary>当前会话 ID（由 <see cref="QueryStreamEngine"/> 在每次 run 开始时设置）。</summary>
     public static string? CurrentConversationId
     {
         get => _conversationId.Value;
@@ -33,7 +33,7 @@ public static class ToolActivationContext
 
 /// <summary>
 /// 会话级工具集管理器——单例，按 conversationId 持有 <see cref="SessionToolSet"/>。
-/// 由 <see cref="ChatService"/> 与 <see cref="ToolSearchTool"/> 共用；会话关闭时须调用 <see cref="Remove"/>。
+/// 由 <see cref="QueryStreamEngine"/> 与 <see cref="ToolSearchTool"/> 共用；会话关闭时须调用 <see cref="Remove"/>。
 /// </summary>
 public sealed class SessionToolSetManager : ISessionToolSetManager
 {

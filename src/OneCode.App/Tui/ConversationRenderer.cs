@@ -20,8 +20,13 @@ internal static class ConversationRenderer
     /// （目标 / 结果摘要），保证整行不超出视口宽度（尾部预留 1 列滚动条），
     /// 避免长参数被终端裁切；目标段优先占用预算，摘要使用剩余空间。
     /// </summary>
+    /// <remarks>
+    /// <paramref name="groupCount"/> &gt; 1 时该行是同类工具组行：名称后追加 ×N 段，
+    /// 目标/摘要显示最新一条成员（组展开见 <see cref="ToolLineTag.Group"/>）。
+    /// </remarks>
     public static FormattedLine MakeCompletedToolLine(
-        string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null, int maxWidth = 0)
+        string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null, int maxWidth = 0,
+        int groupCount = 0, IReadOnlyList<ToolGroupEntry>? group = null)
     {
         var statusColor = isError ? TuiPalette.Error : TuiPalette.Success;
 
@@ -35,6 +40,8 @@ internal static class ConversationRenderer
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
         ];
+        if (groupCount > 1)
+            segments.Add(new($" ×{groupCount}", TuiPalette.Warning));
         // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
         if (!string.IsNullOrWhiteSpace(agentName))
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
@@ -91,7 +98,7 @@ internal static class ConversationRenderer
         else if (isError)
             segments.Add(new(" \u00b7 error", statusColor));
 
-        var tag = new ToolLineTag(name, toolInput, result, IsExpanded: false);
+        var tag = new ToolLineTag(name, toolInput, result, IsExpanded: false, Group: group);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }
 

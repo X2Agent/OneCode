@@ -29,12 +29,6 @@ public static class SessionEventProjection
                 case ToolResultEvent toolResult:
                     messages.Add(toolResult.Message);
                     break;
-                case AttachmentMessageEvent attachment:
-                    messages.Add(attachment.Message);
-                    break;
-                case TombstoneMessageEvent tombstone:
-                    messages.Add(tombstone.Message);
-                    break;
             }
         }
 
@@ -42,9 +36,6 @@ public static class SessionEventProjection
     }
 
     /// <summary>从事件序列取得最新的会话元数据快照。</summary>
-    public static SessionStartedEvent FindSessionSnapshot(IEnumerable<SessionEvent> events) =>
-        FindLatestSessionSnapshot(events)
-            ?? throw new InvalidOperationException("Session event log is missing its creation snapshot.");
     public static SessionStartedEvent? FindLatestSessionSnapshot(IEnumerable<SessionEvent> events)
     {
         var latestStarted = events.OfType<SessionStartedEvent>().MaxBy(item => item.Sequence);

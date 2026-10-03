@@ -1,5 +1,3 @@
-using OneCode.Core.Config;
-
 namespace OneCode.App.Services.Loop;
 
 /// <summary>
@@ -16,13 +14,6 @@ public sealed record LoopRunRequest(
     string? CheckCommand,
     int MaxIterations);
 
-/// <summary>单轮迭代的验证结果，用于进度投影与下一轮反馈。</summary>
-public sealed record LoopIterationReport(
-    int Iteration,
-    int MaxIterations,
-    bool Passed,
-    string Feedback);
-
 /// <summary>整个循环的产物：是否通过、真实调用轮数、汇总与累计 token。</summary>
 public sealed record LoopRunOutcome(
     bool Completed,
@@ -30,13 +21,3 @@ public sealed record LoopRunOutcome(
     string Summary,
     long InputTokens,
     long OutputTokens);
-
-/// <summary>循环上限的单一来源（配置键 <c>loop.maxIterations</c>）。</summary>
-internal static class LoopDefaults
-{
-    /// <summary>默认硬上限；相比 MAF <c>LoopAgent</c> 的默认 10 刻意收紧（每轮是一次完整 agent run）。</summary>
-    public const int MaxIterationsFallback = 3;
-
-    public static int ResolveMaxIterations(ModeBudgetSettings? settings)
-        => settings is null ? MaxIterationsFallback : settings.MaxLoopIterations;
-}

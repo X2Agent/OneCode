@@ -24,7 +24,6 @@ public sealed partial class TeamOrchestrationService
     : ITeamOrchestrationService, IDisposable
 {
     private readonly TeamWorkflowRunner _workflowRunner;
-    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<TeamOrchestrationService> _logger;
     private readonly TeamRunApplicationService _teamRunService;
     private readonly TeamRequirementService _requirementService;
@@ -39,37 +38,24 @@ public sealed partial class TeamOrchestrationService
     private readonly TeamRegistry _registry;
 
     internal TeamOrchestrationService(
-        TeamWorkflowRunner workflowRunner,
-        ILoggerFactory loggerFactory,
-        ILogger<TeamOrchestrationService> logger,
-        TeamRunApplicationService teamRunService,
-        TeamRequirementService requirementService,
-        IClarificationInteractionService clarificationInteraction,
-        IWorkingDirectoryAccessor workingDirectoryAccessor,
-        TeamTaskWorkflowHost taskWorkflowHost,
-
-        TeamClarificationWorkflowHost clarificationWorkflowHost,
-        RequestPortGate approvalGate,
-        ITeamRunStore teamRunStore,
-        TeamRegistry registry,
-        OneCode.Core.Workflows.IOperationLedger? operationLedger = null)
+        TeamWorkflowHostDependencies workflowHosts,
+        TeamOrchestrationDependencies dependencies)
     {
-        _workflowRunner = workflowRunner;
-        _loggerFactory = loggerFactory;
-        _logger = logger;
-        _teamRunService = teamRunService;
-        _requirementService = requirementService;
-        _clarificationInteraction = clarificationInteraction;
-        _workingDirectoryAccessor = workingDirectoryAccessor;
-        _taskWorkflowHost = taskWorkflowHost;
+        _workflowRunner = workflowHosts.WorkflowRunner;
+        _logger = dependencies.Logger;
+        _teamRunService = dependencies.TeamRunService;
+        _requirementService = dependencies.RequirementService;
+        _clarificationInteraction = dependencies.ClarificationInteraction;
+        _workingDirectoryAccessor = dependencies.WorkingDirectoryAccessor;
+        _taskWorkflowHost = workflowHosts.TaskWorkflowHost;
 
-        _clarificationWorkflowHost = clarificationWorkflowHost;
-        _approvalGate = approvalGate;
-        _teamRunStore = teamRunStore;
-        _operationLedger = operationLedger;
+        _clarificationWorkflowHost = workflowHosts.ClarificationWorkflowHost;
+        _approvalGate = workflowHosts.ApprovalGate;
+        _teamRunStore = dependencies.TeamRunStore;
+        _operationLedger = workflowHosts.OperationLedger;
         // 职责收敛：注册表（注册/发现/活跃团队）与结果聚合分别由 TeamRegistry / TeamResultAggregator 承担，
         // 本服务退化为用例门面（运行/恢复/审批/澄清编排）。
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _registry = dependencies.Registry;
     }
 
     public IReadOnlyList<string> RegisteredTeams => _registry.RegisteredTeams;
@@ -483,3 +469,21 @@ public sealed partial class TeamOrchestrationService
     }
 
 }
+
+/// <summary>TeamOrchestrationService 的 MAF 工作流执行栈：运行器、任务/澄清工作流宿主、审批门与操作账本。</summary>
+internal sealed record TeamWorkflowHostDependencies(
+    TeamWorkflowRunner WorkflowRunner,
+    TeamTaskWorkflowHost TaskWorkflowHost,
+    TeamClarificationWorkflowHost ClarificationWorkflowHost,
+    RequestPortGate ApprovalGate,
+    OneCode.Core.Workflows.IOperationLedger? OperationLedger = null);
+
+/// <summary>TeamOrchestrationService 的应用服务与运行时上下文（日志、交互、工作目录、注册表）。</summary>
+internal sealed record TeamOrchestrationDependencies(
+    TeamRunApplicationService TeamRunService,
+    TeamRequirementService RequirementService,
+    ITeamRunStore TeamRunStore,
+    IClarificationInteractionService ClarificationInteraction,
+    IWorkingDirectoryAccessor WorkingDirectoryAccessor,
+    ILogger<TeamOrchestrationService> Logger,
+    TeamRegistry Registry);

@@ -39,8 +39,7 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
     }
 
     /// <summary>
-    /// 组装完整的 IChatClient 装饰器链：
-    /// VcrChatClient → ProviderAware → RetryOnOverload → baseClient
+    /// 组装完整的 IChatClient 装饰器链：ProviderAware → RetryOnOverload → baseClient
     /// </summary>
     public IChatClient CreateWithDecorators(
         string providerId,
@@ -48,7 +47,6 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
         string? baseUrl = null,
         string? model = null,
         ILoggerFactory? loggerFactory = null,
-        VcrMode? vcrMode = null,
         int? ollamaNumCtx = null)
     {
         var baseClient = CreateBaseClient(providerId, apiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
@@ -60,11 +58,7 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
 
         var retryLogger = loggerFactory?.CreateLogger<RetryOnOverloadChatClient>();
         var retryClient = new RetryOnOverloadChatClient(passbackClient, retryLogger);
-        var providerAware = new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
-
-        return vcrMode is { } m && m.IsActive()
-            ? new VcrChatClientDecorator(providerAware, m)
-            : providerAware;
+        return new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
     }
 
     private static IChatClient CreateAnthropicClient(string apiKey, string? baseUrl, string? model)

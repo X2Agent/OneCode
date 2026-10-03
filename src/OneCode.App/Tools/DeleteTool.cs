@@ -17,7 +17,7 @@ namespace OneCode.App.Tools;
 ///  - Path safety: must resolve within the working directory or AdditionalWorkingDirectories
 ///  - Layer-0: FileSystemInvariant treats FileDelete-category tools as write operations —
 ///    sensitive paths (.git/, ~/.ssh/, .env, credentials) and symlink chains are hard-blocked
-///  - Not part of FileEditContract or EditTransaction snapshots: deletion is irreversible
+///  - Not covered by EditGuardMiddleware edit pre-checks or EditTransaction snapshots: deletion is irreversible
 ///    and always requires explicit approval (ToolRisk.Destructive)
 /// </summary>
 public sealed class DeleteTool

@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Search;
-using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
@@ -24,7 +23,7 @@ namespace OneCode.App.Tools;
 /// </summary>
 public sealed class FindReferencesTool(
     ITextSearchService textSearch,
-    IFileSystem fileSystem,
+    LocalAgentFileStore fileSystem,
     IWorkingDirectoryAccessor wd,
     ILspServerManager serverManager,
     LanguagePackRegistry packRegistry,
@@ -32,7 +31,7 @@ public sealed class FindReferencesTool(
     ILogger<FindReferencesTool>? logger = null)
 {
     private readonly ITextSearchService _textSearch = textSearch;
-    private readonly IFileSystem _fileSystem = fileSystem;
+    private readonly LocalAgentFileStore _fileSystem = fileSystem;
     private readonly IWorkingDirectoryAccessor _wd = wd;
     private readonly ILspServerManager _serverManager = serverManager;
     private readonly LanguagePackRegistry _packRegistry = packRegistry;

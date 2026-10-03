@@ -11,9 +11,7 @@ namespace OneCode.App.Commands;
 /// /prompts — list and run saved <c>.prompt</c> templates from project/user prompt dirs
 /// (same extension and layout as <see cref="PromptManager"/> / FilePromptStore).
 /// </summary>
-public sealed class PromptsCommand(
-    IFileSystem fileSystem,
-    IPromptManager promptManager) : Command
+public sealed class PromptsCommand(IPromptManager promptManager) : Command
 {
     private const string PromptExtension = ".prompt";
 
@@ -44,7 +42,7 @@ public sealed class PromptsCommand(
             if (!Directory.Exists(dir))
                 continue;
 
-            foreach (var file in fileSystem.FindFiles(dir, $"*{PromptExtension}"))
+            foreach (var file in Directory.EnumerateFiles(dir, $"*{PromptExtension}", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(dir, file)
                     .Replace('\\', '/')
@@ -89,7 +87,9 @@ public sealed class PromptsCommand(
             if (!PathBoundary.IsWithinDirectory(path, dir))
                 return CommandResult.Error($"Invalid prompt name '{name}'.");
 
-            content = await fileSystem.ReadTextFileAsync(path, ct).ConfigureAwait(false);
+            content = File.Exists(path)
+                ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)
+                : null;
             if (content is not null)
             {
                 return CommandResult.Prompt(

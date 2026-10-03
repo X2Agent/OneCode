@@ -1,5 +1,4 @@
 using OneCode.Infrastructure.Middleware;
-using OneCode.Infrastructure.Middleware.Contracts;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Ai;
 using OneCode.Core.Tokens;
@@ -100,10 +99,8 @@ public sealed record AgentPipelineOptions
     public bool EnableStateMachine { get; init; } = true;
     public bool EnableSafetyInvariants { get; init; } = true;
 
-    // Harness Engineering: behavior contracts + sequence detection
-    public IReadOnlyList<FileEditContract>? BehaviorContracts { get; init; }
-    public bool EnableBehaviorContracts { get; init; } = true;
-    public bool EnableTaskRecovery { get; init; } = true;
+    // Harness Engineering: edit pre-checks
+    public bool EnableEditPreChecks { get; init; } = true;
 
     // Harness Engineering: post-tool verification check (Layer 1)
     // Triggers build/type-check after N source file edits, feeds errors back to LLM.
@@ -275,7 +272,7 @@ public static class AgentPipelineBuilder
             options.LoggerFactory,
             options.ServiceProvider);
 
-        return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider, harnessToolApproval is not null);
+        return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider);
     }
 
     /// <summary>
@@ -297,12 +294,17 @@ public static class AgentPipelineBuilder
         return [.. existing, new ToolApprovalMarkingContextProvider(metadata)];
     }
 
-    public static AgentPipelineHandle Build(
+    /// <summary>
+    /// Mounts the product middleware stack on a constructed <see cref="HarnessAgent"/> and builds the
+    /// runnable agent. Internal: the only entry point is <see cref="BuildHarnessAgent"/>, which always
+    /// hands tool approval to Harness (via <see cref="HarnessAgentOptions.ToolApprovalAgentOptions"/>),
+    /// so no fallback approval boundary is installed here.
+    /// </summary>
+    private static AgentPipelineHandle Build(
         AIAgent agent,
         AgentPipelineOptions options,
         ILoggerFactory loggerFactory,
-        IServiceProvider serviceProvider,
-        bool harnessOwnsToolApproval = false)
+        IServiceProvider serviceProvider)
     {
         var metrics = new AgentPipelineMetrics();
 
@@ -387,8 +389,7 @@ public static class AgentPipelineBuilder
         {
             builder = builder.Use(
                 StateMachineMiddleware.Create(
-                    loggerFactory.CreateLogger("StateMachineMiddleware"),
-                    enableStrikeGuidance: options.EnableTaskRecovery));
+                    loggerFactory.CreateLogger("StateMachineMiddleware")));
         }
 
         if (options.EnableEditTransaction && options.EditTransaction is not null)
@@ -401,14 +402,13 @@ public static class AgentPipelineBuilder
                     loggerFactory.CreateLogger<EditTransactionMiddleware>()).CreateDelegate());
         }
 
-        // W2-B: one EditGuard middleware (contract pre + optional verification post).
-        var editContracts = options.EnableBehaviorContracts ? options.BehaviorContracts : null;
+        // W2-B: one EditGuard middleware (edit-target pre-checks + optional verification post).
         var editVerification = options.EnableVerification ? options.VerificationProvider : null;
-        if (editContracts is { Count: > 0 } || editVerification is not null)
+        if (options.EnableEditPreChecks || editVerification is not null)
         {
             builder = builder.Use(
                 EditGuardMiddleware.Create(
-                    editContracts,
+                    options.EnableEditPreChecks,
                     editVerification,
                     options.WorkingDirectory,
                     options.VerificationOptions ?? Middleware.VerificationOptions.Default,
@@ -427,23 +427,6 @@ public static class AgentPipelineBuilder
                 modelId: options.ModelId,
                 providerId: options.ProviderId,
                 logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate());
-
-        if (options.EnableToolApproval && !harnessOwnsToolApproval)
-        {
-            var rules = options.AutoApprovalRules
-                ?? AutoApprovalRulesFactory.Create(
-                    options.PermissionMode,
-                    options.WorkingDirectory,
-                    options.RulesBySource,
-                    options.AdditionalWorkingDirectories,
-                    options.PermissionChecker);
-            // Prefer assignment so approval wraps the pipeline (MAF builder chaining).
-            builder = builder.UseToolApproval(
-                new ToolApprovalAgentOptions
-                {
-                    AutoApprovalRules = rules,
-                });
-        }
 
         return new AgentPipelineHandle(builder.Build(serviceProvider), metrics);
     }

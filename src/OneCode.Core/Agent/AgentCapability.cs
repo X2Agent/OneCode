@@ -14,7 +14,7 @@ namespace OneCode.Core.Agent;
 /// <para>
 /// Capabilities are resolved <b>statically at build time</b> from a per-profile set. There is no
 /// runtime discovery, no reflection, and no DI scanning — this mirrors how MAF itself composes
-/// pipelines (explicit, ordered registration; see ADR 0007 §1).
+/// pipelines (explicit, ordered registration).
 /// </para>
 /// <para>
 /// Naming follows the capability, not the implementing type, so a provider can be swapped without
@@ -57,20 +57,14 @@ public enum AgentCapability
     /// <summary>Failure-tracking state machine that gates tool use after repeated failures.</summary>
     StateMachine,
 
-    /// <summary>Three-strike recovery guidance emitted by the state machine.</summary>
-    TaskRecovery,
-
-    /// <summary>Post-edit behavior contracts (e.g. mandatory file-edit validation).</summary>
-    BehaviorContracts,
+    /// <summary>Edit-target pre-check: Edit must target an existing file (EditGuardMiddleware).</summary>
+    EditPreChecks,
 
     /// <summary>Post-edit verification (build / type-check) feeding errors back to the model.</summary>
     Verification,
 
     /// <summary>MAF tool-approval flow (<c>ToolApprovalAgent</c> + auto-approval rules).</summary>
     ToolApproval,
-
-    /// <summary>Tool-result size budget (character truncation of oversized results).</summary>
-    ToolResultBudget,
 
     /// <summary>Read-only tool whitelist restricting mutating tools (Explore / Plan sub-agents).</summary>
     ReadOnlyTools,

@@ -93,15 +93,6 @@ public sealed class TuiContextFactory(
                     .Select(um => um.Content)
                     .ToList();
             },
-            GetSessionName: () =>
-            {
-                var conversation = session.SessionManager.ForegroundConversation;
-                if (conversation is null) return null;
-                if (!string.IsNullOrWhiteSpace(conversation.Name))
-                    return conversation.Name;
-                var id = conversation.Id.Value;
-                return id.Length <= 8 ? id : id[..8];
-            },
             GetActiveTeam: () => teamOrchestrationService.ResolveActiveTeam(),
             GetRegisteredTeams: () => teamOrchestrationService.RegisteredTeams,
             CycleTeam: () =>

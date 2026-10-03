@@ -178,7 +178,7 @@ public async Task AutoDream_RefusesToDeleteManualEntry()
 }
 ```
 
-**判定方法**：写出用例后问自己——「破坏我真正想验证的那道闸，这个测试会失败吗？」不确定就去做一次反证（见 §3.4）。
+**判定方法**：写出用例后问自己——「破坏我真正想验证的那道闸，这个测试会失败吗？」不确定就去做一次反证（见 §3.3）。
 
 ### 2.9 静态数据镜像 / 路由映射表镜像
 
@@ -266,24 +266,19 @@ singleToolBreakdown.ToolsAndSkills.Should().BeInRange(20, 60);
 
 // 精确增量：系统提示词按字符加权估算的确定性增量
 withPrompt.EstimatedInputTokens.Should().Be(withoutPrompt.EstimatedInputTokens + 7);
+
+// 同一对象的多个字段逐个精确断言：只看 TotalTokens 会掩盖各分项之间的错算
+usage.InputTokens.Should().Be(1_200);
+usage.OutputTokens.Should().Be(350);
+usage.CacheReadTokens.Should().Be(800);
+usage.TotalTokens.Should().Be(1_550);
 ```
 
 > **名实相符**：测试方法名承诺什么，就必须断言什么。
 > `GetMaxContextTokens_WithRegistry_ReturnsCatalogValue` 只写 `BeGreaterThan(0)`、
 > 或用例实际走的是回退路径，都属名实不符，必须改名或改断言。
 
-### 3.3 成本计算：验证每一步的明细
-
-✅ 正确：
-```csharp
-update.InputCost.Should().Be(3.00m);
-update.OutputCost.Should().Be(15.00m);
-update.CacheReadCost.Should().Be(1.50m);
-update.TotalCost.Should().Be(19.50m);
-update.CumulativeCost.Should().Be(update.TotalCost);
-```
-
-### 3.4 反证法：故意改错，确认测试会失败
+### 3.3 反证法：故意改错，确认测试会失败
 
 守卫类逻辑（安全闸、排序、门控、过滤、状态机）写完测试后，**主动破坏被测逻辑一次**，
 确认测试确实失败，再恢复。这是唯一能证明测试不是假绿的手段。
@@ -303,7 +298,7 @@ update.CumulativeCost.Should().Be(update.TotalCost);
 dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~MemoryEntryStoreTests"
 ```
 
-### 3.5 契约测试：让写入路径与读取路径互相验证
+### 3.4 契约测试：让写入路径与读取路径互相验证
 
 跨越「存储 ↔ 消费」边界的逻辑（写文件 / 读文件、序列化 / 反序列化、产生事件 / 消费事件），
 测试必须走**真实的一方**，不得手搓假数据。
@@ -314,7 +309,7 @@ dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~
 > 自动扫描目录、恢复流程等特性尤其容易踩这个坑：目录名写错时，
 > 自建假数据的测试会**掩盖 BUG**，走真实存储的测试才能立刻暴露。
 
-### 3.6 对比性测试：验证合理的大小关系
+### 3.5 对比性测试：验证合理的大小关系
 
 ✅ 正确：
 ```csharp
@@ -323,7 +318,7 @@ var medium = EffortThinking.GetThinkingBudget(EffortLevel.Medium, "claude-sonnet
 low.Should().BeLessThan(medium);
 ```
 
-### 3.7 权限/分类：数据驱动验证具体判定结果
+### 3.6 权限/分类：数据驱动验证具体判定结果
 
 ✅ 正确：
 ```csharp
@@ -336,13 +331,13 @@ public void IsReadOnly_CorrectlyClassifies(string command, bool expectedReadOnly
 }
 ```
 
-### 3.8 同一语义存在多份映射时，断言实际生效的那一份
+### 3.7 同一语义存在多份映射时，断言实际生效的那一份
 
 当实现里出现「同一映射写了两遍」（例如 LSP action 既在能力门控处查表、又在分派处硬编码方法名），
 测试必须断言**实际生效的那一份**——即真正发出去的方法名/参数，而不是门控侧的查表结果。
 
 只断言门控侧的表，实际分派被改错不会被任何测试发现；反之亦然。
-写完后按 §3.4 做一次反证：把实际分派改错，确认测试变红。
+写完后按 §3.3 做一次反证：把实际分派改错，确认测试变红。
 
 ---
 

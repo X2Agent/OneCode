@@ -426,3 +426,6 @@ FodyWeavers.xsd
 # .dev-workspace/.gitkeep 已被跟踪所以不受影响，但无法再新增需要提交的文件到被排除目录。
 /.*/
 !/.github/
+
+# 运行时会话产物（agent-file-memory：本地记忆/会话目录），不入库
+/agent-file-memory/

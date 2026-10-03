@@ -188,6 +188,40 @@ public sealed class KeyRoutingTests
     }
 
     [Fact]
+    public void DispatchInputKey_ScrollKeysPassThroughWhileSelectorSuspended()
+    {
+        // 审批计划卡（挂起态）恰恰需要翻阅长对话/长计划：PageDown / Ctrl+PgDn
+        // 等转录滚动键必须放行到滚动分发，不得被挂起分支吞掉。
+        var shell = CreateShell();
+        var selector = new InlineSelector("权限", [
+            new InlineSelectorOption("allow", "允许"),
+            new InlineSelectorOption("deny", "拒绝"),
+        ]);
+        shell.ShowInlineSelector(selector);
+
+        var pageDown = 0;
+        var scrollDown = 0;
+        shell.ChatInput.PageDownRequested += () => pageDown++;
+        shell.ChatInput.ScrollDownRequested += () => scrollDown++;
+
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown);
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown.WithCtrl);
+
+        pageDown.Should().Be(1, "挂起态 PageDown 放行");
+        scrollDown.Should().Be(1, "挂起态 Ctrl+PageDown 放行（3 行小步滚动）");
+    }
+
+    [Fact]
+    public void ShellKeyDown_ScrollActions_RouteToTranscriptWithoutInputFocus()
+    {
+        // 焦点异常离开输入框时的兜底：ReplShell.OnKeyDown 也要分发 chat 滚动。
+        var shell = CreateShell();
+
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.PageDown).Should().BeTrue();
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.PageUp).Should().BeTrue();
+    }
+
+    [Fact]
     public void ShortTextQuestion_ShiftEnter_GoesBackAndKeepsTypedAnswer()
     {
         var shell = CreateShell();
@@ -381,16 +415,9 @@ public sealed class KeyRoutingTests
         };
 
         return new ReplShell(
-            app,
-            version: "test",
-            model: "test-model",
-            sshHost: null,
-            slashCommands: [],
-            modeController: new WorkingModeController(),
-            keyResolver: resolver,
-            keyContextManager: keyContextManager,
-            clipboard: null,
-            historyProvider: null,
-            toolNameProvider: () => []);
+            new ReplShellEnvironment(app, "test-model"),
+            new WorkingModeController(),
+            new ReplShellKeyServices(resolver, keyContextManager),
+            new ReplShellInputSources([], () => []));
     }
 }

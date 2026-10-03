@@ -230,6 +230,29 @@ because it doesn't demonstrate codebase investigation.
     // PlanContentQualityGate：通过场景
 
     [Fact]
+    public void QualityGate_ResearchPlanWithNumberedSteps_PassesInvestigationCheck()
+    {
+        // 调研/分析型计划：无文件路径、无技术栈、无 code block——
+        // 编号的后续行动步骤即可作为证据，不再误杀调研型任务。
+        var plan = """
+# 新闻调研后续行动计划
+
+## 结论
+过去半个月 crypto 板块呈机构化、信任争议、舆论战三条主线，
+相关数据口径需注明出处，避免将项目方自述当作第三方验证。
+
+## 后续行动
+1. 追踪 TRX 质押 ETF 的审批节奏与资金流数据
+2. 核对 HTX 储备证明的第三方审计口径与缺口解释
+3. 汇总诉讼管辖权进展与时间线，标注信息来源等级
+""";
+
+        var failures = InvokeQualityGate(plan);
+
+        failures.Should().BeEmpty();
+    }
+
+    [Fact]
     public void QualityGate_CompletePlan_PassesAllChecks()
     {
         var plan = """

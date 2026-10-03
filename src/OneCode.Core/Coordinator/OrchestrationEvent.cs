@@ -10,8 +10,8 @@ namespace OneCode.Core.Coordinator;
 /// 这是一个 Core 层的抽象类型，避免 Core 依赖 App 层的 TuiEvent。
 /// App 层负责将 OrchestrationEvent 转换为具体的 TuiEvent。
 ///
-/// PR-17 评估：展平为独立 sealed record 列表需改动 20+ 调用点（TuiEventMapper、
-/// OrchestrationStreamService、TeamWorkflowRunner 等），风险/收益比不足——暂保留嵌套 record 层次。
+/// 展平为独立 sealed record 列表需改动 20+ 调用点（TuiEventMapper、
+/// OrchestrationStreamService、TeamWorkflowRunner 等），风险/收益比不足，保留嵌套 record 层次。
 ///
 /// 事件分两类：
 /// - 通用事件（ToolStart/ToolDone/TextDelta/Error/ApprovalRequest）：任何编排模式都可能产生，可被 Goal 等模式复用。
@@ -55,7 +55,7 @@ public abstract record OrchestrationEvent
         IReadOnlyList<string> AddedLines,
         IReadOnlyList<string> RemovedLines) : OrchestrationEvent;
 
-    /// <summary>错误。通用事件。Problem 携带结构化错误详情（ERR-1.5）。</summary>
+    /// <summary>错误。通用事件。Problem 携带结构化错误详情。</summary>
     public sealed record Error(string Message, AgentProblemDetails? Problem = null) : OrchestrationEvent;
 
     /// <summary>

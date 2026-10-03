@@ -125,13 +125,6 @@ public sealed class BuildResumePolicyTests
     }
 
     [Fact]
-    public void Evaluate_ClarifyingWithoutPlan_ContinuesClarification()
-    {
-        BuildResumePolicy.Evaluate(Run(BuildRunState.Clarifying), null, Fingerprint)
-            .Action.Should().Be(BuildResumeAction.ContinueClarification);
-    }
-
-    [Fact]
     public void Evaluate_ClarifyingWithPersistedPlan_ResumesPrescribedPlan()
     {
         // 旧检查点可能在计划契约强制前进入 Clarifying；带计划的 Clarifying 直接进执行准备，

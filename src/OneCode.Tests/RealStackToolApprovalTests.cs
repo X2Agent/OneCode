@@ -268,8 +268,7 @@ public sealed class RealStackToolApprovalTests
                 EnableToolResultBudget = false,
                 EnableStateMachine = false,
                 EnableSafetyInvariants = false,
-                EnableBehaviorContracts = false,
-                EnableTaskRecovery = false,
+                EnableEditPreChecks = false,
             },
         });
 

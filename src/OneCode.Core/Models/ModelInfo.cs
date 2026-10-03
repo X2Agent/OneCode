@@ -2,7 +2,6 @@ namespace OneCode.Core.Models;
 
 /// <summary>
 /// 模型信息——从配置加载的模型描述。
-/// 替代硬编码的 ModelConfig 记录。
 /// </summary>
 public sealed record ModelInfo(
     string Id,              // 模型标识，即用户配置的 model 值（如 "gpt-5.4"），不含 provider 前缀

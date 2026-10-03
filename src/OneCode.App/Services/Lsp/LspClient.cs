@@ -17,12 +17,9 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
     private bool _startFailed;
     private Exception? _startError;
     private readonly List<PendingNotificationHandler> _pendingNotificationHandlers = new();
-    private readonly List<PendingRequestHandler> _pendingRequestHandlers = new();
-    private readonly Dictionary<string, Func<JsonElement, Task<JsonElement>>> _requestHandlers = new();
     private readonly Dictionary<string, Action<JsonElement>> _notificationHandlers = new();
     private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private Task? _readLoopTask;
-    private readonly ConcurrentDictionary<string, Task> _outstandingServerRequests = new();
 
     /// <summary>
     /// Server capabilities received after initialization.
@@ -133,10 +130,6 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
             foreach (var handler in _pendingNotificationHandlers)
                 RegisterNotificationHandler(handler.Method, handler.Handler);
             _pendingNotificationHandlers.Clear();
-
-            foreach (var handler in _pendingRequestHandlers)
-                RegisterRequestHandler(handler.Method, handler.Handler);
-            _pendingRequestHandlers.Clear();
 
             _logger.LogDebug("LSP server {ServerName} initialized", _serverName);
             return result;
@@ -274,33 +267,10 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
         RegisterNotificationHandler(method, handler);
     }
 
-    /// <summary>
-    /// Register a handler for incoming requests.
-    /// </summary>
-    public void OnRequest(string method, Func<JsonElement, Task<JsonElement>> handler)
-    {
-        if (_process is null)
-        {
-            // Pre-StartAsync: queue for later registration (symmetric with OnNotification).
-            // The previous implementation incorrectly added a no-op notification handler
-            // and silently discarded the request handler — losing it permanently.
-            _pendingRequestHandlers.Add(new PendingRequestHandler(method, handler));
-            return;
-        }
-
-        RegisterRequestHandler(method, handler);
-    }
-
     private void RegisterNotificationHandler(string method, Action<JsonElement> handler)
     {
         lock (_notificationHandlers)
             _notificationHandlers[method] = handler;
-    }
-
-    private void RegisterRequestHandler(string method, Func<JsonElement, Task<JsonElement>> handler)
-    {
-        lock (_requestHandlers)
-            _requestHandlers[method] = handler;
     }
 
     // Message reading loop
@@ -345,67 +315,21 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
 
                 if (hasId)
                 {
+                    // No server→client request handlers are registered — reply MethodNotFound
+                    // (JSON-RPC -32601) so well-behaved servers can degrade gracefully.
                     // Preserve the raw JSON form of id so we can echo it back unchanged
                     // (string vs number). GetRawText() is correct here — JsonDocument.Parse
                     // reconstitutes the original JSON token.
                     var requestIdRaw = root.TryGetProperty("id", out var ridEl) ? ridEl.GetRawText() : "null";
-                    // Clone params so the handler can use them after doc is disposed.
-                    var @params = root.TryGetProperty("params", out var pEl) ? pEl.Clone() : LspProtocol.EmptyObject;
-
-                    Func<JsonElement, Task<JsonElement>>? handler = null;
-                    lock (_requestHandlers)
+                    _logger.LogDebug("No handler for server request {Method}", method);
+                    using var idDoc = JsonDocument.Parse(requestIdRaw);
+                    var errorResponse = new
                     {
-                        if (_requestHandlers.TryGetValue(method, out var h))
-                            handler = h;
-                    }
-
-                    if (handler is not null)
-                    {
-                        var taskKey = Guid.NewGuid().ToString("N");
-                        _outstandingServerRequests[taskKey] = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var result = await handler(@params).ConfigureAwait(false);
-                                using var idDoc = JsonDocument.Parse(requestIdRaw);
-                                var response = new
-                                {
-                                    jsonrpc = "2.0",
-                                    id = idDoc.RootElement.Clone(),
-                                    result
-                                };
-                                await SendJsonRpcMessageAsync(response).ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to handle server request {Method}", method);
-                                using var idDoc = JsonDocument.Parse(requestIdRaw);
-                                var errorResponse = new
-                                {
-                                    jsonrpc = "2.0",
-                                    id = idDoc.RootElement.Clone(),
-                                    error = new { code = -32603, message = ex.Message }
-                                };
-                                await SendJsonRpcMessageAsync(errorResponse).ConfigureAwait(false);
-                            }
-                            finally
-                            {
-                                _outstandingServerRequests.TryRemove(taskKey, out _);
-                            }
-                        }, CancellationToken.None);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("No handler for server request {Method}", method);
-                        using var idDoc = JsonDocument.Parse(requestIdRaw);
-                        var errorResponse = new
-                        {
-                            jsonrpc = "2.0",
-                            id = idDoc.RootElement.Clone(),
-                            error = new { code = -32601, message = $"Method not found: {method}" }
-                        };
-                        await SendJsonRpcMessageAsync(errorResponse).ConfigureAwait(false);
-                    }
+                        jsonrpc = "2.0",
+                        id = idDoc.RootElement.Clone(),
+                        error = new { code = -32601, message = $"Method not found: {method}" }
+                    };
+                    await SendJsonRpcMessageAsync(errorResponse).ConfigureAwait(false);
                 }
                 else
                 {
@@ -535,21 +459,6 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
                 }
             }
 
-            // Drain server→client request handlers so in-flight tasks are observed.
-            if (!_outstandingServerRequests.IsEmpty)
-            {
-                try
-                {
-                    await Task.WhenAll(_outstandingServerRequests.Values)
-                        .WaitAsync(TimeSpan.FromSeconds(Constants.Lsp.OutstandingRequestDrainSec))
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Draining outstanding server requests timed out for {ServerName}", _serverName);
-                }
-            }
-
             // Observe the read loop so unobserved-task-exception warnings don't fire.
             if (_readLoopTask is not null)
             {
@@ -583,7 +492,6 @@ public sealed class LspClient(string serverName, ILogger<LspClient> logger, Acti
     }
 
     private record PendingNotificationHandler(string Method, Action<JsonElement> Handler);
-    private record PendingRequestHandler(string Method, Func<JsonElement, Task<JsonElement>> Handler);
 }
 
 /// <summary>

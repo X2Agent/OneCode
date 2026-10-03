@@ -20,7 +20,7 @@ public static class OverlayLaunchers
 
         var entries = sessions.Select(s => new SessionEntry(
             s.Id.ToString(),
-            s.Name,
+            s.Title ?? "(未命名)",
             s.Model,
             s.Mode ?? "build",
             s.MessageCount,

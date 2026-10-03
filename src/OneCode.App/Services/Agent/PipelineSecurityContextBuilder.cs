@@ -1,7 +1,6 @@
 using OneCode.Core.Coordinator;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Middleware.Contracts;
 
 namespace OneCode.App.Services.Agent;
 
@@ -25,7 +24,6 @@ internal static class PipelineSecurityContextBuilder
         Action<FileChange>? fileChangeCallback = null,
         string? modelId = null,
         string? providerId = null,
-        IReadOnlyList<FileEditContract>? behaviorContracts = null,
         EditTransaction? editTransaction = null,
         SessionId? conversationId = null,
         long? maxBudgetTokens = null)
@@ -41,7 +39,6 @@ internal static class PipelineSecurityContextBuilder
             FileChangeCallback: fileChangeCallback,
             ModelId: modelId,
             ProviderId: providerId,
-            BehaviorContracts: behaviorContracts,
             EditTransaction: editTransaction,
             PermissionChecker: permissionChecker,
             TokenLedger: tokenLedger,

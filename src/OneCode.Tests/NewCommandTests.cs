@@ -40,7 +40,7 @@ public sealed class NewCommandTests
         var manager = Substitute.For<ISessionManager>();
         manager.ForegroundConversation.Returns((Conversation?)null);
 
-        var created = new Conversation { Name = "conversation-20260823" };
+        var created = new Conversation();
         ConversationOptions? received = null;
         manager.BackgroundCurrentAndCreateNewAsync(
                 Arg.Do<ConversationOptions>(o => received = o), ct)
@@ -51,7 +51,8 @@ public sealed class NewCommandTests
         var result = await command.ExecuteAsync([], ct);
 
         result.Should().BeOfType<CommandResult.TextResult>()
-            .Which.Value.Should().Contain("conversation-20260823");
+            .Which.Value.Should().Contain(created.Id.ToString())
+            .And.NotContain("Name:");
         received.Should().NotBeNull();
         received!.Name.Should().BeNull();
         received.WorkingDirectory.Should().Be(Directory.GetCurrentDirectory());

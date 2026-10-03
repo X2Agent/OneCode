@@ -3,7 +3,6 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using NSubstitute;
-using OneCode.Infrastructure.Middleware.Contracts;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware;
 using OneCode.Core.Domain;
@@ -373,7 +372,7 @@ public sealed class AgentPipelineBuilderTests
         ModelId: "test-model",
         ProviderId: "test-provider",
         SafetyInvariants: new[] { Substitute.For<ISafetyInvariant>() },
-        BehaviorContracts: [new FileEditContract("/tmp")],
+
         EditTransaction: transaction ?? new EditTransaction(),
         PermissionChecker: permissionChecker);
 
@@ -403,9 +402,6 @@ public sealed class AgentPipelineBuilderTests
 
         main.SafetyInvariants.Should().BeSameAs(worker.SafetyInvariants);
         main.SafetyInvariants.Should().BeSameAs(team.SafetyInvariants);
-
-        main.BehaviorContracts.Should().BeSameAs(worker.BehaviorContracts);
-        main.BehaviorContracts.Should().BeSameAs(team.BehaviorContracts);
 
         main.EditTransaction.Should().BeSameAs(worker.EditTransaction);
         main.EditTransaction.Should().BeSameAs(team.EditTransaction);
@@ -541,7 +537,7 @@ public sealed class AgentPipelineBuilderTests
     }
 
     [Fact]
-    public void FullProfile_EnablesTaskRecoveryAndBehaviorContracts()
+    public void FullProfile_EnablesEditPreChecks()
     {
         var ctx = BuildSecurityContext();
         var full = AgentPipelineOptionsFactory.Create(
@@ -554,22 +550,13 @@ public sealed class AgentPipelineBuilderTests
             new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker"));
 
         full.EnableStateMachine.Should().BeTrue();
-        full.EnableTaskRecovery.Should().BeTrue();
-        full.EnableBehaviorContracts.Should().BeTrue();
+        full.EnableEditPreChecks.Should().BeTrue();
         worker.EnableStateMachine.Should().BeFalse();
-        worker.EnableTaskRecovery.Should().BeFalse();
-        worker.EnableBehaviorContracts.Should().BeTrue();
-
-        var team = AgentPipelineOptionsFactory.Create(
-            PipelineProfile.TeamMember,
-            ctx,
-            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "team"));
-        team.EnableStateMachine.Should().BeFalse();
-        team.EnableTaskRecovery.Should().BeFalse();
+        worker.EnableEditPreChecks.Should().BeTrue();
     }
 
     [Fact]
-    public void ExploreProfile_DisablesVerificationAndContracts()
+    public void ExploreProfile_DisablesVerificationAndEditPreChecks()
     {
         var ctx = BuildSecurityContext(enableVerification: true);
         var explore = AgentPipelineOptionsFactory.Create(
@@ -578,9 +565,7 @@ public sealed class AgentPipelineBuilderTests
             new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "explore"));
 
         explore.EnableVerification.Should().BeFalse();
-        explore.EnableBehaviorContracts.Should().BeFalse();
+        explore.EnableEditPreChecks.Should().BeFalse();
         explore.EnableStateMachine.Should().BeFalse();
-        explore.EnableTaskRecovery.Should().BeFalse();
-        explore.BehaviorContracts.Should().BeNull();
     }
 }

@@ -4,18 +4,13 @@ public static class MessageCloner
 {
     public static Message CloneMessage(Message message) => message switch
     {
-        UserMessage user => user with
-        {
-            Attachments = user.Attachments?.Select(a => a with { }).ToList(),
-        },
+        UserMessage user => user with { },
         AssistantMessage assistant => assistant with
         {
             Content = assistant.Content.Select(CloneContentBlock).ToList(),
         },
         SystemMessage system => system with { },
         ToolResultMessage tool => tool with { },
-        AttachmentMessage attachment => attachment with { },
-        TombstoneMessage tombstone => tombstone with { },
         _ => throw new NotSupportedException($"Unsupported message type: {message.GetType().Name}"),
     };
 

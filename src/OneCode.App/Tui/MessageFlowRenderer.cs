@@ -43,6 +43,134 @@ public sealed class MessageFlowRenderer
         };
     }
 
+    /// <summary>
+    /// 把消息流切分为渲染单元：<see cref="ToolRunSegment"/>（连续工具活动段）或单条
+    /// <see cref="Message"/>。工具段以"含 ToolUseBlock 的 assistant"开始，延伸到后续的
+    /// ToolResultMessage / 更多工具 assistant，遇到纯文本 assistant 或非工具消息封段——
+    /// 渲染时段内相邻同名工具对聚合为组行（与流内合并形态一致，防止单轮多工具刷屏）。
+    /// </summary>
+    public static IReadOnlyList<object> SegmentConversation(IReadOnlyList<Message> messages)
+    {
+        List<object> units = [];
+        var i = 0;
+        while (i < messages.Count)
+        {
+            if (messages[i] is AssistantMessage first && first.Content.Any(static block => block is ToolUseBlock))
+            {
+                var segment = new ToolRunSegment();
+                while (i < messages.Count)
+                {
+                    switch (messages[i])
+                    {
+                        case AssistantMessage am when am.Content.Any(static block => block is ToolUseBlock):
+                            segment.Assistants.Add(am);
+                            i++;
+                            break;
+                        case ToolResultMessage trm:
+                            segment.Results.Add(trm);
+                            i++;
+                            break;
+                        default:
+                            // 纯文本 assistant / 用户 / 系统消息——封段。
+                            goto SegmentEnd;
+                    }
+                }
+                SegmentEnd:
+                units.Add(segment);
+            }
+            else
+            {
+                units.Add(messages[i]);
+                i++;
+            }
+        }
+
+        return units;
+    }
+
+    /// <summary>连续工具活动段：若干工具 assistant + 按序跟随的工具结果。</summary>
+    public sealed record ToolRunSegment
+    {
+        public List<AssistantMessage> Assistants { get; init; } = [];
+        public List<ToolResultMessage> Results { get; init; } = [];
+    }
+
+    /// <summary>
+    /// 渲染工具活动段：相邻同名 (tool_use, result) 对聚合成组行（×N，可展开逐条），
+    /// 异名工具/文本块打断聚合；单条对渲染为与流内一致的完成行（可展开详情）。
+    /// </summary>
+    public IReadOnlyList<FormattedLine> RenderToolRunSegment(ToolRunSegment segment)
+    {
+        List<FormattedLine> lines = [];
+        var pendingCalls = new Dictionary<string, (string Name, string Input)>(StringComparer.Ordinal);
+        string? runName = null;
+        List<ToolGroupEntry> runEntries = [];
+        // 局部队列消费：segment 是 journal 捕获的共享对象（resize 重渲会再次调用本方法），
+        // 渲染过程不得修改其 Results 列表。
+        var remainingResults = new Queue<ToolResultMessage>(segment.Results);
+
+        void FlushRun()
+        {
+            if (runName is null || runEntries.Count == 0)
+            {
+                runName = null;
+                runEntries = [];
+                return;
+            }
+
+            var last = runEntries[^1];
+            // 单条 run 不挂 Group：展开保持完整 Args/Result 详情；≥2 条才是组行。
+            lines.Add(ConversationRenderer.MakeCompletedToolLine(
+                runName, last.IsError, last.Args, null, last.Result, maxWidth: CurrentWidth,
+                groupCount: runEntries.Count,
+                group: runEntries.Count > 1 ? runEntries : null));
+            runName = null;
+            runEntries = [];
+        }
+
+        foreach (var assistant in segment.Assistants)
+        {
+            // 文本/思考块先行（与块顺序一致），工具块进入聚合缓冲。
+            foreach (var block in assistant.Content)
+            {
+                switch (block)
+                {
+                    case TextBlock tb when !string.IsNullOrEmpty(tb.Text):
+                        RenderMarkdownBlock(lines, tb.Text);
+                        break;
+                    case ThinkingBlock thb:
+                        RenderThinkingBlock(lines, thb);
+                        break;
+                    case ToolUseBlock tub when tub.Id is { Length: > 0 } id:
+                        pendingCalls[id] = (tub.Name, tub.Input);
+                        break;
+                }
+            }
+
+            // 本条 assistant 的工具结果按序配对消费；id 未登记的（后续 assistant 的
+            // 结果）留待其 assistant 处理时配对。
+            while (remainingResults.Count > 0
+                   && pendingCalls.Remove(remainingResults.Peek().ToolUseId, out var call))
+            {
+                var result = remainingResults.Dequeue();
+                if (runName is { } current && current != call.Name)
+                    FlushRun();
+                runName ??= call.Name;
+                runEntries.Add(new ToolGroupEntry(call.Input, result.Content, string.Empty, result.IsError));
+            }
+        }
+
+        FlushRun();
+
+        // 未配对的 result（孤儿防御）与 tool_use（中断残留）按现状形态兜底渲染。
+        foreach (var orphan in remainingResults)
+            lines.AddRange(RenderToolResultMessage(orphan));
+        foreach (var (_, (name, input)) in pendingCalls)
+            lines.Add(MakeToolLine(name, input, null));
+
+        return lines;
+    }
+
     // message renderers
 
     private IReadOnlyList<FormattedLine> RenderUserMessage(UserMessage msg)
@@ -228,20 +356,20 @@ public sealed class MessageFlowRenderer
         // Show tool name + status icon so the result is visually linked to its tool call.
         lines.Add(MakeToolLine(msg.ToolName, null, !msg.IsError));
 
-        var displayContent = OneCode.Core.Tools.DisplayJsonSerializer.NormalizeForDisplay(msg.Content);
-        var contentLines = displayContent.Replace("\r\n", "\n").Split('\n');
-        var totalLines = contentLines.Length;
+        // 与流式展开详情同一格式化源：信封解包 + 按工具渲染（WebSearch 列表等）。
+        var detail = ToolResultDetailFormatter.FormatDetail(msg.ToolName, msg.Content);
+        var totalLines = detail.Count;
 
         if (totalLines <= MaxToolResultLines)
         {
-            foreach (var line in contentLines)
-                lines.Add(FormattedLine.Plain($"{Indent}  {TruncateLine(line)}", TuiPalette.FgSecondary));
+            foreach (var d in detail)
+                lines.Add(FormattedLine.Plain($"{Indent}  {TruncateLine(d.Text)}", d.Fg ?? TuiPalette.FgSecondary));
         }
         else
         {
             var preview = Math.Min(3, MaxToolResultLines / 2);
             for (var i = 0; i < preview; i++)
-                lines.Add(FormattedLine.Plain($"{Indent}  {TruncateLine(contentLines[i])}", TuiPalette.FgSecondary));
+                lines.Add(FormattedLine.Plain($"{Indent}  {TruncateLine(detail[i].Text)}", detail[i].Fg ?? TuiPalette.FgSecondary));
             lines.Add(FormattedLine.Plain(
                 $"{Indent}  \u2026 ({totalLines - preview} more lines)",
                 TuiPalette.FgMuted));

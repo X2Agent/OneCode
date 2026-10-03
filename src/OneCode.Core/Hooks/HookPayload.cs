@@ -22,7 +22,7 @@ public sealed record HookPayload
     public string? Cwd { get; init; }
 
     /// <summary>工具名称（pre_tool_call / post_tool_call），同时作为工具节点的 matcher 值。</summary>
-    public string? ToolName { get; set; }
+    public string? ToolName { get; init; }
 
     /// <summary>工具调用输入（pre_tool_call / post_tool_call）。</summary>
     public JsonElement? ToolInput { get; init; }
@@ -37,7 +37,7 @@ public sealed record HookPayload
     public string? ToolError { get; init; }
 
     /// <summary>用户输入文本（input）。</summary>
-    public string? UserMessage { get; set; }
+    public string? UserMessage { get; init; }
 
     /// <summary>模型标识（pre/post_model_call），同时作为模型节点的 matcher 值。</summary>
     public string? ModelId { get; init; }
@@ -52,7 +52,7 @@ public sealed record HookPayload
     public string? FinishReason { get; init; }
 
     /// <summary>最终响应文本（output）。</summary>
-    public string? OutputText { get; set; }
+    public string? OutputText { get; init; }
 
     /// <summary>子代理标识（子代理链路节点）。</summary>
     public string? AgentId { get; init; }

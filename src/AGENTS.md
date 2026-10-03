@@ -317,7 +317,7 @@ var producerTask = Task.Run(async () =>
 ```csharp
 // ✅ 正确：构造函数注入（primary constructor），所有依赖均为接口或抽象
 public sealed class MemoryService(
-    IFileSystemHelper fs,
+    IProcessRunner processRunner,
     ILogger<MemoryService> logger,
     IOptions<MemoryOptions> options)
 {
@@ -383,7 +383,7 @@ catch (Exception) { }
 try { return int.Parse(s); } catch { return 0; }  // 用 int.TryParse
 ```
 
-> **注意：** `Result<T>` / `Result` 是 `OneCode.Core.Results` 命名空间下的自定义类型，非 BCL 内置。完整定义和接口规范见 [Core/AGENTS.md](OneCode.Core/AGENTS.md)。
+> **注意：** `Result<T>` 是 `OneCode.Core.Results` 命名空间下的自定义类型，非 BCL 内置。完整定义和接口规范见 [Core/AGENTS.md](OneCode.Core/AGENTS.md)。
 
 #### 5.1 catch 块最低要求
 
@@ -766,10 +766,10 @@ var maxTurns = options.MaxTurns ?? 100;  // ← 为什么默认 100？
 | 配置 JSON 字段名 | [Core.Constants.ConfigKeys](OneCode.Core/Constants.cs) | `ApiKey`, `Model`, `Provider`, `MaxTurns` |
 | Model Provider 标识 | [Core.Constants.ModelProviders](OneCode.Core/Constants.cs) | `Anthropic`, `OpenAI`, `Ollama` |
 | 会话默认值 | [Core.Constants.Session](OneCode.Core/Constants.cs) | `MaxTurnsDefault`, `MaxBudgetTokensDefault` |
-| Permission 模式 | [Core.Constants.PermissionModes](OneCode.Core/Constants.cs) | `Default`, `BypassPermissions`, `Plan` |
+| Permission 模式 | [Core.Constants.PermissionModes](OneCode.Core/Constants.cs) | `Default` |
 | 消息类型 | [Core.Constants.MessageTypes](OneCode.Core/Constants.cs) | `User`, `Assistant`, `Result` |
 | HttpClient 注册名 | [Infrastructure.Constants.HttpClientNames](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
-| 子目录名 | [Infrastructure.Constants.Subdirs](OneCode.Infrastructure/Config/Constants.cs) | `Skills`, `Prompts`, `MemoryStore` |
+| 子目录名 | [Infrastructure.Constants.Subdirs](OneCode.Infrastructure/Config/Constants.cs) | `Skills`, `Prompts`, `Events` |
 | 超时/阈值 | [Infrastructure.Constants.Timeouts](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
 | 应用文件信息 | [Infrastructure.Constants.App](OneCode.Infrastructure/Config/Constants.cs) | `SettingsFileName` |
 
@@ -783,7 +783,7 @@ var apiKey = Environment.GetEnvironmentVariable(CoreConstants.EnvVars.OneCodeApi
 settings.MaxTurns = Get(CoreConstants.ConfigKeys.MaxTurns, CoreConstants.Session.MaxTurnsDefault);
 
 // ✅ 正确：使用 Infrastructure 层常量（已有 using OneCode.Infrastructure.Config; 时直接使用）
-var storeDir = Path.Combine(home, Constants.Subdirs.MemoryStore);
+var storeDir = Path.Combine(home, Constants.Subdirs.Events);
 
 // ❌ 禁止：散落的字符串字面量（多使用场景）
 var apiKey = Environment.GetEnvironmentVariable("ONECODE_API_KEY");
@@ -911,7 +911,7 @@ public PermissionCheckResult Check(...)
 | 接口 | `IXxx.cs` | `ISessionManager.cs`, `ITextSearchService.cs` |
 | 实现 | `XxxService.cs` / `XxxManager.cs` | `MemoryService.cs` |
 | DTO/记录 | `XxxDto.cs` / `XxxModel.cs` 或直接 `Xxx.cs` | `OrchestrationEvent.cs` |
-| 扩展方法 | `XxxExtensions.cs` | `DebugLoggingExtensions.cs` |
+| 扩展方法 | `XxxExtensions.cs` | `SessionStateExtensions.cs` |
 | 测试 | `XxxTests.cs` | `AgentContextPipelineTests.cs` |
 | 枚举 | `XxxKind.cs` / `XxxMode.cs` | `PermissionMode.cs` |
 | 常量类 | `XxxConstants.cs` | `CompactConstants.cs` |

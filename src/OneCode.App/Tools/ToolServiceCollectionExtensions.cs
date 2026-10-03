@@ -51,7 +51,7 @@ public static class ToolServiceCollectionExtensions
             category: ToolCategory.FileEdit | ToolCategory.FileWrite);
         services.AddToolInstance("Edit", (EditTool tool) => AIFunctionFactory.Create(tool.EditAsync, name: "Edit"), ToolRisk.Destructive, concurrency: false, searchHint: "search-replace edit a file",
             category: ToolCategory.FileEdit | ToolCategory.FileWrite);
-        // Delete is deliberately NOT FileEdit/FileWrite: FileEditContract requires the file to
+        // Delete is deliberately NOT FileEdit/FileWrite: Edit pre-checks require the target to
         // exist post-edit, and FileWrite would auto-approve under AcceptEdits — deletion is
         // irreversible and always requires explicit approval (FileDelete feeds FileSystemInvariant).
         services.AddToolInstance("Delete", (DeleteTool tool) => AIFunctionFactory.Create(tool.DeleteAsync, name: "Delete"), ToolRisk.Destructive, concurrency: false, searchHint: "delete a file or directory",
@@ -76,7 +76,7 @@ public static class ToolServiceCollectionExtensions
         services.AddToolInstance("BackgroundWait", (BackgroundWaitTool tool) => AIFunctionFactory.Create(tool.WaitAsync, name: "BackgroundWait"), ToolRisk.ReadOnly, searchHint: "wait for background task",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["background"]);
 
-        // AgentTool resolves via normal DI (ICacheSafeParamsProvider) — no ChatService locator.
+        // AgentTool resolves via normal DI (ICacheSafeParamsProvider) — no conversation-runner locator.
         services.AddToolInstance("Agent", (AgentTool tool) => AIFunctionFactory.Create(tool.RunAgentAsync, name: "Agent"), ToolRisk.Safe, searchHint: "run a sub-agent on a delegated task",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["agent", "sub-agent", "delegate"], category: ToolCategory.PlanAllowed);
         services.AddToolInstance("ParallelAgents", (ParallelAgentsTool tool) => AIFunctionFactory.Create(tool.RunParallelAsync, name: "ParallelAgents"), ToolRisk.Safe, searchHint: "run sub-agents with DAG dependencies",

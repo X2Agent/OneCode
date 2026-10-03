@@ -59,11 +59,11 @@ public sealed class ToolProtocolValidator : IToolProtocolValidator
                         "Function calls must use the assistant role."));
             }
 
-            if (results.Count > 0 && message.Role != ChatRole.User)
+            if (results.Count > 0 && message.Role != ChatRole.Tool)
             {
                 foreach (var result in results)
                     errors.Add(Error(ToolProtocolErrorCode.InvalidRole, result.CallId, index,
-                        "Function results must use the user role."));
+                        "Function results must use the tool role."));
             }
 
             if (pendingCalls.Count > 0 && results.Count == 0)

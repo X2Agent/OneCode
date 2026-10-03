@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
 using OneCode.Core.Workflows;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.Infrastructure.Build;
 
@@ -20,10 +22,12 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
     private readonly string _baseDirectory;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates =
         new(StringComparer.Ordinal);
+    private readonly ILogger _logger;
 
-    public JsonBuildRunStore(string? basePath = null)
+    public JsonBuildRunStore(string? basePath = null, ILogger? logger = null)
     {
         _baseDirectory = basePath ?? Path.Combine(PathsHelper.GetUserConfigDir(), "build-runs");
+        _logger = logger ?? NullLogger.Instance;
         Directory.CreateDirectory(_baseDirectory);
     }
 
@@ -89,7 +93,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         try
         {
             var path = GetRunFilePath(conversationId);
-            await using var fileLock = await AcquireFileLockAsync(path + ".lock", ct).ConfigureAwait(false);
+            await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
             var existing = LoadCurrent(path, expectedConversationId: conversationId);
             var actualVersion = existing?.Version ?? 0;
             if (actualVersion != expectedVersion)
@@ -192,7 +196,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
     private static string GetEventFilePath(string checkpointPath) =>
         Path.Combine(Path.GetDirectoryName(checkpointPath)!, "events.json");
 
-    private static BuildRun? LoadCurrent(
+    private BuildRun? LoadCurrent(
         string checkpointPath,
         SessionId? expectedConversationId = null)
     {
@@ -224,7 +228,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         return replayed;
     }
 
-    private static BuildRun? LoadCheckpoint(
+    private BuildRun? LoadCheckpoint(
         string path,
         SessionId? expectedConversationId = null)
     {
@@ -244,7 +248,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
             $"BuildRun checkpoint '{path}' and its backup are corrupt or incompatible.");
     }
 
-    private static IReadOnlyList<BuildRunEvent> LoadUnboundEventSequence(
+    private IReadOnlyList<BuildRunEvent> LoadUnboundEventSequence(
         string path,
         SessionId? expectedConversationId)
     {
@@ -273,14 +277,17 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
                 return events;
             }
             // 候选文件损坏/不可读 → 尝试下一个（主文件损坏后还有 .bak 兜底）。
-            catch (JsonException)
+            catch (JsonException ex)
             {
+                _logger.LogDebug(ex, "BuildRun event sequence '{Candidate}' is not valid JSON; trying next candidate", candidate);
             }
-            catch (InvalidDataException)
+            catch (InvalidDataException ex)
             {
+                _logger.LogDebug(ex, "BuildRun event sequence '{Candidate}' failed validation; trying next candidate", candidate);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                _logger.LogDebug(ex, "BuildRun event sequence '{Candidate}' could not be read; trying next candidate", candidate);
             }
         }
 
@@ -288,7 +295,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
             $"BuildRun event sequence '{path}' and its backup are corrupt or incompatible.");
     }
 
-    private static IReadOnlyList<BuildRunEvent> LoadEventSequence(
+    private IReadOnlyList<BuildRunEvent> LoadEventSequence(
         string path,
         BuildRunId runId,
         SessionId conversationId)
@@ -308,7 +315,7 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
             $"BuildRun event sequence '{path}' and its backup are corrupt or incompatible.");
     }
 
-    private static BuildRun? TryReadCheckpoint(
+    private BuildRun? TryReadCheckpoint(
         string path,
         SessionId? expectedConversationId = null)
     {
@@ -319,21 +326,24 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         {
             return ReadCheckpoint(path, expectedConversationId);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            _logger.LogDebug(ex, "BuildRun checkpoint '{Path}' is not valid JSON; falling back to backup", path);
             return null;
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException ex)
         {
+            _logger.LogDebug(ex, "BuildRun checkpoint '{Path}' failed validation; falling back to backup", path);
             return null;
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            _logger.LogDebug(ex, "BuildRun checkpoint '{Path}' could not be read; falling back to backup", path);
             return null;
         }
     }
 
-    private static IReadOnlyList<BuildRunEvent>? TryReadEvents(
+    private IReadOnlyList<BuildRunEvent>? TryReadEvents(
         string path,
         BuildRunId runId,
         SessionId conversationId)
@@ -350,16 +360,20 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
             ValidateEventSequence(events, runId, conversationId);
             return events;
         }
-        catch (JsonException)
+        // 候选文件损坏/不可读 → 返回 null 让调用方尝试 .bak。
+        catch (JsonException ex)
         {
+            _logger.LogDebug(ex, "BuildRun event sequence '{Path}' is not valid JSON; falling back to backup", path);
             return null;
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException ex)
         {
+            _logger.LogDebug(ex, "BuildRun event sequence '{Path}' failed validation; falling back to backup", path);
             return null;
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            _logger.LogDebug(ex, "BuildRun event sequence '{Path}' could not be read; falling back to backup", path);
             return null;
         }
     }
@@ -440,78 +454,32 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         }
     }
 
-    private static async Task<FileStream> AcquireFileLockAsync(
-        string lockPath,
-        CancellationToken ct)
-    {
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                return new FileStream(
-                    lockPath,
-                    FileMode.OpenOrCreate,
-                    FileAccess.ReadWrite,
-                    FileShare.None,
-                    bufferSize: 1,
-                    FileOptions.Asynchronous | FileOptions.DeleteOnClose);
-            }
-            catch (IOException)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(25), ct).ConfigureAwait(false);
-            }
-        }
-    }
-
-    private static void WriteJsonWithBackup<T>(
+    private void WriteJsonWithBackup<T>(
         string path,
         T value,
         Action<string> validator)
     {
-        var tempPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, s_jsonOptions));
+        DurableFile.WriteAtomic(
+            path,
+            payload,
+            validateTemp: temp => validator(temp),
+            canBackupSource: primary => IsValidForBackup(primary, validator),
+            validateWritten: written => validator(written));
+    }
+
+    /// <summary>主文件可解析时才允许把它复制为 .bak；损坏时保留上一份有效备份。</summary>
+    private bool IsValidForBackup(string path, Action<string> validator)
+    {
         try
         {
-            var json = JsonSerializer.Serialize(value, s_jsonOptions);
-            using (var stream = new FileStream(
-                       tempPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       bufferSize: 4096,
-                       FileOptions.WriteThrough))
-            using (var writer = new StreamWriter(stream))
-            {
-                writer.Write(json);
-                writer.Flush();
-                stream.Flush(flushToDisk: true);
-            }
-
-            validator(tempPath);
-            if (File.Exists(path))
-            {
-                try
-                {
-                    validator(path);
-                    File.Copy(path, path + ".bak", overwrite: true);
-                }
-                catch (InvalidDataException)
-                {
-                    // Preserve the previous valid backup when the primary is already corrupt.
-                }
-                catch (JsonException)
-                {
-                    // Preserve the previous valid backup when the primary is already corrupt.
-                }
-            }
-
-            File.Move(tempPath, path, overwrite: true);
             validator(path);
+            return true;
         }
-        finally
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
+            _logger.LogDebug(ex, "Primary file {Path} is corrupt; keeping the previous valid backup", path);
+            return false;
         }
     }
 

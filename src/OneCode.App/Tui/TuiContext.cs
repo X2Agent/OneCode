@@ -33,7 +33,6 @@ public sealed record TuiQueryServices(
 /// <summary>Current session, team, and workspace dependencies.</summary>
 public sealed record TuiSessionServices(
     Func<IReadOnlyList<string>>? GetSessionUserPrompts = null,
-    Func<string?>? GetSessionName = null,
     Func<string?>? GetActiveTeam = null,
     Func<IReadOnlyList<string>>? GetRegisteredTeams = null,
     Func<string?>? CycleTeam = null,
@@ -105,7 +104,6 @@ public sealed record TuiContext(
     public Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun => Query.ReplayCurrentBuildRun;
 
     public Func<IReadOnlyList<string>>? GetSessionUserPrompts => Session.GetSessionUserPrompts;
-    public Func<string?>? GetSessionName => Session.GetSessionName;
     public Func<string?>? GetActiveTeam => Session.GetActiveTeam;
     public Func<IReadOnlyList<string>>? GetRegisteredTeams => Session.GetRegisteredTeams;
     public Func<string?>? CycleTeam => Session.CycleTeam;

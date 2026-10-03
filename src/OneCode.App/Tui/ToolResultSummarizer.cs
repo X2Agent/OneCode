@@ -18,20 +18,29 @@ public static class ToolResultSummarizer
         if (string.IsNullOrEmpty(result))
             return null;
 
-        return toolName.ToLowerInvariant() switch
+        return NormalizeName(toolName) switch
         {
-            "write" or "writetool" => SummarizeWrite(result, toolInput),
-            "read" or "readtool" => SummarizeRead(result, toolInput),
-            "edit" or "edittool" => SummarizeEdit(result, toolInput),
-            "bash" or "bashtool" => SummarizeBash(result, toolInput),
-            "grep" or "greptool" => SummarizeGrep(result, toolInput),
-            "glob" or "globtool" => SummarizeGlob(result, toolInput),
+            "write" => SummarizeWrite(result, toolInput),
+            "read" => SummarizeRead(result, toolInput),
+            "edit" => SummarizeEdit(result, toolInput),
+            "bash" => SummarizeBash(result, toolInput),
+            "grep" => SummarizeGrep(result, toolInput),
+            "glob" => SummarizeGlob(result, toolInput),
             "task" => SummarizeTask(result, toolInput),
-            "web_fetch" => SummarizeWebFetch(result, toolInput),
-            "web_search" => SummarizeWebSearch(result, toolInput),
+            "webfetch" => SummarizeWebFetch(result, toolInput),
+            "websearch" => SummarizeWebSearch(result, toolInput),
+            "ls" => SummarizeLs(result),
             _ => null
         };
     }
+
+    /// <summary>
+    /// 工具名归一化：小写 + 去下划线，让注册名（WebSearch/LS/WebFetch）与
+    /// 旧 snake_case 写法（web_search）落到同一 case。旧实现按字面小写匹配，
+    /// 注册名 WebSearch 归一化后是 websearch，case 写的 web_search 永不命中。
+    /// </summary>
+    internal static string NormalizeName(string toolName)
+        => toolName.Replace("_", "").ToLowerInvariant();
 
     private static string? SummarizeWrite(string result, string? toolInput)
     {
@@ -137,9 +146,50 @@ public static class ToolResultSummarizer
 
     private static string? SummarizeWebSearch(string result, string? toolInput)
     {
+        // 结果经信封解包后是 {provider, query, results:[...]}——按结构化数组计数，
+        // 旧实现按原始文本行数计数，JSON 单行结果恒显示 "1 results"。
+        var content = OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(result, out var inner)
+            ? inner
+            : result;
+        var count = ExtractArrayLength(content, "results");
+        if (count is { } results)
+            return $"{results} results";
+
         var lines = result.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Length;
         if (lines > 0)
             return $"{lines} results";
+        return null;
+    }
+
+    private static string? SummarizeLs(string result)
+    {
+        // LS 返回纯文本表格，首行 "Total: N entries"
+        var content = OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(result, out var inner)
+            ? inner
+            : result;
+        var firstLine = content.Replace("\r\n", "\n").Split('\n')[0];
+        var start = firstLine.IndexOf("Total: ", StringComparison.Ordinal);
+        if (start < 0)
+            return null;
+        var digits = new string(firstLine[(start + "Total: ".Length)..].TakeWhile(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"{digits} entries" : null;
+    }
+
+    /// <summary>从 JSON 文本中提取指定数组的长度；缺失或非 JSON 返回 null。</summary>
+    private static int? ExtractArrayLength(string json, string propertyName)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && doc.RootElement.TryGetProperty(propertyName, out var prop)
+                && prop.ValueKind == System.Text.Json.JsonValueKind.Array)
+                return prop.GetArrayLength();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // 非 JSON 文本——调用方回落到行数统计
+        }
         return null;
     }
 
@@ -152,9 +202,11 @@ public static class ToolResultSummarizer
         if (string.IsNullOrEmpty(toolInput))
             return "";
 
+        var normalized = NormalizeName(toolName);
+
         // 文件操作工具 - 显示路径
-        var fileTools = new[] { "write", "read", "edit", "glob", "grep" };
-        if (fileTools.Contains(toolName.ToLowerInvariant()))
+        var fileTools = new[] { "write", "read", "edit", "glob", "grep", "ls" };
+        if (fileTools.Contains(normalized))
         {
             var path = ExtractPathFromInput(toolInput);
             if (!string.IsNullOrEmpty(path))
@@ -165,12 +217,27 @@ public static class ToolResultSummarizer
         }
 
         // Shell 工具 - 显示命令
-        var shellTools = new[] { "bash", "powershell" };
-        if (shellTools.Contains(toolName.ToLowerInvariant()))
+        if (normalized == "bash")
         {
             var cmd = ExtractCommandFromInput(toolInput);
             if (!string.IsNullOrEmpty(cmd))
                 return Truncate(cmd, 50);
+        }
+
+        // 搜索工具 - 显示 query / url，而不是整段 JSON 参数。
+        // 输入有两种形状：完整 JSON（ToolDone 通道）或 ExtractToolInputSummary 提取的
+        // 裸值（ToolStart 摘要通道）——JSON 提取失败时回退裸文本，两种通道显示一致。
+        if (normalized == "websearch")
+        {
+            var query = ExtractFieldFromJson(toolInput, "query") ?? RawInputFallback(toolInput);
+            if (!string.IsNullOrEmpty(query))
+                return Truncate(query, 60);
+        }
+        if (normalized == "webfetch")
+        {
+            var url = ExtractFieldFromJson(toolInput, "url") ?? RawInputFallback(toolInput);
+            if (!string.IsNullOrEmpty(url))
+                return Truncate(url, 60);
         }
 
         // 用户提问工具 - 显示问题或向导标题，不显示整段 JSON 参数。
@@ -242,6 +309,10 @@ public static class ToolResultSummarizer
         }
         return null;
     }
+
+    /// <summary>JSON 提取失败时的裸值回退：输入本身已是摘要文本（非 JSON）则原样返回。</summary>
+    private static string? RawInputFallback(string input)
+        => input.Contains('{') || input.Contains('[') ? null : input.Trim('"', ' ', '\n', '\r');
 
     private static string SimplifyPath(string path)
     {

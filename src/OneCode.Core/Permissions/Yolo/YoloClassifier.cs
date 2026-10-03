@@ -1,3 +1,5 @@
+using OneCode.Core.Tools;
+
 namespace OneCode.Core.Permissions.Yolo;
 
 /// <summary>
@@ -15,8 +17,8 @@ namespace OneCode.Core.Permissions.Yolo;
 /// </summary>
 public sealed class YoloClassifier(
     YoloRuleStore ruleStore,
-    Tools.ToolMetadataRegistry toolMetadata,
-    ILogger<YoloClassifier>? logger = null) : IYoloClassifier
+    ToolMetadataRegistry toolMetadata,
+    ILogger<YoloClassifier>? logger = null)
 {
     /// <summary>
     /// 对工具调用进行安全分类。
@@ -52,8 +54,8 @@ public sealed class YoloClassifier(
         return Task.FromResult(YoloClassifierResult.None());
     }
 
-    public bool IsAllowlistedTool(string toolName) =>
-        toolMetadata.GetPolicy(toolName).ApprovalMode == Tools.ToolApprovalMode.Never;
+    internal bool IsAllowlistedTool(string toolName) =>
+        toolMetadata.GetPolicy(toolName).ApprovalMode == ToolApprovalMode.Never;
 
     private static string? ExtractInputString(string toolName, JsonElement input)
     {
@@ -63,7 +65,7 @@ public sealed class YoloClassifier(
             return null;
 
         // 委托给统一的 ToolArgumentExtractor 提取参数。
-        var extracted = OneCode.Core.Tools.ToolArgumentExtractor.ExtractInputString(toolName, input);
+        var extracted = ToolArgumentExtractor.ExtractInputString(toolName, input);
         if (extracted is not null)
             return extracted;
 

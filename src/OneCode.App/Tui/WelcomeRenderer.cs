@@ -2,7 +2,9 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// Renders a minimal welcome screen on startup / after conversation reset.
-/// Block-char "OneCode" logo with compact layout.
+/// Block-char "OneCode" logo (fg-secondary) with version and usage hint lines,
+/// vertically centered in the viewport — the old top-biased padding left a large
+/// dead zone below the hints, which read as the startup screen feeling off.
 /// Model / workspace / branch live in status &amp; context bars — not duplicated here.
 /// MCP 三态同理：状态栏是唯一实时出口，失败明细由 startup hint 一次性给出，
 /// 欢迎页不再重复渲染（与状态栏/底部 hint 三重重复，2026-09 去重）。
@@ -49,15 +51,14 @@ public static class WelcomeRenderer
     /// <param name="info">Product version and related welcome data.</param>
     /// <param name="viewWidth">Conversation viewport width (columns).</param>
     /// <param name="viewHeight">
-    /// Conversation viewport height (rows). When &gt; 0, top padding is chosen so
-    /// the welcome block sits in the upper-middle of tall / maximized terminals
-    /// instead of clinging to the top edge with a huge empty void below.
+    /// Conversation viewport height (rows). When &gt; 0, the block is vertically
+    /// centered in the viewport instead of clinging to the top edge.
     /// </param>
     public static IReadOnlyList<FormattedLine> Render(WelcomeInfo info, int viewWidth, int viewHeight = 0)
     {
         List<FormattedLine> body = [];
 
-        // pixel logo (centered, gray blocks)
+        // pixel logo (centered)
         var logoWidth = PixelLogo.Length > 0 ? TextWidthHelper.GetDisplayWidth(PixelLogo[0]) : 0;
         var logoPad = new string(' ', Math.Max(0, (viewWidth - logoWidth) / 2));
 
@@ -73,7 +74,6 @@ public static class WelcomeRenderer
         body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
 
         // tips — discoverability only; runtime state lives in chrome bars.
-        // Two rows: input basics first, then mode-direct / panel entry.
         RenderTipLine(
         [
             ("/ ", "斜杠命令"),
@@ -90,6 +90,20 @@ public static class WelcomeRenderer
             ("Alt+1..4 ", "直达模式"),
             ("/keybindings ", "快捷键面板"),
         ]);
+
+        body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+
+        // Vertical placement: geometric center — half the leftover space above,
+        // half below, so no side reads as a dead zone.
+        var topPad = 2;
+        if (viewHeight > body.Count + 4)
+            topPad = Math.Max(2, (viewHeight - body.Count) / 2);
+
+        var lines = new List<FormattedLine>(topPad + body.Count);
+        for (var i = 0; i < topPad; i++)
+            lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+        lines.AddRange(body);
+        return lines;
 
         void RenderTipLine((string Key, string Desc)[] tips)
         {
@@ -108,22 +122,6 @@ public static class WelcomeRenderer
             tipSegs.Insert(0, new(tipPad, TuiPalette.BgPrimary));
             body.Add(FormattedLine.FromSegments(tipSegs.ToArray()));
         }
-
-        body.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-
-        // Vertical placement: optical center slightly above geometric mid on tall screens.
-        var topPad = 4;
-        if (viewHeight > body.Count + 6)
-        {
-            // Leave ~40% of leftover space above so the logo sits in the upper-middle.
-            topPad = Math.Max(2, (viewHeight - body.Count) * 2 / 5);
-        }
-
-        var lines = new List<FormattedLine>(topPad + body.Count);
-        for (var i = 0; i < topPad; i++)
-            lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-        lines.AddRange(body);
-        return lines;
     }
 }
 

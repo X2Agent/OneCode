@@ -41,9 +41,12 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 
 | 禁止项 | 原因 | 正确位置 |
 |--------|------|---------|
-| 直接 `File.ReadAllText` 跨越 Infrastructure 层边界 | 绕过抽象层 | 使用 `IFileSystem` |
 | `HttpClient` 直接实例化 | 绕过 DI 池 | 注入 `IHttpClientFactory` |
 | 静态可变状态（全局单例非 DI 管理） | 测试不可控 | 通过 DI Singleton 管理 |
+
+> 文件 I/O 直接使用 `System.IO`；需要工作目录边界校验 + glob 枚举的代码注入
+> `LocalAgentFileStore`（Infrastructure），其 `ResolvePath` 将路径限制在工作目录与
+> `/add-dir` 附加目录内，越界抛 `UnauthorizedAccessException`。
 
 ### AI SDK 依赖约束
 
@@ -70,7 +73,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `CompactionPipelineBuilder` | `Services/Agent/CompactionPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.CompactionPipelineBuilder` |
 | `AgentPipelineBuilder` | `Services/Agent/AgentPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.AgentPipelineBuilder` |
 | `UnifiedDiff` | `Tools/UnifiedDiff.cs` | `OneCode.Infrastructure.Text.UnifiedDiff` |
-| 9 个 MAF 中间件 + 3 个 Invariants + `FileEditContract` | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` / `Middleware.Contracts` |
+| 9 个 MAF 中间件 + 3 个 Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码
 

@@ -6,21 +6,9 @@ public static partial class Constants
 {
     public static class App
     {
-        public static string Name => ProductInfo.Default.Name;
-        public static string CommandLine => ProductInfo.Default.CommandName;
         public static string ConfigDirName => ProductInfo.Default.ConfigDirName;
 
-        /// <summary>
-        /// Configuration directory name candidates in descending priority order.
-        /// Read/discover/watch actions iterate all candidates (see <see cref="ConfigDirPaths"/>);
-        /// write actions keep using <see cref="ConfigDirName"/> (the primary candidate) so the
-        /// install location stays stable.
-        /// </summary>
-        public static IReadOnlyList<string> ConfigDirCandidates { get; } =
-            [".onecode", ".agent", ".claude"];
-
         public const string SettingsFileName = "settings.json";
-        public static string ConfigFileRelative => $"{ProductInfo.Default.ConfigDirName}/{SettingsFileName}";
     }
 
     public static class HttpClientNames
@@ -51,7 +39,6 @@ public static partial class Constants
     {
         public const string Skills = "skills";
         public const string Prompts = "prompts";
-        public const string Commands = "commands";
         public const string Cache = "cache";
 
         /// <summary>
@@ -60,9 +47,6 @@ public static partial class Constants
         /// <c>InsightsCommand</c>（读取）必须共用本常量，避免目录名漂移导致读不到会话。
         /// </summary>
         public const string Events = "events";
-
-        /// <summary>记忆目录（<c>~/.onecode/memory/</c> 与 <c>{cwd}/.onecode/memory/</c>）。</summary>
-        public const string Memory = "memory";
     }
 
     public static class Timeouts

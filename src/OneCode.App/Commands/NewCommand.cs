@@ -24,6 +24,8 @@ public sealed class NewCommand(ISessionManager sessionManager) : Command
         var conv = await sessionManager.BackgroundCurrentAndCreateNewAsync(
             new ConversationOptions(cwd, Name: name), ct).ConfigureAwait(false);
 
-        return CommandResult.Text($"New session created: {conv.Id}\n  Name: {conv.Name}");
+        // 未命名会话不再有占位名，标题待首条消息落地后由 DisplayTitle 推导。
+        var detail = conv.Name.Length > 0 ? $"\n  Name: {conv.Name}" : "";
+        return CommandResult.Text($"New session created: {conv.Id}{detail}");
     }
 }

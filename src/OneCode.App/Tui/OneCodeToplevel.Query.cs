@@ -42,7 +42,6 @@ public sealed partial class OneCodeToplevel
 
         Invoke(() =>
         {
-            RefreshSessionName();
             // Prefer OnUserSubmitted / DrainInputQueueAsync for the user bubble.
             // This path only fills in when the message was not shown yet.
             if (!_userMessageShown)
@@ -191,7 +190,6 @@ public sealed partial class OneCodeToplevel
 
         Invoke(() =>
         {
-            RefreshSessionName();
             // Prefer OnUserSubmitted / DrainInputQueueAsync for the user bubble.
             // This path only fills in when the message was not shown yet.
             if (!_userMessageShown)

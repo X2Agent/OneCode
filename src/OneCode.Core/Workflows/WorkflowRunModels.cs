@@ -36,9 +36,6 @@ public enum RunTerminalReason
     /// <summary>必需权限被拒绝且无法化解。</summary>
     PermissionRefused,
 
-    /// <summary>等待必要的澄清或范围确认。</summary>
-    ClarificationRequired,
-
     /// <summary>被外部依赖或工作区冲突阻断。</summary>
     Blocked,
 }

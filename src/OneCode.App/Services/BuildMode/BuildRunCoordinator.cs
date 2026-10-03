@@ -49,8 +49,9 @@ public interface IBuildRunCoordinator
 }
 
 /// <summary>
-/// Application control plane for Build mode. ChatService owns streaming only;
-/// lifecycle, persistence, clarification and completion gates live here.
+/// Application control plane for Build mode. QueryStreamEngine owns streaming only;
+/// lifecycle, persistence and completion gates live here. 用户交互门（澄清/计划审批）
+/// 已由 Plan 模式审批卡承担，本层只自动放行上层批准的预置计划。
 /// </summary>
 public sealed partial class BuildRunCoordinator(
     IBuildRunStore store,
@@ -58,7 +59,6 @@ public sealed partial class BuildRunCoordinator(
     RequirementAssessmentService assessmentService,
     BuildStateTransitionService transitions,
     BuildTaskLinker taskLinker,
-    IClarificationQuestionGenerator clarificationGenerator,
     ILogger<BuildRunCoordinator> logger) : IBuildRunCoordinator
 {
     public async Task<BuildRun> BeginOrResumeAsync(
@@ -119,13 +119,6 @@ public sealed partial class BuildRunCoordinator(
                         durableStateObserver,
                         existing.Plan).ConfigureAwait(false);
 
-                case BuildResumeAction.ContinueClarification:
-                    return await ContinueClarificationAsync(
-                        existing,
-                        prompt,
-                        ct,
-                        durableStateObserver).ConfigureAwait(false);
-
                 case BuildResumeAction.PrepareFromScope:
                     return await PrepareForExecutionAsync(
                         existing,
@@ -170,28 +163,8 @@ public sealed partial class BuildRunCoordinator(
         };
         run = await SaveAndReloadAsync(run, run.Version, ct, durableStateObserver).ConfigureAwait(false);
 
-        // A caller-supplied plan has already passed validation and represents an approved,
-        // bounded execution contract. Prompt heuristics may enrich its assessment record,
-        // but must not send that contract back through clarification.
-        if (prescribedPlan is null && assessment.RequiresClarification)
-        {
-            IReadOnlyList<string> questions;
-            try
-            {
-                questions = (await clarificationGenerator.GenerateAsync(prompt, assessment, ct).ConfigureAwait(false)).Questions;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return await BlockClarificationFailureAsync(run, ex, ct, durableStateObserver).ConfigureAwait(false);
-            }
-
-            run = transitions.Transition(run, BuildRunState.Clarifying, now) with
-            {
-                ClarificationQuestions = questions,
-            };
-            return await SaveAndReloadAsync(run, run.Version, ct, durableStateObserver).ConfigureAwait(false);
-        }
-
+        // 需求评估只作记录 enrichment：受控执行恒由上层批准的预置计划驱动，不再
+        // 进入澄清对话（历史流内澄清门已随 PlanWorkflow 上线移除）。
         return await PrepareForExecutionAsync(
             run,
             CreateScope(prompt, prescribedPlan is null ? "runtime-derived" : "prescribed-plan", now, prescribedPlan),
@@ -471,7 +444,9 @@ public sealed partial class BuildRunCoordinator(
             return await SaveAndReloadAsync(current, current.Version, ct).ConfigureAwait(false);
         }
 
-        if (validationStatus != BuildValidationStatus.Passed)
+        // Skipped = 无匹配验证 profile（如生成 HTML 报告类工件），验证"不适用"而非失败——
+        // 与 MainAgentRunner 的 Skipped 语义一致；只有显式 Failed 才走失败收口。
+        if (validationStatus == BuildValidationStatus.Failed)
         {
             current = transitions.Transition(current, BuildRunState.Failed, DateTimeOffset.UtcNow) with
             {

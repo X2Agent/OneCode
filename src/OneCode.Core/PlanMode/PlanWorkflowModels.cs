@@ -15,7 +15,7 @@ public readonly partial record struct PlanWorkflowId(string Value)
             ? new PlanWorkflowId(value)
             : null;
 
-    [GeneratedRegex("^[0-9a-f]{32}$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex("^[0-9a-f]{32}$", RegexOptions.IgnoreCase)]
     private static partial Regex SafePattern();
 }
 
@@ -42,7 +42,6 @@ public enum PlanRunKind
 public enum PlanRevisionStatus
 {
     Submitted,
-    Superseded,
     Approved,
     Rejected,
 }
@@ -124,7 +123,7 @@ public sealed record ApprovedPlanSnapshot
     public required DateTimeOffset ApprovedAt { get; init; }
 
     /// <summary>
-    /// 权威投影：ApprovedSnapshot → BuildPlan（原 PlanAgentRunDispatcher.ToBuildPlan 内联实现）。
+    /// 权威投影：ApprovedSnapshot → BuildPlan。
     /// 派生缓存单源：BuildRun.Plan 必须与该投影一致（恢复时经 BuildResumePolicy 的
     /// PlansMatch 以 prescribed = Project(snapshot) 校验）。
     /// </summary>
@@ -203,3 +202,6 @@ public sealed record PlanWorkflow : IWorkflowRun, ICommandIdempotent
         };
     }
 }
+
+public sealed class PlanConcurrencyException(string message) : InvalidOperationException(message);
+public sealed class PlanTransitionException(string message) : InvalidOperationException(message);

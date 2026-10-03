@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text;
-using OneCode.Infrastructure;
 using OneCode.Infrastructure.Remote;
 
 namespace OneCode.App.Tools;
@@ -44,10 +43,8 @@ public sealed class ReadTool
             if (_ssh is { IsConnected: true } ssh)
                 return await ReadRemoteAsync(ssh, filePath, offset, limit, ct).ConfigureAwait(false);
 
-            var resolveResult = PathsHelper.SafeResolve(filePath, _wd.WorkingDirectory, _wd.AdditionalDirectories);
-            if (!resolveResult.IsSuccess)
-                return ToolResult.Error($"Error: {resolveResult.Error}");
-            var fullPath = resolveResult.Value;
+            if (ToolPathGuard.Resolve(filePath, _wd, out var fullPath) is { } resolveError)
+                return resolveError;
 
             if (!File.Exists(fullPath))
                 return ToolResult.Error($"Error: File not found: {fullPath}");

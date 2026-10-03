@@ -14,9 +14,9 @@ namespace OneCode.App.Services.Cron;
 /// tool permission policy → drain event stream to completion.
 /// </summary>
 /// <remarks>
-/// 依赖 <see cref="IConversationRunner"/> 而非 <c>ChatService</c> 具体类：cron 只需要
+/// 依赖 <see cref="IConversationRunner"/> 接口而非具体实现：cron 只需要
 /// "跑一段 prompt"的能力，不需要会话持久化/hook/token 统计等交互式职责。该抽象也是
-/// 断开运行时循环依赖的关键一环（见 <see cref="IConversationRunner"/> 备注）。
+/// 保持构造图为 DAG 的关键一环（见 <see cref="IConversationRunner"/> 备注）。
 ///
 /// Serialised by <see cref="_gate"/> so a cron-triggered run never overlaps the TUI main
 /// loop's run on the same <see cref="SessionManager.ForegroundConversation"/>.

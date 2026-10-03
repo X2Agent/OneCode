@@ -22,11 +22,14 @@ public static class SetupServiceCollectionExtensions
         services.AddSingleton<ReleaseNotesService>();
         services.AddSingleton<UpgradeService>();
 
-        services.AddSingleton<ConfigManager>(_ =>
+        services.AddSingleton<ConfigManager>(sp =>
         {
             var userConfigDir = PathsHelper.GetUserConfigDir();
             var projectConfigDir = Path.Combine(Environment.CurrentDirectory, Constants.App.ConfigDirName);
-            return new ConfigManager(userConfigDir, projectConfigDir);
+            return new ConfigManager(
+                userConfigDir,
+                projectConfigDir,
+                sp.GetService<ILogger<ConfigManager>>());
         });
         services.AddSingleton<IConfigManager>(sp => sp.GetRequiredService<ConfigManager>());
         services.AddSingleton<TrustService>();

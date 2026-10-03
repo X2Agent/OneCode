@@ -16,7 +16,7 @@ public sealed class SessionManager : ISessionManager
     private readonly ITokenUsageTracker _tokenUsageTracker;
     private readonly SessionIdHolder _sessionIdHolder;
     private readonly ISessionToolSetManager _sessionToolSetManager;
-    private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _transcriptLocks = new();
+    private readonly ToolBatchTranscriptAppender _toolBatchAppender;
     private string _workingDirectory;
 
     private readonly List<BackgroundSession> _backgroundSessions = [];
@@ -63,6 +63,7 @@ public sealed class SessionManager : ISessionManager
         _tokenUsageTracker = tokenUsageTracker;
         _sessionIdHolder = sessionIdHolder;
         _sessionToolSetManager = sessionToolSetManager;
+        _toolBatchAppender = new ToolBatchTranscriptAppender(this, PersistAsync);
     }
 
     /// <summary>
@@ -93,7 +94,9 @@ public sealed class SessionManager : ISessionManager
     {
         var conversation = new Conversation
         {
-            Name = options.Name ?? $"conversation-{DateTime.UtcNow:yyyyMMdd-HHmmss}",
+            // 未命名会话的 Name 保持为空：显示标题由 Conversation.DisplayTitle
+            // 按首条用户消息推导，不再落时间戳占位名。
+            Name = options.Name ?? "",
             WorkingDirectory = options.WorkingDirectory,
             Model = options.Model ?? "",
             Status = ConversationStatus.Active,
@@ -107,8 +110,8 @@ public sealed class SessionManager : ISessionManager
         _tokenUsageTracker.Reset();
 
         _logger.LogInformation(
-            "Created conversation {Id} '{Name}' with model {Model}",
-            conversation.Id, conversation.Name, conversation.Model);
+            "Created conversation {Id} with model {Model}",
+            conversation.Id, conversation.Model);
 
         return conversation;
     }
@@ -245,91 +248,11 @@ public sealed class SessionManager : ISessionManager
     /// Atomically appends sealed call/result batches and saves the conversation once.
     /// Incomplete batches are rejected instead of producing provider-invalid history.
     /// </summary>
-    public async Task AppendCompletedToolBatchesAsync(
+    public Task AppendCompletedToolBatchesAsync(
         SessionId conversationId,
         IReadOnlyList<CompletedToolBatch> batches,
         CancellationToken ct = default)
-    {
-        if (batches.Count == 0)
-            return;
-
-        foreach (var batch in batches)
-        {
-            if (!batch.IsComplete)
-                throw new InvalidOperationException($"Tool batch '{batch.BatchId}' is incomplete.");
-        }
-
-        var transcriptLock = _transcriptLocks.GetOrAdd(conversationId, static _ => new SemaphoreSlim(1, 1));
-        await transcriptLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var conversation = GetConversation(conversationId);
-            if (conversation is null)
-                return;
-
-            List<Message> appended = [];
-            foreach (var batch in batches)
-            {
-                var batchMessageId = ToolBatchMessageId(batch.BatchId);
-                if (conversation.Messages.Any(message =>
-                        string.Equals(message.Id, batchMessageId, StringComparison.Ordinal)))
-                {
-                    continue;
-                }
-
-                var assistantMessage = new AssistantMessage(
-                    Id: batchMessageId,
-                    Content: batch.Calls.OrderBy(call => call.Order)
-                        .Select(call => (ContentBlock)new ToolUseBlock(
-                            call.CallId,
-                            call.ToolName,
-                            call.ArgumentsJson))
-                        .ToArray(),
-                    Timestamp: batch.CompletedAt);
-                conversation.Messages.Add(assistantMessage);
-                appended.Add(assistantMessage);
-
-                foreach (var result in batch.Results.OrderBy(result => result.Order))
-                {
-                    var resultMessage = new ToolResultMessage(
-                        Id: ToolBatchResultMessageId(batch.BatchId, result.CallId),
-                        ToolUseId: result.CallId,
-                        ToolName: result.ToolName,
-                        Content: result.ResultJson,
-                        IsError: result.IsError,
-                        Timestamp: batch.CompletedAt);
-                    conversation.Messages.Add(resultMessage);
-                    appended.Add(resultMessage);
-                }
-            }
-
-            if (appended.Count == 0)
-                return;
-
-            var previousLastActivityAt = conversation.LastActivityAt;
-            conversation.LastActivityAt = DateTimeOffset.UtcNow;
-            try
-            {
-                await PersistAsync(conversation, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                foreach (var message in appended)
-                    conversation.Messages.Remove(message);
-                conversation.LastActivityAt = previousLastActivityAt;
-                throw;
-            }
-        }
-        finally
-        {
-            transcriptLock.Release();
-        }
-    }
-
-    private static string ToolBatchMessageId(string batchId) => $"tool-batch:{batchId}";
-
-    private static string ToolBatchResultMessageId(string batchId, string callId)
-        => $"tool-batch:{batchId}:result:{callId}";
+        => _toolBatchAppender.AppendAsync(conversationId, batches, ct);
 
     /// <summary>Build chat history for the foreground conversation (excluding system prompt).</summary>
     public IReadOnlyList<ChatMessage> GetForegroundChatHistory()

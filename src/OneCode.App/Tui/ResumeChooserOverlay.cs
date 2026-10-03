@@ -90,8 +90,11 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
 }
 
 /// <summary>Display entry for a resumable session.</summary>
-public sealed record SessionEntry(string Id, string Name, string Model, string Mode, int MessageCount, DateTimeOffset LastActivity)
+public sealed record SessionEntry(string Id, string Title, string Model, string Mode, int MessageCount, DateTimeOffset LastActivity)
 {
+    // 标题列按 26 字符截断（超长加省略号），防止把后面的时间列挤出 overlay 可视宽度。
     public string DisplayText =>
-        $"{Name,-28} {Model,-18} {Mode,-6} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
+        $"{TruncateTitle(),-26} {Model,-18} {Mode,-6} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
+
+    private string TruncateTitle() => Title.Length <= 26 ? Title : Title[..25] + "…";
 }

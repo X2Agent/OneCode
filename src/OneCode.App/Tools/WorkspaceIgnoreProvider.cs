@@ -1,5 +1,4 @@
 using Microsoft.Extensions.FileSystemGlobbing;
-using OneCode.Core.IO;
 
 namespace OneCode.App.Tools;
 
@@ -141,9 +140,7 @@ public sealed class WorkspaceIgnoreSnapshot
 }
 
 /// <summary>Loads and caches `.onecodeignore` for the current working directory.</summary>
-public sealed class WorkspaceIgnoreProvider(
-    IWorkingDirectoryAccessor workingDirectory,
-    IFileSystem fileSystem) : IWorkspaceIgnoreProvider
+public sealed class WorkspaceIgnoreProvider(IWorkingDirectoryAccessor workingDirectory) : IWorkspaceIgnoreProvider
 {
     private readonly object _gate = new();
     private string? _cachedPath;
@@ -154,7 +151,9 @@ public sealed class WorkspaceIgnoreProvider(
     {
         var root = Path.GetFullPath(workingDirectory.WorkingDirectory);
         var path = Path.Combine(root, ".onecodeignore");
-        var mtime = fileSystem.GetMtimeMs(path);
+        var mtime = File.Exists(path)
+            ? new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds()
+            : 0;
         lock (_gate)
         {
             if (_cachedSnapshot is not null &&
@@ -163,7 +162,9 @@ public sealed class WorkspaceIgnoreProvider(
                 return _cachedSnapshot;
         }
 
-        var content = await fileSystem.ReadTextFileAsync(path, ct).ConfigureAwait(false);
+        var content = File.Exists(path)
+            ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)
+            : null;
         var snapshot = Parse(path, content);
         lock (_gate)
         {

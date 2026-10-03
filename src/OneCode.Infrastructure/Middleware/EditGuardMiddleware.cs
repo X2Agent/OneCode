@@ -1,16 +1,15 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OneCode.Core.Domain;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Middleware.Contracts;
 
 namespace OneCode.Infrastructure.Middleware;
 
 /// <summary>
-/// Single edit-lifecycle middleware (W2-B): FileEdit contract pre-checks, then optional
-/// post-edit verification. Replaces separate <c>ContractMiddleware</c> + <c>VerificationMiddleware</c> installs.
-/// Weak FileEdit post-conditions (file-still-exists) are dropped; verification covers post-edit quality.
+/// Single edit-lifecycle middleware: Edit-target pre-checks, then optional post-edit verification.
+/// Weak file-still-exists post-conditions are dropped; verification covers post-edit quality.
+/// Path scope checks belong to <c>PermissionChecker.ValidatePath</c>, which also handles
+/// AdditionalWorkingDirectories correctly.
 /// </summary>
 public static class EditGuardMiddleware
 {
@@ -18,7 +17,7 @@ public static class EditGuardMiddleware
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
             CancellationToken, ValueTask<object?>>
         Create(
-            IReadOnlyList<FileEditContract>? contracts,
+            bool enforceEditTargetExists,
             IVerificationProvider? verificationProvider,
             string workingDirectory,
             VerificationOptions? verificationOptions,
@@ -34,8 +33,8 @@ public static class EditGuardMiddleware
 
             var toolName = ctx.Function.Name;
 
-            // --- Pre: behavior contracts (FileEdit exists / path) ---
-            if (contracts is { Count: > 0 })
+            // --- Pre: Edit requires an existing target file ---
+            if (enforceEditTargetExists && ToolNames.IsFileEditTool(toolName))
             {
                 var parameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, toolName, logger);
                 if (parameters is null)
@@ -44,19 +43,25 @@ public static class EditGuardMiddleware
                         $"[CONTRACT] Parameter extraction failed for tool '{toolName}' — blocked to prevent fail-open.");
                 }
 
-                var stateBagForPre = AIAgent.CurrentRunContext?.Session?.StateBag;
-                if (stateBagForPre is null)
+                // Edit 特定检查：目标文件必须存在。Write 不要求（创建新文件是合法用例，
+                // 多数 Write 实现会自动 CreateDirectory，不强制父目录存在）。
+                if (string.Equals(toolName, "Edit", StringComparison.OrdinalIgnoreCase))
                 {
-                    logger.LogWarning("EditGuardMiddleware: StateBag unavailable, skipping contract pre-checks");
-                }
-                else
-                {
-                    foreach (var contract in contracts.Where(c => c.ApplicableTools.Contains(toolName)))
+                    var editPath = ToolArgumentExtractor.ExtractFilePath(parameters);
+                    if (editPath is not null)
                     {
-                        var preResult = await contract.ValidatePreConditionsAsync(toolName, parameters, ct)
-                            .ConfigureAwait(false);
-                        if (preResult is ContractFailed preFail)
-                            return ToolResult.Error(contract.BuildRecoveryGuidance(preFail));
+                        string fullPath;
+                        try
+                        {
+                            fullPath = Path.GetFullPath(editPath, workingDirectory);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            return ToolResult.Error(BuildRecoveryGuidance("Invalid file path.", $"Path: {editPath}"));
+                        }
+
+                        if (!File.Exists(fullPath))
+                            return ToolResult.Error(BuildRecoveryGuidance("Target file does not exist.", $"Path: {fullPath}"));
                     }
                 }
             }
@@ -116,4 +121,14 @@ public static class EditGuardMiddleware
             return ToolResult.Error(combinedContent, "Fix the verification errors above before making further edits.");
         };
     }
+
+    private static string BuildRecoveryGuidance(string description, string details) =>
+        $"""
+        [BEHAVIOR CONTRACT VIOLATION] {description}
+        {details}
+        Recovery steps:
+        1. Re-read the target file's current content
+        2. Fix the issue causing the failure
+        3. Re-submit the edit
+        """;
 }

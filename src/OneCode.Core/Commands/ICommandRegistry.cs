@@ -29,7 +29,7 @@ public interface ICommandRegistry
     void UnregisterBySource(CommandSource source);
 
     /// <summary>
-    /// 刷新所有动态命令来源（C-04）：先清除旧命令，再加载新命令。
+    /// 刷新所有动态命令来源：先清除旧命令，再加载新命令。
     /// </summary>
     Task RefreshDynamicCommandsAsync(IEnumerable<IDynamicCommandSource> sources, CancellationToken ct);
 }

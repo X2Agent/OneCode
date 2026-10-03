@@ -1,7 +1,7 @@
 namespace OneCode.Core.IO;
 
 /// <summary>
-/// Platform-aware path comparer (Fix-4/F-09): Windows file systems are
+/// Platform-aware path comparer: Windows file systems are
 /// case-insensitive, Unix ones are not. Using a fixed OrdinalIgnoreCase
 /// everywhere merges distinct files on Linux (for example <c>A.cs</c> and
 /// <c>a.cs</c>), letting change-scope checks miss out-of-scope writes.

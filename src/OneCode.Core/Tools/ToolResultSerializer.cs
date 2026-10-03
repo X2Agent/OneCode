@@ -1,3 +1,5 @@
+using System.Text.Encodings.Web;
+using System.Text.Json.Serialization;
 using OneCode.Core.Models;
 
 namespace OneCode.Core.Tools;
@@ -18,8 +20,8 @@ public static class ToolResultSerializer
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = false,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>

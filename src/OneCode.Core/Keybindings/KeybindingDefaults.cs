@@ -5,8 +5,6 @@ namespace OneCode.Core.Keybindings;
 /// </summary>
 public static class KeybindingDefaults
 {
-    #region 上下文常量
-
     public const string ContextGlobal = "Global";
     public const string ContextChat = "Chat";
     public const string ContextAutocomplete = "Autocomplete";
@@ -38,9 +36,7 @@ public static class KeybindingDefaults
         [ContextSelector] = "While an inline selector owns the keyboard",
     };
 
-    #endregion
-
-    #region 动作常量
+    // 动作常量
 
     // App 级别动作
     public const string ActionAppExit = "app:exit";
@@ -74,6 +70,10 @@ public static class KeybindingDefaults
     public const string ActionChatScrollDown = "chat:scrollDown";
     public const string ActionChatPageUp = "chat:pageUp";
     public const string ActionChatPageDown = "chat:pageDown";
+
+    // 侧栏（Plan/Team 计划卡）键盘滚动——与主对话区滚动互不干扰的分区操作。
+    public const string ActionSidebarPageUp = "sidebar:pageUp";
+    public const string ActionSidebarPageDown = "sidebar:pageDown";
 
     // TEAM 模式专用：循环切换已注册团队（code-review → research → ...）
     // 绑定 Shift+Tab（Tab 换模式、Shift+Tab 换模式内的团队）。
@@ -192,9 +192,7 @@ public static class KeybindingDefaults
     public static bool IsValidAction(string action) =>
         AllActionsSet.Contains(action) || action.StartsWith("command:", StringComparison.Ordinal);
 
-    #endregion
-
-    #region 默认绑定
+    // 默认绑定
 
     /// <summary>
     /// 默认快捷键绑定映射。
@@ -231,6 +229,10 @@ public static class KeybindingDefaults
             ["ctrl+pgdn"] = ActionChatScrollDown,
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
+
+            // 侧栏翻页（Shift+PageUp/PageDown）：主对话区与右侧计划/团队侧栏分区滚动。
+            ["shift+pgup"] = ActionSidebarPageUp,
+            ["shift+pgdn"] = ActionSidebarPageDown,
 
             // TEAM 模式下循环切换已注册团队（Shift+Tab）。
             // 编排模式由 team.yaml 固定声明，运行期不可覆盖，无策略切换键。
@@ -280,9 +282,7 @@ public static class KeybindingDefaults
     public static List<KeybindingEntry> GetDefaultParsedBindings() =>
         KeybindingParser.ParseBindings(DefaultBindings);
 
-    #endregion
-
-    #region 保留快捷键
+    // 保留快捷键
 
     /// <summary>
     /// 不可重新绑定的快捷键（硬编码行为）。
@@ -337,6 +337,4 @@ public static class KeybindingDefaults
 
         return reserved;
     }
-
-    #endregion
 }

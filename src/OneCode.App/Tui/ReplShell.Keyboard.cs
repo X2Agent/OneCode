@@ -69,6 +69,37 @@ public sealed partial class ReplShell
             return true;
         }
 
+        // chat 滚动兜底：焦点异常离开输入框时，PageUp/PageDown/Ctrl+PgUp/PgDn/
+        // Shift+Up/Down 仍应滚动转录。加 !HasInputFocus 守卫：焦点在输入框时滚动键
+        // 已由 ChatTextEditor 拦截 → ChatInputView 分发，兜底再执行就是重复分发
+        // （吞泡偶发失效时同一按键会翻两页）。
+        if (_chatInput.HasInputFocus)
+        {
+            return base.OnKeyDown(kb);
+        }
+
+        switch (action)
+        {
+            case KeybindingDefaults.ActionChatPageUp:
+                _transcript.MessageView.PageUp();
+                return true;
+            case KeybindingDefaults.ActionChatPageDown:
+                _transcript.MessageView.PageDown();
+                return true;
+            case KeybindingDefaults.ActionChatScrollUp:
+                _transcript.MessageView.ScrollUp();
+                return true;
+            case KeybindingDefaults.ActionChatScrollDown:
+                _transcript.MessageView.ScrollDown();
+                return true;
+            case KeybindingDefaults.ActionSidebarPageUp:
+                ActiveSidebar?.PageUp();
+                return true;
+            case KeybindingDefaults.ActionSidebarPageDown:
+                ActiveSidebar?.PageDown();
+                return true;
+        }
+
         // Ctrl+D — exit the application (when prompt is not focused).
         // When the prompt has focus, ChatInputView.OnInputKeyPress handles it instead.
         if (action == KeybindingDefaults.ActionAppExit && !_chatInput.HasFocus)

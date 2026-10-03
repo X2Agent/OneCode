@@ -66,26 +66,6 @@ public sealed record SessionMarkerEvent(
     public override SessionEvent WithSequence(long sequence) => this with { Sequence = sequence };
 }
 
-/// <summary>附件消息事件。</summary>
-public sealed record AttachmentMessageEvent(
-    SessionId SessionId,
-    long Sequence,
-    DateTimeOffset OccurredAt,
-    AttachmentMessage Message) : SessionEvent(SessionId, Sequence, OccurredAt, SessionEventType.AttachmentMessage)
-{
-    public override SessionEvent WithSequence(long sequence) => this with { Sequence = sequence };
-}
-
-/// <summary>墓碑消息事件。</summary>
-public sealed record TombstoneMessageEvent(
-    SessionId SessionId,
-    long Sequence,
-    DateTimeOffset OccurredAt,
-    TombstoneMessage Message) : SessionEvent(SessionId, Sequence, OccurredAt, SessionEventType.TombstoneMessage)
-{
-    public override SessionEvent WithSequence(long sequence) => this with { Sequence = sequence };
-}
-
 /// <summary>会话创建和元数据快照事件。</summary>
 public sealed record SessionStartedEvent(
     SessionId SessionId,

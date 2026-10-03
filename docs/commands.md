@@ -106,7 +106,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` / `ls` | 列出所有配置及来源、生效模式（TUI 中裸命令打开设置 overlay） |
+| 无参数 / `list` / `ls` | 列出所有配置及来源、生效模式（TUI 中裸 `/config` 打开设置 overlay；`list` / `ls` 仅输出文本） |
 | `get <key>` | 获取指定配置值 |
 | `set <scope> <key> <value>` | 在指定作用域写入配置值 |
 | `remove <scope> <key>` | 移除指定作用域的配置覆盖 |

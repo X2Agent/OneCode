@@ -70,6 +70,28 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
         replacements[0].Reason.Should().Be("compact.full");
     }
 
+    [Fact]
+    public async Task ListAsync_Title_PrefersNameElseFirstUserMessage()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var events = new FileSessionEventStore(_root);
+        var store = new EventSourcedSessionStore(events);
+
+        var named = CreateConversation();
+        named.Messages.Add(new UserMessage("u1", "first message", DateTimeOffset.UtcNow));
+        await store.SaveAsync(named, ct);
+
+        var unnamed = CreateConversation();
+        unnamed.Name = "";
+        unnamed.Messages.Add(new UserMessage("u2", "帮我修复登录超时", DateTimeOffset.UtcNow));
+        await store.SaveAsync(unnamed, ct);
+
+        var summaries = await store.ListAsync(ct);
+
+        summaries.Single(s => s.Id == named.Id).Title.Should().Be("event-sourced");
+        summaries.Single(s => s.Id == unnamed.Id).Title.Should().Be("帮我修复登录超时");
+    }
+
     private Conversation CreateConversation() => new()
     {
         Id = SessionId.NewId(),

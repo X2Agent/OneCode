@@ -42,6 +42,8 @@ internal static class MessageRenderer
     /// <summary>
     /// 构建工具调用展开后显示的完整详情行（Args + Result，按视口宽度自动换行）。
     /// 折叠行负责保持会话紧凑；用户主动展开后不再二次截断内容。
+    /// 组行（<see cref="ToolLineTag.Group"/> 非空）展开为逐条摘要列表：
+    /// 序号 + 搜索词/路径等目标 + 结果摘要 + 单条时长。
     /// </summary>
     public static List<LineEntry> BuildToolDetailLines(ToolLineTag tag, int viewportWidth)
     {
@@ -49,6 +51,46 @@ internal static class MessageRenderer
         List<LineEntry> lines = [];
         var marker = new ToolDetailLineTag();
         var maxContentWidth = Math.Max(20, viewportWidth - detailIndent.Length);
+
+        if (tag.Group is { Count: > 0 } group)
+        {
+            for (var i = 0; i < group.Count; i++)
+            {
+                var member = group[i];
+                var target = TextWidthHelper.CollapseToSingleLine(
+                    ToolResultSummarizer.FormatTarget(tag.Name, member.Args));
+                var summary = string.IsNullOrEmpty(member.Result)
+                    ? string.Empty
+                    : TextWidthHelper.CollapseToSingleLine(
+                        ToolResultSummarizer.Summarize(tag.Name, member.Result, member.Args) ?? string.Empty);
+
+                var text = string.IsNullOrEmpty(summary)
+                    ? $"{i + 1}. {target} ({member.Duration})"
+                    : $"{i + 1}. {target} · {summary} ({member.Duration})";
+                var entryColor = member.IsError ? TuiPalette.Error : TuiPalette.FgSecondary;
+                lines.Add(new LineEntry(
+                    $"{detailIndent}{text}",
+                    entryColor,
+                    new[]
+                    {
+                        new LineSegment($"{detailIndent}{i + 1}. ", TuiPalette.FgMuted),
+                        new LineSegment(target, TuiPalette.ToolDetailColor),
+                        new LineSegment(string.IsNullOrEmpty(summary) ? $" ({member.Duration})" : $" · {summary} ({member.Duration})", entryColor),
+                    },
+                    Tag: marker));
+            }
+
+            if (lines.Count == 0)
+            {
+                lines.Add(new LineEntry(
+                    $"{detailIndent}(no details available)",
+                    TuiPalette.FgMuted,
+                    null,
+                    Tag: marker));
+            }
+
+            return lines;
+        }
 
         if (!string.IsNullOrWhiteSpace(tag.Args))
         {
@@ -80,15 +122,13 @@ internal static class MessageRenderer
 
         if (!string.IsNullOrWhiteSpace(tag.Result))
         {
-            var resultText = FormatResultContent(tag.Result);
-            var resultLines = resultText.Replace("\r\n", "\n").Split('\n');
-            foreach (var resultLine in resultLines)
+            foreach (var detail in ToolResultDetailFormatter.FormatDetail(tag.Name, tag.Result))
             {
-                foreach (var wrappedLine in TextWidthHelper.WordWrapByWidth(resultLine, maxContentWidth))
+                foreach (var wrappedLine in TextWidthHelper.WordWrapByWidth(detail.Text, maxContentWidth))
                 {
                     lines.Add(new LineEntry(
                         $"{detailIndent}{wrappedLine}",
-                        TuiPalette.FgSecondary,
+                        detail.Fg ?? TuiPalette.FgSecondary,
                         null,
                         Tag: marker));
                 }
@@ -106,11 +146,4 @@ internal static class MessageRenderer
 
         return lines;
     }
-
-    /// <summary>
-    /// Normalizes JSON, JSON-string and mixed-text result content for readability in
-    /// the expanded tool detail view without altering non-Unicode backslash escapes.
-    /// </summary>
-    private static string FormatResultContent(string result)
-        => OneCode.Core.Tools.DisplayJsonSerializer.NormalizeForDisplay(result);
 }

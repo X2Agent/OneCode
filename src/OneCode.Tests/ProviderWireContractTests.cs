@@ -252,9 +252,9 @@ public sealed class ProviderWireContractTests
         ];
 
         await sut.GetResponseAsync(history, cancellationToken: TestContext.Current.CancellationToken);
-        history.Add(new ChatMessage(ChatRole.User, [new FunctionResultContent("call_1", "result 1")]));
+        history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call_1", "result 1")]));
         await sut.GetResponseAsync(history, cancellationToken: TestContext.Current.CancellationToken);
-        history.Add(new ChatMessage(ChatRole.User, [new FunctionResultContent("call_2", "result 2")]));
+        history.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call_2", "result 2")]));
         await sut.GetResponseAsync(history, cancellationToken: TestContext.Current.CancellationToken);
 
         capture.RequestBodies.Should().HaveCount(3);
@@ -269,6 +269,52 @@ public sealed class ProviderWireContractTests
         // 历史里的原始实例永远不被写入
         history.SelectMany(m => m.Contents)
             .Should().OnlyContain(c => c.AdditionalProperties == null || c.AdditionalProperties.Count == 0);
+    }
+
+    [Fact]
+    public async Task OpenAi_ToolRoleResults_AreSerializedAsToolMessages()
+    {
+        // 跨轮回放协议：工具结果必须走 ChatRole.Tool——OpenAI 适配器只把 Tool 角色的
+        // FunctionResultContent 序列化为 tool wire 消息，User 角色会被静默丢弃
+        // （assistant tool_calls 无 tool 结果的畸形历史，部分模型返回空响应）。
+        var (sut, capture) = CreateOpenAiSut();
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, "search the news"),
+            new(ChatRole.Assistant, [new FunctionCallContent("call_1", "web_search", new Dictionary<string, object?>())]),
+            new(ChatRole.Tool, [new FunctionResultContent("call_1", """{"results":[]}""")]),
+        ];
+
+        await sut.GetResponseAsync(history, cancellationToken: TestContext.Current.CancellationToken);
+
+        var messages = Body(capture).GetProperty("messages");
+        messages.GetArrayLength().Should().Be(3);
+        var toolMessage = messages[2];
+        toolMessage.GetProperty("role").GetString().Should().Be("tool");
+        toolMessage.GetProperty("tool_call_id").GetString().Should().Be("call_1");
+        toolMessage.GetProperty("content").GetString().Should().Contain("results");
+    }
+
+    [Fact]
+    public async Task Anthropic_ToolRoleResults_BecomeToolResultBlocksInUserMessage()
+    {
+        var (sut, capture) = CreateAnthropicSut();
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, "search the news"),
+            new(ChatRole.Assistant, [new FunctionCallContent("call_1", "web_search", new Dictionary<string, object?>())]),
+            new(ChatRole.Tool, [new FunctionResultContent("call_1", """{"results":[]}""")]),
+        ];
+
+        await sut.GetResponseAsync(history, cancellationToken: TestContext.Current.CancellationToken);
+
+        var messages = Body(capture).GetProperty("messages");
+        var lastMessage = messages[messages.GetArrayLength() - 1];
+        lastMessage.GetProperty("role").GetString().Should().Be("user"); // tool 消息并入 user 轮（Anthropic 协议）
+        var toolResultBlock = lastMessage.GetProperty("content")
+            .EnumerateArray()
+            .Single(block => block.GetProperty("type").GetString() == "tool_result");
+        toolResultBlock.GetProperty("tool_use_id").GetString().Should().Be("call_1");
     }
 
     private static int CountCacheControlBlocks(JsonElement element)

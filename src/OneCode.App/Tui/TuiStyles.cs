@@ -39,24 +39,25 @@ internal static class TuiStyles
     public static Attribute ThinkingLine => new(TuiPalette.Thinking, TuiPalette.BgPrimary);
     public static Attribute SpinnerColor => new(TuiPalette.Accent, TuiPalette.BgPrimary);
 
-    // Chat input region — 背景与状态栏一致（BgSurface），使底部区域视觉连贯
+    // Chat input region — 背景与状态栏一致（BgInput），使底部区域视觉连贯，
+    // 与消息区（BgPrimary）只保留微弱分层，不形成突兀色块。
     public static Scheme ChatInput => new()
     {
-        Normal = new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface),
-        Focus = new Attribute(TuiPalette.FgPrimary, TuiPalette.BgSurface),
-        HotNormal = new Attribute(TuiPalette.Accent, TuiPalette.BgSurface),
-        HotFocus = new Attribute(TuiPalette.Accent, TuiPalette.BgSurface),
-        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface),
+        Normal = new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput),
+        Focus = new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput),
+        HotNormal = new Attribute(TuiPalette.Accent, TuiPalette.BgInput),
+        HotFocus = new Attribute(TuiPalette.Accent, TuiPalette.BgInput),
+        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput),
     };
 
     // Status bar
     public static Scheme StatusBar => new()
     {
-        Normal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface),
-        Focus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface),
-        HotNormal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface),
-        HotFocus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgSurface),
-        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgSurface),
+        Normal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
+        Focus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
+        HotNormal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
+        HotFocus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
+        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput),
     };
 
     // Completion popup

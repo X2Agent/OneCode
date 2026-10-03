@@ -33,8 +33,6 @@ public static class ConversationEventMapper
             SystemMessage system => new SystemMessageEvent(conversation.Id, 0, system.Timestamp, system),
             AssistantMessage assistant => new AssistantMessageEvent(conversation.Id, 0, assistant.Timestamp, assistant),
             ToolResultMessage toolResult => new ToolResultEvent(conversation.Id, 0, toolResult.Timestamp, toolResult),
-            AttachmentMessage attachment => new AttachmentMessageEvent(conversation.Id, 0, attachment.Timestamp, attachment),
-            TombstoneMessage tombstone => new TombstoneMessageEvent(conversation.Id, 0, tombstone.Timestamp, tombstone),
             _ => throw new InvalidOperationException($"Unsupported conversation message: {message.GetType().Name}"),
         }));
 

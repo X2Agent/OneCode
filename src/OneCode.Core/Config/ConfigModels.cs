@@ -112,17 +112,17 @@ public static class SettingDescriptors
     private static readonly IReadOnlyDictionary<string, SettingDescriptor> Items =
         new Dictionary<string, SettingDescriptor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["apiKey"] = new("apiKey", ActivationMode.RestartRequired, IsSecret: true, EnvironmentVariable: "ONECODE_API_KEY"),
-            ["baseUrl"] = new("baseUrl", ActivationMode.RestartRequired, EnvironmentVariable: "ONECODE_BASE_URL"),
+            ["apiKey"] = new("apiKey", ActivationMode.RestartRequired, IsSecret: true, EnvironmentVariable: Constants.EnvVars.OneCodeApiKey),
+            ["baseUrl"] = new("baseUrl", ActivationMode.RestartRequired, EnvironmentVariable: Constants.EnvVars.OneCodeBaseUrl),
             ["provider"] = new("provider", ActivationMode.RestartRequired, EnvironmentVariable: "ONECODE_PROVIDER_OVERRIDE", BuiltInDefault: "anthropic"),
-            ["model"] = new("model", ActivationMode.NextOperation, EnvironmentVariable: "ONECODE_MODEL"),
+            ["model"] = new("model", ActivationMode.NextOperation, EnvironmentVariable: Constants.EnvVars.OneCodeModel),
             ["fastModel"] = new("fastModel", ActivationMode.NextOperation),
             ["permissionMode"] = new("permissionMode", ActivationMode.NextOperation, BuiltInDefault: "default"),
             ["trustedDirectories"] = new("trustedDirectories", ActivationMode.Immediate, ConfigValueKind.StringList, AllowProjectScope: false, BuiltInDefault: Array.Empty<string>()),
             ["allowedDirectories"] = new("allowedDirectories", ActivationMode.Immediate, ConfigValueKind.StringList, BuiltInDefault: Array.Empty<string>()),
             ["hasTrustAccepted"] = new("hasTrustAccepted", ActivationMode.Immediate, ConfigValueKind.Boolean, AllowProjectScope: false, BuiltInDefault: false),
-            ["maxTurns"] = new("maxTurns", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 100),
-            ["maxBudgetTokens"] = new("maxBudgetTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: 5_000_000L),
+            ["maxTurns"] = new("maxTurns", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.MaxTurnsDefault),
+            ["maxBudgetTokens"] = new("maxBudgetTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: Constants.Session.MaxBudgetTokensDefault),
             ["webSearchProvider"] = new("webSearchProvider", ActivationMode.NextOperation, EnvironmentVariable: Constants.EnvVars.OneCodeWebSearchProvider, BuiltInDefault: "duckduckgo"),
             ["webSearchApiKeys.tavily"] = new("webSearchApiKeys.tavily", ActivationMode.NextOperation, IsSecret: true, EnvironmentVariable: Constants.EnvVars.TavilyApiKey),
             ["thinkingEnabled"] = new("thinkingEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: false),
@@ -134,11 +134,11 @@ public static class SettingDescriptors
             ["autodream.enabled"] = new("autodream.enabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, EnvironmentVariable: "ONECODE_AUTODREAM", BuiltInDefault: true),
             ["autodream.minHours"] = new("autodream.minHours", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_HOURS", BuiltInDefault: 6),
             ["autodream.minSessions"] = new("autodream.minSessions", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_SESSIONS", BuiltInDefault: 3),
-            ["goal.maxSubGoalAttempts"] = new("goal.maxSubGoalAttempts", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 20),
-            ["goal.maxTurnsPerSubGoal"] = new("goal.maxTurnsPerSubGoal", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 50),
-            ["goal.maxTotalTokens"] = new("goal.maxTotalTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: 200_000L),
-            ["goal.maxWallClockHours"] = new("goal.maxWallClockHours", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: 2.0),
-            ["loop.maxIterations"] = new("loop.maxIterations", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 3),
+            ["goal.maxSubGoalAttempts"] = new("goal.maxSubGoalAttempts", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.GoalMaxSubGoalAttemptsDefault),
+            ["goal.maxTurnsPerSubGoal"] = new("goal.maxTurnsPerSubGoal", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.GoalMaxTurnsPerSubGoalDefault),
+            ["goal.maxTotalTokens"] = new("goal.maxTotalTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: Constants.Session.GoalMaxTotalTokensDefault),
+            ["goal.maxWallClockHours"] = new("goal.maxWallClockHours", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: Constants.Session.GoalMaxWallClockHoursDefault),
+            ["loop.maxIterations"] = new("loop.maxIterations", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.LoopMaxIterationsDefault),
         };
 
     public static IEnumerable<SettingDescriptor> All => Items.Values;

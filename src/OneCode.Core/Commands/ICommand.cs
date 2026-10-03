@@ -4,8 +4,6 @@ namespace OneCode.Core.Commands;
 /// Core command contract.
 /// 元数据成员（Category/Aliases 等）以默认接口成员（DIM）形式内联在本接口中，
 /// 具体命令通常继承 <see cref="Command"/> 基类并仅 override 需要的成员。
-/// （原 ICommandMetadata 可选接口已并入本接口——所有命令经 Command 基类均具备元数据，
-/// 消费方不再需要 is-check 模式。）
 /// </summary>
 public interface ICommand
 {

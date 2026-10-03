@@ -223,6 +223,28 @@ public partial class MainAgentRunner(
                 currentMessages = [new ChatMessage(ChatRole.User, approvalResponses)];
             }
 
+            // 产出画像诊断日志：2026-09 的"对话静默停止"事故中，模型返回 200 + 零内容
+            // 流式响应后运行按 Completed 收尾，全链路无任何日志，只能靠时间差推断。
+            if (evidence.TurnCount == 0 && evidence.ToolCallCount == 0)
+            {
+                _logger.LogWarning(
+                    "Agent run completed with zero output (no text, no tool calls, finishReason={FinishReason}, in={InputTokens}, out={OutputTokens}) — the model likely returned an empty response",
+                    evidence.FinishReason?.ToString() ?? "none",
+                    evidence.InputTokens,
+                    evidence.OutputTokens);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Agent run finished (terminal={TerminalReason}, turns={Turns}, toolCalls={ToolCalls}, in={InputTokens}, out={OutputTokens}, finishReason={FinishReason})",
+                    terminalReason,
+                    evidence.TurnCount,
+                    evidence.ToolCallCount,
+                    evidence.InputTokens,
+                    evidence.OutputTokens,
+                    evidence.FinishReason?.ToString() ?? "none");
+            }
+
             await _sessionStore.PersistSessionAsync(
                 builtAgent,
                 session,

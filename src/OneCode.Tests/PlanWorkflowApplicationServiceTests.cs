@@ -532,6 +532,47 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BindBuildRunAsync_SameRunAfterCompletion_IsIdempotent()
+    {
+        // 成功收尾的固定时序：plan workflow 先经验证完成（Completed、ActiveRunId 清空），
+        // BuildRun 的 Verifying 投影事件随后到达触发第二次绑定——同 run 重绑必须幂等
+        // 成功，不得被状态守卫误判为失败（否则批准执行全链报 "cannot bind" 错误）。
+        var sessionId = SessionId.NewId();
+        var store = new PlanAggregateStore(Path.Combine(_root, Guid.NewGuid().ToString("N")));
+        var sut = new PlanWorkflowApplicationService(store);
+        var executing = await CreatePersistedExecutingWorkflowAsync(sut, sessionId);
+        var buildRunId = BuildRunId.New().ToString();
+        var first = await sut.BindBuildRunAsync(new BindPlanBuildRunCommand(
+            $"bind-{buildRunId}",
+            sessionId,
+            executing.Id,
+            executing.ActiveRunId!,
+            buildRunId), TestContext.Current.CancellationToken);
+        first.Workflow.BuildRunId.Should().Be(buildRunId);
+
+        // 模拟验证完成：Completed、ActiveRunId 清空（单槽幂等标记也已被其他命令覆盖）。
+        var current = (await store.LoadAsync(sessionId, TestContext.Current.CancellationToken))!;
+        var completed = current.Workflow with
+        {
+            State = PlanWorkflowState.Completed,
+            ActiveRunId = null,
+            Version = current.Workflow.Version + 1,
+            LastProcessedCommandId = "complete-plan-verification-later-command",
+        };
+        await store.SaveAsync(current with { Workflow = completed }, current.Workflow.Version, TestContext.Current.CancellationToken);
+
+        var rebound = await sut.BindBuildRunAsync(new BindPlanBuildRunCommand(
+            "bind-after-completion",
+            sessionId,
+            executing.Id,
+            "build-durable",
+            buildRunId), TestContext.Current.CancellationToken);
+
+        rebound.IsDuplicateCommand.Should().BeTrue();
+        rebound.Workflow.BuildRunId.Should().Be(buildRunId);
+    }
+
+    [Fact]
     public async Task FailExecutionRecoveryAsync_ReplayedCommand_IsIdempotent()
     {
         var sessionId = SessionId.NewId();

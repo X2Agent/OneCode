@@ -198,7 +198,7 @@ provider 次序与状态 key、source/provider/client 所有权不误释放共�
 
 - 自写 `while (RunStreaming)` 外层目标环（Goal 已用 MAF `LoopAgent` + `DelegateLoopEvaluator`；`/loop` 运行时有界循环同样走 `LoopAgent` —— 见 [代理循环边界](./0010-agent-loop-boundaries.md)）
 - 新的 `ApprovalHandler` / 平行 Ask 引擎（历史踩坑处）
-- 自研 chat history 循环（交给 `ChatHistoryProvider`；Main 路径经 `TranscriptChatHistoryProvider` 读会话转录，宿主不注入历史消息、也不清空框架历史）
+- 自研 chat history 循环（交给 `ChatHistoryProvider`；Main 路径经 `TranscriptChatHistoryProvider` 读写两侧桥接会话转录——per-service-call 哨兵要求 provider 实现回写，只读实现会让多轮工具调用的请求出现孤儿 tool 消息；宿主不注入历史消息、也不清空框架历史）
 - 再实现「自家 Harness 运行时」
 - 在 Harness 已拥有 compaction 时再从产品侧挂一个 `CompactionProvider`（现由 `HarnessAgentOptions.CompactionStrategy` 单一入口保证，**禁止回归**）
 - 在 Harness 已拥有 approval 时再挂一套 `UseToolApproval`（现有 `harnessOwnsToolApproval` 已挡住，**禁止回归**）

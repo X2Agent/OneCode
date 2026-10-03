@@ -12,19 +12,8 @@ public enum SessionEventType
     UserMessage,
     SystemMessage,
     AssistantMessage,
-    AssistantAttempt,
-    ToolCall,
     ToolResult,
     MessagesReplaced,
-    AttachmentMessage,
-    TombstoneMessage,
-    CompactionStarted,
-    CompactionSummary,
-    CompactionPruned,
-    CompactionEnded,
-    HookInvoked,
-    HookResult,
-    GoalChanged,
 }
 
 /// <summary>

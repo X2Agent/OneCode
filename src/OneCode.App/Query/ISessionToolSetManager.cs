@@ -1,7 +1,7 @@
 namespace OneCode.App.Query;
 
 /// <summary>
-/// Per-conversation tool activation state shared by <see cref="ChatService"/> and tool search.
+/// Per-conversation tool activation state shared by <see cref="QueryStreamEngine"/> and tool search.
 /// </summary>
 public interface ISessionToolSetManager
 {

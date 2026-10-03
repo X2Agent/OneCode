@@ -3,7 +3,7 @@ using OneCode.Core.Config;
 
 namespace OneCode.App.Query;
 
-/// <summary>Hook 触发与桌面通知的封装，拆自 <see cref="QueryStreamEngine"/>。</summary>
+/// <summary>Hook 触发与桌面通知的封装。</summary>
 internal sealed class HookDispatcher(
     IHookExecutionService hookExecutionService,
     IConfigManager configManager,
@@ -16,8 +16,8 @@ internal sealed class HookDispatcher(
     /// <summary>
     /// 触发拦截点并返回聚合结果。matcher 的实际比较值由调用方通过
     /// <paramref name="actualMatcherValue"/> 显式传入（不从 payload 字段猜测，
-    /// 语义声明见 <see cref="HookPointMetadataRegistry"/>）；<paramref name="configure"/> 用于
-    /// 填充拦截点专属 payload 字段（UserMessage / ToolName / OutputText 等）。
+    /// 语义声明见 <see cref="HookPointMetadataRegistry"/>）；<paramref name="configure"/> 以
+    /// <c>with</c> 表达式填充拦截点专属 payload 字段（UserMessage / ToolName / OutputText 等）。
     /// </summary>
     public async Task<AggregatedHookResult?> FireHookAsync(
         HookInterceptionPoint point,
@@ -25,7 +25,7 @@ internal sealed class HookDispatcher(
         string? workingDirectory,
         CancellationToken ct = default,
         string? actualMatcherValue = null,
-        Action<HookPayload>? configure = null)
+        Func<HookPayload, HookPayload>? configure = null)
     {
         var payload = new HookPayload
         {
@@ -33,8 +33,8 @@ internal sealed class HookDispatcher(
             SessionId = sessionId?.ToString(),
             Cwd = workingDirectory ?? Environment.CurrentDirectory,
         };
-
-        configure?.Invoke(payload);
+        if (configure is not null)
+            payload = configure(payload);
 
         return await _hookExecutionService.FireAsync(payload, actualMatcherValue, ct).ConfigureAwait(false);
     }

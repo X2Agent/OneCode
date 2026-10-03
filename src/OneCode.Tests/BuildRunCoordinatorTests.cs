@@ -146,8 +146,10 @@ public sealed class BuildRunCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public void Transition_ToCompleted_RejectsSkippedValidation()
+    public void Transition_ToCompleted_AllowsSkippedValidation()
     {
+        // Skipped = 验证不适用（无匹配 profile，如生成 HTML 报告类工件），不是失败——
+        // 与 MainAgentRunner 的 Skipped 语义一致，允许收口 Completed。
         var sut = new BuildStateTransitionService();
         var run = CreateAcceptingRun() with
         {
@@ -162,68 +164,33 @@ public sealed class BuildRunCoordinatorTests : IDisposable
 
         var act = () => sut.Transition(run, BuildRunState.Completed, DateTimeOffset.UtcNow);
 
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*final validation*");
+        act.Should().NotThrow();
     }
 
     [Fact]
-    public async Task BeginOrResumeAsync_AmbiguousRequest_PersistsClarifyingRun()
+    public async Task BeginOrResumeAsync_PrescribedPlan_ParksAtPlannedForPreambleApproval()
     {
+        // 预置计划（上层 PlanWorkflow 已批）走完评估 → 计划 → Planned 停靠；
+        // BuildPreambleRunner 随后以 plan-mode-approval 源自动放行。
         var store = new InMemoryBuildRunStore();
         var sut = CreateCoordinator(store, "fingerprint-a");
-        var sessionId = SessionId.NewId();
-
-        var run = await sut.BeginOrResumeAsync(
-            sessionId,
-            "Build a product-development and AI system.",
-            Path.GetTempPath());
-
-        run.State.Should().Be(BuildRunState.Clarifying);
-        run.Scope.Should().BeNull();
-        run.ClarificationQuestions.Should().NotBeEmpty();
-        (await store.LoadAsync(sessionId)).Should().BeEquivalentTo(run);
-    }
-
-    [Fact]
-    public async Task BeginOrResumeAsync_GeneratorFailure_BlocksRunWithFailureSummary()
-    {
-        var store = new InMemoryBuildRunStore();
-        var generator = Substitute.For<IClarificationQuestionGenerator>();
-        generator.GenerateAsync(
-                Arg.Any<string>(),
-                Arg.Any<RequirementAssessment>(),
-                Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromException<RequirementIntake>(
-                new InvalidOperationException("model down")));
-        var sut = CreateCoordinator(store, "fingerprint-a", clarificationGenerator: generator);
-
-        var run = await sut.BeginOrResumeAsync(
-            SessionId.NewId(),
-            "Build a product-development and AI system.",
-            Path.GetTempPath());
-
-        run.State.Should().Be(BuildRunState.Blocked);
-        run.TerminalReason.Should().Be(RunTerminalReason.Blocked);
-        run.FailureSummary.Should().Contain("澄清问题生成失败");
-        run.FailureSummary.Should().Contain("model down");
-    }
-
-    [Fact]
-    public async Task BeginOrResumeAsync_ExplicitRequest_ParksAtPlannedUntilApproved()
-    {
-        var store = new InMemoryBuildRunStore();
-        var sut = CreateCoordinator(store, "fingerprint-a");
+        var prescribed = new BuildPlan(
+            "Fix Foo.cs and run tests.",
+            [new BuildPlanTask("t1", "Fix Foo.cs line 42", "Fix and verify", [], [], ["FooTests passes"])],
+            ["dotnet test"], [], []);
 
         var run = await sut.BeginOrResumeAsync(
             SessionId.NewId(),
             "Fix Foo.cs line 42 and run FooTests.",
-            Path.GetTempPath());
+            Path.GetTempPath(),
+            prescribedPlan: prescribed);
 
         run.State.Should().Be(BuildRunState.Planned);
+        run.Plan.Should().NotBeNull();
+        run.ApprovedToolPolicy.Should().BeNull();
         run = await ApprovePlanAsync(sut, run);
         run.State.Should().Be(BuildRunState.Implementing);
         run.Scope.Should().NotBeNull();
-        run.Plan.Should().NotBeNull();
         run.TerminalReason.Should().BeNull();
         run.ApprovedToolPolicy.Should().NotBeNull();
         run.PlanApprovedAt.Should().NotBeNull();
@@ -710,8 +677,9 @@ public sealed class BuildRunCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task CompleteAsync_SkippedValidation_ProducesFailedRun()
+    public async Task CompleteAsync_SkippedValidation_EntersAcceptingInsteadOfFailed()
     {
+        // Skipped（验证不适用）不得把成功执行的任务误标为 Failed。
         var store = new InMemoryBuildRunStore();
         var sut = CreateCoordinator(store, "fingerprint-a");
         var run = await sut.BeginOrResumeAsync(
@@ -720,22 +688,20 @@ public sealed class BuildRunCoordinatorTests : IDisposable
             Path.GetTempPath());
         run = await ApprovePlanAsync(sut, run);
 
-        var completed = await sut.CompleteAsync(
+        var accepting = await sut.CompleteAsync(
             run.Id,
             new MainAgentRunResult(
                 null,
                 0,
                 0,
                 1,
-                TerminalReason: RunTerminalReason.ValidationFailed,
-                TransactionRolledBack: true,
+                TerminalReason: RunTerminalReason.Completed,
                 FinalValidationStatus: BuildValidationStatus.Skipped,
                 ModifiedFiles: ["Foo.cs"],
                 ValidationFailureSummary: "No verification profile."));
 
-        completed.State.Should().Be(BuildRunState.Failed);
-        completed.TransactionCommitted.Should().BeFalse();
-        completed.TransactionRolledBack.Should().BeTrue();
+        accepting.State.Should().Be(BuildRunState.Accepting);
+        accepting.Validations[^1].Status.Should().Be(BuildValidationStatus.Skipped);
     }
 
     [Fact]
@@ -1106,42 +1072,25 @@ public sealed class BuildRunCoordinatorTests : IDisposable
     private static BuildRunCoordinator CreateCoordinator(
         IBuildRunStore store,
         string fingerprint,
-        TaskService? taskService = null,
-        IClarificationQuestionGenerator? clarificationGenerator = null)
+        TaskService? taskService = null)
     {
         var provider = Substitute.For<IWorkspaceFingerprintProvider>();
         provider.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(fingerprint));
-        return CreateCoordinator(store, provider, taskService, clarificationGenerator);
+        return CreateCoordinator(store, provider, taskService);
     }
 
     private static BuildRunCoordinator CreateCoordinator(
         IBuildRunStore store,
         IWorkspaceFingerprintProvider provider,
-        TaskService? taskService = null,
-        IClarificationQuestionGenerator? clarificationGenerator = null) =>
+        TaskService? taskService = null) =>
         new(
             store,
             provider,
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             new BuildTaskLinker(taskService ?? new TaskService()),
-            clarificationGenerator ?? CreateFakeClarificationGenerator(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
-
-    private static IClarificationQuestionGenerator CreateFakeClarificationGenerator(
-        IReadOnlyList<string>? questions = null)
-    {
-        var generator = Substitute.For<IClarificationQuestionGenerator>();
-        generator.GenerateAsync(
-                Arg.Any<string>(),
-                Arg.Any<RequirementAssessment>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new RequirementIntake(
-                questions ?? ["第一期要交付哪个可用切片？"],
-                [], [], []));
-        return generator;
-    }
 
     private static BuildRun CreateAcceptingRun()
     {

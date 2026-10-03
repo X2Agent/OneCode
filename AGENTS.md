@@ -20,7 +20,7 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 
 要求 .NET SDK 10。测试栈：xUnit v3 + FluentAssertions + NSubstitute。
 
-发布前人工测试：TUI 交互与功能手测清单见 [docs/testing/tui-manual-checklist.md](docs/testing/tui-manual-checklist.md)，逐项执行并签收。
+人工测试：见 [docs/testing/manual-checklist.md](docs/testing/manual-checklist.md)——只含单元测试覆盖不到的模块；日常开发改完只跑改动模块标 ● 的行 + 收尾检查，发布前逐项全量执行。
 
 ## Project Architecture
 
@@ -46,6 +46,7 @@ src/
 - **MAF 接入**：装配顺序、扩展点与现状对照见 [docs/maf/integration-guide.md](docs/maf/integration-guide.md)；集成边界与禁令见 [docs/adr/0007-maf-integration-boundaries.md](docs/adr/0007-maf-integration-boundaries.md)；结构化输出采用策略（结构化请求 + 文本降级）见 [docs/adr/0008-structured-output-text-fallback.md](docs/adr/0008-structured-output-text-fallback.md)。
 - **子代理派工**：派工入口、profile 能力矩阵、TaskService 生命周期与 DAG 语义见 [docs/sub-agents.md](docs/sub-agents.md)；「不起子代理的决定权归属」边界（为何不用 MAF BackgroundAgents 作底层）见 [docs/adr/0011-background-agents-delegation-boundary.md](docs/adr/0011-background-agents-delegation-boundary.md)。
 - **决策模型接入**：抽象归属、接入点白名单与禁令见 [docs/adr/0012-decision-model-integration-jev.md](docs/adr/0012-decision-model-integration-jev.md)——决策模型（如 TypeSafe Jev）只能收窄已授权候选集或把 Allow 升级为 Ask/Deny，**绝不能产生 Allow**；上游未定型期间实验类型不进依赖面。
+- **UI 形态战略**：TUI 是唯一交互前端，路线见 [docs/plan/tui-roadmap.md](docs/plan/tui-roadmap.md)（引擎解耦 → 多会话/attach → daemon → 产物卡调起本机软件 → run -p/ssh）；Web UI、桌面壳、AG-UI 端点**不做**，边界与禁令见 [docs/adr/0013-ui-surface-strategy.md](docs/adr/0013-ui-surface-strategy.md)。
 
 ## Agent Guidelines
 
@@ -62,5 +63,4 @@ src/
 ## Tool Permissions
 
 - 禁止直接实例化 `HttpClient`（用 `IHttpClientFactory`）。
-- App 层禁止跨 Infrastructure 边界直接文件 I/O（用 `IFileSystem` 抽象）。
 - Terminal.Gui 依赖仅允许在 `OneCode.App/Tui/` 子目录内使用。

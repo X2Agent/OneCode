@@ -52,7 +52,7 @@ public sealed class JsonTaskStore : ITaskStore
     {
         lock (_gate)
         {
-            var tempPath = _path + ".tmp-" + Guid.NewGuid().ToString("N");
+            var tempPath = $"{_path}.tmp-{Guid.NewGuid():N}";
             try
             {
                 var envelope = new TaskSnapshotEnvelope(

@@ -29,15 +29,6 @@ public enum PermissionMode
 }
 
 /// <summary>
-/// 权限决策原因——记录为什么做出了某个权限决策。
-/// 用于审计、调试和用户理解权限行为。
-/// </summary>
-public abstract record PermissionDecisionReason
-{
-    public sealed record Other(string Reason) : PermissionDecisionReason;
-}
-
-/// <summary>
 /// 权限规则
 /// </summary>
 public sealed record PermissionRule(
@@ -75,7 +66,6 @@ public sealed record AdditionalWorkingDirectory(
 
 public enum WorkingDirectorySource
 {
-    CliArg,
     AddDirCommand,
     Worktree,
     Config,
@@ -89,11 +79,10 @@ public enum WorkingDirectorySource
 public sealed record PermissionCheckResult
 {
     public required PermissionDecision Decision { get; init; }
-    public PermissionDecisionReason? DecisionReason { get; init; }
     public string? Message { get; init; }
 
     public static PermissionCheckResult Allow => new() { Decision = PermissionDecision.Allow };
-    public static PermissionCheckResult Deny(string reason) => new() { Decision = PermissionDecision.Deny, Message = reason, DecisionReason = new PermissionDecisionReason.Other(reason) };
+    public static PermissionCheckResult Deny(string reason) => new() { Decision = PermissionDecision.Deny, Message = reason };
     public static PermissionCheckResult Ask(string message) => new() { Decision = PermissionDecision.Ask, Message = message };
 }
 

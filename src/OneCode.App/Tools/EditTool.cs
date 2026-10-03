@@ -57,10 +57,8 @@ public sealed class EditTool(
             if (_ssh is { IsConnected: true } ssh)
                 return await EditRemoteAsync(ssh, filePath, oldString, newString, mode, replaceAll, dryRun, ct).ConfigureAwait(false);
 
-            var resolved = PathsHelper.SafeResolve(filePath, _wd.WorkingDirectory, _wd.AdditionalDirectories);
-            if (!resolved.IsSuccess)
-                return ToolResult.Error($"Error: {resolved.Error}");
-            var fullPath = resolved.Value!;
+            if (ToolPathGuard.Resolve(filePath, _wd, out var fullPath) is { } resolveError)
+                return resolveError;
 
             if (!File.Exists(fullPath))
                 return ToolResult.Error(BuildMissingFileMessage(fullPath, _wd.WorkingDirectory));

@@ -6,7 +6,7 @@ namespace OneCode.Core.Build;
 
 /// <summary>
 /// BuildRun aggregate root — tracks the lifecycle of a single Build mode execution.
-/// Owned by <c>BuildRunCoordinator</c>, not by ChatService or MainAgentRunner.
+/// Owned by <c>BuildRunCoordinator</c>, not by the conversation runner or MainAgentRunner.
 /// </summary>
 public sealed record BuildRun : IWorkflowRun
 {

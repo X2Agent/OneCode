@@ -15,6 +15,11 @@ namespace OneCode.Core.Coordinator;
 /// Team config is stored in YAML files at ~/.onecode/teams/{name}/team.yaml,
 /// using the same AgentTemplateConfig format as sub-agents.
 /// </summary>
+/// <remarks>
+/// 成员数超过接口设计规范的 5 个上限：注册管理（Register/Unregister/RegisterBuiltin）、
+/// 运行入口（Run/Resume）与投影查询（Teams/Mode/Members）刻意聚合在单一编排门面，
+/// 消费方（TUI / 命令层 / 工作流宿主）均以完整编排能力为单位依赖，拆分只会增加注入噪音。
+/// </remarks>
 public interface ITeamOrchestrationService
 {
     /// <summary>

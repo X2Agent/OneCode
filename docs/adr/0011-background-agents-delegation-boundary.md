@@ -183,7 +183,7 @@ Workflows 才是，而且已经切过了。
 
 1. 上游暴露编程式任务 API（如 `provider.StartTaskAsync(...)`）或 .NET harness 侧释放配套补全
    → 重评 F4/F5/F6 能否改用框架能力；
-2. 出现**刻意不带产品闸**的轻量代理面。注意：`docs/plan/web-host-plan.md` 的 Web Host 明确复用
+2. 出现**刻意不带产品闸**的轻量代理面。注意：`docs/plan/tui-roadmap.md` 的后台会话/attach/守护进程明确复用
    `QueryStreamEngine` / 权限 / Build 门禁，**不构成触发**；
 3. 产品要求「一次委派周期内按发现增量加任务」的自适应 fan-out（编译期 DAG 表达不了）
    → 与「扩展 `ParallelAgents` 增加动态相」二选一比较后立项。

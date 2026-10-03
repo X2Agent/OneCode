@@ -16,7 +16,7 @@ public sealed class ModelCatalog
     public static ModelCatalog LoadFromStream(Stream stream)
     {
         var catalog = new ModelCatalog();
-        using var doc = System.Text.Json.JsonDocument.Parse(stream);
+        using var doc = JsonDocument.Parse(stream);
 
         foreach (var providerProp in doc.RootElement.EnumerateObject())
         {
@@ -36,43 +36,15 @@ public sealed class ModelCatalog
                 }
 
                 var supportsAttachment = modelValue.TryGetProperty("attachment", out var attachProp)
-                    && attachProp.ValueKind == System.Text.Json.JsonValueKind.True;
+                    && attachProp.ValueKind == JsonValueKind.True;
 
                 var supportsReasoning = modelValue.TryGetProperty("reasoning", out var reasoningProp)
-                    && reasoningProp.ValueKind == System.Text.Json.JsonValueKind.True;
-
-                IReadOnlyList<ReasoningOption>? reasoningOptions = null;
-                if (modelValue.TryGetProperty("reasoning_options", out var roProp)
-                    && roProp.ValueKind == System.Text.Json.JsonValueKind.Array)
-                {
-                    var opts = new List<ReasoningOption>();
-                    foreach (var optEl in roProp.EnumerateArray())
-                    {
-                        if (optEl.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                        var type = optEl.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
-                        if (string.IsNullOrEmpty(type)) continue;
-
-                        var values = new List<string>();
-                        if (optEl.TryGetProperty("values", out var valsProp)
-                            && valsProp.ValueKind == System.Text.Json.JsonValueKind.Array)
-                        {
-                            foreach (var v in valsProp.EnumerateArray())
-                            {
-                                if (v.ValueKind == System.Text.Json.JsonValueKind.String)
-                                    values.Add(v.GetString()!);
-                            }
-                        }
-                        opts.Add(new ReasoningOption(type, values));
-                    }
-                    if (opts.Count > 0)
-                        reasoningOptions = opts;
-                }
+                    && reasoningProp.ValueKind == JsonValueKind.True;
 
                 if (context <= 0) continue;
 
                 var fullId = $"{providerId}/{modelId}";
-                var entry = new ModelEntry(fullId, context, supportsAttachment,
-                    supportsReasoning, reasoningOptions);
+                var entry = new ModelEntry(fullId, context, supportsAttachment, supportsReasoning);
 
                 // "anthropic/claude-sonnet-4-20250514" → entry（精确覆盖）
                 catalog._models[fullId] = entry;
@@ -90,10 +62,6 @@ public sealed class ModelCatalog
 
     /// <summary>Whether the model supports reasoning / chain-of-thought.</summary>
     public bool SupportsReasoning(string? modelId) => Resolve(modelId)?.SupportsReasoning ?? false;
-
-    /// <summary>Returns the reasoning options for the model (e.g., effort levels), or empty if none.</summary>
-    public IReadOnlyList<ReasoningOption> GetReasoningOptions(string? modelId)
-        => Resolve(modelId)?.ReasoningOptions ?? [];
 
     public int Count => _models.Values.Select(e => e.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count();
 
@@ -179,9 +147,9 @@ public sealed class ModelCatalog
         return num * multiplier;
     }
 
-    private static int ReadInt(System.Text.Json.JsonElement element)
+    private static int ReadInt(JsonElement element)
     {
-        if (element.ValueKind != System.Text.Json.JsonValueKind.Number) return 0;
+        if (element.ValueKind != JsonValueKind.Number) return 0;
         if (element.TryGetInt64(out var longVal)) return longVal > int.MaxValue ? int.MaxValue : (int)longVal;
         if (element.TryGetDouble(out var doubleVal)) return doubleVal > int.MaxValue ? int.MaxValue : (int)doubleVal;
         return 0;
@@ -194,12 +162,5 @@ public sealed record ModelEntry(
     string Id,
     int ContextWindow,
     bool SupportsAttachment = false,
-    bool SupportsReasoning = false,
-    IReadOnlyList<ReasoningOption>? ReasoningOptions = null);
-
-/// <summary>
-/// Reasoning capability option from the models.dev catalog.
-/// Common type: "effort" with values like ["none", "low", "medium", "high"].
-/// </summary>
-public sealed record ReasoningOption(string Type, IReadOnlyList<string> Values);
+    bool SupportsReasoning = false);
 

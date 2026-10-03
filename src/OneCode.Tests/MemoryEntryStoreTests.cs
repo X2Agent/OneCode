@@ -1,12 +1,6 @@
-using OneCode.Core.Config;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSubstitute;
 using OneCode.App.Services.AutoDream;
-using OneCode.App.Tools;
 using OneCode.Core.Memory;
-using OneCode.Core.Models;
-using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Memory;
 using System.Diagnostics;
@@ -732,12 +726,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_AppliesConsolidationChanges_WritesToProjectMemoryMd()
     {
-        var service = new AutoDreamService(
-            NullLogger<AutoDreamService>.Instance,
-            NullLoggerFactory.Instance,
-            agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(_store, Substitute.For<IConfigManager>(), _wdAccessor),
-            globalConfigDirOverride: Path.Combine(_tempDir, "global"));
+        var applier = CreateConsolidationApplier();
 
         var agentOutput = """
             [
@@ -758,13 +747,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var method = typeof(AutoDreamService).GetMethod(
-            "ApplyConsolidationChangesAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        method.Should().NotBeNull();
-        var task = (Task<int>)method!.Invoke(service, [agentOutput, default])!;
-        var written = await task;
+        var written = await applier.ApplyConsolidationChangesAsync(agentOutput, default);
 
         written.Should().Be(2);
 
@@ -778,12 +761,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_AppliesConsolidationChanges_HandlesDeleteAction()
     {
-        var service = new AutoDreamService(
-            NullLogger<AutoDreamService>.Instance,
-            NullLoggerFactory.Instance,
-            agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(_store, Substitute.For<IConfigManager>(), _wdAccessor),
-            globalConfigDirOverride: Path.Combine(_tempDir, "global"));
+        var applier = CreateConsolidationApplier();
 
         var now = DateTimeOffset.UtcNow;
         await _store.UpsertAsync(MemoryScope.Project, [
@@ -800,11 +778,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var method = typeof(AutoDreamService).GetMethod(
-            "ApplyConsolidationChangesAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
-        var written = await (Task<int>)method.Invoke(service, [agentOutput, default])!;
+        var written = await applier.ApplyConsolidationChangesAsync(agentOutput, default);
 
         written.Should().Be(1);
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
@@ -814,12 +788,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_AppliesConsolidationChanges_ToleratesMarkdownFences()
     {
-        var service = new AutoDreamService(
-            NullLogger<AutoDreamService>.Instance,
-            NullLoggerFactory.Instance,
-            agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(_store, Substitute.For<IConfigManager>(), _wdAccessor),
-            globalConfigDirOverride: Path.Combine(_tempDir, "global"));
+        var applier = CreateConsolidationApplier();
 
         var agentOutput = """
             Here are the consolidated memories:
@@ -838,11 +807,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             That's all.
             """;
 
-        var method = typeof(AutoDreamService).GetMethod(
-            "ApplyConsolidationChangesAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
-        var written = await (Task<int>)method.Invoke(service, [agentOutput, default])!;
+        var written = await applier.ApplyConsolidationChangesAsync(agentOutput, default);
 
         written.Should().Be(1);
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
@@ -852,18 +817,9 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_AppliesConsolidationChanges_EmptyJsonArray_ReturnsZero()
     {
-        var service = new AutoDreamService(
-            NullLogger<AutoDreamService>.Instance,
-            NullLoggerFactory.Instance,
-            agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(_store, Substitute.For<IConfigManager>(), _wdAccessor),
-            globalConfigDirOverride: Path.Combine(_tempDir, "global"));
+        var applier = CreateConsolidationApplier();
 
-        var method = typeof(AutoDreamService).GetMethod(
-            "ApplyConsolidationChangesAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-
-        var written = await (Task<int>)method.Invoke(service, ["[]", default])!;
+        var written = await applier.ApplyConsolidationChangesAsync("[]", default);
         written.Should().Be(0);
     }
 
@@ -872,7 +828,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_PrunesExpiredEntries_AfterConsolidation()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var past = DateTimeOffset.UtcNow.AddDays(-10);
         await _store.UpsertAsync(MemoryScope.Project, [
@@ -890,7 +846,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        await InvokeApplyConsolidationAsync(service, agentOutput);
+        await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
         entries.Should().HaveCount(1, "expired entry should have been pruned");
@@ -910,7 +866,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_RefusesToDeleteManualEntry()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var now = DateTimeOffset.UtcNow;
         await _store.UpsertAsync(MemoryScope.Project, [
@@ -927,7 +883,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var written = await InvokeApplyConsolidationAsync(service, agentOutput);
+        var written = await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         written.Should().Be(0, "the change was rejected, not applied");
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
@@ -941,7 +897,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_RefusesToOverwriteManualEntry()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var now = DateTimeOffset.UtcNow;
         await _store.UpsertAsync(MemoryScope.Project, [
@@ -959,7 +915,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var written = await InvokeApplyConsolidationAsync(service, agentOutput);
+        var written = await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         written.Should().Be(0);
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
@@ -977,7 +933,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_SkipsManualPrefixedKey()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var agentOutput = """
             [
@@ -995,7 +951,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var written = await InvokeApplyConsolidationAsync(service, agentOutput);
+        var written = await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         written.Should().Be(0);
         (await _store.LoadAsync(MemoryScope.Project, default)).Should().BeEmpty(
@@ -1009,7 +965,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_StillDeletesAutoDreamOwnedEntry()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var now = DateTimeOffset.UtcNow;
         await _store.UpsertAsync(MemoryScope.Project, [
@@ -1026,7 +982,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        await InvokeApplyConsolidationAsync(service, agentOutput);
+        await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         var entries = await _store.LoadAsync(MemoryScope.Project, default);
         entries.Should().BeEmpty("autodream-owned entries remain deletable");
@@ -1038,7 +994,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task AutoDream_SkipsDeleteOfMissingKey()
     {
-        var service = CreateAutoDreamService();
+        var applier = CreateConsolidationApplier();
 
         var agentOutput = """
             [
@@ -1050,7 +1006,7 @@ public sealed class MemoryEntryStoreTests : IDisposable
             ]
             """;
 
-        var written = await InvokeApplyConsolidationAsync(service, agentOutput);
+        var written = await InvokeApplyConsolidationAsync(applier, agentOutput);
 
         written.Should().Be(0);
         (await _store.LoadAsync(MemoryScope.Project, default)).Should().BeEmpty();
@@ -1163,25 +1119,12 @@ public sealed class MemoryEntryStoreTests : IDisposable
 
     // Test helpers
 
-    private AutoDreamService CreateAutoDreamService() => new(
-        NullLogger<AutoDreamService>.Instance,
-        NullLoggerFactory.Instance,
-        agent: new AutoDreamAgentDependencies(
-            Substitute.For<IChatClient>(),
-            new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null),
-            Substitute.For<IModelManager>(),
-            new PromptManager()),
-        storage: new AutoDreamStorageDependencies(_store, Substitute.For<IConfigManager>(), _wdAccessor),
-        globalConfigDirOverride: Path.Combine(_tempDir, "global"));
+    /// <summary>整合写入测试只覆盖 <see cref="AutoDreamMemoryApplier"/>，直接构造被测对象。</summary>
+    private AutoDreamMemoryApplier CreateConsolidationApplier() =>
+        new(_store, NullLogger<AutoDreamMemoryApplier>.Instance, () => _wdAccessor.WorkingDirectory);
 
-    /// <summary>调用私有 <c>ApplyConsolidationChangesAsync</c>（无公开接缝，测试经反射）。</summary>
-    private static Task<int> InvokeApplyConsolidationAsync(AutoDreamService service, string agentOutput)
-    {
-        var method = typeof(AutoDreamService).GetMethod(
-            "ApplyConsolidationChangesAsync",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        return (Task<int>)method.Invoke(service, [agentOutput, default])!;
-    }
+    private static Task<int> InvokeApplyConsolidationAsync(AutoDreamMemoryApplier applier, string agentOutput) =>
+        applier.ApplyConsolidationChangesAsync(agentOutput, default);
 
     private sealed class TestWorkingDirectoryAccessor : IWorkingDirectoryAccessor
     {

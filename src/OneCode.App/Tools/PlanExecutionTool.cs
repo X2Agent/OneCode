@@ -21,20 +21,23 @@ public sealed class PlanExecutionTool(
         [Description("Failure detail when status is failed.")] string? error = null,
         CancellationToken ct = default)
     {
-        var context = await ResolveContextAsync(ct).ConfigureAwait(false);
-        var parsed = status.ToLowerInvariant() switch
-        {
-            "in_progress" => PlanStepExecutionStatus.InProgress,
-            "completed" => PlanStepExecutionStatus.Completed,
-            "failed" => PlanStepExecutionStatus.Failed,
-            "skipped" => PlanStepExecutionStatus.Skipped,
-            _ => (PlanStepExecutionStatus?)null,
-        };
-        if (parsed is null)
-            return ToolResult.Error("status must be one of: in_progress, completed, failed, skipped");
-
+        // ResolveContextAsync 也必须在 try 内：上下文缺失抛出的 PlanTransitionException
+        // 若冒泡出工具函数，会让 FunctionInvokingChatClient 终止整个 run——
+        // 模型应收到错误结果以便自愈，而不是运行直接崩溃。
         try
         {
+            var context = await ResolveContextAsync(ct).ConfigureAwait(false);
+            var parsed = status.ToLowerInvariant() switch
+            {
+                "in_progress" => PlanStepExecutionStatus.InProgress,
+                "completed" => PlanStepExecutionStatus.Completed,
+                "failed" => PlanStepExecutionStatus.Failed,
+                "skipped" => PlanStepExecutionStatus.Skipped,
+                _ => (PlanStepExecutionStatus?)null,
+            };
+            if (parsed is null)
+                return ToolResult.Error("status must be one of: in_progress, completed, failed, skipped");
+
             var buildRunScope = ResolveBuildRunScope();
             taskLinker.ReconcilePlanStepProjections(context.SessionId.ToString(), buildRunScope, context.Workflow);
             var linkedTask = taskLinker.GetLinkedPlanTask(context.SessionId.ToString(), buildRunScope, stepId);
@@ -122,9 +125,10 @@ public sealed class PlanExecutionTool(
         [Description("Final verification and delivery summary.")] string summary,
         CancellationToken ct = default)
     {
-        var context = await ResolveContextAsync(ct).ConfigureAwait(false);
+        // 与 UpdatePlanStepAsync 同理：上下文解析失败返回错误而非让 run 崩溃。
         try
         {
+            var context = await ResolveContextAsync(ct).ConfigureAwait(false);
             var result = await workflowService.CompleteVerificationAsync(new CompletePlanVerificationCommand(
                 Guid.NewGuid().ToString("N"),
                 context.SessionId,

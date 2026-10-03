@@ -5,7 +5,6 @@ using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Ai;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Search;
-using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Infrastructure;
 
@@ -20,26 +19,6 @@ public static class InfrastructureServiceCollectionExtensions
         var handler = new HttpClientHandler();
         MtlsHelper.ApplyToHandler(handler);
         return handler;
-    }
-
-    /// <summary>
-    /// 注册 VCR（录像/回放）基础设施服务。
-    ///
-    /// VCR 是开发/测试阶段的内部工具，不面向终端用户。
-    /// 通过 <c>ONECODE_VCR</c> 环境变量控制模式（off/replay/record），
-    /// 由 <see cref="VcrModeParser.Parse"/> 解析为 <see cref="VcrMode"/>。
-    /// 未设置环境变量时 <see cref="VcrMode"/> 为 <see cref="VcrMode.Inactive"/>，
-    /// VCR 装饰器/handler 零开销透传。
-    /// </summary>
-    public static IServiceCollection AddVcrServices(this IServiceCollection services)
-    {
-        var mode = VcrModeParser.Parse(Environment.GetEnvironmentVariable(CoreConstants.EnvVars.Vcr));
-        // Enum cannot use AddSingleton<T>(instance); register via non-generic overload.
-        services.AddSingleton(typeof(VcrMode), mode);
-        // VcrDelegatingHandler must be registered so that AddHttpMessageHandler<VcrDelegatingHandler>()
-        // can resolve it from DI when constructing named HttpClients (WebSearch, WebFetch).
-        services.AddTransient<VcrDelegatingHandler>();
-        return services;
     }
 
     /// <summary>
@@ -62,6 +41,7 @@ public static class InfrastructureServiceCollectionExtensions
     {
         services.AddTransient<OpenAiResponseSanitizingHandler>();
         services.AddTransient<OpenAiReasoningPassbackHandler>();
+        services.AddTransient<OpenAiRequestDiagnosticsHandler>();
         services.AddTransient<OneCodeIdentityHandler>();
 
         services.AddHttpClient(Constants.HttpClientNames.Ollama)
@@ -70,13 +50,14 @@ public static class InfrastructureServiceCollectionExtensions
             .ConfigureHttpClient(static client => client.Timeout = Timeout.InfiniteTimeSpan);
 
         // Handler order: last AddHttpMessageHandler is outermost.
-        // Desired: Identity → Passback → Sanitizing → Proxy HttpClientHandler
+        // Desired: Identity → Passback → Diagnostics → Sanitizing → Proxy HttpClientHandler
         // 这两个 handler 必须留在 HTTP 层：Passback 注入的 reasoning_content 不在
         // OpenAI SDK 请求模型中（MEAI 转换即丢弃）；Sanitizing 必须在 SDK 反序列化之前
-        // 修复退化响应。
+        // 修复退化响应。Diagnostics 放在 Passback 之后，转储的是最终发出的请求体。
         services.AddHttpClient(Constants.HttpClientNames.OpenAI)
             .ConfigurePrimaryHttpMessageHandler(CreateTransportHandler)
             .AddHttpMessageHandler<OpenAiResponseSanitizingHandler>()
+            .AddHttpMessageHandler<OpenAiRequestDiagnosticsHandler>()
             .AddHttpMessageHandler<OpenAiReasoningPassbackHandler>()
             .AddHttpMessageHandler<OneCodeIdentityHandler>()
             .ConfigureHttpClient(static client => client.Timeout = Timeout.InfiniteTimeSpan);

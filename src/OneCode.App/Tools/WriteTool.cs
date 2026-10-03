@@ -51,10 +51,8 @@ public sealed class WriteTool(ILspNotifier notifier, IWorkingDirectoryAccessor w
             if (_ssh is { IsConnected: true } ssh)
                 return await WriteRemoteAsync(ssh, filePath, content, dryRun, ct).ConfigureAwait(false);
 
-            var resolved = PathsHelper.SafeResolve(filePath, _wd.WorkingDirectory, _wd.AdditionalDirectories);
-            if (!resolved.IsSuccess)
-                return ToolResult.Error($"Error: {resolved.Error}");
-            var fullPath = resolved.Value!;
+            if (ToolPathGuard.Resolve(filePath, _wd, out var fullPath) is { } resolveError)
+                return resolveError;
 
             var encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false) as System.Text.Encoding;
             var lineEndingStyle = FileEncodingHelper.LineEndingStyle.Lf;

@@ -1,7 +1,6 @@
 using OneCode.Core.Mcp;
 using OneCode.Core.Config;
 using System.Text;
-using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 using CoreConstants = OneCode.Core.Constants;
 
@@ -30,7 +29,6 @@ namespace OneCode.App.Commands;
 public sealed class DoctorCommand(
     IConfigManager configManager,
     IGitHelper gitHelper,
-    IFileSystem fileSystem,
     IMcpConnectionManager mcpConnectionManager,
     ILspServerManager lspServerManager) : Command
 {
@@ -252,7 +250,6 @@ public sealed class DoctorCommand(
             (CoreConstants.EnvVars.OneCodeModel, "Default model override"),
             (CoreConstants.EnvVars.OneCodeWebSearchProvider, "Web search provider"),
             (CoreConstants.EnvVars.TavilyApiKey, "Tavily search API key"),
-            (CoreConstants.EnvVars.Vcr, "VCR record/replay mode"),
         };
 
         var sb = new StringBuilder("Environment variables (OneCode-relevant):");
@@ -280,9 +277,7 @@ public sealed class DoctorCommand(
     {
         var hasGit = await gitHelper.GetVersionAsync(ct).ConfigureAwait(false) is not null;
 
-        var hasMd = await fileSystem.ReadTextFileAsync(
-            Path.Combine(Directory.GetCurrentDirectory(), "AGENTS.md"), ct)
-            .ConfigureAwait(false) is not null;
+        var hasMd = File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "AGENTS.md"));
 
         var settings = configManager.Current.Effective;
         var provider = string.IsNullOrEmpty(settings.Provider)

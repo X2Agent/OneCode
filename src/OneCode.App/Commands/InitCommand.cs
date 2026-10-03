@@ -1,7 +1,6 @@
 using OneCode.Core.Config;
 using System.Text;
 using OneCode.Core.Prompt;
-using OneCode.Core.IO;
 
 using OneCode.Infrastructure.Tools;
 
@@ -24,7 +23,6 @@ namespace OneCode.App.Commands;
 ///   /init --no-llm     → force static template, bypass LLM even if API key is set
 /// </summary>
 public sealed class InitCommand(
-    IFileSystem fileSystem,
     IConfigManager configManager,
     IPromptManager promptManager,
     ILogger<InitCommand>? logger = null) : Command
@@ -63,7 +61,7 @@ public sealed class InitCommand(
         if (noLlm || !IsApiKeyAvailable())
         {
             var template = BuildStaticTemplate(cwd);
-            await fileSystem.WriteTextFileAsync(mdPath, template, ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(mdPath, template, ct).ConfigureAwait(false);
             var suffix = noLlm ? " (static template, --no-llm)" : " (static template, no API key)";
             return CommandResult.Text($"Created AGENTS.md at {mdPath}{suffix}");
         }
@@ -73,7 +71,7 @@ public sealed class InitCommand(
         var variables = BuildVariables(context);
         var prompt = await LoadPromptAsync(promptManager, "system/init", variables, ct).ConfigureAwait(false);
         if (prompt is null)
-            return CommandResult.Error("Prompt 'system/init' is not available. Verify prompts/system/init.prompt exists.");
+            return PromptMissingError("system/init");
         return CommandResult.Prompt(prompt, AllowedTools);
     }
 
@@ -134,7 +132,7 @@ public sealed class InitCommand(
         string? existing = null;
         if (File.Exists(mdPath))
         {
-            existing = await fileSystem.ReadTextFileAsync(mdPath, ct).ConfigureAwait(false);
+            existing = await ReadTextOrNullAsync(mdPath, ct).ConfigureAwait(false);
             if (existing is { Length: > 6000 })
                 existing = existing[..6000] + "\n... (truncated)";
         }
@@ -160,7 +158,7 @@ public sealed class InitCommand(
         foreach (var name in candidates)
         {
             var path = Path.Combine(cwd, name);
-            var content = await fileSystem.ReadTextFileAsync(path, ct).ConfigureAwait(false);
+            var content = await ReadTextOrNullAsync(path, ct).ConfigureAwait(false);
             if (content is { Length: > 0 })
             {
                 if (content.Length > 4000)
@@ -264,7 +262,7 @@ public sealed class InitCommand(
 
     private async Task<string?> ReadPackageJsonAsync(string cwd, CancellationToken ct)
     {
-        var content = await fileSystem.ReadTextFileAsync(Path.Combine(cwd, "package.json"), ct).ConfigureAwait(false);
+        var content = await ReadTextOrNullAsync(Path.Combine(cwd, "package.json"), ct).ConfigureAwait(false);
         if (content is null) return null;
 
         var sb = new StringBuilder("package.json:\n");
@@ -287,7 +285,7 @@ public sealed class InitCommand(
 
     private async Task<string?> ReadTomlSectionAsync(string path, string section, CancellationToken ct)
     {
-        var content = await fileSystem.ReadTextFileAsync(path, ct).ConfigureAwait(false);
+        var content = await ReadTextOrNullAsync(path, ct).ConfigureAwait(false);
         if (content is null) return null;
 
         var sb = new StringBuilder();
@@ -309,7 +307,7 @@ public sealed class InitCommand(
 
     private async Task<string?> ReadGoModAsync(string cwd, CancellationToken ct)
     {
-        var content = await fileSystem.ReadTextFileAsync(Path.Combine(cwd, "go.mod"), ct).ConfigureAwait(false);
+        var content = await ReadTextOrNullAsync(Path.Combine(cwd, "go.mod"), ct).ConfigureAwait(false);
         if (content is null) return null;
 
         var sb = new StringBuilder("go.mod:\n");
@@ -317,6 +315,10 @@ public sealed class InitCommand(
             sb.AppendLine(CultureInfo.InvariantCulture, $"  {line.Trim()}");
         return sb.ToString();
     }
+
+    /// <summary>读取文本文件，文件不存在时返回 null。</summary>
+    private static async Task<string?> ReadTextOrNullAsync(string path, CancellationToken ct) =>
+        File.Exists(path) ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false) : null;
 
     private static string? ExtractJsonField(string json, string field)
     {

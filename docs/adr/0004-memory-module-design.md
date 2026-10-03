@@ -180,7 +180,7 @@ _Use the `search_memories` tool to retrieve full memory content._
 | 路径 | 保护方式 | 位置 |
 |---|---|---|
 | 容量淘汰 | `PruneAsync` 对 `Source == "manual"` **豁免**，永不被自动淘汰 | `MemoryEntryStore.PruneAsync` |
-| AutoDream 写入 | 拒绝 delete / upsert 用户手写条目；拒绝创建 `manual:` 前缀的 key | `AutoDreamService.ApplyConsolidationChangesAsync` |
+| AutoDream 写入 | 拒绝 delete / upsert 用户手写条目；拒绝创建 `manual:` 前缀的 key | `AutoDreamMemoryApplier.ApplyConsolidationChangesAsync` |
 
 **为何写入路径也必须守**：AutoDream 的输出是**不可信内容**（LLM 生成）。在补上这三道闸之前，
 一条幻觉的 `{"action":"delete","key":"manual:xxx"}` 就能抹掉用户手写记忆——与淘汰豁免的原则直接冲突。
@@ -333,7 +333,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 **LLM 不该做的**（宿主负责）：分配 Key、决定配额、决定 TTL、决定淘汰。
 
 > 现状已部分踩在这条线上——`autodream-consolidation.prompt` 让 LLM 输出 `key/scope/ttlHours`，
-> 再由 `AutoDreamService.ApplyConsolidationChangesAsync` 做校验、清洗、截断、配额。
+> 再由 `AutoDreamMemoryApplier.ApplyConsolidationChangesAsync` 做校验、清洗、截断、配额。
 > 缺口在于缺少**冲突消解**这一环（§11.3）。
 
 #### 11.2 使用反馈驱动的淘汰（✅ 已实施）

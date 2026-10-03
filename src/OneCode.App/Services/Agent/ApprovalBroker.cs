@@ -86,6 +86,12 @@ public sealed class ApprovalBroker : IApprovalBroker
                 request.Reason);
 
             await writer.WriteAsync(evt, ct).ConfigureAwait(false);
+            // 无进展诊断锚点：状态栏若长时间停在"执行 <上一工具>"，看日志即可区分
+            // "卡在审批等待（本条日志是最后一条）"与"卡在模型请求"。
+            logger?.LogInformation(
+                "Waiting for approval decision on tool {ToolName} (request {RequestId})",
+                request.ToolName,
+                request.RequestId);
             var decision = await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
             if (decision == ApprovalDecision.AllowAllConversation)
                 Volatile.Write(ref broker!._allowAllForRun, 1);

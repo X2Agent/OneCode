@@ -24,7 +24,7 @@ public sealed class RetryOnOverloadChatClientTests
         }
 
         inner.Attempts.Should().Be(3);
-        updates.Should().BeEmpty();
+        ConcatText(updates).Should().Be("ok");
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class RetryOnOverloadChatClientTests
         }
 
         inner.Attempts.Should().Be(2);
-        updates.Should().BeEmpty();
+        ConcatText(updates).Should().Be("ok");
     }
 
     [Fact]
@@ -71,7 +71,67 @@ public sealed class RetryOnOverloadChatClientTests
         }
 
         inner.Attempts.Should().Be(2);
-        updates.Should().BeEmpty();
+        ConcatText(updates).Should().Be("ok");
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_RetriesZeroContentEmptyStreamAndRecovers()
+    {
+        // 2026-09 事故:OpenRouter 实验模型返回 HTTP 200 + 零内容 SSE,流"正常"结束不抛异常,
+        // 旧逻辑静默按 Completed 收尾(TUI 零输出零提示)。空流必须按瞬时错误重试。
+        var inner = new EmptyStreamClient(emptyStreamsBeforeContent: 1);
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 3);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        inner.Attempts.Should().Be(2);
+        ConcatText(updates).Should().Be("ok");
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_ThrowsEmptyChoicesWhenStreamNeverCarriesContent()
+    {
+        // 重试预算耗尽后流仍零内容 → 抛 EmptyChoicesResponseException,
+        // 沿 QueryStreamEngine 异常路径在 TUI 显示错误,不允许再静默收尾。
+        var inner = new EmptyStreamClient(emptyStreamsBeforeContent: int.MaxValue);
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 1);
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in sut.GetStreamingResponseAsync(
+                [],
+                cancellationToken: TestContext.Current.CancellationToken))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<EmptyChoicesResponseException>();
+        inner.Attempts.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_UsageOnlyStream_IsTreatedAsZeroContent()
+    {
+        // 只含 usage 统计的流不是有效输出——事故现场的签名就是 token 有计数、内容为零。
+        var inner = new EmptyStreamClient(emptyStreamsBeforeContent: 1, emitUsageOnly: true);
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 3);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        inner.Attempts.Should().Be(2);
+        ConcatText(updates).Should().Be("ok");
     }
 
     [Fact]
@@ -159,6 +219,70 @@ public sealed class RetryOnOverloadChatClientTests
             .Should().ContainSingle(call => call.CallId == "call-1" && call.Name == "Read");
     }
 
+    [Fact]
+    public async Task GetStreamingResponseAsync_RetriesStalledStreamAfterFirstChunkAndRecovers()
+    {
+        // 2026-09 事故:HttpClient.Timeout = Infinite 下 TCP 停滞表现为"流不结束也不抛错",
+        // 空响应防线(仅流正常结束时触发)覆盖不到,TUI 永久显示"执行 <工具>"。
+        // 首个 chunk 之后无新数据须按停滞取消本次尝试并重试,replay 去重不重复输出。
+        var inner = new StallAfterFirstChunkClient();
+        using var sut = new RetryOnOverloadChatClient(
+            inner, maxRetries: 3, streamIdleTimeout: TimeSpan.FromMilliseconds(150));
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        inner.Attempts.Should().Be(2);
+        ConcatText(updates).Should().Be("Hello world");
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_ThrowsStalledExceptionWhenStallPersists()
+    {
+        var inner = new AlwaysStallingClient();
+        using var sut = new RetryOnOverloadChatClient(
+            inner, maxRetries: 1, streamIdleTimeout: TimeSpan.FromMilliseconds(100));
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in sut.GetStreamingResponseAsync(
+                [],
+                cancellationToken: TestContext.Current.CancellationToken))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<StreamStalledException>();
+        inner.Attempts.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_UserCancellationDuringStallPropagatesAsCancelled()
+    {
+        // 空闲取消与用户取消必须可区分:用户 Esc 中断走原始取消令牌,不得被改写成停滞异常。
+        var inner = new AlwaysStallingClient();
+        using var sut = new RetryOnOverloadChatClient(
+            inner, maxRetries: 3, streamIdleTimeout: TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        Func<Task> act = async () =>
+        {
+            await foreach (var _ in sut.GetStreamingResponseAsync(
+                [],
+                cancellationToken: cts.Token))
+            {
+            }
+        };
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        inner.Attempts.Should().Be(1);
+    }
+
     private static ClientResultException CreateRateLimitException()
         => new(
             "rate limited",
@@ -194,7 +318,7 @@ public sealed class RetryOnOverloadChatClientTests
             CancellationToken cancellationToken = default)
         {
             Attempts++;
-            return _remainingFailures-- > 0 ? Fail(cancellationToken) : Empty(cancellationToken);
+            return _remainingFailures-- > 0 ? Fail(cancellationToken) : SuccessWithText(cancellationToken);
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
@@ -208,10 +332,66 @@ public sealed class RetryOnOverloadChatClientTests
 #pragma warning restore CS0162
         }
 
-        private static async IAsyncEnumerable<ChatResponseUpdate> Empty([EnumeratorCancellation] CancellationToken cancellationToken = default)
+        private static async IAsyncEnumerable<ChatResponseUpdate> SuccessWithText([EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return CreateUpdate(new TextContent("ok"));
+        }
+    }
+
+    /// <summary>流"成功"结束但零内容(纯空流或仅 usage)——复现 OpenRouter 实验模型的空响应。</summary>
+    private sealed class EmptyStreamClient(int emptyStreamsBeforeContent, bool emitUsageOnly = false) : IChatClient
+    {
+        private int _attempts;
+
+        public int Attempts => _attempts;
+
+        public void Dispose()
+        {
+        }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            _attempts++;
+            return _attempts <= emptyStreamsBeforeContent
+                ? (emitUsageOnly ? UsageOnly(cancellationToken) : Nothing(cancellationToken))
+                : TextOnly(cancellationToken);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> Nothing(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();
             yield break;
+        }
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> UsageOnly(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return CreateUpdate(new UsageContent(new UsageDetails
+            {
+                InputTokenCount = 10,
+                OutputTokenCount = 0,
+            }));
+        }
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> TextOnly(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return CreateUpdate(new TextContent("ok"));
         }
     }
 
@@ -318,8 +498,94 @@ public sealed class RetryOnOverloadChatClientTests
         }
     }
 
+    /// <summary>首个 chunk 后连接停滞（不断开、无新数据，直到尝试级取消触发）——复现 TCP 半开场景。</summary>
+    private sealed class StallAfterFirstChunkClient : IChatClient
+    {
+        public int Attempts { get; private set; }
+
+        public void Dispose()
+        {
+        }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Attempts++;
+            return Attempts == 1
+                ? StallAfterFirstChunk(cancellationToken)
+                : ReplayFullText(cancellationToken);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> StallAfterFirstChunk(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return CreateUpdate(new TextContent("Hel"));
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            yield break;
+        }
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> ReplayFullText(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return CreateUpdate(new TextContent("Hel"));
+            await Task.Yield();
+            yield return CreateUpdate(new TextContent("lo world"));
+        }
+    }
+
+    /// <summary>每次尝试都在首个 chunk 后停滞——重试预算耗尽须抛 StreamStalledException。</summary>
+    private sealed class AlwaysStallingClient : IChatClient
+    {
+        public int Attempts { get; private set; }
+
+        public void Dispose()
+        {
+        }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Attempts++;
+            return StallAfterFirstChunkClientStall(cancellationToken);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        private static async IAsyncEnumerable<ChatResponseUpdate> StallAfterFirstChunkClientStall(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return CreateUpdate(new TextContent("Hel"));
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            yield break;
+        }
+    }
+
     private static ChatResponseUpdate CreateUpdate(params AIContent[] contents)
         => new(ChatRole.Assistant, contents.ToList());
+
+    private static string ConcatText(IEnumerable<ChatResponseUpdate> updates)
+        => string.Concat(updates
+            .SelectMany(static update => update.Contents)
+            .OfType<TextContent>()
+            .Select(static text => text.Text));
 
     private static FunctionCallContent CreateToolCall(string callId)
         => new(callId, "Read", new Dictionary<string, object?>

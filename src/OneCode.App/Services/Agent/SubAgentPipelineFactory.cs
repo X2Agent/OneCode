@@ -71,9 +71,6 @@ public sealed class SubAgentPipelineFactory(
             && PermissionProfiles.GetProfile(permissionMode).EnableVerification;
 
         var verificationProviderForProfile = useVerification ? verificationProvider : null;
-        var behaviorContracts = behavior.Has(AgentCapability.BehaviorContracts)
-            ? AgentPipelineAssembly.CreateDefaultBehaviorContracts(cwd)
-            : null;
 
         return PipelineSecurityContextBuilder.Create(
             workingDirectory: cwd,
@@ -89,7 +86,6 @@ public sealed class SubAgentPipelineFactory(
             fileChangeCallback: request.FileChangeCallback,
             modelId: request.ModelId,
             providerId: request.ProviderId,
-            behaviorContracts: behaviorContracts,
             editTransaction: request.EditTransaction,
             conversationId: request.ConversationId,
             maxBudgetTokens: MaxBudgetTokens);

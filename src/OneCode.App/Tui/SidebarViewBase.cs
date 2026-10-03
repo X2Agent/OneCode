@@ -7,8 +7,9 @@ namespace OneCode.App.Tui;
 /// content area (reuses <see cref="MessageListView"/>), left separator line as a
 /// drag handle for width adjustment, and width clamping to [MinWidth, ComputeMaxWidth(screenWidth)].
 ///
-/// Display-only by design: <c>CanFocus = false</c>, no keyboard handling — all
-/// user interaction happens in the main conversation column.
+/// <c>CanFocus = false</c>; keyboard scrolling reaches it through ReplShell's
+/// sidebar:pageUp/pageDown actions (Shift+PageUp/PageDown), while mouse wheel
+/// scrolling is handled natively by the embedded content view.
 /// </summary>
 internal abstract class SidebarViewBase : View
 {
@@ -82,13 +83,29 @@ internal abstract class SidebarViewBase : View
     }
 
     /// <summary>Replaces the sidebar content with a fresh rendering.</summary>
+    /// <remarks>
+    /// 内容替换保留阅读位置：用户正翻阅计划时内容更新（执行进度推进）不再跳回底部——
+    /// 偏移按新行数钳制重放（<see cref="MessageListView"/> 的滚动语义）。
+    /// </remarks>
     public void Update(IReadOnlyList<FormattedLine> lines, string headerTitle)
     {
         _headerTitle = string.IsNullOrWhiteSpace(headerTitle) ? _defaultTitle : headerTitle;
+        var preferredOffset = _content.ScrollOffset;
+        var wasAutoScroll = _content.IsAutoScroll;
         _content.Clear();
         _content.AppendLines(lines);
-        SetNeedsDraw();
+        if (!wasAutoScroll)
+        {
+            _content.RestoreOffset(preferredOffset);
+            SetNeedsDraw();
+        }
     }
+
+    /// <summary>侧栏内容按视口高度向上翻页（Shift+PageUp）。</summary>
+    public void PageUp() => _content.PageUp();
+
+    /// <summary>侧栏内容按视口高度向下翻页（Shift+PageDown）。</summary>
+    public void PageDown() => _content.PageDown();
 
     /// <summary>Clears content while keeping the sidebar chrome (header + separator).</summary>
     public void ClearContent()

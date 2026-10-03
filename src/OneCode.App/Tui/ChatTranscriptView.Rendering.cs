@@ -135,8 +135,37 @@ public sealed partial class ChatTranscriptView
             if (_stream.ToolTracker.TryMatchByToolId(toolId, out var pending)
                 && pending.LineIndex < _stream.StatusLines.Count)
             {
-                var durationStr = $"({StreamingToolTracker.FormatDuration(pending.StartTick)})";
-                _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(name, isError, toolInput, durationStr, result, agentName: agentName, maxWidth: ContentWidth);
+                // 同轮相邻同类调用并入组行（×N 递增），不再逐条平铺刷屏。
+                // 组键含 TEAM 归属：不同成员的同名调用各自成组。
+                var groupKey = string.IsNullOrWhiteSpace(agentName) ? name : $"{name}|{agentName}";
+                if (_stream.ToolTracker.TryAppendToGroup(
+                        groupKey, toolInput, result, pending.StartTick, isError,
+                        out var groupLineIndex, out var members, out var totalDuration)
+                    && groupLineIndex < _stream.StatusLines.Count)
+                {
+                    // 该 done 对应的起始行已并入组行——移除原行并校正其后行索引，
+                    // 否则组行下方残留一行孤儿起始行。
+                    _stream.StatusLines.RemoveAt(pending.LineIndex);
+                    _stream.ToolTracker.ShiftLineIndicesFrom(pending.LineIndex, -1);
+                    if (pending.LineIndex < groupLineIndex)
+                        groupLineIndex--;
+
+                    var last = members[^1];
+                    _stream.StatusLines[groupLineIndex] = ConversationRenderer.MakeCompletedToolLine(
+                        name, last.IsError, last.Args, $"({totalDuration})", last.Result,
+                        agentName: agentName, maxWidth: ContentWidth,
+                        groupCount: members.Count, group: members);
+                }
+                else
+                {
+                    _stream.ToolTracker.RegisterGroup(
+                        groupKey, pending.LineIndex, toolInput, result, pending.StartTick, isError);
+                    var durationStr = $"({StreamingToolTracker.FormatDuration(pending.StartTick)})";
+                    // 首条成员不挂 Group：单条完成行展开仍是完整 Args/Result 详情，
+                    // 第二条并入（×N ≥ 2）后才切换为组行展开形态。
+                    _stream.StatusLines[pending.LineIndex] = ConversationRenderer.MakeCompletedToolLine(
+                        name, isError, toolInput, durationStr, result, agentName: agentName, maxWidth: ContentWidth);
+                }
             }
             // 已见过的 ToolId（ContinueStreaming 已提交到历史）— 跳过去重
             else if (_stream.ToolTracker.WasSeen(toolId))
@@ -146,6 +175,10 @@ public sealed partial class ChatTranscriptView
 
             if (isError && !string.IsNullOrWhiteSpace(result))
                 AddNoticeLines(result, TuiPalette.Error);
+
+            // 工具完成即脱离"执行 X"——activity 回到通用进行中，等下一个工具/首 token 覆盖。
+            // 旧实现在此不发事件：若 run 在工具后停滞/卡死，状态栏永久停留"执行 X"。
+            _app.Invoke(() => ActivityChanged?.Invoke("处理中"));
 
             RebuildStreamingPreview();
             return;

@@ -20,8 +20,7 @@ public sealed class CompactApplier
         session.Messages.Add(new SystemMessage(
             Id: Guid.NewGuid().ToString("N"),
             Content: CompactConstants.CompactBoundaryContent,
-            Timestamp: DateTimeOffset.UtcNow,
-            Type: SystemMessageType.Info));
+            Timestamp: DateTimeOffset.UtcNow));
 
         session.Messages.Add(new UserMessage(
             Id: Guid.NewGuid().ToString("N"),
@@ -76,8 +75,7 @@ public sealed class CompactApplier
         session.Messages.Add(new SystemMessage(
             Id: Guid.NewGuid().ToString("N"),
             Content: "[Partial conversation compaction]",
-            Timestamp: DateTimeOffset.UtcNow,
-            Type: SystemMessageType.Info));
+            Timestamp: DateTimeOffset.UtcNow));
 
         session.Messages.Add(new UserMessage(
             Id: Guid.NewGuid().ToString("N"),
@@ -172,8 +170,7 @@ public sealed class CompactApplier
         {
             if (session.Messages[index] is SystemMessage current
                 && session.Messages[index - 1] is SystemMessage previous
-                && current.Content == previous.Content
-                && current.Type == previous.Type)
+                && current.Content == previous.Content)
             {
                 session.Messages.RemoveAt(index);
             }

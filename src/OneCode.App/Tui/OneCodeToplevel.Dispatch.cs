@@ -145,7 +145,6 @@ public sealed partial class OneCodeToplevel
                 Invoke(() =>
                 {
                     _shell.Transcript.AddCommandResult(result);
-                    RefreshSessionName();
                     // /model、/config set … model 只改 AppState/配置，状态栏需回读运行时模型
                     SyncRuntimeModel();
                 });
@@ -343,7 +342,6 @@ public sealed partial class OneCodeToplevel
                     Invoke(() =>
                     {
                         _shell.Transcript.AddCommandResult(result);
-                        RefreshSessionName();
                         // /model、/config set … model 只改 AppState/配置，状态栏需回读运行时模型
                         SyncRuntimeModel();
                     });

@@ -2,6 +2,7 @@ using OneCode.Core.Session;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 using System.Text;
+using CoreConstants = OneCode.Core.Constants;
 namespace OneCode.App.Commands;
 
 /// <summary>
@@ -30,7 +31,7 @@ public sealed class InsightsCommand(
         string[] files = [];
         if (Directory.Exists(sessionsDir))
         {
-            files = Directory.GetFiles(sessionsDir, "*.jsonl", SearchOption.TopDirectoryOnly)
+            files = Directory.GetFiles(sessionsDir, $"*.{CoreConstants.Session.EventsFileExtension}", SearchOption.TopDirectoryOnly)
                 .OrderByDescending(File.GetLastWriteTime).Take(100).ToArray();
         }
 

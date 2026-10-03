@@ -17,8 +17,6 @@ public static partial class ChatBlockRenderers
         {
             BuildRunState.Created or BuildRunState.Intake or BuildRunState.Assessing
                 => (TuiGlyphs.InProgress, "正在分析任务…", TuiPalette.ModeBuildFg),
-            BuildRunState.Clarifying
-                => (TuiGlyphs.Paused, "等待补充任务信息…", TuiPalette.Warning),
             BuildRunState.ScopeConfirmed or BuildRunState.Planning or BuildRunState.Planned
                 => (TuiGlyphs.InProgress, "正在准备执行…", TuiPalette.ModeBuildFg),
             BuildRunState.Implementing when state.TotalTasks > 0

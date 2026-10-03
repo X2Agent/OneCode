@@ -25,6 +25,25 @@ namespace OneCode.App.Tui;
 /// <see cref="TodoStripView"/> 显示时从内容区借行（对话列宽度不变），
 /// 空快照整体隐藏——见 <c>ReplShell.TodoPanel.cs</c>。
 /// </summary>
+/// <summary>ReplShell 的宿主环境：应用实例、初始模型与平台服务。</summary>
+public sealed record ReplShellEnvironment(
+    IApplication App,
+    string InitialModel,
+    OneCode.Core.IO.IClipboardService? Clipboard = null,
+    OneCode.Core.Commands.IGitHelper? GitHelper = null);
+
+/// <summary>ReplShell 的键位服务：解析器与上下文管理器成对使用。</summary>
+public sealed record ReplShellKeyServices(
+    KeybindingResolver Resolver,
+    KeybindingContextManager ContextManager);
+
+/// <summary>ReplShell 的输入与显示数据源（由宿主注入的动态 provider）。</summary>
+public sealed record ReplShellInputSources(
+    IReadOnlyList<SlashCommandEntry> SlashCommands,
+    Func<IReadOnlyCollection<string>> ToolNameProvider,
+    Func<IReadOnlyList<string>>? HistoryProvider = null,
+    Func<bool>? GetShowThinking = null);
+
 public sealed partial class ReplShell : View
 {
     private readonly AgentStatusBar _agentStatusBar;
@@ -46,6 +65,10 @@ public sealed partial class ReplShell : View
     private SidebarViewBase? _sidebarHiddenForWidth;
     private bool _completionVisible;
 
+    /// <summary>当前可见的侧栏（Plan 优先，Team 兜底）；键盘翻页的目标。</summary>
+    private SidebarViewBase? ActiveSidebar =>
+        _planSidebar.Visible ? _planSidebar : _teamSidebar.Visible ? _teamSidebar : null;
+
     // 待办横条（输入框上方全宽状态带）当前占用行数；0 = 隐藏。见 ReplShell.TodoPanel.cs。
     private int _todoStripRows;
 
@@ -63,34 +86,29 @@ public sealed partial class ReplShell : View
     public AgentStatusBar AgentStatusBar => _agentStatusBar;
     public SessionContextBar SessionContextBar => _sessionContextBar;
 
-    public ReplShell(IApplication app, string version, string model, string? sshHost,
-        IReadOnlyList<SlashCommandEntry> slashCommands,
+    public ReplShell(
+        ReplShellEnvironment environment,
         WorkingModeController modeController,
-        KeybindingResolver keyResolver,
-        KeybindingContextManager keyContextManager,
-        OneCode.Core.IO.IClipboardService? clipboard,
-        Func<IReadOnlyList<string>>? historyProvider,
-        Func<IReadOnlyCollection<string>> toolNameProvider,
-        Func<bool>? getShowThinking = null,
-        OneCode.Core.Commands.IGitHelper? gitHelper = null)
+        ReplShellKeyServices keyServices,
+        ReplShellInputSources inputSources)
     {
-        _app = app;
+        _app = environment.App;
         _modeController = modeController;
-        _keyResolver = keyResolver;
-        _keyContextManager = keyContextManager;
-        _clipboard = clipboard;
-        _gitHelper = gitHelper;
+        _keyResolver = keyServices.Resolver;
+        _keyContextManager = keyServices.ContextManager;
+        _clipboard = environment.Clipboard;
+        _gitHelper = environment.GitHelper;
 
-        _transcript = new ChatTranscriptView(app, clipboard, getShowThinking);
+        _transcript = new ChatTranscriptView(_app, _clipboard, inputSources.GetShowThinking);
         _chatInput = new ChatInputView(
-            app,
+            _app,
             _modeController,
-            slashCommands,
-            toolNameProvider,
-            keyResolver,
-            keyContextManager,
-            clipboard,
-            historyProvider);
+            inputSources.SlashCommands,
+            inputSources.ToolNameProvider,
+            _keyResolver,
+            _keyContextManager,
+            _clipboard,
+            inputSources.HistoryProvider);
 
         CanFocus = true;
         TabStop = TabBehavior.NoStop;
@@ -117,6 +135,10 @@ public sealed partial class ReplShell : View
         _chatInput.PageUpRequested += () => _transcript.MessageView.PageUp();
         _chatInput.PageDownRequested += () => _transcript.MessageView.PageDown();
 
+        // Shift+PageUp/PageDown — scroll the active plan/team sidebar (page-level)
+        _chatInput.SidebarPageUpRequested += () => ActiveSidebar?.PageUp();
+        _chatInput.SidebarPageDownRequested += () => ActiveSidebar?.PageDown();
+
         // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板）。
         _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
         _chatInput.SidebarNarrowerRequested += () => AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
@@ -138,8 +160,8 @@ public sealed partial class ReplShell : View
             Width = Dim.Fill(),
             Height = 1,
         };
-        if (!string.IsNullOrEmpty(model))
-            _agentStatusBar.SetModel(model);
+        if (!string.IsNullOrEmpty(environment.InitialModel))
+            _agentStatusBar.SetModel(environment.InitialModel);
 
         // Activity transitions and model identity share one authoritative runtime component.
         _transcript.ActivityChanged += activity => _agentStatusBar.SetActivity(activity);
@@ -166,7 +188,7 @@ public sealed partial class ReplShell : View
         // separator line is a mouse drag handle: during the drag only layout
         // is refreshed (OnSidebarWidthChanged), the plan content and conversation
         // list re-render on release (OnSidebarDragEnded).
-        _planSidebar = new PlanSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
+        _planSidebar = new PlanSidebarView(_app, OnSidebarWidthChanged, OnSidebarDragEnded)
         {
             Y = 0,
             Height = Dim.Fill(),
@@ -176,7 +198,7 @@ public sealed partial class ReplShell : View
         _contentZone.Add(_planSidebar);
 
         // TEAM 运行状态板（右停靠，与 Plan 侧边栏互斥，见 ReplShell.TeamSidebar.cs）
-        _teamSidebar = new TeamSidebarView(app, OnSidebarWidthChanged, OnSidebarDragEnded)
+        _teamSidebar = new TeamSidebarView(_app, OnSidebarWidthChanged, OnSidebarDragEnded)
         {
             Y = 0,
             Height = Dim.Fill(),

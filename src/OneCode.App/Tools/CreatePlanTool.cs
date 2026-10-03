@@ -378,6 +378,16 @@ internal static class PlanContentQualityGate
         TimeSpan.FromSeconds(1));
 
     /// <summary>
+    /// 编号步骤列表正则——匹配 markdown/中文语境的编号行（"1. …"、"2、 …"、"3) …"）。
+    /// 用于调研/分析型计划的证据替代：此类计划无文件路径、无技术栈、无 code block，
+    /// 但应给出编号的后续行动步骤（结论 → 分步建议），否则门槛会误杀调研型任务。
+    /// </summary>
+    private static readonly Regex NumberedStepsRegex = new(
+        @"^\s{0,3}\d{1,2}[.、)]\s+\S",
+        RegexOptions.Multiline,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
     /// 技术栈关键词正则——匹配常见框架/技术栈名称。用于 Greenfield 场景（Phase 1 Branch B）
     /// 的调研证据替代：新项目无文件可引用，但应明确技术选型。
     /// 涵盖前端（React/Vue/Angular/Svelte）、后端（Express/Nest/Django/Flask/Spring/ASP.NET/Rails）、
@@ -424,22 +434,27 @@ internal static class PlanContentQualityGate
                 "Organize the plan with headings like '# Context', '# Approach', '# File Paths', '# Verification'.");
         }
 
-        // 3. 调研证据检查（自适应——支持新项目 Greenfield 场景与混合场景）：
+        // 3. 调研证据检查（自适应——支持新项目 Greenfield 与调研/分析型场景）：
         //    - 现有项目场景：引用文件路径或包含 code block
-        //    - 新项目/Greenfield 场景：引用技术栈关键词（架构决策关键词作为补充证据，不强制）
+        //    - 新项目/Greenfield 场景：引用技术栈关键词
+        //    - 调研/分析型场景：编号的后续行动步骤（无文件路径/技术栈可引用）
         //    - 混合场景：任一证据满足即可通过
         var hasFilePath = FilePathReferenceRegex.IsMatch(planContent);
         var hasCodeBlock = CodeBlockRegex.IsMatch(planContent);
         var hasTechStack = TechStackReferenceRegex.IsMatch(planContent);
+        var hasNumberedSteps = NumberedStepsRegex.IsMatch(planContent);
         var existingProjectEvidence = hasFilePath || hasCodeBlock;
         // Greenfield 证据：技术栈引用即可；架构决策关键词作为补充但不强制。
         var greenfieldEvidence = hasTechStack;
-        if (!existingProjectEvidence && !greenfieldEvidence)
+        // 调研/分析型证据：编号步骤列表（结论 → 分步后续行动）。
+        var researchEvidence = hasNumberedSteps;
+        if (!existingProjectEvidence && !greenfieldEvidence && !researchEvidence)
         {
             failures.Add(
-                "Plan does not reference any file paths, code blocks, or tech stack keywords. " +
-                "Complete Phase 1 (investigate existing codebase with Read/Grep/Glob, OR for new projects " +
-                "specify the tech stack) and reflect the evidence in the plan.");
+                "Plan does not reference any file paths, code blocks, tech stack keywords, " +
+                "or numbered follow-up steps. Complete Phase 1 (investigate existing codebase " +
+                "with Read/Grep/Glob, OR for new projects specify the tech stack, OR for research " +
+                "tasks list numbered next actions) and reflect the evidence in the plan.");
         }
 
         return failures;

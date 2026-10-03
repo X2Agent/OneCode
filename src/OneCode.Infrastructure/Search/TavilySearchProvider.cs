@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using OneCode.Core.Config;
 using OneCode.Core.Search;
+using OneCode.Core.Tools;
 using InfrastructureConstants = OneCode.Infrastructure.Config.Constants;
 
 namespace OneCode.Infrastructure.Search;
@@ -67,7 +68,9 @@ public sealed class TavilySearchProvider(IHttpClientFactory httpClientFactory, I
             {
                 var title = item.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null;
                 var url = item.TryGetProperty("url", out var urlEl) ? urlEl.GetString() : null;
-                var snippet = item.TryGetProperty("content", out var contentEl) ? contentEl.GetString() : null;
+                var rawSnippet = item.TryGetProperty("content", out var contentEl) ? contentEl.GetString() : null;
+                // Tavily 的 content 常夹带站点页脚原始 HTML（footer/p 标签），入口剥离一次。
+                var snippet = rawSnippet is null ? null : HtmlPlainText.Strip(rawSnippet);
 
                 if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(url))
                     continue;

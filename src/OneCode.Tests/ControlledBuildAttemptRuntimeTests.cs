@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using NSubstitute;
+using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
@@ -156,6 +157,47 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_RestoresAmbientActivationContextDuringAgentRun()
+    {
+        // 受控 attempt 经 durable workflow 调度，流枚举链设置的 ambient AsyncLocal
+        // （会话 ID / run ID / 能力边界）不保证延续到本层——agent 执行期间必须
+        // 重建，否则 UpdatePlanStep 等工具定位不到会话而报
+        // "Plan execution requires an explicit agent run conversation."。
+        var run = CreateClaimedRun();
+        var agentRunId = $"build-{Guid.NewGuid():N}";
+        string? seenConversation = null;
+        string? seenRunId = null;
+        var runner = CreateRunner(_ =>
+        {
+            seenConversation = ToolActivationContext.CurrentConversationId;
+            seenRunId = OneCodeAgentRunContext.CurrentRunId;
+            return Task.FromResult(PassingResult([]));
+        });
+        var coordinator = Substitute.For<IBuildRunCoordinator>();
+        coordinator.CompleteAsync(run.Id, Arg.Any<MainAgentRunResult>(), Arg.Any<CancellationToken>(), 7)
+            .Returns(run with { State = BuildRunState.Accepting, Version = 2 });
+        coordinator.ConfirmCommitAsync(run.Id, Arg.Any<CancellationToken>(), 7)
+            .Returns(run with { State = BuildRunState.Completed, TransactionCommitted = true, Version = 3 });
+
+        var options = new MainAgentRunOptions { ConversationId = run.ConversationId, AgentRunId = agentRunId };
+        ToolActivationContext.CurrentConversationId = "outer-context";
+        try
+        {
+            await CreateRuntime(run, runner, coordinator, options: options).ExecuteAsync(
+                CreateInput(run),
+                TestContext.Current.CancellationToken);
+
+            seenConversation.Should().Be(run.ConversationId.ToString(), "agent 执行期间会话上下文指向本次 run");
+            seenRunId.Should().Be(agentRunId);
+            ToolActivationContext.CurrentConversationId.Should().Be("outer-context", "执行结束后恢复外层上下文");
+        }
+        finally
+        {
+            ToolActivationContext.CurrentConversationId = null;
+        }
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Success_CommitsLedgerTransaction()
     {
         var file = CreateFile("ledger-commit.txt", "before");
@@ -222,7 +264,8 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
         BuildRun run,
         IMainAgentRunner runner,
         IBuildRunCoordinator coordinator,
-        OneCode.Core.Workflows.IOperationLedger? ledger = null)
+        OneCode.Core.Workflows.IOperationLedger? ledger = null,
+        MainAgentRunOptions? options = null)
     {
         var store = Substitute.For<IBuildRunStore>();
         store.LoadByIdAsync(run.Id, Arg.Any<CancellationToken>()).Returns(run);
@@ -231,7 +274,11 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
             coordinator,
             store,
             new ControlledBuildAttemptContext(
-                new MainAgentRunOptions(),
+                options ?? new MainAgentRunOptions
+                {
+                    ConversationId = run.ConversationId,
+                    AgentRunId = $"build-{run.Id}",
+                },
                 Channel.CreateUnbounded<object>().Writer,
                 () => new EditTransaction(),
                 buildRun => buildRun,

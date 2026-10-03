@@ -1,6 +1,5 @@
 using NSubstitute;
 using OneCode.App.Tools;
-using OneCode.Core.IO;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;
@@ -207,21 +206,7 @@ public sealed class GlobToolTests : IDisposable
         File.WriteAllText(Path.Combine(_projectDir, ".onecodeignore"), "cache/\n*.sqlite\n.env.*");
 
         var wd = CreateWd();
-        var fileSystem = Substitute.For<IFileSystem>();
-        fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
-        {
-            var path = call.Arg<string>();
-            return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
-        });
-        fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var path = call.Arg<string>();
-                return File.Exists(path)
-                    ? Task.FromResult<string?>(File.ReadAllText(path))
-                    : Task.FromResult<string?>(null);
-            });
-        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd, fileSystem));
+        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd));
 
         var result = await tool.GlobAsync("**/*", ct: ct);
 
@@ -243,21 +228,7 @@ public sealed class GlobToolTests : IDisposable
         File.WriteAllText(Path.Combine(_projectDir, ".onecodeignore"), "/generated/\n");
 
         var wd = CreateWd();
-        var fileSystem = Substitute.For<IFileSystem>();
-        fileSystem.GetMtimeMs(Arg.Any<string>()).Returns(call =>
-        {
-            var path = call.Arg<string>();
-            return File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0;
-        });
-        fileSystem.ReadTextFileAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var path = call.Arg<string>();
-                return File.Exists(path)
-                    ? Task.FromResult<string?>(File.ReadAllText(path))
-                    : Task.FromResult<string?>(null);
-            });
-        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd, fileSystem));
+        var tool = new GlobTool(wd, new WorkspaceIgnoreProvider(wd));
 
         var result = await tool.GlobAsync("**/*.cs", path: "src", ct: ct);
 

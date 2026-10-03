@@ -161,7 +161,6 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
             new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             new BuildTaskLinker(new TaskService()),
-            Substitute.For<IClarificationQuestionGenerator>(),
             Substitute.For<ILogger<BuildRunCoordinator>>());
         var host = new ControlledBuildAttemptHost(
             durableHost,

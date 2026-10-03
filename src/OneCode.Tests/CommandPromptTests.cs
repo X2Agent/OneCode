@@ -4,7 +4,6 @@ using OneCode.App.Services;
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Commands;
 using OneCode.Core.Prompt;
-using OneCode.Core.IO;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -101,10 +100,9 @@ public sealed class CommandPromptTests : IDisposable
     public async Task InitCommand_NoApiKey_WritesStaticTemplate()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings();
         // 不走 prompt 路径，空 PromptManager 即可
-        var sut = new InitCommand(fs, CreateConfigManager(settings), new PromptManager());
+        var sut = new InitCommand(CreateConfigManager(settings), new PromptManager());
 
         var result = await sut.ExecuteAsync([], ct);
 
@@ -119,9 +117,8 @@ public sealed class CommandPromptTests : IDisposable
     public async Task InitCommand_NoLlmFlag_FallsBackEvenWithApiKey()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
-        var sut = new InitCommand(fs, CreateConfigManager(settings), new PromptManager());
+        var sut = new InitCommand(CreateConfigManager(settings), new PromptManager());
 
         var result = await sut.ExecuteAsync(["--no-llm"], ct);
 
@@ -133,12 +130,11 @@ public sealed class CommandPromptTests : IDisposable
     public async Task InitCommand_WithApiKey_ReturnsPromptResult()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
         var pm = CreatePromptManager("system/init",
             "## Task: Initialize AGENTS.md\nType: {{projectType}}");
 
-        var sut = new InitCommand(fs, CreateConfigManager(settings), pm);
+        var sut = new InitCommand(CreateConfigManager(settings), pm);
         var result = await sut.ExecuteAsync([], ct);
 
         var prompt = result.Should().BeOfType<CommandResult.PromptResult>().Subject;
@@ -151,9 +147,8 @@ public sealed class CommandPromptTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         await File.WriteAllTextAsync(Path.Combine(_tempDir, "AGENTS.md"), "# existing", ct);
-        var fs = new TestFileSystem();
         var settings = new AppSettings();
-        var sut = new InitCommand(fs, CreateConfigManager(settings), new PromptManager());
+        var sut = new InitCommand(CreateConfigManager(settings), new PromptManager());
 
         var result = await sut.ExecuteAsync([], ct);
 
@@ -167,9 +162,8 @@ public sealed class CommandPromptTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var existing = Path.Combine(_tempDir, "AGENTS.md");
         await File.WriteAllTextAsync(existing, "# old content", ct);
-        var fs = new TestFileSystem();
         var settings = new AppSettings();
-        var sut = new InitCommand(fs, CreateConfigManager(settings), new PromptManager());
+        var sut = new InitCommand(CreateConfigManager(settings), new PromptManager());
 
         var result = await sut.ExecuteAsync(["--force"], ct);
 
@@ -185,12 +179,11 @@ public sealed class CommandPromptTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         await File.WriteAllTextAsync(
             Path.Combine(_tempDir, "TestProj.csproj"), "<Project></Project>", ct);
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
         var pm = CreatePromptManager("system/init",
             "Type: {{projectType}}\nBuild: {{buildCommand}}");
 
-        var sut = new InitCommand(fs, CreateConfigManager(settings), pm);
+        var sut = new InitCommand(CreateConfigManager(settings), pm);
         var result = await sut.ExecuteAsync([], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
@@ -204,12 +197,11 @@ public sealed class CommandPromptTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         await File.WriteAllTextAsync(
             Path.Combine(_tempDir, "README.md"), "# My Project\nA test project.", ct);
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
         var pm = CreatePromptManager("system/init",
             "README: {{readmeContent}}");
 
-        var sut = new InitCommand(fs, CreateConfigManager(settings), pm);
+        var sut = new InitCommand(CreateConfigManager(settings), pm);
         var result = await sut.ExecuteAsync([], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
@@ -221,10 +213,9 @@ public sealed class CommandPromptTests : IDisposable
     public async Task InitCommand_PromptNotFound_ReturnsError()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
         // 空 PromptManager，没有注册模板
-        var sut = new InitCommand(fs, CreateConfigManager(settings), new PromptManager());
+        var sut = new InitCommand(CreateConfigManager(settings), new PromptManager());
 
         var result = await sut.ExecuteAsync([], ct);
 
@@ -236,11 +227,10 @@ public sealed class CommandPromptTests : IDisposable
     public async Task InitCommand_ApiKeyFromEffectiveSnapshot_TriggersLlmPath()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "resolved-environment-key" };
         var pm = CreatePromptManager("system/init", "Type: {{projectType}}");
 
-        var sut = new InitCommand(fs, CreateConfigManager(settings), pm);
+        var sut = new InitCommand(CreateConfigManager(settings), pm);
         var result = await sut.ExecuteAsync([], ct);
 
         result.Should().BeOfType<CommandResult.PromptResult>();
@@ -440,11 +430,10 @@ public sealed class CommandPromptTests : IDisposable
     public async Task DesignInitCommand_OutputFlag_AllowedToolsTargetsOutputPath()
     {
         var ct = TestContext.Current.CancellationToken;
-        var fs = new TestFileSystem();
         var settings = new AppSettings { ApiKey = "sk-test" };
         var pm = CreatePromptManager("system/design-init", "Write to: {{outputPath}}");
 
-        var sut = new DesignInitCommand(fs, CreateConfigManager(settings), pm);
+        var sut = new DesignInitCommand(CreateConfigManager(settings), pm);
         var result = await sut.ExecuteAsync(["--output", "docs/design.md"], ct);
 
         var prompt = result.Should().BeOfType<CommandResult.PromptResult>().Subject;
@@ -472,19 +461,4 @@ public sealed class CommandPromptTests : IDisposable
         return helper;
     }
 
-    private sealed class TestFileSystem : IFileSystem
-    {
-        public Task<string?> ReadTextFileAsync(string path, CancellationToken ct = default)
-            => Task.Run<string?>(() => File.Exists(path) ? File.ReadAllText(path) : null, ct);
-
-        public async Task WriteTextFileAsync(string path, string content, CancellationToken ct = default)
-            => await File.WriteAllTextAsync(path, content, ct).ConfigureAwait(false);
-
-        public IReadOnlyList<string> FindFiles(string directory, string? patterns = null, string[]? excludeDirs = null)
-            => Directory.GetFiles(directory, patterns ?? "*");
-
-        public bool MatchesGlob(string filePath, string pattern) => true;
-
-        public long GetMtimeMs(string path) => File.GetLastWriteTimeUtc(path).Ticks / TimeSpan.TicksPerMillisecond;
-    }
 }

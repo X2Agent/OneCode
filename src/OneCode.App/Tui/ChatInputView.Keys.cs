@@ -67,9 +67,26 @@ public sealed partial class ChatInputView
         // 选择题/选择器挂起态：Editor 只读，全部键转发给会话，未消耗的键也
         // 吞掉，防止回落到聊天分支（如 Enter 误提交）。
         // 文本题：Editor 仍需接收可打印字符，只转发导航/取消/确认组合键。
+        // 例外：转录滚动键在挂起态放行——审批计划卡时恰恰需要翻阅长对话/长计划，
+        // 滚动与 selector 的 up/down/enter/escape 不冲突，也不把焦点还给输入框。
         var interactionSuspended = _interactionSuspended && !_isQuestionMode;
         if (interactionSuspended || IsQuestionInteractionKey(e))
         {
+            if (interactionSuspended && IsChatScrollAction(earlyAction))
+            {
+                DispatchChatScroll(earlyAction);
+                e.Handled = true;
+                return;
+            }
+
+            // 侧栏翻页在挂起态同样放行（审批卡场景翻阅右侧计划）。
+            if (interactionSuspended && IsSidebarScrollAction(earlyAction))
+            {
+                DispatchSidebarScroll(earlyAction);
+                e.Handled = true;
+                return;
+            }
+
             if (InteractionSession?.HandleInteractionKey(e) == true || interactionSuspended)
             {
                 _suppressKeyBubble = true;
@@ -310,29 +327,18 @@ public sealed partial class ChatInputView
         }
 
         // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
-        if (action == KeybindingDefaults.ActionChatScrollUp)
+        // PageUp / PageDown — scroll the conversation transcript (page-level)
+        if (IsChatScrollAction(action))
         {
-            ScrollUpRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatScrollDown)
-        {
-            ScrollDownRequested?.Invoke();
+            DispatchChatScroll(action);
             e.Handled = true;
             return;
         }
 
-        // PageUp / PageDown — scroll the conversation transcript (page-level)
-        if (action == KeybindingDefaults.ActionChatPageUp)
+        // Shift+PageUp/PageDown — scroll the plan/team sidebar (page-level)
+        if (IsSidebarScrollAction(action))
         {
-            PageUpRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatPageDown)
-        {
-            PageDownRequested?.Invoke();
+            DispatchSidebarScroll(action);
             e.Handled = true;
             return;
         }
@@ -351,6 +357,50 @@ public sealed partial class ChatInputView
             OnPasteRequested();
             e.Handled = true;
             return;
+        }
+    }
+
+    /// <summary>转录滚动动作判定：挂起态放行与常规分发共用。</summary>
+    private static bool IsChatScrollAction(string? action)
+        => action is KeybindingDefaults.ActionChatScrollUp
+            or KeybindingDefaults.ActionChatScrollDown
+            or KeybindingDefaults.ActionChatPageUp
+            or KeybindingDefaults.ActionChatPageDown;
+
+    private void DispatchChatScroll(string? action)
+    {
+        switch (action)
+        {
+            case KeybindingDefaults.ActionChatScrollUp:
+                ScrollUpRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionChatScrollDown:
+                ScrollDownRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionChatPageUp:
+                PageUpRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionChatPageDown:
+                PageDownRequested?.Invoke();
+                break;
+        }
+    }
+
+    /// <summary>侧栏（Plan/Team 计划卡）翻页动作判定。</summary>
+    private static bool IsSidebarScrollAction(string? action)
+        => action is KeybindingDefaults.ActionSidebarPageUp
+            or KeybindingDefaults.ActionSidebarPageDown;
+
+    private void DispatchSidebarScroll(string? action)
+    {
+        switch (action)
+        {
+            case KeybindingDefaults.ActionSidebarPageUp:
+                SidebarPageUpRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionSidebarPageDown:
+                SidebarPageDownRequested?.Invoke();
+                break;
         }
     }
 

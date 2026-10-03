@@ -9,9 +9,6 @@ public sealed partial class ChatTranscriptView : View
     private readonly ILogger<ChatTranscriptView> _logger;
     private readonly StreamingTranscriptState _stream = new();
 
-    private int _inputTokens;
-    private int _outputTokens;
-
     // Stored welcome info so we can re-render on resize (centering depends on width).
     private WelcomeInfo? _welcomeInfo;
     private bool _isWelcomeShowing;
@@ -73,8 +70,6 @@ public sealed partial class ChatTranscriptView : View
     {
         CancelPendingStreamingRebuild();
         _stream.Clear();
-        _inputTokens = 0;
-        _outputTokens = 0;
         _isWelcomeShowing = false;
         _messageView.Clear();
         _committedJournal.Clear();
@@ -255,27 +250,6 @@ public sealed partial class ChatTranscriptView : View
         SetTrailingModeBannerJournal(bannerLines);
     }
 
-    /// <summary>
-    /// Inserts pre-rendered banner/card lines (e.g. historical plan cards) into the chat.
-    /// Unlike <see cref="UpdateModeBanner"/>, this always appends and seals any
-    /// trailing mode banner so later mode switches start a new history entry.
-    /// </summary>
-    public void AddModeBanner(IReadOnlyList<FormattedLine> bannerLines)
-    {
-        InvalidateTrailingModeBanner();
-        var previewCount = _messageView.StreamingPreviewLineCount > 0
-            ? _messageView.StreamingPreviewLineCount
-            : _stream.PreviewLineCount;
-        if (_stream.IsStreaming && previewCount > 0)
-            _messageView.InsertBeforeLast(previewCount, bannerLines);
-        else
-            _messageView.AppendLines(bannerLines);
-        // 历史 banner 与宽度无关：作为静态条目追加，且不占用"尾部可替换"槽位
-        // （后续 UpdateModeBanner 追加新条目而非替换本条）。
-        var snapshot = bannerLines.ToList();
-        _committedJournal.Add(_ => snapshot);
-    }
-
     private void InvalidateTrailingModeBanner()
     {
         _stream.TrailingModeBannerLineCount = 0;
@@ -304,14 +278,16 @@ public sealed partial class ChatTranscriptView : View
     {
         Clear();
 
-        foreach (var msg in conversation.Messages)
-            AppendCommittedBlock(RenderMessageJournalEntry(msg));
+        foreach (var unit in MessageFlowRenderer.SegmentConversation(conversation.Messages))
+        {
+            if (unit is MessageFlowRenderer.ToolRunSegment segment)
+                AppendCommittedBlock(RenderToolRunJournalEntry(segment));
+            else
+                AppendCommittedBlock(RenderMessageJournalEntry((Message)unit));
+        }
 
         _messageView.ScrollToBottom();
     }
-
-    public (int InputTokens, int OutputTokens) GetTokenUsage()
-        => (_inputTokens, _outputTokens);
 
     public void NotifyLayoutChanged()
     {
@@ -423,6 +399,30 @@ public sealed partial class ChatTranscriptView : View
             try
             {
                 return _renderer.RenderMessage(message);
+            }
+            finally
+            {
+                _renderer.CurrentMode = prevMode;
+                _renderer.CurrentWidth = prevWidth;
+            }
+        };
+    }
+
+    /// <summary>
+    /// 为工具活动段构造日志闭包：重放时按当前宽度重新聚合渲染
+    /// （相邻同名工具对合并为组行），与实时流的合并形态一致。
+    /// </summary>
+    private Func<int, IReadOnlyList<FormattedLine>> RenderToolRunJournalEntry(MessageFlowRenderer.ToolRunSegment segment)
+    {
+        var mode = _renderer.CurrentMode;
+        return width =>
+        {
+            var (prevMode, prevWidth) = (_renderer.CurrentMode, _renderer.CurrentWidth);
+            _renderer.CurrentMode = mode;
+            _renderer.CurrentWidth = width;
+            try
+            {
+                return _renderer.RenderToolRunSegment(segment);
             }
             finally
             {

@@ -35,8 +35,17 @@ using NSubstitute;
 
 namespace OneCode.Tests;
 
-public sealed class ChatServiceTests
+public sealed class QueryStreamEngineTests
 {
+    /// <summary>受控执行请求的预置计划固定样本（内容不参与断言）。</summary>
+    private static BuildPlan PrescribedPlan()
+        => new(
+            "Fix Foo.cs and verify",
+            [new BuildPlanTask("t1", "Fix Foo.cs line 42", "Fix and verify", [], [], ["FooTests passes"])],
+            ["dotnet test"],
+            [],
+            []);
+
     [Fact]
     public async Task StreamQueryAsync_PreCancelledToken_StopsWithoutStreaming()
     {
@@ -155,7 +164,8 @@ public sealed class ChatServiceTests
             "system",
             "model",
             WorkingMode.Plan,
-            Path.GetTempPath());
+            Path.GetTempPath(),
+            PrescribedPlan());
         using var cts = new CancellationTokenSource();
 
         var act = async () =>
@@ -205,7 +215,8 @@ public sealed class ChatServiceTests
             "system",
             "model",
             WorkingMode.Plan,
-            Path.GetTempPath());
+            Path.GetTempPath(),
+            PrescribedPlan());
         using var cts = new CancellationTokenSource();
 
         var act = async () =>
@@ -354,19 +365,13 @@ public sealed class ChatServiceTests
             var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
             fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult("fingerprint-durable"));
-            var questionGenerator = Substitute.For<IClarificationQuestionGenerator>();
-            questionGenerator.GenerateAsync(
-                    Arg.Any<string>(),
-                    Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(new RequirementIntake(["第一期要交付什么？"], [], [], []));
+            var taskService = new TaskService();
             var coordinator = new BuildRunCoordinator(
                 buildStore,
                 fingerprint,
                 new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
-                new BuildTaskLinker(new TaskService()),
-                questionGenerator,
+                new BuildTaskLinker(taskService),
                 Substitute.For<ILogger<BuildRunCoordinator>>());
             var registry = new JsonWorkflowRunRegistry(Path.Combine(root, "workflow-runs"));
             var durableHost = new DurableWorkflowHost(
@@ -380,6 +385,74 @@ public sealed class ChatServiceTests
                 buildStore,
                 registry,
                 coordinator);
+            // 批准执行要求 step 证据经 UpdatePlanStep 提交（BuildProtocolBlock 协议）——
+            // seed 一个 Executing 态 PlanWorkflow 并把真工具注册进目录，stub agent 据此提交。
+            var runId = "durable-build-run";
+            var planStore = new PlanAggregateStore(Path.Combine(root, "plan-aggregates"));
+            var workflowService = new PlanWorkflowApplicationService(planStore);
+            var now = DateTimeOffset.UtcNow;
+            var workflow = PlanWorkflow.Create(conversation.Id) with
+            {
+                State = PlanWorkflowState.Executing,
+                Version = 1,
+                LatestRevision = 1,
+                SubmittedRevision = 1,
+                ApprovedRevision = 1,
+                ExecutionRequestId = "durable",
+                ActiveRunId = runId,
+                ActiveRunKind = PlanRunKind.Build,
+                ApprovedSnapshot = new ApprovedPlanSnapshot
+                {
+                    PlanId = default,
+                    SessionId = conversation.Id,
+                    Revision = 1,
+                    Title = "Durable plan",
+                    Markdown = "# Durable plan",
+                    Steps = [new PlanStepDefinition
+                    {
+                        Id = "t1",
+                        Title = "Fix Foo.cs",
+                        Description = "Fix and verify",
+                        Files = [],
+                        AcceptanceCriteria = ["FooTests passes"],
+                        DependsOn = [],
+                        Risk = PlanStepRisk.Low,
+                    }],
+                    ContentHash = "sha256-durable",
+                    ApprovedBy = "user",
+                    ApprovedAt = now,
+                },
+                StepExecutions = [new PlanStepExecution
+                {
+                    StepId = "t1",
+                    Status = PlanStepExecutionStatus.InProgress,
+                    UpdatedAt = now,
+                }],
+                UpdatedAt = now,
+            };
+            await planStore.SaveAsync(
+                new PlanAggregate(workflow, [new PlanRevision
+                {
+                    PlanId = workflow.Id,
+                    SessionId = conversation.Id,
+                    Revision = 1,
+                    Title = "Durable plan",
+                    Markdown = "# Durable plan",
+                    Steps = workflow.ApprovedSnapshot!.Steps,
+                    Risks = [],
+                    Assumptions = [],
+                    ContentHash = "sha256-durable",
+                    Status = PlanRevisionStatus.Approved,
+                    CreatedAt = now,
+                }]),
+                -1,
+                TestContext.Current.CancellationToken);
+            var planExecutionTool = new PlanExecutionTool(
+                workflowService,
+                new PlanCardPublisher(new OrchestrationEventBus()),
+                new BuildTaskLinker(taskService));
+            var updateStepTool = AIFunctionFactory.Create(
+                planExecutionTool.UpdatePlanStepAsync, name: PlanToolNames.UpdateStep);
             var runner = Substitute.For<IMainAgentRunner>();
             runner.RunStreamingAsync(
                     Arg.Any<MainAgentRunOptions>(),
@@ -389,6 +462,16 @@ public sealed class ChatServiceTests
                 {
                     var options = callInfo.ArgAt<MainAgentRunOptions>(0);
                     var writer = callInfo.ArgAt<ChannelWriter<object>>(1);
+                    // 按 BuildProtocolBlock 协议提交 step 证据（ambient 上下文已由
+                    // attempt 运行时重建，工具能定位会话与 run）。
+                    var updateStep = options.Tools!.OfType<AIFunction>()
+                        .Single(t => t.Name == PlanToolNames.UpdateStep);
+                    await updateStep.InvokeAsync(new AIFunctionArguments
+                    {
+                        ["stepId"] = "t1",
+                        ["status"] = "completed",
+                        ["evidence"] = "Foo.cs fixed; FooTests passed.",
+                    }, TestContext.Current.CancellationToken);
                     await writer.WriteAsync(
                         new AgentResponseUpdate { Contents = { new TextContent("durable complete") } },
                         TestContext.Current.CancellationToken);
@@ -412,7 +495,7 @@ public sealed class ChatServiceTests
                 .Returns(Task.FromResult(new ClarificationInteractionResult("确认执行", false)));
             var capabilities = new ToolCapabilitySet
             {
-                AllowedToolNames = new[] { "ReadFile", "Write", "Edit" }.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
+                AllowedToolNames = new[] { "ReadFile", "Write", "Edit", PlanToolNames.UpdateStep }.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
                 AllowedCategories = ToolCategory.FileWrite,
                 MaximumRisk = ToolRisk.Destructive,
                 AllowDynamicActivation = true,
@@ -427,15 +510,17 @@ public sealed class ChatServiceTests
                 attemptHost,
                 buildStore,
                 clarifier,
-                capabilityResolver);
+                capabilityResolver,
+                extraTools: [updateStepTool]);
             var request = new WorkflowRunRequest(
-                "durable-build-run",
+                runId,
                 conversation.Id,
                 "Fix Foo.cs line 42 and run FooTests.",
                 "system",
                 "model1",
                 WorkingMode.Build,
-                root);
+                root,
+                PrescribedPlan());
 
             var events = new List<QueryEvent>();
             await foreach (var evt in sut.StreamWorkflowRunAsync(
@@ -446,11 +531,11 @@ public sealed class ChatServiceTests
             }
 
             var persisted = await buildStore.LoadAsync(conversation.Id, TestContext.Current.CancellationToken);
-            persisted!.State.Should().Be(BuildRunState.Completed);
+            persisted!.State.Should().Be(BuildRunState.Completed, because: persisted.FailureSummary);
             persisted.WorkflowFencingToken.Should().BeGreaterThan(0);
             persisted.Metrics.TurnsCompleted.Should().Be(1);
             persisted.ApprovedToolPolicy.Should().NotBeNull();
-            persisted.PlanApprovalSource.Should().Be("runtime-approved");
+            persisted.PlanApprovalSource.Should().Be("plan-mode-approval");
             events.OfType<BuildRunStateEvent>().Select(item => item.State).Should().ContainInOrder(
                 BuildRunState.Planning,
                 BuildRunState.Planned,
@@ -513,7 +598,8 @@ public sealed class ChatServiceTests
             "sys",
             "model1",
             WorkingMode.Build,
-            conversation.WorkingDirectory);
+            conversation.WorkingDirectory,
+            PrescribedPlan());
 
         var events = new List<QueryEvent>();
         await foreach (var evt in sut.StreamWorkflowRunAsync(
@@ -532,96 +618,44 @@ public sealed class ChatServiceTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task StreamWorkflowRunAsync_PlanApprovalCancelled_BlocksRunWithoutStartingAgent()
+        [Fact]
+    public async Task StreamWorkflowRunAsync_MissingPrescribedPlan_FailsWithoutStartingAgent()
     {
-        var root = Path.Combine(Path.GetTempPath(), "onecode-chat-cancel-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
+        // 受控执行恒由上层批准的预置计划驱动（WorkflowRunRequest.PrescribedBuildPlan
+        // 必填不变量）——缺失即拒绝，不启动 agent。
+        var conversation = new Conversation
         {
-            var conversation = new Conversation
-            {
-                Id = SessionId.NewId(),
-                WorkingDirectory = root,
-            };
-            var sessionManager = Substitute.For<ISessionManager>();
-            sessionManager.ForegroundConversation.Returns(conversation);
-            sessionManager.WorkingDirectory.Returns(root);
-            var buildStore = new JsonBuildRunStore(Path.Combine(root, "build-runs"));
-            var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
-            fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult("fingerprint-cancel"));
-            var questionGenerator = Substitute.For<IClarificationQuestionGenerator>();
-            questionGenerator.GenerateAsync(
-                    Arg.Any<string>(),
-                    Arg.Any<OneCode.Core.Build.RequirementAssessment>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(new RequirementIntake(["第一期要交付什么？"], [], [], []));
-            var coordinator = new BuildRunCoordinator(
-                buildStore,
-                fingerprint,
-                new RequirementAssessmentService(),
-                new BuildStateTransitionService(),
-                new BuildTaskLinker(new TaskService()),
-                questionGenerator,
-                Substitute.For<ILogger<BuildRunCoordinator>>());
-            var clarifier = Substitute.For<IClarificationInteractionService>();
-            clarifier.AskAsync(
-                    Arg.Any<string>(),
-                    Arg.Any<IReadOnlyList<string>>(),
-                    Arg.Any<bool>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult(ClarificationInteractionResult.Cancelled));
-            var capabilities = new ToolCapabilitySet
-            {
-                AllowedToolNames = new[] { "ReadFile", "Write", "Edit" }.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
-                AllowedCategories = ToolCategory.FileWrite,
-                MaximumRisk = ToolRisk.Destructive,
-                AllowDynamicActivation = true,
-                AllowSubAgents = true,
-            };
-            var capabilityResolver = Substitute.For<IToolCapabilityResolver>();
-            capabilityResolver.Resolve(Arg.Any<WorkingMode>()).Returns(capabilities);
-            var runner = Substitute.For<IMainAgentRunner>();
-            var sut = CreateSutWithDependencies(
-                runner,
-                sessionManager,
-                coordinator,
-                clarificationInteraction: clarifier,
-                capabilityResolver: capabilityResolver);
-            var request = new WorkflowRunRequest(
-                "cancelled-approval",
-                conversation.Id,
-                "Fix Foo.cs line 42 and run FooTests.",
-                "system",
-                "model1",
-                WorkingMode.Build,
-                root);
+            Id = SessionId.NewId(),
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.ForegroundConversation.Returns(conversation);
+        sessionManager.WorkingDirectory.Returns(conversation.WorkingDirectory);
+        var runner = Substitute.For<IMainAgentRunner>();
+        var sut = CreateSutWithDependencies(runner, sessionManager, Substitute.For<IBuildRunCoordinator>());
+        var request = new WorkflowRunRequest(
+            "missing-prescribed-plan",
+            conversation.Id,
+            "execute",
+            "system",
+            "model",
+            WorkingMode.Build,
+            Path.GetTempPath(),
+            null!);
 
-            var events = new List<QueryEvent>();
-            await foreach (var evt in sut.StreamWorkflowRunAsync(
-                request,
-                TestContext.Current.CancellationToken))
+        var act = async () =>
+        {
+            await foreach (var _ in sut.StreamWorkflowRunAsync(request, TestContext.Current.CancellationToken))
             {
-                events.Add(evt);
             }
+        };
 
-            var persisted = await buildStore.LoadAsync(conversation.Id, TestContext.Current.CancellationToken);
-            persisted!.State.Should().Be(BuildRunState.Blocked);
-            persisted.PlanRejectionReason.Should().Contain("取消");
-            persisted.ApprovedToolPolicy.Should().BeNull();
-            events.OfType<BuildRunStateEvent>().Select(item => item.State).Should().Contain(BuildRunState.Blocked);
-            events.OfType<DoneEvent>().Should().ContainSingle();
-            await runner.DidNotReceive().RunStreamingAsync(
-                Arg.Any<MainAgentRunOptions>(),
-                Arg.Any<ChannelWriter<object>>(),
-                Arg.Any<CancellationToken>());
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*prescribed plan*");
+        await runner.DidNotReceive().RunStreamingAsync(
+            Arg.Any<MainAgentRunOptions>(),
+            Arg.Any<ChannelWriter<object>>(),
+            Arg.Any<CancellationToken>());
     }
 
     /// <summary>
@@ -683,8 +717,8 @@ public sealed class ChatServiceTests
             var toolCatalog = new ToolCatalog(new Lazy<List<AIFunction>>(() => []), toolMetadata, mcpConnectionManager: null);
             var configManager = TestConfigManager.Create();
             configManager.Current.Returns(ConfigSnapshot.FromEffective(new AppSettings()));
-            var sut = new ChatService(
-                Substitute.For<ILogger<ChatService>>(),
+            var sut = new QueryStreamEngine(
+                Substitute.For<ILogger<QueryStreamEngine>>(),
                 runner,
                 toolCatalog,
                 Substitute.For<IHookExecutionService>(),
@@ -745,7 +779,7 @@ public sealed class ChatServiceTests
         throw new InvalidOperationException("An infinite delay must only complete through cancellation.");
     }
 
-    private static async Task<List<QueryEvent>> CollectEventsAsync(ChatService sut, CancellationToken ct = default)
+    private static async Task<List<QueryEvent>> CollectEventsAsync(QueryStreamEngine sut, CancellationToken ct = default)
     {
         var events = new List<QueryEvent>();
         await foreach (var evt in sut.StreamQueryAsync("test", "sys", "model1", ct: ct))
@@ -753,24 +787,25 @@ public sealed class ChatServiceTests
         return events;
     }
 
-    private static ChatService CreateSutWithDependencies(
+    private static QueryStreamEngine CreateSutWithDependencies(
         IMainAgentRunner runner,
         ISessionManager sessionManager,
         IBuildRunCoordinator coordinator,
         ControlledBuildAttemptHost? controlledBuildAttemptHost = null,
         IBuildRunStore? buildRunStore = null,
         IClarificationInteractionService? clarificationInteraction = null,
-        IToolCapabilityResolver? capabilityResolver = null)
+        IToolCapabilityResolver? capabilityResolver = null,
+        IReadOnlyList<AIFunction>? extraTools = null)
     {
         var toolMetadata = new ToolMetadataRegistry();
         var toolCatalog = new ToolCatalog(
-            new Lazy<List<AIFunction>>(() => []),
+            new Lazy<List<AIFunction>>(() => extraTools?.ToList() ?? []),
             toolMetadata,
             mcpConnectionManager: null);
         var configManager = TestConfigManager.Create();
         configManager.Current.Returns(ConfigSnapshot.FromEffective(new AppSettings()));
-        return new ChatService(
-            Substitute.For<ILogger<ChatService>>(),
+        return new QueryStreamEngine(
+            Substitute.For<ILogger<QueryStreamEngine>>(),
             runner,
             toolCatalog,
             Substitute.For<IHookExecutionService>(),
@@ -789,10 +824,10 @@ public sealed class ChatServiceTests
                 Substitute.For<INotifierService>()));
     }
 
-    private static (ChatService Sut, IMainAgentRunner Runner) CreateSutWithMockedRunner(
+    private static (QueryStreamEngine Sut, IMainAgentRunner Runner) CreateSutWithMockedRunner(
         Action<ChannelWriter<object>>? writeUpdates = null)
     {
-        var logger = Substitute.For<ILogger<ChatService>>();
+        var logger = Substitute.For<ILogger<QueryStreamEngine>>();
         var toolMetadata = new ToolMetadataRegistry();
         var toolCatalog = new ToolCatalog(new Lazy<List<AIFunction>>(() => []), toolMetadata, mcpConnectionManager: null);
         var configManager = TestConfigManager.Create();
@@ -815,7 +850,7 @@ public sealed class ChatServiceTests
                 TotalOutputTokens: 0,
                 TurnCount: 0)));
 
-        var sut = new ChatService(logger,
+        var sut = new QueryStreamEngine(logger,
             mainAgentRunner: runner,
             toolCatalog: toolCatalog,
             hookExecutionService: Substitute.For<IHookExecutionService>(),
@@ -832,13 +867,13 @@ public sealed class ChatServiceTests
         return (sut, runner);
     }
 
-    private static ChatService CreateSut()
+    private static QueryStreamEngine CreateSut()
     {
-        var logger = Substitute.For<ILogger<ChatService>>();
+        var logger = Substitute.For<ILogger<QueryStreamEngine>>();
         var serviceProvider = Substitute.For<IServiceProvider>();
         var toolMetadata = new ToolMetadataRegistry();
         var toolCatalog = new ToolCatalog(new Lazy<List<AIFunction>>(() => []), toolMetadata, mcpConnectionManager: null);
-        // MainAgentRunner is now a required (non-null) dependency of ChatService.
+        // MainAgentRunner is now a required (non-null) dependency of QueryStreamEngine.
         // Construct a real instance; tests above short-circuit before invoking the runner's pipeline.
         var chatClient = Substitute.For<IChatClient>();
         var configManager = TestConfigManager.Create();
@@ -871,7 +906,7 @@ public sealed class ChatServiceTests
             serviceProvider,
             toolMetadata);
 
-        return new ChatService(logger,
+        return new QueryStreamEngine(logger,
             mainAgentRunner: mainAgentRunner,
             toolCatalog: toolCatalog,
             hookExecutionService: Substitute.For<IHookExecutionService>(),

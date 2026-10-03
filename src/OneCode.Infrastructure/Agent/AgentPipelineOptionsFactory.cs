@@ -6,14 +6,13 @@ using OneCode.Core.Permissions;
 using OneCode.Core.Tools;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Middleware;
-using OneCode.Infrastructure.Middleware.Contracts;
 using Microsoft.Agents.AI;
 
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
 /// PIPE-1: 跨角色共享的安全上下文。
-/// 所有 profile 的 SafetyInvariants/BehaviorContracts/RulesBySource/AdditionalWorkingDirectories
+/// 所有 profile 的 SafetyInvariants/RulesBySource/AdditionalWorkingDirectories
 /// 必须从同一 PipelineSecurityContext 获取，确保 Worker/Team 与 Main 安全字段等价。
 /// </summary>
 public sealed record PipelineSecurityContext(
@@ -29,7 +28,6 @@ public sealed record PipelineSecurityContext(
     string? ModelId,
     string? ProviderId,
     IReadOnlyList<ISafetyInvariant>? SafetyInvariants = null,
-    IReadOnlyList<FileEditContract>? BehaviorContracts = null,
     EditTransaction? EditTransaction = null,
     IPermissionChecker? PermissionChecker = null,
     ITokenLedger? TokenLedger = null,
@@ -82,7 +80,7 @@ public static class AgentPipelineOptionsFactory
             enableVerification = permissionProfile.EnableVerification;
         }
 
-        if (!behavior.EnableBehaviorContracts)
+        if (!behavior.EnableEditPreChecks)
             enableVerification = false;
 
         var isToolAllowed = overrides.IsToolAllowed;
@@ -104,14 +102,10 @@ public static class AgentPipelineOptionsFactory
             RulesBySource = ctx.RulesBySource,
             AdditionalWorkingDirectories = ctx.AdditionalWorkingDirectories,
             HookExecutionService = ctx.Hook,
-            BehaviorContracts = behavior.EnableBehaviorContracts
-                ? ctx.BehaviorContracts ?? [new FileEditContract(ctx.WorkingDirectory)]
-                : null,
             SafetyInvariants = ctx.SafetyInvariants,
 
             EnableStateMachine = behavior.EnableStateMachine,
-            EnableTaskRecovery = behavior.EnableTaskRecovery,
-            EnableBehaviorContracts = behavior.EnableBehaviorContracts,
+            EnableEditPreChecks = behavior.EnableEditPreChecks,
             EnableToolApproval = enableToolApproval,
             EnableFileMemory = behavior.Has(AgentCapability.FileMemory),
             EnableTodo = behavior.Has(AgentCapability.Todo),

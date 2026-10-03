@@ -235,8 +235,8 @@ public sealed class FindReferencesToolTests : IDisposable
         processRunner.ExecuteAsync("rg", Arg.Any<string[]>(), _projectDir, ct: Arg.Any<CancellationToken>())
             .Returns(new ProcessResult(0, prefix + "rg.cs:1:var x = MySymbol();", "", false));
 
-        var textSearch = new TextSearchService(processRunner, Substitute.For<IFileSystem>(), NullLogger<TextSearchService>.Instance);
-        var tool = new FindReferencesTool(textSearch, Substitute.For<IFileSystem>(), CreateWd(), null!, null!, null!);
+        var textSearch = new TextSearchService(processRunner, new LocalAgentFileStore(CreateWd()), NullLogger<TextSearchService>.Instance);
+        var tool = new FindReferencesTool(textSearch, new LocalAgentFileStore(CreateWd()), CreateWd(), null!, null!, null!);
 
         var result = await tool.FindAsync("MySymbol", path: "src", ct: ct);
 

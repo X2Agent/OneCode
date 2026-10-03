@@ -11,7 +11,7 @@ namespace OneCode.Tests;
 /// <summary>
 /// Unit tests for <see cref="StreamingSession"/> — the acceptance requires the
 /// event-digestion logic (sequence, CallId dedup, token accumulation, suggestion extraction,
-/// turn boundaries) to be verifiable without the full ChatService pipeline.
+/// turn boundaries) to be verifiable without the full query pipeline.
 /// </summary>
 public sealed class StreamingSessionTests
 {
@@ -43,6 +43,22 @@ public sealed class StreamingSessionTests
         sut.ToolBatchCollector.CompletedBatches[0].Calls.Single().CallId.Should().Be("call_1");
         sut.ToolBatchCollector.CompletedBatches[0].Results.Single().CallId.Should().Be("call_1");
         sut.ToolBatchCollector.HasOpenBatch.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Digest_ToolDone_CarriesToolInputForTargetDisplay()
+    {
+        // 完成行必须带参数 JSON，否则 TUI 完成行丢失搜索词/路径等目标段，
+        // 同类调用（如连续 WebSearch）在转录中无法区分。
+        var sut = CreateSut();
+        var fcc = new FunctionCallContent("call_1", "WebSearch", new Dictionary<string, object?> { ["query"] = "波场 9月" });
+        var frc = new FunctionResultContent("call_1", "{}");
+
+        var events = DigestAll(sut, new AgentResponseUpdate { Contents = { fcc, frc } });
+
+        var done = events.OfType<ToolDoneEvent>().Single();
+        done.ToolInput.Should().NotBeNull();
+        done.ToolInput.Should().Contain("波场 9月");
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
 using OneCode.Infrastructure.Agent;
@@ -99,8 +100,20 @@ public sealed class ControlledBuildAttemptRuntime(
         };
 
         MainAgentRunResult result;
+        // 受控 attempt 经 durable workflow 调度执行，流枚举链上设置的 ambient AsyncLocal
+        // 上下文（QueryStreamHelpers.WithActivationContextAsync）不保证延续到本层——
+        // agent 执行前显式重建，否则 plan 执行工具（UpdatePlanStep 等）定位不到会话，
+        // 以 "Plan execution requires an explicit agent run conversation." 失败。
+        var previousConversationId = ToolActivationContext.CurrentConversationId;
+        var previousRunId = OneCodeAgentRunContext.CurrentRunId;
+        var previousBuildRunId = OneCodeAgentRunContext.CurrentBuildRunId;
+        var previousCapabilities = ToolActivationContext.CurrentCapabilities;
         try
         {
+            ToolActivationContext.CurrentConversationId = context.Options.ConversationId?.ToString();
+            OneCodeAgentRunContext.CurrentRunId = context.Options.AgentRunId;
+            OneCodeAgentRunContext.CurrentBuildRunId = input.BuildRunId.ToString();
+            ToolActivationContext.CurrentCapabilities = context.Options.ToolCapabilities;
             result = await mainAgentRunner.RunStreamingAsync(
                 options,
                 new NonCompletingChannelWriter(context.EventWriter),
@@ -146,6 +159,13 @@ public sealed class ControlledBuildAttemptRuntime(
                 context.BuildStateEventFactory(failed),
                 CancellationToken.None).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            ToolActivationContext.CurrentConversationId = previousConversationId;
+            OneCodeAgentRunContext.CurrentRunId = previousRunId;
+            OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
+            ToolActivationContext.CurrentCapabilities = previousCapabilities;
         }
 
         var terminalReason = result.TerminalReason == RunTerminalReason.Completed

@@ -11,8 +11,6 @@ public enum MessageRole
     Assistant,
     System,
     Tool,
-    Attachment,
-    Tombstone,
 }
 
 /// <summary>
@@ -22,7 +20,6 @@ public sealed record UserMessage(
     string Id,
     string Content,
     DateTimeOffset Timestamp,
-    IReadOnlyList<Attachment>? Attachments = null,
     string? Uuid = null,
     bool IsMeta = false) : Message(Id, MessageRole.User, Timestamp);
 
@@ -34,9 +31,7 @@ public sealed record AssistantMessage(
     IReadOnlyList<ContentBlock> Content,
     DateTimeOffset Timestamp,
     TokenUsage? TokenUsage = null,
-    string? Uuid = null,
-    bool IsApiErrorMessage = false,
-    ApiErrorInfo? ApiError = null) : Message(Id, MessageRole.Assistant, Timestamp);
+    string? Uuid = null) : Message(Id, MessageRole.Assistant, Timestamp);
 
 /// <summary>
 /// 系统消息
@@ -44,18 +39,7 @@ public sealed record AssistantMessage(
 public sealed record SystemMessage(
     string Id,
     string Content,
-    DateTimeOffset Timestamp,
-    SystemMessageType Type = SystemMessageType.Info) : Message(Id, MessageRole.System, Timestamp);
-
-/// <summary>
-/// 系统消息类型
-/// </summary>
-public enum SystemMessageType
-{
-    Info,
-    Warning,
-    Error
-}
+    DateTimeOffset Timestamp) : Message(Id, MessageRole.System, Timestamp);
 
 /// <summary>
 /// 工具结果消息
@@ -68,44 +52,6 @@ public sealed record ToolResultMessage(
     bool IsError,
     DateTimeOffset Timestamp,
     string? Uuid = null) : Message(Id, MessageRole.Tool, Timestamp);
-
-/// <summary>
-/// 附件消息——钩子结果、文件变更通知等非用户输入的附加信息
-/// </summary>
-public sealed record AttachmentMessage(
-    string Id,
-    string Content,
-    AttachmentType Type,
-    DateTimeOffset Timestamp,
-    string? SourceToolUseId = null) : Message(Id, MessageRole.Attachment, Timestamp);
-
-public enum AttachmentType
-{
-    HookResult,
-    FileChangedNotification,
-    MemoryNotification,
-    McpResourceUpdate,
-}
-
-/// <summary>
-/// 墓碑消息——流式 fallback 时标记孤立消息
-///
-/// 当流式响应中断或回退时，某些消息可能变得无效。
-/// TombstoneMessage 用于标记这些消息，使 UI 可以隐藏或替换它们。
-/// </summary>
-public sealed record TombstoneMessage(
-    string Id,
-    string OriginalMessageId,
-    string Reason,
-    DateTimeOffset Timestamp) : Message(Id, MessageRole.Tombstone, Timestamp);
-
-/// <summary>
-/// API 错误信息
-/// </summary>
-public sealed record ApiErrorInfo(
-    string Type,
-    string Message,
-    int? StatusCode = null);
 
 /// <summary>
 /// 内容块基类
@@ -130,14 +76,6 @@ public sealed record ThinkingBlock(
 /// </summary>
 public sealed record RedactedThinkingBlock(
     string Data) : ContentBlock;
-
-/// <summary>
-/// 附件
-/// </summary>
-public sealed record Attachment(
-    string Type,
-    string MediaType,
-    string Data);
 
 /// <summary>
 /// Token 使用统计

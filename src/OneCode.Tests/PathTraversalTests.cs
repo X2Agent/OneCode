@@ -220,10 +220,9 @@ public sealed class PathTraversalTests
         var projectDir = Path.Combine(_tempDir, "project");
         var outsideDir = Path.Combine(_tempDir, "outside");
         var processRunner = Substitute.For<IProcessRunner>();
-        var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, new LocalAgentFileStore(wd), NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var outsideSearchPath = Path.Combine(outsideDir, "subdir");
@@ -246,10 +245,9 @@ public sealed class PathTraversalTests
     {
         var projectDir = Path.Combine(_tempDir, "project");
         var processRunner = Substitute.For<IProcessRunner>();
-        var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, new LocalAgentFileStore(wd), NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var result = await tool.SearchAsync("pattern", path: "../../outside", ct: TestContext.Current.CancellationToken);
@@ -272,12 +270,9 @@ public sealed class PathTraversalTests
         // Force native fallback (no ripgrep)
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(false);
-        var fileSystem = Substitute.For<IFileSystem>();
-        fileSystem.FindFiles(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string[]>())
-                  .Returns(new List<string> { Path.Combine(projectDir, "subdir", "file.cs") });
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new GrepTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), wd);
+        var tool = new GrepTool(new TextSearchService(processRunner, new LocalAgentFileStore(wd), NullLogger<TextSearchService>.Instance), wd);
         try
         {
             var result = await tool.SearchAsync("Hello", path: "subdir", ct: TestContext.Current.CancellationToken);
@@ -362,10 +357,10 @@ public sealed class PathTraversalTests
     {
         var projectDir = Path.Combine(_tempDir, "project");
         var processRunner = Substitute.For<IProcessRunner>();
-        var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
+        var fs = new LocalAgentFileStore(wd);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
         try
         {
             var result = await tool.FindAsync("MySymbol", path: "../../outside", ct: TestContext.Current.CancellationToken);
@@ -384,10 +379,10 @@ public sealed class PathTraversalTests
         var projectDir = Path.Combine(_tempDir, "project");
         var outsideDir = Path.Combine(_tempDir, "outside");
         var processRunner = Substitute.For<IProcessRunner>();
-        var fileSystem = Substitute.For<IFileSystem>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
+        var fs = new LocalAgentFileStore(wd);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
         try
         {
             var result = await tool.FindAsync("MySymbol", path: outsideDir, ct: TestContext.Current.CancellationToken);
@@ -411,12 +406,10 @@ public sealed class PathTraversalTests
 
         var processRunner = Substitute.For<IProcessRunner>();
         processRunner.CommandExistsAsync("rg").Returns(false);
-        var fileSystem = Substitute.For<IFileSystem>();
-        fileSystem.FindFiles(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string[]>())
-                  .Returns(new List<string> { Path.Combine(projectDir, "subdir", "file.cs") });
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fileSystem, NullLogger<TextSearchService>.Instance), fileSystem, wd, null!, null!, null!);
+        var fs = new LocalAgentFileStore(wd);
+        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
         try
         {
             // Search in "subdir" (strictly inside working dir) to avoid "." edge case

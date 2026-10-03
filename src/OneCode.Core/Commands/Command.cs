@@ -30,7 +30,6 @@ public abstract class Command : ICommand
 
     /// <summary>
     /// 加载并渲染 prompt 模板。返回 null 表示模板不存在。
-    /// （统一 Commit/Review/Init 等处逐字相同的私有实现。）
     /// </summary>
     protected static async Task<string?> LoadPromptAsync(
         OneCode.Core.Prompt.IPromptManager promptManager,
@@ -43,4 +42,11 @@ public abstract class Command : ICommand
             return null;
         return new OneCode.Core.Prompt.PromptTemplate(name, loaded).Render(variables);
     }
+
+    /// <summary>
+    /// 用户可触发的命令路径上 prompt 缺失的标准错误。prompt 文件经 csproj 双重打包，
+    /// 生产环境必然存在——缺失即部署问题，显式报错而非静默降级。
+    /// </summary>
+    protected static CommandResult PromptMissingError(string promptName) =>
+        CommandResult.Error($"Prompt '{promptName}' is not available. Verify prompts/{promptName}.prompt exists.");
 }

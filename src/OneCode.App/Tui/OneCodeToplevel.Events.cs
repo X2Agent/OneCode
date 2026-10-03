@@ -17,6 +17,13 @@ public sealed partial class OneCodeToplevel
     /// </summary>
     public void DispatchEvent(TuiEvent evt)
     {
+        // 无进展 watchdog 的时间源：文本增量/工具/审批/用量等所有 TUI 事件都经此漏斗，均算进展。
+        // 工具开始后的静默是"等工具"，其余静默是"等模型"——状态栏文案据此区分。
+        if (evt is TuiToolStart)
+            _shell.AgentStatusBar.NotifyAwaitingTool();
+        else
+            _shell.AgentStatusBar.NotifyProgress();
+
         // TEAM 侧边栏（纯显示状态板）先消费 Team 事件；非 Team 事件为 no-op。
         _shell.UpdateTeamSidebar(evt);
 
@@ -91,9 +98,6 @@ public sealed partial class OneCodeToplevel
                     case RunTerminalReason.PermissionRefused:
                         _shell.Transcript.AddSystem($"(permission refused after {tc} turns)");
                         break;
-                    case RunTerminalReason.ClarificationRequired:
-                        _shell.Transcript.AddSystem("(build paused until scope clarification is confirmed)");
-                        break;
                     case RunTerminalReason.Blocked:
                         _shell.Transcript.AddSystem("(build blocked by workspace conflict or external dependency)");
                         break;
@@ -101,6 +105,17 @@ public sealed partial class OneCodeToplevel
 
                 if (rolledBack && reason != RunTerminalReason.ValidationFailed)
                     _shell.Transcript.AddSystem($"(file changes rolled back)");
+
+                // PLAN 收尾兜底：run 正常结束但侧栏从未出现计划（模型未调 SubmitPlan
+                // 交付，或提交被质量门槛/安全扫描打回后改用文字收尾）。无兜底时用户
+                // 只看到文字总结，无法知道规划流程没有走完、侧栏设计为何没出现。
+                if ((_ctx.ModeController?.Mode ?? WorkingMode.Build) == WorkingMode.Plan
+                    && reason is RunTerminalReason.Completed or RunTerminalReason.TurnLimitReached
+                    && _shell.ActivePlan is null)
+                {
+                    _shell.Transcript.AddSystem(
+                        "模型未提交计划（未调用 SubmitPlan）。可发送「请用 SubmitPlan 提交计划」让它补交，或直接输入你的意见让它继续。");
+                }
                 break;
 
             case TuiError { Message: var msg }:

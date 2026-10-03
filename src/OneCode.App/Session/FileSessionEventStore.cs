@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using OneCode.Core.Session;
 using InfraConstants = OneCode.Infrastructure.Config.Constants;
+using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Session;
 
@@ -124,7 +125,7 @@ public sealed class FileSessionEventStore : ISessionEventStore
     public Task<IReadOnlyList<SessionId>> ListSessionsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var ids = Directory.EnumerateFiles(_eventsDirectory, "*.jsonl")
+        var ids = Directory.EnumerateFiles(_eventsDirectory, $"*.{CoreConstants.Session.EventsFileExtension}")
             .Select(file => SessionId.TryParse(Path.GetFileNameWithoutExtension(file)))
             .Where(id => id.HasValue)
             .Select(id => id!.Value)
@@ -226,8 +227,6 @@ public sealed class FileSessionEventStore : ISessionEventStore
                 new MessagesReplacedPayload(
                     item.Messages.Select(SerializeMessage).ToArray(),
                     item.Reason), _jsonOptions),
-            AttachmentMessageEvent item => JsonSerializer.SerializeToElement(item.Message, _jsonOptions),
-            TombstoneMessageEvent item => JsonSerializer.SerializeToElement(item.Message, _jsonOptions),
             SessionMarkerEvent item => JsonSerializer.SerializeToElement(item.Data, _jsonOptions),
             _ => throw new InvalidOperationException($"Unsupported session event: {sessionEvent.GetType().Name}"),
         };
@@ -279,18 +278,6 @@ public sealed class FileSessionEventStore : ISessionEventStore
                 envelope.Payload.Deserialize<ToolResultMessage>(_jsonOptions)
                     ?? throw new JsonException("Tool result payload is null.")),
             SessionEventType.MessagesReplaced => CreateMessagesReplacedEvent(envelope),
-            SessionEventType.AttachmentMessage => new AttachmentMessageEvent(
-                envelope.SessionId,
-                envelope.Sequence,
-                envelope.OccurredAt,
-                envelope.Payload.Deserialize<AttachmentMessage>(_jsonOptions)
-                    ?? throw new JsonException("Attachment payload is null.")),
-            SessionEventType.TombstoneMessage => new TombstoneMessageEvent(
-                envelope.SessionId,
-                envelope.Sequence,
-                envelope.OccurredAt,
-                envelope.Payload.Deserialize<TombstoneMessage>(_jsonOptions)
-                    ?? throw new JsonException("Tombstone payload is null.")),
             _ => new SessionMarkerEvent(
                 envelope.SessionId,
                 envelope.Sequence,
@@ -359,8 +346,6 @@ public sealed class FileSessionEventStore : ISessionEventStore
         AssistantMessage item => new MessagePayload("assistant", JsonSerializer.SerializeToElement(item, _jsonOptions)),
         SystemMessage item => new MessagePayload("system", JsonSerializer.SerializeToElement(item, _jsonOptions)),
         ToolResultMessage item => new MessagePayload("tool", JsonSerializer.SerializeToElement(item, _jsonOptions)),
-        AttachmentMessage item => new MessagePayload("attachment", JsonSerializer.SerializeToElement(item, _jsonOptions)),
-        TombstoneMessage item => new MessagePayload("tombstone", JsonSerializer.SerializeToElement(item, _jsonOptions)),
         _ => throw new InvalidOperationException($"Unsupported conversation message: {message.GetType().Name}"),
     };
 
@@ -374,15 +359,11 @@ public sealed class FileSessionEventStore : ISessionEventStore
             ?? throw new JsonException("System message payload is null."),
         "tool" => payload.Value.Deserialize<ToolResultMessage>(_jsonOptions)
             ?? throw new JsonException("Tool result payload is null."),
-        "attachment" => payload.Value.Deserialize<AttachmentMessage>(_jsonOptions)
-            ?? throw new JsonException("Attachment message payload is null."),
-        "tombstone" => payload.Value.Deserialize<TombstoneMessage>(_jsonOptions)
-            ?? throw new JsonException("Tombstone message payload is null."),
         _ => throw new JsonException($"Unknown message discriminator: {payload.Type}"),
     };
 
     private string GetEventFile(SessionId sessionId) =>
-        Path.Combine(_eventsDirectory, $"{sessionId.Value}.jsonl");
+        Path.Combine(_eventsDirectory, $"{sessionId.Value}.{CoreConstants.Session.EventsFileExtension}");
 
     private sealed record PersistedSessionEvent(
         int SchemaVersion,

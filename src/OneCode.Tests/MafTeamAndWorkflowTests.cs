@@ -93,18 +93,19 @@ public sealed class MafTeamOrchestrationTests
         var clarificationCompiler = new TeamClarificationWorkflowCompiler();
         var clarificationHost = new TeamClarificationWorkflowHost(durableHost, clarificationCompiler, registry);
         return new TeamOrchestrationService(
-            workflowRunner,
-            NullLoggerFactory.Instance,
-            NullLogger<TeamOrchestrationService>.Instance,
-            teamRunService,
-            requirementService,
-            clarification,
-            workingDir,
-            taskWorkflowHost,
-            clarificationHost,
-            new OneCode.App.Services.Runtime.RequestPortGate(approvalHost, clarification),
-            teamRunStore,
-            new TeamRegistry(NullLogger.Instance));
+            new TeamWorkflowHostDependencies(
+                workflowRunner,
+                taskWorkflowHost,
+                clarificationHost,
+                new OneCode.App.Services.Runtime.RequestPortGate(approvalHost, clarification)),
+            new TeamOrchestrationDependencies(
+                teamRunService,
+                requirementService,
+                teamRunStore,
+                clarification,
+                workingDir,
+                NullLogger<TeamOrchestrationService>.Instance,
+                new TeamRegistry(NullLogger.Instance)));
     }
 
     [Fact]

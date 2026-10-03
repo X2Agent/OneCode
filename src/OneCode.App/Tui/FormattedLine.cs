@@ -67,7 +67,20 @@ public sealed class FormattedLine
 }
 
 /// <summary>Metadata attached to a tool-call summary line for click-to-expand/collapse.</summary>
-public sealed record ToolLineTag(string Name, string? Args, string? Result, bool IsExpanded);
+/// <remarks>
+/// <paramref name="Group"/> 非空时该行是"同类工具组行"（同轮相邻同类调用的合并形态）：
+/// 折叠行显示 <c>名称 ×N</c>，展开由 <see cref="MessageRenderer.BuildToolDetailLines"/>
+/// 按 Group 逐条列出搜索词/结果摘要/时长。
+/// </remarks>
+public sealed record ToolLineTag(
+    string Name,
+    string? Args,
+    string? Result,
+    bool IsExpanded,
+    IReadOnlyList<ToolGroupEntry>? Group = null);
+
+/// <summary>工具组行内单条调用的展示数据（组展开时逐条列出）。</summary>
+public sealed record ToolGroupEntry(string? Args, string? Result, string Duration, bool IsError);
 
 /// <summary>Marker tag for detail lines inserted below an expanded tool line.</summary>
 public sealed record ToolDetailLineTag;

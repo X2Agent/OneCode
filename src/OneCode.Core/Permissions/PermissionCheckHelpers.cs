@@ -44,7 +44,7 @@ public static class PermissionCheckHelpers
         if (!IsShellTool(toolName, toolInput))
             return false;
 
-        var command = ExtractInputString(toolName, toolInput);
+        var command = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
         return IsPowerShellDialect(toolName, toolInput)
             ? PowerShellCommandClassifier.IsReadOnly(command)
             : BashCommandClassifier.IsReadOnly(command);
@@ -59,7 +59,7 @@ public static class PermissionCheckHelpers
         if (!IsShellTool(toolName, toolInput))
             return false;
 
-        var command = ExtractInputString(toolName, toolInput);
+        var command = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
         return IsPowerShellDialect(toolName, toolInput)
             ? PowerShellCommandClassifier.IsDestructive(command)
             : BashCommandClassifier.IsDestructive(command);
@@ -232,7 +232,7 @@ public static class PermissionCheckHelpers
     internal static PermissionCheckResult EvaluateRules(
         string toolName, JsonElement toolInput, ToolPermissionContext context)
     {
-        var inputStr = ExtractInputString(toolName, toolInput);
+        var inputStr = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
 
         foreach (var (_, group) in context.RulesBySource)
         {
@@ -269,13 +269,13 @@ public static class PermissionCheckHelpers
         if (IsShellTool(toolName, toolInput))
         {
             pathValues = (IsPowerShellDialect(toolName, toolInput)
-                    ? PowerShellCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput))
-                    : BashCommandClassifier.ExtractReferencedPaths(ExtractInputString(toolName, toolInput)))
+                    ? PowerShellCommandClassifier.ExtractReferencedPaths(ToolArgumentExtractor.ExtractInputString(toolName, toolInput))
+                    : BashCommandClassifier.ExtractReferencedPaths(ToolArgumentExtractor.ExtractInputString(toolName, toolInput)))
                 .ToArray();
         }
         else
         {
-            pathValues = ExtractInputString(toolName, toolInput) is { } singlePath ? [singlePath] : [];
+            pathValues = ToolArgumentExtractor.ExtractInputString(toolName, toolInput) is { } singlePath ? [singlePath] : [];
         }
 
         var workingDir = string.IsNullOrWhiteSpace(context.WorkingDirectory)
@@ -314,11 +314,6 @@ public static class PermissionCheckHelpers
         }
 
         return PermissionCheckResult.Allow;
-    }
-
-    internal static string? ExtractInputString(string toolName, JsonElement input)
-    {
-        return OneCode.Core.Tools.ToolArgumentExtractor.ExtractInputString(toolName, input);
     }
 
     private static string? ExtractField(JsonElement input, string fieldName)

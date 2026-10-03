@@ -77,8 +77,11 @@ public sealed class BuildStateTransitionService
             throw new InvalidOperationException(
                 "Every completed Build task requires TaskCompletion evidence referencing its persistent TaskItem.");
         }
-        if (run.Validations.Count == 0 || run.Validations[^1].Status != BuildValidationStatus.Passed)
-            throw new InvalidOperationException("The latest final validation must pass.");
+        // Skipped = 无匹配验证 profile（验证不适用，如生成 HTML 报告类工件），与
+        // MainAgentRunner 的语义一致：不适用 ≠ 失败，允许完成收口。
+        if (run.Validations.Count == 0
+            || run.Validations[^1].Status is not (BuildValidationStatus.Passed or BuildValidationStatus.Skipped))
+            throw new InvalidOperationException("The latest final validation must pass or be explicitly skipped.");
         if (run.Scope.AcceptanceCriteria.Where(item => item.Required)
             .Any(item => item.Status != AcceptanceStatus.Passed || string.IsNullOrWhiteSpace(item.Evidence)))
         {

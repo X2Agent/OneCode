@@ -12,10 +12,14 @@ namespace OneCode.Infrastructure.Ai;
 public sealed class RetryOnOverloadChatClient(
     IChatClient inner,
     ILogger<RetryOnOverloadChatClient>? logger = null,
-    int maxRetries = 6) : IChatClient
+    int maxRetries = 6,
+    TimeSpan? streamIdleTimeout = null) : IChatClient
 {
     private static readonly TimeSpan DefaultRetryDelay = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(120);
+    /// <summary>chunk 间空闲上限：收到过数据后连续无新 chunk 超过该时长即判定连接停滞。
+    /// 需容忍推理模型两段内容之间的分钟级静默，故取值偏宽。</summary>
+    private static readonly TimeSpan DefaultStreamIdleTimeout = TimeSpan.FromSeconds(180);
     private const double CircuitBreakerFailureRatio = 0.8;
     private const int CircuitBreakerMinimumThroughput = 3;
     private static readonly TimeSpan CircuitBreakerDuration = TimeSpan.FromSeconds(60);
@@ -23,6 +27,11 @@ public sealed class RetryOnOverloadChatClient(
     private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     private readonly ILogger<RetryOnOverloadChatClient>? _logger = logger;
     private readonly int _maxRetries = maxRetries;
+    private readonly TimeSpan _streamIdleTimeout = streamIdleTimeout ?? DefaultStreamIdleTimeout;
+
+    // 弹性管道只覆盖非流式 GetResponseAsync；流式路径（交互主路径）走 StreamWithRetryAsync
+    // 手写重试（退避策略共用 MaxWithBackoff），熔断器对流式不生效——流式半途熔断会
+    // 丢弃已输出内容，暂不开启。
     private readonly ResiliencePipeline _pipeline = new ResiliencePipelineBuilder()
             .AddCircuitBreaker(new CircuitBreakerStrategyOptions
             {
@@ -62,19 +71,12 @@ public sealed class RetryOnOverloadChatClient(
                 },
                 DelayGenerator = args =>
                 {
-                    // 计算指数退避延迟（作为下限保证）
-                    var attempt = args.AttemptNumber;
-                    var exponentialSeconds = Math.Min(
-                        4.0 * Math.Pow(2, attempt),
-                        120.0);
-
-                    if (GetServerRetryAfter(args.Outcome.Exception, logger) is { } retryAfter)
-                    {
-                        // 取 Retry-After 与指数退避的最大值，确保不因服务端过小的建议值跳过退避
-                        var delay = TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
-                        return ValueTask.FromResult<TimeSpan?>(delay);
-                    }
-                    return ValueTask.FromResult<TimeSpan?>(null);
+                    // 无 Retry-After → 返回 null，回落到 Polly 的指数退避 + jitter；
+                    // 有 → max(Retry-After, 指数退避)，不因服务端过小的建议值跳过退避。
+                    return ValueTask.FromResult<TimeSpan?>(
+                        GetServerRetryAfter(args.Outcome.Exception, logger) is { } retryAfter
+                            ? MaxWithBackoff(retryAfter, args.AttemptNumber)
+                            : null);
                 },
             })
             .Build();
@@ -138,22 +140,79 @@ public sealed class RetryOnOverloadChatClient(
                     ? null
                     : replayState.CreateCursor();
                 TimeSpan? retryDelay = null;
+                ChatFinishReason? finishReason = null;
 
-                var source = _inner.GetStreamingResponseAsync(messages, options, cancellationToken);
-                var enumerator = source.GetAsyncEnumerator(cancellationToken);
+                // chunk 间空闲看门狗：收到首个 chunk 之后才开始计时（首字节前不计时，
+                // 避免误杀本地小模型冷加载 / 长 prompt 预处理）；连续无新 chunk 超过
+                // _streamIdleTimeout 即判定连接停滞，取消本次尝试进重试。HttpClient.Timeout
+                // = Infinite 下 TCP 半开/代理停滞既不结束也不抛错，空响应防线（仅流正常
+                // 结束时触发）覆盖不到，没有这里就会永久挂起、TUI 永久转圈。
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using var idleTimer = new Timer(
+                    static state =>
+                    {
+                        try { ((CancellationTokenSource)state!).Cancel(); }
+                        catch (ObjectDisposedException) { }
+                    },
+                    attemptCts, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+                var source = _inner.GetStreamingResponseAsync(messages, options, attemptCts.Token);
+                var enumerator = source.GetAsyncEnumerator(attemptCts.Token);
+                var sawChunk = false;
                 try
                 {
                     while (await enumerator.MoveNextAsync().ConfigureAwait(false))
                     {
+                        // 首个 chunk 之后即启用 chunk 间空闲计时（首字节前不计时——
+                        // 本地模型冷加载/长 prompt 预处理的分钟级静默是合法状态）。
+                        sawChunk = true;
+                        idleTimer.Change(_streamIdleTimeout, Timeout.InfiniteTimeSpan);
+
+                        var current = enumerator.Current;
+                        finishReason = current.FinishReason ?? finishReason;
+
                         var update = replayCursor is null
-                            ? enumerator.Current
-                            : FilterReplay(enumerator.Current, replayCursor);
+                            ? current
+                            : FilterReplay(current, replayCursor);
 
                         if (update is null)
                             continue;
 
                         replayState.Record(update);
                         await writer.WriteAsync(update, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && sawChunk)
+                {
+                    // 空闲看门狗触发的尝试级取消（外部取消由 when 排除，原样向上传播）。
+                    if (attempt >= _maxRetries)
+                    {
+                        _logger?.LogWarning(
+                            "LLM streaming stalled — no chunks for {Idle:g} — giving up after {Attempts} attempts. Replaying {TextChars} chars and {ToolCalls} tool calls.",
+                            _streamIdleTimeout,
+                            attempt + 1,
+                            replayState.EmittedTextLength,
+                            replayState.EmittedToolCallCount);
+                        throw new StreamStalledException(
+                            $"模型流式响应停滞：{_streamIdleTimeout.TotalSeconds:N0}s 内无任何数据（已重试 {attempt + 1} 次）。");
+                    }
+
+                    retryDelay = MaxWithBackoff(retryAfter: null, attempt);
+                    _logger?.LogWarning(
+                        "LLM streaming stalled — no chunks for {Idle:g} (attempt {Attempt}/{Max}), retrying in {Delay:g}. Replaying {TextChars} chars and {ToolCalls} tool calls.",
+                        _streamIdleTimeout,
+                        attempt + 1,
+                        _maxRetries,
+                        retryDelay,
+                        replayState.EmittedTextLength,
+                        replayState.EmittedToolCallCount);
+
+                    if (replayCursor?.DidDiverge == true)
+                    {
+                        _logger?.LogWarning(
+                            "Streaming retry replay diverged after matching {MatchedChars} chars and {MatchedToolCalls} tool calls; duplicate suppression switched to best effort.",
+                            replayCursor.MatchedTextChars,
+                            replayCursor.MatchedToolCalls);
                     }
                 }
                 catch (Exception ex) when (attempt < _maxRetries && IsTransientUpstreamError(ex))
@@ -181,7 +240,34 @@ public sealed class RetryOnOverloadChatClient(
                 }
 
                 if (!retryDelay.HasValue)
-                    return;
+                {
+                    if (replayState.HasVisibleContent)
+                        return;
+
+                    // 流式路径的空响应防线：HTTP 200 + 零内容 SSE（无文本、无工具调用、无推理，
+                    // 仅有 usage 统计甚至空流直接结束）。OpenRouter 免费/实验模型过载或内容
+                    // 过滤时的典型表现，与非流式路径的 EmptyChoicesResponseException 同源——
+                    // 那条防线只覆盖 JSON 响应，SSE 流正常结束不会抛异常，此前会一路静默到
+                    // TUI（运行按 Completed 收尾、零输出零提示）。已有内容后正常结束不重试
+                    // （内容已渲染，重试无法撤回）。
+                    if (attempt >= _maxRetries)
+                    {
+                        _logger?.LogWarning(
+                            "LLM streaming response completed with zero content after {Attempts} attempts (last finish reason: {FinishReason}) — giving up",
+                            attempt + 1,
+                            finishReason?.ToString() ?? "none");
+                        throw new EmptyChoicesResponseException(
+                            $"模型连续 {attempt + 1} 次返回空响应（HTTP 200，无文本、无工具调用）。可能是上游过载或该请求被内容过滤：可稍后重试、切换模型（/model）或压缩上下文（/compact）。");
+                    }
+
+                    retryDelay = EmptyStreamRetryDelay(attempt);
+                    _logger?.LogWarning(
+                        "LLM streaming response completed with zero content (finish reason: {FinishReason}) — attempt {Attempt}/{Max}, retrying in {Delay:g}",
+                        finishReason?.ToString() ?? "none",
+                        attempt + 1,
+                        _maxRetries,
+                        retryDelay);
+                }
 
                 await Task.Delay(retryDelay.Value, cancellationToken).ConfigureAwait(false);
             }
@@ -253,19 +339,26 @@ public sealed class RetryOnOverloadChatClient(
         }
     }
 
-    private TimeSpan GetRetryDelay(Exception ex, int attempt)
+    /// <summary>
+    /// 统一退避策略：指数退避（4s 基数、120s 上限）为下限，服务端 Retry-After 与其取
+    /// 最大值。流式与非流式两条重试路径共用，防止两份手写退避漂移。
+    /// </summary>
+    private static TimeSpan MaxWithBackoff(TimeSpan? retryAfter, int attempt)
     {
-        var exponentialSeconds = Math.Min(
-            4.0 * Math.Pow(2, attempt),
-            120.0);
-
-        if (GetServerRetryAfter(ex, _logger) is { } retryAfter)
-        {
-            return TimeSpan.FromSeconds(Math.Max(retryAfter.TotalSeconds, exponentialSeconds));
-        }
-
-        return TimeSpan.FromSeconds(exponentialSeconds);
+        var exponentialSeconds = Math.Min(4.0 * Math.Pow(2, attempt), 120.0);
+        return TimeSpan.FromSeconds(Math.Max(retryAfter?.TotalSeconds ?? 0, exponentialSeconds));
     }
+
+    /// <summary>
+    /// 空流重试退避（3s 起、10s 封顶）：空响应与限流不同，大概率是该请求的确定性失败
+    /// （内容过滤 / 上游对特定上下文返回坏结果），重试只是给瞬态过载留机会——套用限流的
+    /// 120s 上限会让用户在最坏情况下干等约 4 分钟才见到报错，这里把最坏总等待压到约 50s。
+    /// </summary>
+    private static TimeSpan EmptyStreamRetryDelay(int attempt)
+        => TimeSpan.FromSeconds(Math.Min(3.0 * Math.Pow(2, attempt), 10.0));
+
+    private TimeSpan GetRetryDelay(Exception ex, int attempt) =>
+        MaxWithBackoff(GetServerRetryAfter(ex, _logger), attempt);
 
     private static ChatResponseUpdate? FilterReplay(ChatResponseUpdate update, StreamingReplayCursor replayCursor)
     {
@@ -332,8 +425,15 @@ public sealed class RetryOnOverloadChatClient(
     private sealed class StreamingReplayState
     {
         private readonly List<ReplaySegment> _segments = [];
+        private bool _hasVisibleContent;
 
         public bool HasHistory => _segments.Count > 0;
+
+        /// <summary>
+        /// 本轮请求（跨全部重试尝试累计）是否产出过任何可见内容（文本/工具调用/推理/多模态）。
+        /// 仅含 usage 统计的空流不算——那是 OpenRouter 免费/实验模型"200 但空"的典型表现。
+        /// </summary>
+        public bool HasVisibleContent => _hasVisibleContent;
 
         public int EmittedTextLength { get; private set; }
 
@@ -347,11 +447,22 @@ public sealed class RetryOnOverloadChatClient(
                 {
                     case TextContent { Text.Length: > 0 } textContent:
                         AppendText(textContent.Text);
+                        _hasVisibleContent = true;
                         break;
 
                     case FunctionCallContent functionCall:
                         _segments.Add(ReplaySegment.Tool(BuildToolCallKey(functionCall)));
                         EmittedToolCallCount++;
+                        _hasVisibleContent = true;
+                        break;
+
+                    case TextContent: // 空文本占位块
+                    case UsageContent: // token 统计
+                        break;
+
+                    default:
+                        // TextReasoningContent / DataContent 等真实内容
+                        _hasVisibleContent = true;
                         break;
                 }
             }

@@ -33,7 +33,7 @@ public sealed class CommitCommand(
 
         var prompt = await LoadPromptAsync(promptManager, "system/commit", variables, ct).ConfigureAwait(false);
         if (prompt is null)
-            return CommandResult.Error("Prompt 'system/commit' is not available. Verify prompts/system/commit.prompt exists.");
+            return PromptMissingError("system/commit");
         return CommandResult.Prompt(prompt, AllowedTools);
     }
 }

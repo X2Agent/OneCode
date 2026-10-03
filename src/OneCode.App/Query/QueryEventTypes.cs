@@ -1,6 +1,6 @@
 namespace OneCode.App.Query;
 
-/// <summary>Base type for all query-layer events consumed by ChatService / TUI adapter.</summary>
+/// <summary>Base type for all query-layer events consumed by QueryStreamEngine / TUI adapter.</summary>
 public abstract record QueryEvent;
 
 /// <summary>流式文本增量 — 来自 API 的 text_delta。</summary>
@@ -18,7 +18,7 @@ public sealed record ToolStartEvent(string ToolId, string ToolName, string? Tool
 /// <summary>工具调用完成 — 含结果/错误和原始输入。</summary>
 public sealed record ToolDoneEvent(string ToolId, string ToolName, bool IsError, string? Result = null, string? ToolInput = null) : QueryEvent;
 
-/// <summary>权限检查 — 当 ChatService 需要用户批准工具执行时触发。</summary>
+/// <summary>权限检查 — 当 QueryStreamEngine 需要用户批准工具执行时触发。</summary>
 public sealed record PermissionCheckEvent(string ToolName, bool Allowed, string? DenialReason = null) : QueryEvent;
 
 /// <summary>工具池就绪 — 所有注册工具初始化完成后触发。</summary>

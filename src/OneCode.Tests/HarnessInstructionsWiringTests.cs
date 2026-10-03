@@ -95,8 +95,7 @@ public sealed class HarnessInstructionsWiringTests
                 EnableToolResultBudget = false,
                 EnableStateMachine = false,
                 EnableSafetyInvariants = false,
-                EnableBehaviorContracts = false,
-                EnableTaskRecovery = false,
+                EnableEditPreChecks = false,
             },
         });
 

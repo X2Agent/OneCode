@@ -311,7 +311,7 @@ public static partial class PowerShellCommandClassifier
     }
 
     // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
-    public static string? GetPrimaryCommandName(string? command)
+    internal static string? GetPrimaryCommandName(string? command)
     {
         if (string.IsNullOrWhiteSpace(command))
             return null;

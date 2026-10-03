@@ -125,7 +125,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `nextPromptSuggesterEnabled` | `bool` | `true` | 是否生成下一步输入建议 |
 | `notificationsEnabled` | `bool` | `false` | 是否启用本地任务完成通知 |
 
-详细日志由运行标志 `ONECODE_LOG_LEVEL` 控制（`off` / `debug` / `trace`），不属于持久化配置。
+日志级别由构建模式决定：Debug 构建记录 `Debug` 及以上，Release 构建记录 `Warning` 及以上（含 Error），
+两者都同时写控制台与文件 `~/.onecode/debug/<sessionId>.log`。没有运行时覆盖开关，也不属于持久化配置。
 
 ### Web 搜索
 
@@ -242,14 +243,13 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 
 > 环境变量由 `ConfigManager` 映射到配置键并标记来源为 `Environment`。环境变量作用域只读，任何保存操作都不会将其值持久化到 `settings.json`。
 >
-> `ONECODE_LOG_LEVEL`、`ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。调试日志级别 `ONECODE_LOG_LEVEL` 取值 `off|debug|trace`（空按构建默认；`off` 可显式关闭，`trace` 隐含开启调试）。
+> `ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。
 >
 > 其他不走 `ConfigManager` 的环境变量：
 >
 > | 环境变量 | 作用 |
 > |---|---|
 > | `ONECODE_MAX_CONTEXT_TOKENS` | 最终覆盖手段：显式指定上下文窗口上限（正整数），优先于模型目录/默认值解析 |
-> | `ONECODE_VCR` | VCR 录制/回放模式：`off`（默认，走真实网络）/ `record`（录制响应到 fixture）/ `replay`（命中 fixture 返回缓存）；其他值 fail-safe 回落 `off` |
 
 ---
 

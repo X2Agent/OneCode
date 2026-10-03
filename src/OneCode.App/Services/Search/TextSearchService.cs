@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileSystemGlobbing;
 using OneCode.App.Tools;
 using OneCode.Core.IO;
+using OneCode.Infrastructure;
 
 namespace OneCode.App.Services.Search;
 
@@ -10,7 +11,7 @@ namespace OneCode.App.Services.Search;
 /// </summary>
 public sealed class TextSearchService(
     IProcessRunner processRunner,
-    IFileSystem fileSystem,
+    LocalAgentFileStore fileSystem,
     ILogger<TextSearchService> logger,
     IWorkspaceIgnoreProvider? ignoreProvider = null) : ITextSearchService
 {

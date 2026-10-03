@@ -18,7 +18,7 @@ public readonly partial record struct SessionId(string Value) : IEquatable<Sessi
     public static SessionId? TryParse(string? s)
         => !string.IsNullOrEmpty(s) && SafePattern().IsMatch(s) ? new SessionId(s) : (SessionId?)null;
 
-    [GeneratedRegex(@"^[0-9a-f]{32}$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(@"^[0-9a-f]{32}$", RegexOptions.IgnoreCase)]
     private static partial Regex SafePattern();
 }
 

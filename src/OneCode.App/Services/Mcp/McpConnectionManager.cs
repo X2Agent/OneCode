@@ -25,8 +25,7 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _connectGates = new(StringComparer.Ordinal);
     // 正在握手（尚未定论成败）的连接数——状态栏三态的"连接中"数据源。
     private readonly ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
-    // 最近一次启动连接的启用服务器目标数（状态栏"连接中 x/y"的分母）。
-    private volatile int _expectedCount;
+    private readonly McpStartupConnector _startupConnector;
     private bool _disposed;
 
     public McpConnectionManager(
@@ -45,6 +44,8 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
         _elicitationHandler = elicitationHandler;
         _hintCollector = hintCollector;
         _inProcessRegistry = inProcessRegistry;
+        // 复用 manager 自身的 logger：启动连接日志与连接池日志同类别，便于按同一过滤器检索。
+        _startupConnector = new McpStartupConnector(this, multiScopeLoader, hintCollector, _logger);
         _healthLoopTask = Task.Run(() => AutoReconnectLoopAsync(_healthCts.Token));
     }
 
@@ -62,124 +63,19 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
     /// <summary>Default timeout per MCP server connection (30 seconds).</summary>
     private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>
-    /// 整个启动连接阶段的总预算（60 秒）。每台服务器各自享有 <see cref="ConnectionTimeout"/>
-    /// 独立窗口（避免一台慢服务器吃掉全局超时），总体仍受该预算约束防止启动被无限拖住。
-    /// </summary>
-    private static readonly TimeSpan StartupBudgetTimeout = TimeSpan.FromSeconds(60);
-
-    public async Task ConnectAllAsync(CancellationToken ct = default)
-    {
-        var merged = await _multiScopeLoader.LoadAllAsync(ct: ct).ConfigureAwait(false);
-        var enabled = merged.Servers.Where(kv => !kv.Value.Disabled).ToDictionary(kv => kv.Key, kv => kv.Value);
-        var disabledCount = merged.Servers.Count(kv => kv.Value.Disabled);
-
-        if (disabledCount > 0)
-            _logger.LogInformation("Skipping {Count} disabled MCP server(s).", disabledCount);
-
-        // 内置服务（如 playwright）默认按需连接：不随启动连接，由消费方
-        // 在首次使用时通过 ConnectOneAsync 触发。连接时机是"正向约定"，
-        // 无需用户在配置里表达。
-        var builtIn = enabled.Where(kv => BuiltInMcpServers.IsBuiltIn(kv.Key)).Select(kv => kv.Key).ToList();
-        if (builtIn.Count > 0)
-        {
-            _logger.LogDebug("Deferring {Count} built-in MCP server(s) (on-demand): {Names}", builtIn.Count, string.Join(", ", builtIn));
-            enabled = enabled.Where(kv => !BuiltInMcpServers.IsBuiltIn(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
-        }
-
-        if (enabled.Count == 0)
-        {
-            _logger.LogDebug("No MCP servers to connect at startup.");
-            _expectedCount = 0;
-            return;
-        }
-
-        // 记录目标数（状态栏三态"连接中 x/y"的分母）。内置按需服务已被剔除，不计入。
-        _expectedCount = enabled.Count;
-        _logger.LogInformation("Connecting to {Count} MCP server(s)...", enabled.Count);
-
-        using var startupBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        startupBudget.CancelAfter(StartupBudgetTimeout);
-
-        // 并发连接（与既有行为一致），但每台服务器持有独立的超时窗口（配置
-        // initTimeoutMs / startupTimeoutMs 可覆盖，未配置回落 30s），链接到启动总预算：
-        // 任一服务器超时不影响其他服务器的连接进度。
-        var failures = new ConcurrentBag<string>();
-        await Task.WhenAll(enabled.Select(async kv =>
-        {
-            using var perServer = CancellationTokenSource.CreateLinkedTokenSource(ct, startupBudget.Token);
-            perServer.CancelAfter(ResolveConnectionTimeout(kv.Value));
-            await ConnectOneWithTimeoutAsync(kv.Key, kv.Value, perServer.Token, failures).ConfigureAwait(false);
-        })).ConfigureAwait(false);
-
-        ReportConnectFailures(failures);
-    }
-
-    /// <summary>
-    /// 将启动阶段连接失败的服务器汇总为一条 startup hint（软失败此前仅落日志，
-    /// TUI 用户看不到，模型侧表现为"看不到该服务器的工具"）。
-    /// </summary>
-    private void ReportConnectFailures(ConcurrentBag<string> failures)
-    {
-        if (failures.IsEmpty || _hintCollector is null)
-            return;
-
-        var detail = string.Join("；", failures.OrderBy(static f => f, StringComparer.Ordinal));
-        var first = failures
-            .Select(static f => f.Split(':', 2)[0].Trim())
-            .OrderBy(static n => n, StringComparer.Ordinal)
-            .First();
-
-        _hintCollector.Add(new StartupHint
-        {
-            Id = "mcp-connect-failures",
-            Message = $"部分 MCP 服务器连接失败：{detail}。可用 /mcp connect <名称> 重试。",
-            ActionCommand = $"/mcp connect {first}",
-        });
-    }
-
-    private async Task ConnectOneWithTimeoutAsync(
-        string name, McpServerDefinition def, CancellationToken ct, ConcurrentBag<string> failures)
-    {
-        var timeout = ResolveConnectionTimeout(def);
-        try
-        {
-            await ConnectOneAsync(name, def, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogWarning("MCP server '{Name}' connection timed out after {Timeout}", name, timeout);
-            failures.Add($"{name}: 连接超时（>{timeout.TotalSeconds:0}s）");
-            MarkConnectionError(name, $"连接超时（>{timeout.TotalSeconds:0}s）");
-            return;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to connect to MCP server '{Name}'", name);
-            failures.Add($"{name}: {ex.Message}");
-            MarkConnectionError(name, ex.Message);
-            return;
-        }
-
-        // ConnectOneAsyncCore 对传输层异常/超时软失败（记录断连状态、不抛出），
-        // 这里按结果兜底判定，确保失败对用户可见。
-        if (!_connections.TryGetValue(name, out var conn) || !conn.IsConnected)
-        {
-            failures.Add(ct.IsCancellationRequested
-                ? $"{name}: 连接超时（>{timeout.TotalSeconds:0}s）"
-                : $"{name}: 连接失败（详见日志）");
-            MarkConnectionError(name, ct.IsCancellationRequested
-                ? $"连接超时（>{timeout.TotalSeconds:0}s）"
-                : "连接失败（详见日志）");
-        }
-    }
+    public Task ConnectAllAsync(CancellationToken ct = default)
+        => _startupConnector.ConnectAllAsync(ct);
 
     /// <summary>把失败原因写进连接池条目（<see cref="McpServerStatus.LastError"/>）——/mcp list 的失败详情数据源。条目尚不存在（如门闩等待期间被取消）时为空操作。</summary>
-    private void MarkConnectionError(string name, string error)
+    internal void MarkConnectionError(string name, string error)
     {
         if (_connections.TryGetValue(name, out var conn) && !conn.IsConnected)
             _connections[name] = conn with { LastError = error };
     }
+
+    /// <summary>指定服务器当前是否已连接（池中无条目视为未连接）。供启动连接编排做软失败兜底判定。</summary>
+    internal bool IsConnected(string name)
+        => _connections.TryGetValue(name, out var conn) && conn.IsConnected;
 
     /// <summary>
     /// Hot-connect a single server by name, loading its definition from the
@@ -266,7 +162,7 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
     /// 优先生效（startupTimeoutMs 历史上承载 stdio 子进程拉起时长，取两者较大值），未配置回落
     /// <see cref="ConnectionTimeout"/>（30s）。非法值（≤0）同样回落默认，避免配置错误导致永不超时。
     /// </summary>
-    private static TimeSpan ResolveConnectionTimeout(McpServerDefinition def)
+    internal static TimeSpan ResolveConnectionTimeout(McpServerDefinition def)
     {
         var fromConfig = Math.Max(def.InitTimeoutMs ?? 0, def.StartupTimeoutMs ?? 0);
         return fromConfig > 0 ? TimeSpan.FromMilliseconds(fromConfig) : ConnectionTimeout;
@@ -479,7 +375,7 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
             }
         }
 
-        return new McpConnectionSummary(_expectedCount, connected, _inFlight.Count, failed, toolCount);
+        return new McpConnectionSummary(_startupConnector.ExpectedCount, connected, _inFlight.Count, failed, toolCount);
     }
 
     // Helpers

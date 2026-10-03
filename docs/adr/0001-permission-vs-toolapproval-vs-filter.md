@@ -99,11 +99,11 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 
 **编辑生命周期只有一道 `EditGuardMiddleware`**（`OneCode.Infrastructure/Middleware/EditGuardMiddleware.cs`），替代了早期的 `ContractMiddleware` + `VerificationMiddleware` 两道结构；其内部分两段：
 
-1. **Pre**：`FileEditContract` 前置契约校验（Edit 目标文件必须存在），失败 fail-closed 返回 `ToolResult.Error` + 恢复指导；
+1. **Pre**：Edit 目标文件存在性前置校验（内联在中间件内），失败 fail-closed 返回 `ToolResult.Error` + 恢复指导；
 2. **Post**：可选的编辑后验证（`IVerificationProvider`，按 `VerificationOptions.Threshold` 防抖触发编译/类型检查），
    失败时把错误回注工具结果，由 `StateMachineMiddleware` 统一做状态转移。
 
-`FileEditContract.ValidatePostConditionsAsync`（弱后置「文件仍存在」校验）不保留，避免与强校验重复。`VerificationOptions` 位于 `Middleware/VerificationOptions.cs`。
+弱后置「文件仍存在」校验不保留，避免与强校验重复。`VerificationOptions` 位于 `Middleware/VerificationOptions.cs`。
 
 本 ADR 的归属约束不受影响：EditGuard 只做「编辑契约 + 编辑后质量」，**安全决策仍唯一属于 Permission 层**，
 路径 scope 检查仍由 `PermissionCheckHelpers.ValidatePath` 负责。

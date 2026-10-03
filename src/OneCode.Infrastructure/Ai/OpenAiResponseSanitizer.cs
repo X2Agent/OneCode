@@ -238,7 +238,8 @@ internal static partial class OpenAiResponseSanitizer
         if (IsOfficialFinishReason(value))
             return match.Value;
 
-        return @"""finish_reason"":""" + MapFinishReasonAlias(value) + @"""";
+        // JsonSerializer.Serialize(string) 产出带引号转义的 JSON 字符串字面量，避免手拼。
+        return @"""finish_reason"":" + JsonSerializer.Serialize(MapFinishReasonAlias(value));
     }
 
     private static bool IsPlaceholderFinishReason(string value) =>

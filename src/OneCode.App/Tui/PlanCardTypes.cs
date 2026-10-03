@@ -39,53 +39,6 @@ public enum PlanCardPhase
     Cancelled,
 }
 
-/// <summary>
-/// Plan card 持久化快照——通过 <see cref="Conversation.Metadata"/> 跨会话恢复。
-/// 用于用户退出程序后重新打开会话时，恢复 plan card 的 Phase 状态
-/// 和内容，使 InlineSelector 决策面板能继续工作。
-/// </summary>
-/// <remarks>
-/// 设计说明：仅靠 plan.md 文件不足以恢复 PlanCardPhase 状态——plan.md 只含 plan 内容，
-/// 不知道当前是否处于 PendingApproval（应弹决策面板）。
-/// 通过 Conversation.Metadata 持久化 Phase 字段是必要补充。
-///
-/// <para>
-/// 参考 <c>AgentSessionPersistence.cs</c> 持久化 MAF AgentSession 的模式：
-/// 序列化为 JSON 字符串存入 Metadata，反序列化时兼容 JsonElement 形态。
-/// </para>
-/// </remarks>
-public sealed record PlanCardStateSnapshot(
-    string Title,
-    List<PlanStepSnapshot> Steps,
-    PlanCardPhase Phase,
-    DateTimeOffset SavedAt);
-
-/// <summary>
-/// <see cref="PlanStep"/> 的持久化 DTO——避免直接序列化 internal 类型。
-/// 用于持久化场景（跨会话恢复）；Label/Content 命名沿用历史快照 JSON 契约，
-/// 语义对应 <see cref="OneCode.App.Tools.PlanStepDto"/> 的 Title/Description。
-/// </summary>
-public sealed record PlanStepSnapshot(
-    string Label,
-    string? Content,
-    string? Assignee,
-    string Status);
-
-/// <summary>
-/// <see cref="Conversation.Metadata"/> 中持久化 PlanCardState 的 key 常量。
-/// 命名风格参考 <c>MafSessionMetadataKey</c>（"mafSession"）——camelCase 短词。
-/// </summary>
-public static class PlanCardStateKeys
-{
-    /// <summary>
-    /// Conversation.Metadata key——值为序列化的 <see cref="PlanCardStateSnapshot"/> JSON 字符串。
-    /// 由 <c>CreatePlanTool.SubmitPlanAsync</c>（PendingApproval）写入，
-    /// 由 <c>TuiHostConfigurator.WireSessionModals</c> 在会话恢复时读取，
-    /// 由 <c>TuiHostConfigurator.WirePlanCard</c> 在 Approve 决策时清除。
-    /// </summary>
-    public const string PlanCard = "planCard";
-}
-
 /// <summary>Mutable state for an active plan card awaiting user decision.</summary>
 internal sealed class PlanCardState(
     string title,
