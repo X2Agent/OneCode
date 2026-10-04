@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
@@ -70,6 +71,35 @@ public sealed class ForkedAgentRunnerTests
                     new OneCode.App.Services.Compact.CompactPromptBuilder(new PromptManager()))),
             promptComposer: new PromptComposer(promptManager));
     }
+
+    [Fact]
+    public void FilterChildTools_StripsDispatchTools_KeepsOthers()
+    {
+        // 嵌套派工深度上限 1：子代理工具面一律摘除派工工具，其余工具保留
+        var tools = ForkedAgentRunner.FilterChildTools(
+            [Tool("Agent"), Tool("ParallelAgents"), Tool("Read"), Tool("Grep")],
+            capabilities: null);
+
+        tools.Select(t => t.Name).Should().BeEquivalentTo("Read", "Grep");
+    }
+
+    [Fact]
+    public void FilterChildTools_IntersectsWithAllowedToolNames()
+    {
+        var capabilities = ToolCapabilitySet.CreateUnrestricted(["Read"]);
+
+        var tools = ForkedAgentRunner.FilterChildTools(
+            [Tool("Agent"), Tool("Read"), Tool("Grep")],
+            capabilities);
+
+        tools.Select(t => t.Name).Should().BeEquivalentTo("Read");
+    }
+
+    [Fact]
+    public void FilterChildTools_NullSource_YieldsEmpty()
+        => ForkedAgentRunner.FilterChildTools(null, null).Should().BeEmpty();
+
+    private static AIFunction Tool(string name) => AIFunctionFactory.Create(static () => "", name: name);
 
     [Fact]
     public async Task RunForkedAgentAsync_NullChatClient_ReturnsErrorResultWithoutThrowing()

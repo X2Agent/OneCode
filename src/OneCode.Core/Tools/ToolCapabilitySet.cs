@@ -14,6 +14,9 @@ public sealed record ToolCapabilitySet
     public required bool AllowDynamicActivation { get; init; }
     public required bool AllowSubAgents { get; init; }
 
+    /// <summary>派工工具名。子代理一律不可见——嵌套派工深度上限 1。</summary>
+    public static readonly IReadOnlyList<string> SubAgentDispatchTools = ["Agent", "ParallelAgents"];
+
     public static ToolCapabilitySet CreateUnrestricted(IEnumerable<string> toolNames) => new()
     {
         AllowedToolNames = toolNames.ToImmutableHashSet(NameComparer),
@@ -28,7 +31,7 @@ public sealed record ToolCapabilitySet
         if (metadata is null || !metadata.IsVisible || !metadata.IsEnabled)
             return false;
 
-        if (!AllowSubAgents && toolName is "Agent" or "ParallelAgents")
+        if (!AllowSubAgents && SubAgentDispatchTools.Contains(toolName))
             return false;
 
         return AllowedToolNames.Contains(toolName);

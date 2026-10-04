@@ -68,9 +68,7 @@ public sealed class ForkedAgentRunner(
 
             var csp = parameters.CacheSafeParams;
             var maxTurns = parameters.MaxTurns ?? 10;
-            var tools = csp?.Tools?
-                .Where(tool => parameters.Capabilities?.AllowedToolNames.Contains(tool.Name) != false)
-                .ToList() ?? (List<AITool>)[];
+            var tools = FilterChildTools(csp?.Tools, parameters.Capabilities);
             var cwd = _workingDirectoryAccessor.WorkingDirectory;
             var profile = parameters.Profile;
 
@@ -204,6 +202,17 @@ public sealed class ForkedAgentRunner(
     }
 
     public int ActiveRunCount => _activeRuns.Count;
+
+    /// <summary>
+    /// 子代理工具面：父级 AllowedToolNames 收敛 + 摘除派工工具。所有 fork 都是主 agent 的
+    /// 子代理（GOAL 子目标不经此 runner），无条件排除 <see cref="ToolCapabilitySet.SubAgentDispatchTools"/>
+    /// 即等价于「嵌套派工深度上限 1」，无需引入 Depth 环境流。
+    /// </summary>
+    internal static List<AITool> FilterChildTools(IEnumerable<AITool>? source, ToolCapabilitySet? capabilities)
+        => source?
+            .Where(tool => capabilities?.AllowedToolNames.Contains(tool.Name) != false)
+            .Where(tool => !ToolCapabilitySet.SubAgentDispatchTools.Contains(tool.Name))
+            .ToList() ?? [];
 
     public async Task<AgentRunResult> RunAsync(AgentRunRequest request, CancellationToken ct = default)
     {
