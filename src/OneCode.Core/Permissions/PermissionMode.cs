@@ -18,14 +18,6 @@ public enum PermissionMode
     /// 其他工具路径校验后 Allow（保持自主性，不弹窗）。
     /// </summary>
     GoalAuto,
-    /// <summary>
-    /// TEAM 模式专用：多 Agent 协作模式。
-    /// 与 AcceptEdits 类似（文件写入 + 常规开发命令自动放行）。
-    /// 危险 Shell 命令产生 Ask 决策，进入 MAF 审批协议；审批请求由 Team 任务工作流
-    /// 桥接为 OrchestrationEvent.ApprovalRequest 事件（见 TeamWorkflowRunner），
-    /// 成员自身拥有 ToolApprovalAgent。
-    /// </summary>
-    Team,
 }
 
 /// <summary>

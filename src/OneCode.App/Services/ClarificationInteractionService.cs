@@ -8,7 +8,7 @@ public sealed record ClarificationInteractionResult(
 }
 
 /// <summary>
-/// Shared application-layer adapter for Build/Team requirement clarification.
+/// Shared application-layer adapter for Build requirement clarification.
 /// Rendering remains owned by the existing InlineSelector and QuestionWizard components.
 /// </summary>
 public interface IClarificationInteractionService

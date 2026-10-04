@@ -88,7 +88,7 @@ internal static class AgentWorkflowEventProcessor
                     logger.LogWarning(failureLogMessage, args);
                     // 发射 OrchestrationEvent.Error 通知 TUI，而非仅记录日志
                     eventSink?.Invoke(new OrchestrationEvent.Error(
-                        $"Team member failed: {failEvt}"));
+                        $"Sub-agent failed: {failEvt}"));
                     // 标记发生失败，外层据此跳过 transaction.Commit()
                     hadFailures = true;
                     break;
@@ -99,7 +99,7 @@ internal static class AgentWorkflowEventProcessor
                     var exMessage = errorEvt.Exception?.Message ?? errorEvt.ToString();
                     logger.LogError(errorEvt.Exception, failureLogMessage, failureLogArgs.Append(exMessage).ToArray());
                     eventSink?.Invoke(new OrchestrationEvent.Error(
-                        $"Team workflow failed: {exMessage}"));
+                        $"Agent workflow failed: {exMessage}"));
                     hadFailures = true;
                     break;
 

@@ -377,7 +377,7 @@ public partial class MainAgentRunner(
             chatOptions.Reasoning = new ReasoningOptions { Effort = effort };
 
         // Tool approval wrapping is centralized in AgentPipelineBuilder from
-        // ToolMetadataRegistry. Keeping it there prevents Main/Worker/Team policy drift.
+        // ToolMetadataRegistry. Keeping it there prevents Main/Worker policy drift.
         if (options.Tools is { Count: > 0 })
         {
             chatOptions.Tools = options.Tools.ToList();

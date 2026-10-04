@@ -97,14 +97,14 @@ public static class PermissionCheckHelpers
     }
 
     /// <summary>
-    /// "自动放行文件写入与 Shell"公共流程——适用于 GoalAuto/AcceptEdits/Team 策略。
+    /// "自动放行文件写入与 Shell"公共流程——适用于 GoalAuto/AcceptEdits 策略。
     ///
     /// 决策表：
     ///   只读工具 / 只读 Shell   → Allow
     ///   文件写入工具           → ValidatePath 后 Allow（路径越界 Deny）
     ///   危险 Shell             → 返回 <paramref name="destructiveShellResult"/>（null 表示未处理，由调用方决定）
     ///   常规 Shell             → ValidatePath 后 Allow（路径越界 Deny）
-    ///   未知工具               → 返回 null（由调用方决定，如 EvaluateRules 或 Team 工具白名单）
+    ///   未知工具               → 返回 null（由调用方决定，如 EvaluateRules 或工具白名单）
     ///
     /// 不适用此方法的策略：
     ///   - Default/Auto 模式：文件写入不自动 Allow，需走 EvaluateRules（用 <see cref="CheckReadOnlyAndEvaluate"/> 代替）
@@ -118,7 +118,7 @@ public static class PermissionCheckHelpers
     /// </param>
     /// <returns>
     /// 返回非 null 表示已确定决策；返回 null 表示工具未被本方法识别（如未知工具），
-    /// 调用方应自行决定后续处理（如 EvaluateRules 或 Team 工具白名单）。
+    /// 调用方应自行决定后续处理（如 EvaluateRules 或工具白名单）。
     /// </returns>
     internal static PermissionCheckResult? AutoAllowFileWriteAndShell(
         string toolName,

@@ -13,7 +13,7 @@ namespace OneCode.Infrastructure.Agent;
 /// <summary>
 /// PIPE-1: 跨角色共享的安全上下文。
 /// 所有 profile 的 SafetyInvariants/RulesBySource/AdditionalWorkingDirectories
-/// 必须从同一 PipelineSecurityContext 获取，确保 Worker/Team 与 Main 安全字段等价。
+/// 必须从同一 PipelineSecurityContext 获取，确保 Worker 与 Main 安全字段等价。
 /// </summary>
 public sealed record PipelineSecurityContext(
     string WorkingDirectory,
@@ -37,7 +37,7 @@ public sealed record PipelineSecurityContext(
 /// <summary>
 /// 角色级覆盖 — 仅裁剪工具集与配额，不裁剪安全层。
 /// 审批单通道：Ask 一律进入 MAF 审批协议；交互呈现由上层桥承担
-/// （Main 流式审批拆分 / Team 工作流审批桥），中间件与管道不持有 broker。
+/// （Main 流式审批拆分），中间件与管道不持有 broker。
 /// </summary>
 public sealed record PipelineRoleOverrides(
     int MaxToolCalls,
@@ -49,7 +49,7 @@ public sealed record PipelineRoleOverrides(
 
 /// <summary>
 /// PIPE-1: 统一的 AgentPipelineOptions 工厂。
-/// 消除 Main/Worker/Team 三路管道能力不对称 — 安全字段在所有 profile 上一致传递，
+/// 消除 Main/Worker 管道能力不对称 — 安全字段在所有 profile 上一致传递，
 /// 中间件裁剪与工具集按 <see cref="PipelineProfile"/> 控制。
 /// </summary>
 public static class AgentPipelineOptionsFactory

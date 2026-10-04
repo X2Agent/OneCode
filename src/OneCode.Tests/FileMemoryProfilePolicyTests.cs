@@ -22,7 +22,6 @@ public sealed class FileMemoryProfilePolicyTests
 
     [Theory]
     [InlineData(PipelineProfile.Worker)]
-    [InlineData(PipelineProfile.TeamMember)]
     [InlineData(PipelineProfile.Explore)]
     [InlineData(PipelineProfile.Plan)]
     public void NonMainProfiles_DoNotGetWorkingMemory(PipelineProfile profile)
@@ -58,18 +57,6 @@ public sealed class FileMemoryProfilePolicyTests
         BuildOptions(PipelineProfile.Worker).EnableTodo.Should().BeTrue();
         BuildOptions(PipelineProfile.Explore).EnableTodo.Should().BeFalse();
         BuildOptions(PipelineProfile.Plan).EnableTodo.Should().BeFalse();
-    }
-
-    /// <summary>
-    /// R4：Team 成员启用框架审批协议，由 Workflow executor 拦截并桥接给宿主。
-    /// 关掉它只能靠产品侧 inline 分支补位——那正是本轮要移除的双轨。
-    /// </summary>
-    [Fact]
-    public void TeamMember_KeepsFrameworkApprovalEnabled()
-    {
-        PipelineProfileBehavior.For(PipelineProfile.TeamMember)
-            .EnableToolApproval.Should().BeTrue(
-                "the workflow intercepts approval requests, so the framework protocol can carry them");
     }
 
     // M2: store 根必须绑定项目，不能绑定进程 cwd

@@ -386,69 +386,69 @@ public sealed class AgentPipelineBuilderTests
             PipelineProfile.Full, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 50, ToolLimitMessage: "main limit"));
         var worker = AgentPipelineOptionsFactory.CreateForWorker(ctx, maxToolCalls: 10);
-        var team = AgentPipelineOptionsFactory.Create(
-            PipelineProfile.TeamMember, ctx,
-            new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "team limit"));
+        var worker2 = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "worker limit"));
 
         // 共享安全字段（所有 role 等价，引用相同）
         main.WorkingDirectory.Should().Be(worker.WorkingDirectory);
-        main.WorkingDirectory.Should().Be(team.WorkingDirectory);
+        main.WorkingDirectory.Should().Be(worker2.WorkingDirectory);
 
         main.RulesBySource.Should().BeSameAs(worker.RulesBySource);
-        main.RulesBySource.Should().BeSameAs(team.RulesBySource);
+        main.RulesBySource.Should().BeSameAs(worker2.RulesBySource);
 
         main.AdditionalWorkingDirectories.Should().BeSameAs(worker.AdditionalWorkingDirectories);
-        main.AdditionalWorkingDirectories.Should().BeSameAs(team.AdditionalWorkingDirectories);
+        main.AdditionalWorkingDirectories.Should().BeSameAs(worker2.AdditionalWorkingDirectories);
 
         main.SafetyInvariants.Should().BeSameAs(worker.SafetyInvariants);
-        main.SafetyInvariants.Should().BeSameAs(team.SafetyInvariants);
+        main.SafetyInvariants.Should().BeSameAs(worker2.SafetyInvariants);
 
         main.EditTransaction.Should().BeSameAs(worker.EditTransaction);
-        main.EditTransaction.Should().BeSameAs(team.EditTransaction);
+        main.EditTransaction.Should().BeSameAs(worker2.EditTransaction);
 
         main.PermissionChecker.Should().BeSameAs(worker.PermissionChecker);
-        main.PermissionChecker.Should().BeSameAs(team.PermissionChecker);
+        main.PermissionChecker.Should().BeSameAs(worker2.PermissionChecker);
 
         main.HookExecutionService.Should().BeSameAs(worker.HookExecutionService);
-        main.HookExecutionService.Should().BeSameAs(team.HookExecutionService);
+        main.HookExecutionService.Should().BeSameAs(worker2.HookExecutionService);
 
         main.VerificationProvider.Should().BeSameAs(worker.VerificationProvider);
-        main.VerificationProvider.Should().BeSameAs(team.VerificationProvider);
+        main.VerificationProvider.Should().BeSameAs(worker2.VerificationProvider);
 
         // 角色裁剪字段差异（工具集与配额，按 role 裁剪）
         main.MaxToolCalls.Should().Be(50);
         worker.MaxToolCalls.Should().Be(10);
-        team.MaxToolCalls.Should().Be(20);
+        worker2.MaxToolCalls.Should().Be(20);
 
         main.ToolLimitMessage.Should().Be("main limit");
         worker.ToolLimitMessage.Should().Contain("10");
-        team.ToolLimitMessage.Should().Be("team limit");
+        worker2.ToolLimitMessage.Should().Be("worker limit");
     }
 
     [Fact]
     public void AddDir_WorkerRespectsAdditionalDirectories()
     {
-        // 契约：/add-dir 添加的目录在 Worker/Team 与 Main 一致传递
+        // 契约：/add-dir 添加的目录在 Worker 与 Main 一致传递
         var ctx = BuildSecurityContext();
         var main = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Full, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 50, ToolLimitMessage: "main"));
         var worker = AgentPipelineOptionsFactory.CreateForWorker(ctx, maxToolCalls: 10);
-        var team = AgentPipelineOptionsFactory.Create(
-            PipelineProfile.TeamMember, ctx,
-            new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "team"));
+        var worker2 = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "worker"));
 
         worker.AdditionalWorkingDirectories.Should().NotBeNull();
         worker.AdditionalWorkingDirectories.Should().ContainKey("extra");
         worker.AdditionalWorkingDirectories!["extra"].Path.Should().Be("/extra");
         worker.AdditionalWorkingDirectories.Should().BeSameAs(main.AdditionalWorkingDirectories);
-        team.AdditionalWorkingDirectories.Should().BeSameAs(main.AdditionalWorkingDirectories);
+        worker2.AdditionalWorkingDirectories.Should().BeSameAs(main.AdditionalWorkingDirectories);
     }
 
     [Fact]
     public async Task AlwaysDeny_WorkerRespectsAsMain()
     {
-        // 契约：alwaysDeny 规则在 Worker/Team 与 Main 行为一致（通过 PermissionChecker 实际调用验证）
+        // 契约：alwaysDeny 规则在 Worker 与 Main 行为一致（通过 PermissionChecker 实际调用验证）
         var checker = new PermissionChecker(CreateYoloClassifier());
         var ctx = BuildSecurityContext(
             mode: PermissionMode.Default,

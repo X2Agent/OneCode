@@ -56,7 +56,6 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, PermissionsCommand>();
         s.AddSingleton<ICommand, PromptsCommand>();
         s.AddSingleton<ICommand, SkillsCommand>();
-        s.AddSingleton<ICommand, TeamCommand>();
         s.AddSingleton<ICommand, ThinkCommand>();
         s.AddSingleton<ICommand, UpgradeCommand>();
         s.AddSingleton<ICommand, VersionCommand>();

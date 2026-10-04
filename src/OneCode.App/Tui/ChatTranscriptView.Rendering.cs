@@ -136,7 +136,7 @@ public sealed partial class ChatTranscriptView
                 && pending.LineIndex < _stream.StatusLines.Count)
             {
                 // 同轮相邻同类调用并入组行（×N 递增），不再逐条平铺刷屏。
-                // 组键含 TEAM 归属：不同成员的同名调用各自成组。
+                // 组键含代理归属：不同代理的同名调用各自成组。
                 var groupKey = string.IsNullOrWhiteSpace(agentName) ? name : $"{name}|{agentName}";
                 if (_stream.ToolTracker.TryAppendToGroup(
                         groupKey, toolInput, result, pending.StartTick, isError,
@@ -226,11 +226,10 @@ public sealed partial class ChatTranscriptView
     }
 
     /// <summary>
-    /// TEAM 成员发言块：说话人行 + 最多 3 行预览（折叠式呈现）。
-    /// 完整内容仍保留在 Delivery 证据中，主对话不被长文本刷屏。
+    /// 代理发言块（子代理/工作流消息）：说话人行 + 最多 3 行预览（折叠式呈现）。
     /// 预览行按视口宽度预换行；块由闭包持有宽度，resize 时整体重渲。
     /// </summary>
-    public void AddTeamSpeech(string agentName, string content)
+    public void AddAgentSpeech(string agentName, string content)
     {
         const int PreviewLineCount = 3;
         var speechLines = (content ?? string.Empty)
@@ -336,7 +335,7 @@ public sealed partial class ChatTranscriptView
     public void AddFileChange(string fileName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
         => AddFileChange(fileName, null, addedLines, removedLines);
 
-    /// <summary>带 TEAM 归属的重载：diff 头标注执行修改的成员 ID。</summary>
+    /// <summary>带代理归属的重载：diff 头标注执行修改的代理 ID。</summary>
     public void AddFileChange(string fileName, string? agentName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
     {
         _logger.LogDebug(

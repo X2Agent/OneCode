@@ -112,13 +112,11 @@ public static class TuiEventMapper
         return tuiEvent;
     }
 
-    /// <summary>Maps TEAM/GOAL OrchestrationEvent → TuiEvent (pure mapping, except ApprovalRequest which bridges ResponseSource).</summary>
-    public static TuiEvent? MapOrchestrationEventToTuiEvent(OrchestrationEvent teamEvt)
+    /// <summary>Maps GOAL OrchestrationEvent → TuiEvent (pure mapping, except ApprovalRequest which bridges ResponseSource).</summary>
+    public static TuiEvent? MapOrchestrationEventToTuiEvent(OrchestrationEvent orchestrationEvt)
     {
-        return teamEvt switch
+        return orchestrationEvt switch
         {
-            OrchestrationEvent.AgentCoordination ac
-                => new TuiAgentCoordination(ac.FromName, ac.FromColor, ac.ToName, ac.ToColor, ac.Content),
             OrchestrationEvent.AgentMessage am
                 => new TuiAgentMessage(am.AgentName, am.AgentColor, am.Content),
             OrchestrationEvent.ToolStart ts
@@ -129,77 +127,10 @@ public static class TuiEventMapper
                 => new TuiTextDelta(td.Text),
             OrchestrationEvent.FileChanged fc
                 => new TuiFileChange(fc.FileName, fc.AddedLines, fc.RemovedLines, fc.AgentName),
-            OrchestrationEvent.TeamTaskProgress progress
-                => new TuiTeamTaskProgress(
-                    progress.TaskId,
-                    progress.TaskTitle,
-                    progress.AssigneeRole,
-                    progress.Status,
-                    progress.CompletedTasks,
-                    progress.TotalTasks,
-                    progress.ActiveTasks,
-                    progress.BlockedTasks),
             OrchestrationEvent.Error err
                 => new TuiError(err.Message),
-            OrchestrationEvent.ApprovalRequest ar
-                => MapOrchestrationApprovalRequest(
-                    ar.Request.RequestId ?? ar.Request.AgentName ?? "",
-                    ar.Request.ToolName,
-                    ar.Request.ToolInput,
-                    ar.ResponseSource),
-            OrchestrationEvent.TeamClarificationRequest clarification
-                => new TuiTeamProgress(
-                    $"团队 '{clarification.TeamName}' 需要澄清 {clarification.Questions.Count} 个问题后才能规划",
-                    clarification.Questions.Select((question, index) =>
-                        ($"问题 {index + 1}", question, "待回答")).ToList(),
-                    "请在随后的澄清向导中回答",
-                    clarification.TeamName),
-            OrchestrationEvent.TeamPlanApprovalRequest approval
-                => MapTeamPlanApproval(approval),
-            OrchestrationEvent.TeamUserResponse userResponse
-                => new TuiTeamUserResponse(userResponse.TeamName, userResponse.Response),
             _ => null,
         };
-    }
-
-    /// <summary>
-    /// Maps TeamPlanApprovalRequest → TuiTeamPlanApproval as a notification-only event.
-    /// Plan approval decisions are now handled by the MAF RequestPort workflow
-    /// (TeamApprovalWorkflowHost), not by a TUI-side TaskCompletionSource bridge.
-    /// </summary>
-    private static TuiEvent MapTeamPlanApproval(OrchestrationEvent.TeamPlanApprovalRequest approval)
-        => new TuiTeamPlanApproval(
-            approval.TeamName,
-            approval.PlanSummary,
-            approval.Tasks,
-            approval.RequiredGates);
-
-    /// <summary>
-    /// 映射 OrchestrationEvent.ApprovalRequest → TuiApprovalRequest。
-    /// 桥接 ResponseSource，使 TUI 的决策回传到 Team 路径的 inline handler。
-    /// Team 桥只提供单次批准（成员策略固定 PermissionMode.Team），故不开放
-    /// 「本次对话全部允许」升级档——该决策会被桥按拒绝处理。
-    /// </summary>
-    private static TuiEvent MapOrchestrationApprovalRequest(
-        string agentName,
-        string toolName,
-        string? toolInput,
-        TaskCompletionSource<OneCode.Core.Permissions.ApprovalDecision> responseSource)
-    {
-        var tuiEvent = new TuiApprovalRequest(agentName, toolName, toolInput)
-        {
-            AllowSessionEscalation = false,
-        };
-        tuiEvent.ResponseSource.Task.ContinueWith(t =>
-        {
-            if (t.IsCompletedSuccessfully)
-                responseSource.TrySetResult(t.Result);
-            else if (t.IsFaulted)
-                responseSource.TrySetException(t.Exception is { } ex ? ex : new InvalidOperationException("Approval failed"));
-            else if (t.IsCanceled)
-                responseSource.TrySetCanceled();
-        }, TaskScheduler.Default);
-        return tuiEvent;
     }
 
 }

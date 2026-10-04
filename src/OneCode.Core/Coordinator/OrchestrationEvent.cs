@@ -1,42 +1,20 @@
 using OneCode.Core.Build;
 using OneCode.Core.Errors;
-using OneCode.Core.Permissions;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.Core.Coordinator;
 
 /// <summary>
-/// 编排模式（Team/Goal 等）执行过程中推送给 TUI 层的事件。
+/// 编排模式（Goal 等多步工作流）执行过程中推送给 TUI 层的事件。
 /// 这是一个 Core 层的抽象类型，避免 Core 依赖 App 层的 TuiEvent。
 /// App 层负责将 OrchestrationEvent 转换为具体的 TuiEvent。
 ///
 /// 展平为独立 sealed record 列表需改动 20+ 调用点（TuiEventMapper、
-/// OrchestrationStreamService、TeamWorkflowRunner 等），风险/收益比不足，保留嵌套 record 层次。
-///
-/// 事件分两类：
-/// - 通用事件（ToolStart/ToolDone/TextDelta/Error/ApprovalRequest）：任何编排模式都可能产生，可被 Goal 等模式复用。
-/// - Team 专有事件（AgentCoordination/AgentMessage）：仅 Team 模式产生。
+/// OrchestrationStreamService 等），风险/收益比不足，保留嵌套 record 层次。
 /// </summary>
 public abstract record OrchestrationEvent
 {
-    /// <summary>Agent 间协调消息（orchestrator → researcher 等）。Team 专有。</summary>
-    public sealed record AgentCoordination(string FromName, string? FromColor, string ToName, string? ToColor, string? Content) : OrchestrationEvent;
-
-    /// <summary>
-    /// Team 任务状态变更快照（开始时 Status=null，结束时为终态名称），
-    /// 携带全量计数（已完成/总数/活跃/阻塞），供 TUI 进度面板消费。Team 专有。
-    /// </summary>
-    public sealed record TeamTaskProgress(
-        string TaskId,
-        string TaskTitle,
-        string AssigneeRole,
-        string? Status,
-        int CompletedTasks,
-        int TotalTasks,
-        int ActiveTasks = 0,
-        int BlockedTasks = 0) : OrchestrationEvent;
-
-    /// <summary>单个 Agent 的消息输出。Team 专有。</summary>
+    /// <summary>单个 Agent 的消息输出。子代理 DAG / Goal 工作流产生。</summary>
     public sealed record AgentMessage(string AgentName, string? AgentColor, string Content) : OrchestrationEvent;
 
     /// <summary>工具调用开始。通用事件。</summary>
@@ -48,7 +26,7 @@ public abstract record OrchestrationEvent
     /// <summary>文本增量。通用事件。</summary>
     public sealed record TextDelta(string AgentName, string Text) : OrchestrationEvent;
 
-    /// <summary>Team/Goal 文件变更事件。由共享编辑中间件在每次 Write/Edit 后发出。</summary>
+    /// <summary>文件变更事件。由共享编辑中间件在每次 Write/Edit 后发出。</summary>
     public sealed record FileChanged(
         string AgentName,
         string FileName,
@@ -57,38 +35,6 @@ public abstract record OrchestrationEvent
 
     /// <summary>错误。通用事件。Problem 携带结构化错误详情。</summary>
     public sealed record Error(string Message, AgentProblemDetails? Problem = null) : OrchestrationEvent;
-
-    /// <summary>
-    /// 事件驱动审批请求 — Team 子 Agent 的工具审批通过此事件推送到 TUI。
-    /// 持有 Core <see cref="Permissions.ApprovalRequest"/> 作为唯一权威载荷；
-    /// <see cref="ResponseSource"/> 是编排层回传通道（展示层投影由 TuiEventMapper 生成）。
-    /// </summary>
-    public sealed record ApprovalRequest(Permissions.ApprovalRequest Request) : OrchestrationEvent
-    {
-        /// <summary>用于回传用户审批决策的 TaskCompletionSource。</summary>
-        public TaskCompletionSource<ApprovalDecision> ResponseSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
-    /// <summary>TeamRun 需求澄清请求。存在阻断问题时不得进入计划审批或创建写事务。</summary>
-    public sealed record TeamClarificationRequest(
-        TeamRunId RunId,
-        string TeamName,
-        string Goal,
-        IReadOnlyList<string> Questions) : OrchestrationEvent;
-
-    /// <summary>
-    /// TeamRun 计划级审批通知事件。审批决策通过 MAF RequestPort 持久化，
-    /// 不再通过 TaskCompletionSource 阻塞。此事件仅用于通知 TUI 展示审批卡片。
-    /// </summary>
-    public sealed record TeamPlanApprovalRequest(
-        TeamRunId RunId,
-        string TeamName,
-        string PlanSummary,
-        IReadOnlyList<string> Tasks,
-        IReadOnlyList<string> RequiredGates) : OrchestrationEvent;
-
-    /// <summary>用户在澄清/审批交互中给出的回答回显，供 TUI 写入会话记录。</summary>
-    public sealed record TeamUserResponse(string TeamName, string Response) : OrchestrationEvent;
 
     /// <summary>
     /// Plan 聚合投影变更（事件通道统一）：计划提交/审批/执行阶段推进时

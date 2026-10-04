@@ -42,17 +42,16 @@ public static class KeybindingDefaults
     public const string ActionAppExit = "app:exit";
     public const string ActionAppSidebarToggle = "app:sidebarToggle";
 
-    // 右侧侧边栏（Plan/TEAM）宽度键盘调整——与分隔线鼠标拖拽等价的键盘路径。
+    // 右侧侧边栏（Plan）宽度键盘调整——与分隔线鼠标拖拽等价的键盘路径。
     // 注册于 Global 上下文：输入框聚焦时经 ChatInputView 转发，非聚焦时经
     // ReplShell.OnKeyDown 兜底，两条分发路径共用同一动作。
     public const string ActionAppSidebarWider = "app:sidebarWider";
     public const string ActionAppSidebarNarrower = "app:sidebarNarrower";
 
-    // 工作模式直达（Alt+1..4 独立单键绑定，与裸 Tab 循环解耦——共享 tab 前缀
+    // 工作模式直达（Alt+1/2/4 独立单键绑定，与裸 Tab 循环解耦——共享 tab 前缀
     // 会与循环/补全语义冲突；经典终端把 ctrl+2/3/4 编码为 NUL/ESC/FS。注册于 Chat 上下文。
     public const string ActionAppModeBuild = "app:modeBuild";
     public const string ActionAppModePlan = "app:modePlan";
-    public const string ActionAppModeTeam = "app:modeTeam";
     public const string ActionAppModeGoal = "app:modeGoal";
 
     // 历史导航
@@ -71,13 +70,9 @@ public static class KeybindingDefaults
     public const string ActionChatPageUp = "chat:pageUp";
     public const string ActionChatPageDown = "chat:pageDown";
 
-    // 侧栏（Plan/Team 计划卡）键盘滚动——与主对话区滚动互不干扰的分区操作。
+    // 侧栏（Plan 计划卡）键盘滚动——与主对话区滚动互不干扰的分区操作。
     public const string ActionSidebarPageUp = "sidebar:pageUp";
     public const string ActionSidebarPageDown = "sidebar:pageDown";
-
-    // TEAM 模式专用：循环切换已注册团队（code-review → research → ...）
-    // 绑定 Shift+Tab（Tab 换模式、Shift+Tab 换模式内的团队）。
-    public const string ActionChatCycleTeam = "chat:cycleTeam";
 
     // Autocomplete 菜单动作
     public const string ActionAutocompletePrevious = "autocomplete:previous";
@@ -109,13 +104,12 @@ public static class KeybindingDefaults
         ActionAppExit,
         ActionAppSidebarToggle,
         ActionAppSidebarWider, ActionAppSidebarNarrower,
-        ActionAppModeBuild, ActionAppModePlan, ActionAppModeTeam, ActionAppModeGoal,
+        ActionAppModeBuild, ActionAppModePlan, ActionAppModeGoal,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
         ActionChatCancel, ActionChatKillAgents,
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
-        ActionChatCycleTeam,
         ActionAutocompletePrevious, ActionAutocompleteNext,
         ActionAutocompleteAccept, ActionAutocompleteDismiss,
         ActionDiffScrollUp, ActionDiffScrollDown,
@@ -135,12 +129,11 @@ public static class KeybindingDefaults
     {
         // App 级别
         [ActionAppExit] = "退出应用",
-        [ActionAppSidebarToggle] = "切换右侧侧边栏可见性（Plan/TEAM 面板）",
-        [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan/TEAM 面板）",
-        [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan/TEAM 面板）",
+        [ActionAppSidebarToggle] = "切换右侧侧边栏可见性（Plan 面板）",
+        [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan 面板）",
+        [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan 面板）",
         [ActionAppModeBuild] = "切换到 BUILD 模式",
         [ActionAppModePlan] = "切换到 PLAN 模式",
-        [ActionAppModeTeam] = "切换到 TEAM 模式",
         [ActionAppModeGoal] = "切换到 GOAL 模式",
 
         // 历史导航
@@ -158,8 +151,6 @@ public static class KeybindingDefaults
         [ActionChatScrollDown] = "对话区向下滚动（行级）",
         [ActionChatPageUp] = "对话区向上翻页",
         [ActionChatPageDown] = "对话区向下翻页",
-        [ActionChatCycleTeam] = "TEAM 模式下循环切换已注册团队",
-
         // Autocomplete
         [ActionAutocompletePrevious] = "上一条补全建议",
         [ActionAutocompleteNext] = "下一条补全建议",
@@ -204,7 +195,7 @@ public static class KeybindingDefaults
             ["ctrl+d"] = ActionAppExit,
             ["ctrl+g"] = ActionAppSidebarToggle,
 
-            // 侧边栏宽度调整（Plan/TEAM 面板）：Ctrl+Shift+方向键，步进见
+            // 侧边栏宽度调整（Plan 面板）：Ctrl+Shift+方向键，步进见
             // SidebarViewBase.KeyboardResizeStep。不占用 ctrl+left/right（占位建议循环）。
             ["ctrl+shift+right"] = ActionAppSidebarWider,
             ["ctrl+shift+left"] = ActionAppSidebarNarrower,
@@ -230,19 +221,14 @@ public static class KeybindingDefaults
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
 
-            // 侧栏翻页（Shift+PageUp/PageDown）：主对话区与右侧计划/团队侧栏分区滚动。
+            // 侧栏翻页（Shift+PageUp/PageDown）：主对话区与右侧计划侧栏分区滚动。
             ["shift+pgup"] = ActionSidebarPageUp,
             ["shift+pgdn"] = ActionSidebarPageDown,
-
-            // TEAM 模式下循环切换已注册团队（Shift+Tab）。
-            // 编排模式由 team.yaml 固定声明，运行期不可覆盖，无策略切换键。
-            ["shift+tab"] = ActionChatCycleTeam,
 
             // 工作模式直达（Alt+数字独立绑定；裸 Tab 循环为硬编码行为，不经 Resolver，
             // 两者无共享前缀、互不干扰）。
             ["alt+1"] = ActionAppModeBuild,
             ["alt+2"] = ActionAppModePlan,
-            ["alt+3"] = ActionAppModeTeam,
             ["alt+4"] = ActionAppModeGoal,
         }),
         new(ContextAutocomplete, new Dictionary<string, string?>

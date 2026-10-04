@@ -20,8 +20,6 @@ public static partial class ChatBlockRenderers
         {
             WorkingMode.Build => ("BUILD", "直接执行，适合小改动和探索性任务", TuiPalette.ModeBuildFg),
             WorkingMode.Plan => ("PLAN", "先出计划再执行，适合复杂重构", TuiPalette.ModePlanFg),
-            // TEAM：编排模式由所选团队的 team.yaml 固定声明，横幅不再区分策略。
-            WorkingMode.Team => ("TEAM", "多 Agent 协作——模式由团队 team.yaml 固定声明", TuiPalette.ModeTeamFg),
             WorkingMode.Goal => ("GOAL", "自主分解目标并迭代验证", TuiPalette.ModeGoalFg),
             _ => ("BUILD", "直接执行，适合小改动和探索性任务", TuiPalette.ModeBuildFg),
         };
@@ -59,7 +57,7 @@ public static partial class ChatBlockRenderers
         foreach (var line in TextWidthHelper.WordWrapByWidth(hdr, Math.Max(8, viewWidth)))
             list.Add(FormattedLine.Plain(line, TuiPalette.Accent));
 
-        // TEAM 归属标注：diff 头后追加执行者（角色专属色），多成员并发修改时可追溯。
+        // 代理归属标注：diff 头后追加执行者（角色专属色），多代理并发修改时可追溯。
         if (!string.IsNullOrWhiteSpace(agentName))
             foreach (var line in TextWidthHelper.WordWrapByWidth(
                 $"   · by {agentName}", Math.Max(8, viewWidth)))
@@ -93,7 +91,6 @@ public static partial class ChatBlockRenderers
             _ => (TuiGlyphs.InProgress, progress.Mode switch
             {
                 WorkingMode.Plan => TuiPalette.ModePlanFg,
-                WorkingMode.Team => TuiPalette.ModeTeamFg,
                 WorkingMode.Goal => TuiPalette.ModeGoalFg,
                 _ => TuiPalette.Accent,
             }),
@@ -125,7 +122,7 @@ public static partial class ChatBlockRenderers
         }));
 
         // Wrap agent content to fit within viewWidth, accounting for the 4-space indent.
-        // Without this, long lines (common in TEAM mode) overflow the terminal width.
+        // Without this, long lines overflow the terminal width.
         var contentMaxWidth = Math.Max(10, viewWidth - 4);
         var wrappedLines = TextWidthHelper.WordWrapByWidth(content, contentMaxWidth);
 

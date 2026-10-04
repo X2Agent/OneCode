@@ -478,7 +478,6 @@ public sealed class DocFactConsistencyTests
         "docs/adr/0010-agent-loop-boundaries.md",
         "docs/adr/0011-background-agents-delegation-boundary.md",
         "docs/sub-agents.md",
-        "docs/team-modes.md",
         "docs/background-services.md",
         "docs/compact-thresholds.md",
         "docs/hooks.md",

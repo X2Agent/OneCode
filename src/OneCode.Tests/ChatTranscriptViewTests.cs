@@ -427,13 +427,12 @@ public sealed class ChatTranscriptViewTests
         var view = new ChatTranscriptView(CreateImmediateApp());
 
         view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Plan));
-        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Team));
+        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Goal));
         view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Goal));
 
         var text = string.Join('\n', view.MessageView.RenderedLines);
         text.Should().Contain("GOAL");
         text.Should().NotContain("PLAN");
-        text.Should().NotContain("TEAM");
         // Banner is blank line + content line — only one such pair after rapid cycle.
         view.MessageView.RenderedLines.Count(l => l.Contains("GOAL")).Should().Be(1);
     }
@@ -445,11 +444,11 @@ public sealed class ChatTranscriptViewTests
 
         view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Plan));
         view.AddUserMessageDirect("hello");
-        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Team));
+        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Goal));
 
         var text = string.Join('\n', view.MessageView.RenderedLines);
         text.Should().Contain("PLAN");
-        text.Should().Contain("TEAM");
+        text.Should().Contain("GOAL");
         text.Should().Contain("hello");
     }
 
@@ -461,11 +460,11 @@ public sealed class ChatTranscriptViewTests
         view.BeginStreaming();
         view.AppendStreamingToken("streaming…");
         view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Plan));
-        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Team));
+        view.UpdateModeBanner(ChatBlockRenderers.RenderModeBanner(WorkingMode.Goal));
         view.EndStreaming();
 
         var text = string.Join('\n', view.MessageView.RenderedLines);
-        text.Should().Contain("TEAM");
+        text.Should().Contain("GOAL");
         text.Should().NotContain("PLAN");
         text.Should().Contain("streaming");
     }

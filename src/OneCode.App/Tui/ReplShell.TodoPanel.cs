@@ -4,7 +4,7 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// 待办横条（<see cref="TodoStripView"/>）的宿主逻辑：快照进入、显示/隐藏与
-/// 内容区高度让位。与 Plan/TEAM 侧边栏（右停靠、互斥、Ctrl+G 切换）相互独立——
+/// 内容区高度让位。与 Plan 侧边栏（右停靠、Ctrl+G 切换）相互独立——
 /// 横条是全宽底部状态带，不参与侧边栏互斥。
 /// </summary>
 public sealed partial class ReplShell

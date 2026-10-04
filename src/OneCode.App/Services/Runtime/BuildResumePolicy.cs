@@ -37,7 +37,7 @@ public sealed record BuildResumeDecision(BuildResumeAction Action, string? Failu
 /// 输入已加载的 run、调用方指定的计划与当前工作区指纹，输出动作；
 /// 不做 I/O、不改状态、不抛异常（PlanConflict 由调用方转译为异常）。
 /// 状态→动作的映射规则集中于此，取代原先散落在 BeginOrResumeAsync 里的 if 链。
-/// 恢复策略函数的参考实现——Team/Goal 恢复路径推广同款纯函数模式；
+/// 恢复策略函数的参考实现——Goal 恢复路径推广同款纯函数模式；
 /// 指纹漂移 fail-closed（PlanConflict/FingerprintDrift 两道护栏先行）已为三模式一致语义。
 /// </summary>
 public static class BuildResumePolicy

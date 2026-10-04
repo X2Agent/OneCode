@@ -1,9 +1,9 @@
 namespace OneCode.Core.Workflows;
 
 /// <summary>
-/// 工作流步骤图拓扑排序共享内核——收敛 Build/Plan/Team/Agent 各自重复的排序实现。
+/// 工作流步骤图拓扑排序共享内核——收敛 Build/Plan/Agent 各自重复的排序实现。
 /// 提供两种既有语义：DFS 后序（Build/Plan 家族：输入序遍历根、依赖声明序递归）与
-/// Kahn 字典序（Team/Agent 家族：就绪集按 Id OrdinalIgnoreCase 出队）。
+/// Kahn 字典序（Agent 家族：就绪集按 Id OrdinalIgnoreCase 出队）。
 /// 两种算法对同一输入产生不同顺序，不可互替——调用方按原语义选择。
 /// </summary>
 public static class WorkflowTopology
@@ -45,7 +45,7 @@ public static class WorkflowTopology
     }
 
     /// <summary>
-    /// Kahn 字典序拓扑序（Team/Agent 家族语义）：就绪集与后继遍历均按 Id
+    /// Kahn 字典序拓扑序（Agent 家族语义）：就绪集与后继遍历均按 Id
     /// OrdinalIgnoreCase 排序，保证同图同序。依赖 Id 不在节点集内时与原实现一致
     /// 抛 <see cref="KeyNotFoundException"/>；存在环时抛
     /// <see cref="InvalidOperationException"/>，消息由 <paramref name="cycleExceptionMessage"/> 提供。

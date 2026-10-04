@@ -60,14 +60,13 @@ public sealed partial class ReplShell : View
     private readonly View _contentZone;
     private readonly ChatTranscriptView _transcript;
     private readonly PlanSidebarView _planSidebar;
-    private readonly TeamSidebarView _teamSidebar;
     private readonly FrameView _completionOverlay;
     private SidebarViewBase? _sidebarHiddenForWidth;
     private bool _completionVisible;
 
-    /// <summary>当前可见的侧栏（Plan 优先，Team 兜底）；键盘翻页的目标。</summary>
+    /// <summary>当前可见的侧栏（Plan 面板）；键盘翻页的目标。</summary>
     private SidebarViewBase? ActiveSidebar =>
-        _planSidebar.Visible ? _planSidebar : _teamSidebar.Visible ? _teamSidebar : null;
+        _planSidebar.Visible ? _planSidebar : null;
 
     // 待办横条（输入框上方全宽状态带）当前占用行数；0 = 隐藏。见 ReplShell.TodoPanel.cs。
     private int _todoStripRows;
@@ -135,11 +134,11 @@ public sealed partial class ReplShell : View
         _chatInput.PageUpRequested += () => _transcript.MessageView.PageUp();
         _chatInput.PageDownRequested += () => _transcript.MessageView.PageDown();
 
-        // Shift+PageUp/PageDown — scroll the active plan/team sidebar (page-level)
+        // Shift+PageUp/PageDown — scroll the active plan sidebar (page-level)
         _chatInput.SidebarPageUpRequested += () => ActiveSidebar?.PageUp();
         _chatInput.SidebarPageDownRequested += () => ActiveSidebar?.PageDown();
 
-        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板）。
+        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan 面板）。
         _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
         _chatInput.SidebarNarrowerRequested += () => AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
         _chatInput.SidebarToggleRequested += () => ToggleSidebarVisibility();
@@ -197,16 +196,6 @@ public sealed partial class ReplShell : View
         _planSidebar.X = Pos.AnchorEnd(_planSidebar.CurrentWidth);
         _contentZone.Add(_planSidebar);
 
-        // TEAM 运行状态板（右停靠，与 Plan 侧边栏互斥，见 ReplShell.TeamSidebar.cs）
-        _teamSidebar = new TeamSidebarView(_app, OnSidebarWidthChanged, OnSidebarDragEnded)
-        {
-            Y = 0,
-            Height = Dim.Fill(),
-            Visible = false,
-        };
-        _teamSidebar.X = Pos.AnchorEnd(_teamSidebar.CurrentWidth);
-        _contentZone.Add(_teamSidebar);
-
         // overlay host (full-screen, on top)
         _overlayHost = new OverlayHost(this)
         {
@@ -240,7 +229,7 @@ public sealed partial class ReplShell : View
         _modeController.ModeChanged += (_, args) =>
         {
             _transcript.CurrentMode = args.CurrentMode;
-            // TEAM/GOAL 模式下底部栏隐藏 ctx 百分比（见 SessionContextBar.SetWorkingMode）。
+            // GOAL 模式下底部栏隐藏 ctx 百分比（见 SessionContextBar.SetWorkingMode）。
             _sessionContextBar.SetWorkingMode(args.CurrentMode);
             var bannerLines = ChatBlockRenderers.RenderModeBanner(args.CurrentMode, ContentWidth);
             // Replace trailing banner in-place — stacking snapshots makes the chat
@@ -263,8 +252,6 @@ public sealed partial class ReplShell : View
     {
         if (_planSidebar.Visible == visible)
             return;
-        if (visible)
-            SetTeamSidebarVisible(false); // 面板互斥：展开 Plan 时收起 TEAM
         _planSidebar.Visible = visible;
         ApplySidebarLayout();
         // 对话列宽度变化：旧换行不再匹配新视口，请求按新宽度整体重渲。
@@ -279,26 +266,22 @@ public sealed partial class ReplShell : View
     private void OnSidebarWidthChanged() => ApplySidebarLayout();
 
     /// <summary>
-    /// 键盘调整当前可见侧边栏（Plan/TEAM 互斥）的宽度，clamp 规则与分隔线鼠标拖拽
+    /// 键盘调整当前可见侧边栏（Plan）的宽度，clamp 规则与分隔线鼠标拖拽
     /// 共用（<see cref="SidebarViewBase.AdjustWidth"/>）。宽度实际变化时按最终宽度
     /// 重渲侧边栏内容与对话列（等同一次拖拽释放，见 <see cref="OnSidebarDragEnded"/>）。
     /// </summary>
     internal void AdjustSidebarWidth(int delta)
     {
-        SidebarViewBase? sidebar = _planSidebar.Visible ? _planSidebar
-            : _teamSidebar.Visible ? _teamSidebar
-            : null;
-        if (sidebar is null || !sidebar.AdjustWidth(delta))
+        if (!_planSidebar.Visible || !_planSidebar.AdjustWidth(delta))
             return;
 
         RenderActivePlanCard();
-        RenderActiveTeamSidebar();
         _transcript.RequestContentRerender();
     }
 
     /// <summary>
     /// 切换当前侧边栏可见性（Ctrl+G，app:sidebarToggle）。
-    /// 有活跃计划或团队面板时切换其展开/隐藏；两者都无内容时不展开空面板。
+    /// 有活跃计划面板时切换其展开/隐藏；无内容时不展开空面板。
     /// </summary>
     internal void ToggleSidebarVisibility()
     {
@@ -306,26 +289,17 @@ public sealed partial class ReplShell : View
         {
             _planSidebar.Visible = false;
         }
-        else if (_teamSidebar.Visible)
-        {
-            _teamSidebar.Visible = false;
-        }
         else
         {
-            // 当前均未显示：优先显示已有内容的侧栏。
-            // 两者都没有内容时不展开空面板——Ctrl+G 虽是显式动作，但空侧栏只增视觉噪声；
-            // 计划/团队一旦出现会自动展开（见 SetPlanSidebarVisible / ShowPlanCard）。
-            if (_activeTeamRun is not null)
-                _teamSidebar.Visible = true;
-            else if (_activePlan is not null)
-                _planSidebar.Visible = true;
-            else
+            // 当前未显示：有内容才展开——Ctrl+G 虽是显式动作，但空侧栏只增视觉噪声；
+            // 计划一旦出现会自动展开（见 SetPlanSidebarVisible / ShowPlanCard）。
+            if (_activePlan is null)
                 return;
+            _planSidebar.Visible = true;
         }
 
         ApplySidebarLayout();
         RenderActivePlanCard();
-        RenderActiveTeamSidebar();
         _transcript.RequestContentRerender();
     }
 
@@ -336,14 +310,13 @@ public sealed partial class ReplShell : View
     private void OnSidebarDragEnded()
     {
         RenderActivePlanCard();
-        RenderActiveTeamSidebar();
         _transcript.RequestContentRerender();
     }
 
     /// <summary>
     /// Recomputes the transcript width so the chat column yields space to the
-    /// visible sidebar (Plan 或 TEAM，互斥) and reclaims it (minus the 1-col gutter)
-    /// when neither is visible.
+    /// visible sidebar (Plan) and reclaims it (minus the 1-col gutter)
+    /// when it is not visible.
     /// </summary>
     private void ApplySidebarLayout()
     {
@@ -352,12 +325,10 @@ public sealed partial class ReplShell : View
         var sidebarWidth = 0;
         if (_planSidebar.Visible)
             sidebarWidth = _planSidebar.CurrentWidth;
-        else if (_teamSidebar.Visible)
-            sidebarWidth = _teamSidebar.CurrentWidth;
 
         if (sidebarWidth > 0 && ShouldHideSidebarForWidth(Viewport.Width, sidebarWidth))
         {
-            _sidebarHiddenForWidth = _planSidebar.Visible ? _planSidebar : _teamSidebar;
+            _sidebarHiddenForWidth = _planSidebar;
             _sidebarHiddenForWidth.Visible = false;
             sidebarWidth = 0;
         }

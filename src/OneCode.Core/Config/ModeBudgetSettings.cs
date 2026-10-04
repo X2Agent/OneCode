@@ -6,13 +6,13 @@ namespace OneCode.Core.Config;
 
 /// <summary>
 /// 各模式预算的统一配置视图（控制面并入）。
-/// Goal 全开（attempt / token / 墙钟，三级警告）；Team/Build 仅 <c>maxTurns</c>（Team 的
-/// team.yaml 每团队配置优先）；Plan 无模式预算（token 预算由 BudgetGuardRunMiddleware
+/// Goal 全开（attempt / token / 墙钟，三级警告）；Build 仅 <c>maxTurns</c>；
+/// Plan 无模式预算（token 预算由 BudgetGuardRunMiddleware
 /// 全模式统一生效，与模式预算正交）。
 /// </summary>
 public sealed record ModeBudgetSettings
 {
-    /// <summary>Build/Team 的全局 turns 上限（<c>maxTurns</c>，默认 100；Team 的 team.yaml 每团队配置优先）。</summary>
+    /// <summary>Build 的全局 turns 上限（<c>maxTurns</c>，默认 100）。</summary>
     public int MaxTurns { get; init; } = CoreConstants.Session.MaxTurnsDefault;
 
     /// <summary>跨所有子目标的总 attempt 上限（<c>goal.maxSubGoalAttempts</c>）。</summary>

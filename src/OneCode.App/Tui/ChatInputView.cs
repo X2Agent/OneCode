@@ -98,11 +98,8 @@ public sealed partial class ChatInputView : View
     public event Action? ImagePasteRejected;
 
     /// <summary>
-    /// 在 TEAM 模式下循环切换已注册团队（Shift+Tab）。
-    /// 调用方（OneCodeToplevel）将其桥接到 TuiContext.CycleTeam 回调，
     /// 并刷新 AgentStatusBar 显示的团队名。
     /// </summary>
-    public event Action? CycleTeamRequested;
 
     /// <summary>
     /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。
@@ -133,10 +130,10 @@ public sealed partial class ChatInputView : View
     /// <summary>对话区页级向下滚动（PageDown）。</summary>
     public event Action? PageDownRequested;
 
-    /// <summary>侧栏（Plan/Team 计划卡）页级向上滚动（Shift+PageUp）。</summary>
+    /// <summary>侧栏（Plan 计划卡）页级向上滚动（Shift+PageUp）。</summary>
     public event Action? SidebarPageUpRequested;
 
-    /// <summary>侧栏（Plan/Team 计划卡）页级向下滚动（Shift+PageDown）。</summary>
+    /// <summary>侧栏（Plan 计划卡）页级向下滚动（Shift+PageDown）。</summary>
     public event Action? SidebarPageDownRequested;
 
     public event Action<bool, int>? CompletionStateChanged;

@@ -40,28 +40,9 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                 transcript.AddBuildDeliveryCard(delivery);
                 return true;
 
-            case TuiAgentCoordination { FromName: var from, ToName: var to }:
-                transcript.UpdateModeProgress(new TuiModeProgress(
-                    WorkingMode.Team,
-                    $"正在协调 {from} 与 {to}…"));
-                return true;
-
             case TuiAgentMessage { AgentName: var agent, Content: var content }:
-                // TEAM 讨论内容直达主对话（折叠预览块），不再压缩成一行进度。
-                transcript.AddTeamSpeech(agent, content);
-                return true;
-
-            case TuiTeamProgress { Header: var header, Tasks: var tasks }:
-                if (tasks.Count == 0)
-                {
-                    transcript.UpdateModeProgress(new TuiModeProgress(WorkingMode.Team, header));
-                }
-                else
-                {
-                    // 仅打印摘要行（如「团队 'impl' 需要澄清 N 个问题后才能规划」）。
-                    // 问题明细不再逐条打印——澄清向导组件已完整展示问题，重复输出造成干扰。
-                    transcript.AddSystem(header);
-                }
+                // 子代理/工作流消息直达主对话（折叠预览块），不再压缩成一行进度。
+                transcript.AddAgentSpeech(agent, content);
                 return true;
 
             case TuiModeProgress progress:
@@ -87,11 +68,6 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                 transcript.AddToolDone(name, err, input, result ?? "", tid, agent);
                 return true;
 
-            case TuiTeamTaskProgress:
-                // TEAM 任务级进度已移入右侧 TeamSidebarView（状态板），
-                // 不再逐条刷对话流 ModeProgress——多任务并行时互相覆盖且刷屏。
-                // 事件仍在此被吞掉（返回 true），避免落入 default 处理。
-                return true;
 
             case TuiFileChange { FileName: var file, AddedLines: var added, RemovedLines: var removed, AgentName: var agent }:
                 transcript.AddFileChange(file, agent, added, removed);

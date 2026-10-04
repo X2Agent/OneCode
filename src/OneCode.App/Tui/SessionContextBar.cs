@@ -45,7 +45,7 @@ public sealed class SessionContextBar : View
 
     /// <summary>
     /// 同步当前工作模式（由 <see cref="ReplShell"/> 订阅 ModeChanged 驱动）。
-    /// TEAM/GOAL 模式下隐藏右侧 ctx 上下文进度条——这两个模式的上下文消耗由
+    /// GOAL 模式下隐藏右侧 ctx 上下文进度条——该模式的上下文消耗由
     /// 各自编排层管理，单轮百分比快照对用户没有参考意义，展示反而造成噪音。
     /// </summary>
     public void SetWorkingMode(WorkingMode mode)
@@ -55,9 +55,9 @@ public sealed class SessionContextBar : View
         SetNeedsDraw();
     }
 
-    /// <summary>TEAM/GOAL 模式不显示上下文占用进度条（internal 便于单测）。</summary>
+    /// <summary>GOAL 模式不显示上下文占用进度条（internal 便于单测）。</summary>
     internal static bool ShowsContextGauge(WorkingMode mode)
-        => mode is not (WorkingMode.Team or WorkingMode.Goal);
+        => mode is not WorkingMode.Goal;
 
     /// <summary>
     /// Refresh git context. Called once on startup (or on directory/worktree change).
@@ -281,7 +281,7 @@ public sealed class SessionContextBar : View
 
         // Context window usage — visual progress bar with max context (if available)
         // Hidden on narrow terminals (<50) to avoid overflow; hidden entirely in
-        // TEAM/GOAL modes (per-run orchestration makes the snapshot meaningless).
+        // GOAL mode (per-run orchestration makes the snapshot meaningless).
         if (_maxContextTokens > 0 && viewportWidth >= 50 && ShowsContextGauge(_mode))
         {
             if (segs.Count > 0) segs.Add((" · ", TuiPalette.FgMuted));

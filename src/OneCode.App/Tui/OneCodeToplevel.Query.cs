@@ -84,7 +84,7 @@ public sealed partial class OneCodeToplevel
     }
 
     /// <summary>
-    /// Resumes a durable workflow (Goal/Team) from a checkpoint.
+    /// Resumes a durable Goal workflow from a checkpoint.
     /// Routes directly to the workflow resume stream without passing through the LLM pipeline.
     /// </summary>
     private async Task RunResumeWorkflowAsync(

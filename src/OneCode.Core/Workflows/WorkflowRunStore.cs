@@ -1,7 +1,7 @@
 namespace OneCode.Core.Workflows;
 
 /// <summary>
-/// 四模式 durable run 聚合（BuildRun / PlanWorkflow / TeamRun / GoalRun）的共享词汇
+/// durable run 聚合（BuildRun / PlanWorkflow / GoalRun）的共享词汇
 /// （共享内核）。以 compile-time 形式实现，
 /// 不改变任何持久化 schema（兼容红线：字段只加不删不改型）。
 /// </summary>
@@ -19,7 +19,7 @@ public interface IWorkflowRun
 /// <summary>
 /// 统一 durable run store 契约：
 /// Save(expectedVersion CAS) / ClaimWorkflowAsync(fencing) / SaveFencedAsync 收编为一份签名。
-/// 各模式的 Load 键类型不同（Build=ConversationId、Goal/Plan=SessionId、Team=RunId），由各模式接口自行保留。
+/// 各模式的 Load 键类型不同（Build=ConversationId、Goal/Plan=SessionId），由各模式接口自行保留。
 /// 实现必须保持既有文件布局与 JSON schema 字节级不变（持久化兼容红线）。
 /// </summary>
 /// <typeparam name="TRun">模式聚合根类型。</typeparam>
@@ -47,7 +47,7 @@ public interface IWorkflowRunStore<TRun, TId>
 
 /// <summary>
 /// 列出所有非终态 run（按更新时间倒序），供恢复扫描使用。
-/// 仅具备恢复扫描语义的模式实现（Goal / Team）。
+/// 仅具备恢复扫描语义的模式实现（Goal）。
 /// </summary>
 public interface IActiveWorkflowRunStore<TRun>
     where TRun : IWorkflowRun

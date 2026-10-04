@@ -1,5 +1,4 @@
 using NSubstitute;
-using OneCode.App.Services.Streaming;
 using OneCode.App.Tui;
 using Terminal.Gui.App;
 
@@ -16,17 +15,9 @@ public sealed class WorkingModeTests
     }
 
     [Fact]
-    public void Cycle_PlanToTeam_ReturnsTeam()
+    public void Cycle_PlanToGoal_ReturnsGoal()
     {
         var c = new WorkingModeController(WorkingMode.Plan);
-        c.CycleMode().Should().Be(WorkingMode.Team);
-        c.Mode.Should().Be(WorkingMode.Team);
-    }
-
-    [Fact]
-    public void Cycle_TeamToGoal_ReturnsGoal()
-    {
-        var c = new WorkingModeController(WorkingMode.Team);
         c.CycleMode().Should().Be(WorkingMode.Goal);
         c.Mode.Should().Be(WorkingMode.Goal);
     }
@@ -40,10 +31,9 @@ public sealed class WorkingModeTests
     }
 
     [Fact]
-    public void Cycle_FourTimesReturnsToStart()
+    public void Cycle_ThreeTimesReturnsToStart()
     {
         var c = new WorkingModeController(WorkingMode.Build);
-        c.CycleMode();
         c.CycleMode();
         c.CycleMode();
         c.CycleMode();
@@ -71,26 +61,6 @@ public sealed class WorkingModeTests
         c.ModeChanged += (_, _) => fired++;
         c.Mode = WorkingMode.Build;
         fired.Should().Be(0);
-    }
-
-    [Theory]
-    [InlineData(0, "(no output)")]
-    [InlineData(0, "")]
-    [InlineData(1, "   ")]
-    [InlineData(1, "  (no output)  ")]
-    public void MissingTeamOutput_IsDetected(int turns, string output)
-    {
-        OrchestrationStreamService.IsMissingTeamOutput(
-            new OneCode.Core.Coordinator.TeamRunResult("team", output, turns, false))
-            .Should().BeTrue();
-    }
-
-    [Fact]
-    public void AgentOutput_IsNotReportedAsMissing()
-    {
-        OrchestrationStreamService.IsMissingTeamOutput(
-            new OneCode.Core.Coordinator.TeamRunResult("team", "done", 1, false))
-            .Should().BeFalse();
     }
 
     [Fact]

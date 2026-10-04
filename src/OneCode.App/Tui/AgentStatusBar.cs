@@ -7,7 +7,7 @@ namespace OneCode.App.Tui;
 ///   ⠋ 思考中 · Opus · 🔒 Sandbox · LSP: 2s · MCP: 3s      BUILD
 ///
 /// Owns all persistent agent runtime and orientation state: activity/configuration
-/// on the left, working mode/team orientation on the right.
+/// on the left, working mode orientation on the right.
 /// 自带无进展 watchdog：busy 期间距最近一次事件/活动超过 <see cref="StallWarnAfterSeconds"/>
 /// 秒时，activity 被替换为"无进展 Ns"提示（不自动取消——慢本地模型/长工具是合法状态）。
 /// </summary>
@@ -31,8 +31,6 @@ public sealed class AgentStatusBar : View
     private string? _stallOverride;
     private long _lastProgressTick = Stopwatch.GetTimestamp();
     private bool _awaitingTool;
-    private string? _activeTeam;
-    private string? _teamModeLabel;
     private string _activity = "处理中";
     private string _model = "Opus";
     private readonly string _sandbox = "Sandbox";
@@ -157,19 +155,6 @@ public sealed class AgentStatusBar : View
     public void SetModel(string m) { _model = string.IsNullOrWhiteSpace(m) ? "Opus" : m; SetNeedsDraw(); }
 
     /// <summary>
-    /// 更新团队标签。<paramref name="teamModeLabel"/> 为该团队 team.yaml 声明的编排模式
-    /// 标签（经 TeamOrchestrationModeExtensions.ToLabel 得到）——模式是团队的固定属性，
-    /// 状态栏只透出 YAML 事实，不存在运行期覆盖。
-    /// </summary>
-    public void SetActiveTeam(string? teamName, string? teamModeLabel = null)
-    {
-        if (_activeTeam == teamName && _teamModeLabel == teamModeLabel) return;
-        _activeTeam = teamName;
-        _teamModeLabel = teamModeLabel;
-        SetNeedsDraw();
-    }
-
-    /// <summary>
     /// Update the LSP status indicator shown in the status bar.
     /// Pass <paramref name="serverCount"/> == 0 to hide the indicator.
     /// </summary>
@@ -202,7 +187,7 @@ public sealed class AgentStatusBar : View
         AddStr(new string(' ', w));
 
         // Measure right-side Mode Tag first to establish strict boundary
-        var (modeTag, strategyLabel, teamLabel, rightCol) = MeasureModeTag(w);
+        var (modeTag, rightCol) = MeasureModeTag(w);
         var maxLeftCol = Math.Max(1, rightCol - 2);
 
         var col = 1;
@@ -214,7 +199,7 @@ public sealed class AgentStatusBar : View
                 break;
         }
 
-        DrawModeTag(rightCol, modeTag, strategyLabel, teamLabel);
+        DrawModeTag(rightCol, modeTag);
         return true;
     }
 
@@ -344,30 +329,21 @@ public sealed class AgentStatusBar : View
         return true;
     }
 
-    private (string ModeTag, string StrategyLabel, string TeamLabel, int RightCol) MeasureModeTag(int width)
+    private (string ModeTag, int RightCol) MeasureModeTag(int width)
     {
         var modeTag = _modeController.ModeTag;
-        var strategyLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_teamModeLabel)
-            ? $" \u00b7 {_teamModeLabel}"
-            : "";
-        var teamLabel = _modeController.Mode == WorkingMode.Team && !string.IsNullOrEmpty(_activeTeam)
-            ? $" \u00b7 {_activeTeam}"
-            : "";
-        var rightWidth = TextWidthHelper.GetDisplayWidth(modeTag)
-            + TextWidthHelper.GetDisplayWidth(strategyLabel)
-            + TextWidthHelper.GetDisplayWidth(teamLabel) + 1;
+        var rightWidth = TextWidthHelper.GetDisplayWidth(modeTag) + 1;
         var rightCol = Math.Max(1, width - rightWidth);
-        return (modeTag, strategyLabel, teamLabel, rightCol);
+        return (modeTag, rightCol);
     }
 
-    private void DrawModeTag(int rightCol, string modeTag, string strategyLabel, string teamLabel)
+    private void DrawModeTag(int rightCol, string modeTag)
     {
         Move(rightCol, 0);
         var modeColor = _modeController.Mode switch
         {
             WorkingMode.Build => TuiPalette.ModeBuildFg,
             WorkingMode.Plan => TuiPalette.ModePlanFg,
-            WorkingMode.Team => TuiPalette.ModeTeamFg,
             WorkingMode.Goal => TuiPalette.ModeGoalFg,
             _ => TuiPalette.FgSecondary,
         };
@@ -375,17 +351,6 @@ public sealed class AgentStatusBar : View
             ? new Attribute(modeColor, TuiPalette.BgInput)
             : new Attribute(TuiPalette.BgInput, modeColor));
         AddStr(modeTag);
-
-        if (strategyLabel.Length > 0)
-        {
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
-            AddStr(strategyLabel);
-        }
-        if (teamLabel.Length > 0)
-        {
-            SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
-            AddStr(teamLabel);
-        }
     }
 
     /// <summary>

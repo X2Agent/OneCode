@@ -3,8 +3,6 @@ using OneCode.Core.Keybindings;
 using OneCode.Core.Mcp;
 using OneCode.Core.Product;
 
-using OneCode.Core.Coordinator;
-
 using OneCode.Core.IO;
 
 namespace OneCode.App.Services;
@@ -21,7 +19,6 @@ public sealed class TuiContextFactory(
     OneCode.Core.Lsp.ILspServerManager lspServerManager,
     Services.Lsp.LspDiagnosticRegistry lspDiagnosticRegistry,
     IClipboardService clipboard,
-    ITeamOrchestrationService teamOrchestrationService,
     OneCode.Core.Commands.IGitHelper gitHelper)
 {
     public TuiContext Create(
@@ -93,22 +90,6 @@ public sealed class TuiContextFactory(
                     .Select(um => um.Content)
                     .ToList();
             },
-            GetActiveTeam: () => teamOrchestrationService.ResolveActiveTeam(),
-            GetRegisteredTeams: () => teamOrchestrationService.RegisteredTeams,
-            CycleTeam: () =>
-            {
-                var teams = teamOrchestrationService.RegisteredTeams;
-                if (teams.Count == 0) return null;
-                var current = teamOrchestrationService.ResolveActiveTeam();
-                var nextTeam = teams.FirstOrDefault(t =>
-                    string.Equals(t, current, StringComparison.OrdinalIgnoreCase)) is { } cur
-                        ? teams[(teams.IndexOf(cur) + 1) % teams.Count]
-                        : teams[0];
-                teamOrchestrationService.ActiveTeam = nextTeam;
-                return nextTeam;
-            },
-            // 模式标签统一由 Core 枚举扩展提供（单一事实源），TUI 层不再手写字符串映射。
-            GetTeamModeLabel: mode => teamOrchestrationService.GetTeamMode(mode)?.ToLabel(),
             GitHelper: gitHelper);
 
         var diagnostics = new TuiDiagnosticServices(

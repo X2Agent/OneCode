@@ -4,7 +4,7 @@ using System.Text;
 namespace OneCode.Core.Workflows;
 
 /// <summary>
-/// 工作流定义哈希的统一内核：五处定义指纹（Build 受控 attempt / Goal / Team 任务 / Team 审批 /
+/// 工作流定义哈希的统一内核：定义指纹（Build 受控 attempt / Goal /
 /// 子代理任务）共用同一份输出契约。
 ///
 /// <para>冻结契约（改动即导致已持久化记录的漂移检测失配）：canonical 字节 → SHA256 →

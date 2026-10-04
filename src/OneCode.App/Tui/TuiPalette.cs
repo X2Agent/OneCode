@@ -44,7 +44,6 @@ internal static class TuiPalette
         ["diff-context"] = "#8B949E",
         ["mode-build"] = "#4CAF84",
         ["mode-plan"] = "#5B8DEE",
-        ["mode-team"] = "#A386D8",
         ["mode-goal"] = "#5BB8C8",
         ["agent-orchestrator"] = "#A386D8",
         ["agent-researcher"] = "#5B8DEE",
@@ -171,8 +170,6 @@ internal static class TuiPalette
     /// <summary>Plan 模式前景色。#5B8DEE。</summary>
     public static readonly Color ModePlanFg = new(0x5B, 0x8D, 0xEE);
 
-    /// <summary>Team 模式前景色。#A386D8。</summary>
-    public static readonly Color ModeTeamFg = new(0xA3, 0x86, 0xD8);
 
     /// <summary>Goal 模式前景色。#5BB8C8。</summary>
     public static readonly Color ModeGoalFg = new(0x5B, 0xB8, 0xC8);
@@ -208,12 +205,11 @@ internal static class TuiPalette
     /// <summary>Thinking 耗时标识色。#D29922。</summary>
     public static readonly Color ThoughtTimingColor = new(0xD2, 0x99, 0x22);
 
-    /// <summary>根据当前工作模式返回用户消息 ▎ 色（Build=绿, Plan=蓝, Team=紫, Goal=青）。</summary>
+    /// <summary>根据当前工作模式返回用户消息 ▎ 色（Build=绿, Plan=蓝, Goal=青）。</summary>
     public static Color GetModeBarColor(WorkingMode mode) => mode switch
     {
         WorkingMode.Build => ModeBuildFg,
         WorkingMode.Plan => ModePlanFg,
-        WorkingMode.Team => ModeTeamFg,
         WorkingMode.Goal => ModeGoalFg,
         _ => Accent,
     };

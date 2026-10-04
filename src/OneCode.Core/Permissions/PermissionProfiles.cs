@@ -31,7 +31,7 @@ internal enum DestructiveShellPolicy
     /// <summary>Deny immediately (GoalAuto).</summary>
     Deny,
 
-    /// <summary>Ask for approval (Team).</summary>
+    /// <summary>Ask for approval (interactive permission prompt).</summary>
     Ask,
 }
 
@@ -137,7 +137,7 @@ public static class PermissionProfiles
             DestructiveShellPolicy.Deny => PermissionCheckResult.Deny(
                 "Destructive shell command denied in GOAL mode. Use a safer alternative."),
             DestructiveShellPolicy.Ask => PermissionCheckResult.Ask(
-                "Dangerous shell command in Team mode requires approval (no interactive channel available)."),
+                "Dangerous shell command requires approval (no interactive channel available)."),
             DestructiveShellPolicy.EvaluateRules => null,
             _ => null,
         };
@@ -236,13 +236,6 @@ public static class PermissionProfiles
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.Deny,
                 UnknownTools = UnknownToolPolicy.AllowWithPathValidation,
-            },
-            [PermissionMode.Team] = new()
-            {
-                Profile = noVerification,
-                Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
-                DestructiveShell = DestructiveShellPolicy.Ask,
-                UnknownTools = UnknownToolPolicy.EvaluateRules,
             },
         };
     }

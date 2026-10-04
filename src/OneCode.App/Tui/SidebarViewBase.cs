@@ -1,7 +1,7 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Right-docked sidebar base — shared chrome for the Plan and Team side panels.
+/// Right-docked sidebar base — shared chrome for the Plan side panel.
 ///
 /// Provides: fixed header line (glyph + title, never scrolls away), scrollable
 /// content area (reuses <see cref="MessageListView"/>), left separator line as a
@@ -38,7 +38,7 @@ internal abstract class SidebarViewBase : View
     /// <summary>标题行前缀字形（如 📋 / 🛠），由具体面板指定。</summary>
     protected abstract string HeaderGlyph { get; }
 
-    /// <summary>标题行属性（Plan/Team 各用模式主题色，与对话流卡片头一致）。</summary>
+    /// <summary>标题行属性（用模式主题色，与对话流卡片头一致）。</summary>
     protected abstract Attribute HeaderAttribute { get; }
 
     /// <param name="app">宿主 Application，提供 Screen 与鼠标抓取服务。</param>
@@ -250,7 +250,7 @@ internal abstract class SidebarViewBase : View
         var w = Viewport.Width;
         if (w <= 0) return false;
 
-        // 标题行：反色条，前景色由具体面板指定（Plan/Team 各用模式主题色）。
+        // 标题行：反色条，前景色由具体面板指定（用模式主题色）。
         Move(0, 0);
         SetAttribute(HeaderAttribute);
         var title = $" {HeaderGlyph} {_headerTitle}";

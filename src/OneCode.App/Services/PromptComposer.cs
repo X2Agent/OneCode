@@ -51,7 +51,7 @@ public sealed class PromptComposer(IPromptManager promptManager)
     }
 
     /// <summary>
-    /// Renders a Worker / fork body (Team role file or Explore/Plan overlay), with the memory recall
+    /// Renders a Worker / fork body (role overlay or harness body), with the memory recall
     /// hint appended. Returned without the harness fragment.
     /// </summary>
     public string RenderRoleBody(string roleBody)
@@ -60,7 +60,7 @@ public sealed class PromptComposer(IPromptManager promptManager)
         return AppendMemoryHint(roleBody);
     }
 
-    // 子代理（Team 成员 / Explore、Plan fork）持有 search_memories 工具但没有主会话的
+    // 子代理（Explore、Plan fork 等）持有 search_memories 工具但没有主会话的
     // {{memory_section}} 摘要索引——末尾显式引导一行，避免"有工具却不知道用"。
     private const string MemoryRecallHint =
         """

@@ -9,7 +9,7 @@ namespace OneCode.Core.Agent;
 /// same capability was expressed in three different shapes depending on where you looked:
 /// positional booleans in <c>PipelineProfileBehavior.For</c>, a profile-to-bool switch in
 /// <c>SharedContextProviderBuilder.ApplyProfileDefaults</c>, and <c>if</c> guards in
-/// <c>BuildCommon</c>. Answering "does a TeamMember get LSP diagnostics?" meant reading all three.
+/// <c>BuildCommon</c>. Answering "does Explore get LSP diagnostics?" meant reading all three.
 /// </para>
 /// <para>
 /// Capabilities are resolved <b>statically at build time</b> from a per-profile set. There is no

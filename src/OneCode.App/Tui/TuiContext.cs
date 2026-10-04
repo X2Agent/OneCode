@@ -30,13 +30,9 @@ public sealed record TuiQueryServices(
     /// <summary>MCP 预连接收尾等待（首条消息前的有界窗口，≤5s）。</summary>
     Func<CancellationToken, Task>? WaitForMcpPreconnect = null);
 
-/// <summary>Current session, team, and workspace dependencies.</summary>
+/// <summary>Current session and workspace dependencies.</summary>
 public sealed record TuiSessionServices(
     Func<IReadOnlyList<string>>? GetSessionUserPrompts = null,
-    Func<string?>? GetActiveTeam = null,
-    Func<IReadOnlyList<string>>? GetRegisteredTeams = null,
-    Func<string?>? CycleTeam = null,
-    Func<string, string?>? GetTeamModeLabel = null,
     OneCode.Core.Commands.IGitHelper? GitHelper = null);
 
 /// <summary>LSP / MCP status and diagnostic subscriptions.</summary>
@@ -104,10 +100,6 @@ public sealed record TuiContext(
     public Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun => Query.ReplayCurrentBuildRun;
 
     public Func<IReadOnlyList<string>>? GetSessionUserPrompts => Session.GetSessionUserPrompts;
-    public Func<string?>? GetActiveTeam => Session.GetActiveTeam;
-    public Func<IReadOnlyList<string>>? GetRegisteredTeams => Session.GetRegisteredTeams;
-    public Func<string?>? CycleTeam => Session.CycleTeam;
-    public Func<string, string?>? GetTeamModeLabel => Session.GetTeamModeLabel;
     public IGitHelper? GitHelper => Session.GitHelper;
 
     public Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus => Diagnostics.GetLspServerStatus;

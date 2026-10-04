@@ -24,9 +24,6 @@ public sealed partial class OneCodeToplevel
         else
             _shell.AgentStatusBar.NotifyProgress();
 
-        // TEAM 侧边栏（纯显示状态板）先消费 Team 事件；非 Team 事件为 no-op。
-        _shell.UpdateTeamSidebar(evt);
-
         if (_transcriptPresenter.TryPresent(evt))
             return;
 
@@ -119,7 +116,7 @@ public sealed partial class OneCodeToplevel
                 break;
 
             case TuiError { Message: var msg }:
-                // TEAM/GOAL 编排中的成员级错误是中途事件：不能走 AddError
+                // GOAL 编排中的成员级错误是中途事件：不能走 AddError
                 // （其内部会强制结束流式状态），否则后续工具事件落入 committed
                 // 路径，完整 JSON 平铺外显。查询运行中改为流式错误通知；
                 // 流式生命周期由查询循环的 finally 统一收尾。
@@ -141,52 +138,14 @@ public sealed partial class OneCodeToplevel
                 _shell.SessionContextBar.SetTurn(tn);
                 break;
 
-            case TuiTeamPlanApproval approval:
-                HandleTeamPlanApprovalNotification(approval);
-                break;
-
-            // 用户在澄清/审批交互中的回答回显 — 写入会话记录
-            case TuiTeamUserResponse { TeamName: var team, Response: var response }:
-                if (!string.IsNullOrWhiteSpace(response))
-                    _shell.Transcript.AddSystem($"你的回答：{response}");
-                break;
-
-            case TuiTeamDelivery { Report: var report }:
-                _shell.Transcript.UpdateModeProgress(new TuiModeProgress(
-                    WorkingMode.Team,
-                    report.Committed
-                        ? $"团队任务已完成：修改 {report.Changes.Files.Count} 个文件，验证通过"
-                        : "团队任务未完成，文件修改已回滚",
-                    report.Committed ? ModeProgressState.Completed : ModeProgressState.Failed));
-                if (!string.IsNullOrWhiteSpace(report.Summary))
-                    _shell.Transcript.AddSystem(report.Summary);
-                // TEAM 归属汇总：列出修改过文件的成员（来自 FileChange.Contributors）。
-                var contributors = report.Changes.Files
-                    .SelectMany(f => f.Contributors ?? [])
-                    .Distinct()
-                    .ToList();
-                if (contributors.Count > 0)
-                    _shell.Transcript.AddSystem($"参与成员：{string.Join("、", contributors)}");
-                if (!report.Committed)
-                {
-                    foreach (var gate in report.Gates.Where(g => g.Required && g.Status != QualityGateStatus.Passed))
-                    {
-                        _shell.Transcript.AddSystem(
-                            $"质量门 {gate.GateId} [{gate.Kind}]：{gate.Status} — {gate.Summary}");
-                        foreach (var evidence in gate.Evidence.Take(3))
-                            _shell.Transcript.AddSystem($"  证据：{evidence}");
-                    }
-                }
-                break;
-
             case TuiSuggestions { Items: var items }:
                 // 下一步提示建议 — turn 完成后由规则引擎生成，在输入框显示为占位符
                 _shell.ChatInput.SetSuggestions(items);
                 break;
 
             // 事件驱动审批请求 — TUI 自主渲染审批组件，通过 ResponseSource 回传决策
-            case TuiApprovalRequest { ToolName: var tn, ToolInput: var ti, ResponseSource: var rs, AllowSessionEscalation: var esc }:
-                _ = HandleApprovalRequestAsync(tn, ti, rs, esc);
+            case TuiApprovalRequest { ToolName: var tn, ToolInput: var ti, ResponseSource: var rs }:
+                _ = HandleApprovalRequestAsync(tn, ti, rs);
                 break;
 
             // LSP 诊断变更 — 刷新状态栏 LSP 指示器（服务器数/错误数/警告数）
@@ -239,40 +198,17 @@ public sealed partial class OneCodeToplevel
     }
 
     /// <summary>
-    /// Displays the Team plan approval notification. Approval decisions are now handled
-    /// by the MAF RequestPort workflow (TeamApprovalWorkflowHost) via IClarificationInteractionService,
-    /// so the TUI only shows a status message without blocking on a TaskCompletionSource.
-    /// </summary>
-    private void HandleTeamPlanApprovalNotification(TuiTeamPlanApproval approval)
-    {
-        // 每个任务独立一行，避免多任务挤在一行难以阅读。
-        var taskLines = approval.Tasks.Take(3)
-            .Select((task, index) => $"  {index + 1}. {task}")
-            .ToList();
-        if (approval.Tasks.Count > 3)
-            taskLines.Add($"  … 共 {approval.Tasks.Count} 个任务");
-        List<string> lines = [ $"团队 {approval.TeamName} 计划审批中：" ];
-        lines.AddRange(taskLines.Count > 0 ? taskLines : [approval.Summary]);
-        foreach (var line in lines)
-            _shell.Transcript.AddSystem(line);
-    }
-
-    /// <summary>
     /// 异步处理审批请求 — 构造提示文本、显示审批 UI、回传决策。
     /// </summary>
-    /// <param name="allowSessionEscalation">
-    /// 是否提供「本次对话全部允许」升级档（Team 工作流桥为 false）。
-    /// </param>
     private async Task HandleApprovalRequestAsync(
         string toolName,
         string? toolInput,
-        TaskCompletionSource<ApprovalDecision> responseSource,
-        bool allowSessionEscalation)
+        TaskCompletionSource<ApprovalDecision> responseSource)
     {
         try
         {
             var (title, message, allowApprovals) = BuildApprovalPrompt(toolName, toolInput);
-            var request = new PermissionPromptRequest(title, message, allowApprovals, allowSessionEscalation);
+            var request = new PermissionPromptRequest(title, message, allowApprovals);
             var result = await ShowPermissionPromptAsync(request, CancellationToken.None).ConfigureAwait(false);
 
             // Parse failure: AllowApprovals is false — UI only offered Deny, but still map defensively.

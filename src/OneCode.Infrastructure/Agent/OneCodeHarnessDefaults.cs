@@ -4,7 +4,7 @@ namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
 /// Shared <see cref="HarnessAgentOptions"/> product opt-outs for OneCode.
-/// Keeps Main/Worker/Team/Fork and AutoDream aligned so MAF Harness defaults
+/// Keeps Main/Worker/Fork and AutoDream aligned so MAF Harness defaults
 /// do not dual-mount alongside product providers.
 /// Boundary rationale and the replacement for each opt-out:
 /// docs/adr/0007-maf-integration-boundaries.md §1.

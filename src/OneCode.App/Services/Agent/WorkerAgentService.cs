@@ -1,9 +1,8 @@
 using OneCode.App.Query;
-using OneCode.App.Services.Agent;
 using OneCode.Core.Tasks;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 
-namespace OneCode.App.Services.Coordinator;
+namespace OneCode.App.Services.Agent;
 
 /// <summary>
 /// Worker agent lifecycle manager with TaskService integration.

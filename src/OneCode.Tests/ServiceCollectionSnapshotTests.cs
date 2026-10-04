@@ -10,7 +10,6 @@ using OneCode.App.Query;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.AutoDream;
 using OneCode.App.Services.Compact;
-using OneCode.App.Services.Coordinator;
 using OneCode.App.Services.Setup;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Cron;
@@ -171,7 +170,6 @@ public sealed class ServiceCollectionSnapshotTests
             .AddPromptServices(workingDir)
             .AddLspServices()
             .AddNamedHttpClients()
-            .AddTeamServices()
             .AddAutoDreamServices()
             .AddPlatformServices()
             .AddCommands()

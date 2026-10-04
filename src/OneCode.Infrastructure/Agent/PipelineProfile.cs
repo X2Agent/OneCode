@@ -21,13 +21,6 @@ public enum PipelineProfile
     Worker,
 
     /// <summary>
-    /// Team orchestration member — fixed <see cref="Core.Permissions.PermissionMode.Team"/>,
-    /// MAF approval protocol carried through the Team workflow approval bridge
-    /// (see <c>TeamWorkflowRunner</c>), no post-edit verification.
-    /// </summary>
-    TeamMember,
-
-    /// <summary>
     /// Read-only research sub-agent — Explore tool whitelist, no verification or edit contracts.
     /// </summary>
     Explore,
@@ -108,17 +101,6 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
             AgentCapability.StateMachine,
             AgentCapability.LspDiagnostics,
             AgentCapability.ShellEnvironment,
-            AgentCapability.FileMemory,
-            AgentCapability.ReadOnlyTools)),
-
-        // TeamMember: fixed Team permission; MAF approval stays enabled — approval requests surface
-        // as workflow external requests and TeamWorkflowRunner bridges them to the product events.
-        // No CodeAct sandbox and no post-edit verification. Keeps design/task/LSP/shell context.
-        // No working memory: members would share one writable directory across concurrent members.
-        PipelineProfile.TeamMember => new(AllExcept(
-            AgentCapability.StateMachine,
-            AgentCapability.CodeAct,
-            AgentCapability.Verification,
             AgentCapability.FileMemory,
             AgentCapability.ReadOnlyTools)),
 

@@ -1,11 +1,10 @@
 namespace OneCode.App.Modes;
 
 /// <summary>
-/// Four working modes supported by the app.
+/// Working modes supported by the app.
 ///
 /// - <see cref="Build"/>: Agent directly analyzes and executes the request.
 /// - <see cref="Plan"/>:  Agent first produces a plan card; user approves before execution.
-/// - <see cref="Team"/>:  Multi-agent team coordination (Magentic or GroupChat strategy).
 /// - <see cref="Goal"/>:  Autonomous goal-driven loop with AI evaluation.
 /// </summary>
 public enum WorkingMode
@@ -16,19 +15,13 @@ public enum WorkingMode
     /// <summary>PLAN — plan-then-execute flow.</summary>
     Plan = 1,
 
-    /// <summary>TEAM — multi-agent team mode.</summary>
-    Team = 2,
-
     /// <summary>GOAL — autonomous goal-driven loop with AI evaluation.</summary>
-    Goal = 3,
+    Goal = 2,
 }
 
 /// <summary>
-/// Orchestration strategies for the TEAM mode (driven by team.yaml).
-///
-/// 编排模式（Magentic / GroupChat / ParallelDag）是团队定义的固定属性，
-/// 由 team.yaml 的 template 字段声明，运行期不可覆盖——用户只能通过
-/// 切换团队来选择不同的执行方式。
+/// Working-mode controller: owns the active mode, its change notification and the
+/// Tab cycle order. 模式标签统一由本类提供（单一事实源），TUI 层不再手写字符串映射。
 /// </summary>
 public sealed class WorkingModeController
 {
@@ -54,11 +47,11 @@ public sealed class WorkingModeController
     }
 
     /// <summary>
-    /// Cycles the mode BUILD → PLAN → TEAM → GOAL → BUILD.
+    /// Cycles the mode BUILD → PLAN → GOAL → BUILD.
     /// </summary>
     public WorkingMode CycleMode()
     {
-        Mode = (WorkingMode)(((int)Mode + 1) % 4);
+        Mode = (WorkingMode)(((int)Mode + 1) % 3);
         return Mode;
     }
 
@@ -67,7 +60,6 @@ public sealed class WorkingModeController
     {
         WorkingMode.Build => "BUILD",
         WorkingMode.Plan => "PLAN",
-        WorkingMode.Team => "TEAM",
         WorkingMode.Goal => "GOAL",
         _ => "???",
     };

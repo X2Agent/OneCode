@@ -53,7 +53,7 @@ public abstract record CommandResult
     public sealed record ErrorResult(string Message) : CommandResult;
 
     /// <summary>
-    /// Resumes a durable workflow (Goal/Team) from a checkpoint.
+    /// Resumes a durable Goal workflow from a checkpoint.
     /// The dispatch layer routes this directly to the appropriate workflow resume stream,
     /// bypassing the LLM query pipeline.
     /// </summary>
@@ -80,7 +80,6 @@ public abstract record CommandResult
 public enum WorkflowResumeKind
 {
     Goal,
-    Team
 }
 
 public enum CommandSource

@@ -12,12 +12,11 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView
 {
-    /// <summary>app:mode* 动作 → 目标工作模式映射（Alt+1..4 直达）。</summary>
+    /// <summary>app:mode* 动作 → 目标工作模式映射（Alt+1/2/4 直达）。</summary>
     private static readonly Dictionary<string, WorkingMode> ModeDirectActions = new()
     {
         [KeybindingDefaults.ActionAppModeBuild] = WorkingMode.Build,
         [KeybindingDefaults.ActionAppModePlan] = WorkingMode.Plan,
-        [KeybindingDefaults.ActionAppModeTeam] = WorkingMode.Team,
         [KeybindingDefaults.ActionAppModeGoal] = WorkingMode.Goal,
     };
 
@@ -212,17 +211,7 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Shift+Tab — 在 TEAM 模式下循环切换已注册团队。
-        // 编排模式是团队 YAML 的固定属性，运行期不可覆盖（无策略切换键）。
-        // 补全激活时不拦截（Shift+Tab 仍由 ContextAutocomplete 的 shift+tab=confirm:cycleMode 处理）。
-        if (action == KeybindingDefaults.ActionChatCycleTeam && !_completion.IsCompletionActive)
-        {
-            CycleTeamRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
-        // Alt+1..4（app:mode*）— 工作模式直达，busy 态同样允许。
+        // Alt+1/2/4（app:mode*）— 工作模式直达，busy 态同样允许。
         // 守卫：补全激活 / 交互挂起 / 提问模式下数字必须入文或交给交互会话；
         // 被拦下时不置 Handled，按键交还后续处理（编辑器 / 交互会话）。
         // 挂起分支在本方法前部已先行吞键返回，此处守卫作纵深防御。
@@ -237,7 +226,7 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan/TEAM 面板），
+        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan 面板），
         // 与分隔线鼠标拖拽等价的键盘路径。宽度调整与补全/模式切换互不冲突，无额外守卫。
         if (action == KeybindingDefaults.ActionAppSidebarWider)
         {
@@ -335,7 +324,7 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Shift+PageUp/PageDown — scroll the plan/team sidebar (page-level)
+        // Shift+PageUp/PageDown — scroll the plan sidebar (page-level)
         if (IsSidebarScrollAction(action))
         {
             DispatchSidebarScroll(action);
@@ -386,7 +375,7 @@ public sealed partial class ChatInputView
         }
     }
 
-    /// <summary>侧栏（Plan/Team 计划卡）翻页动作判定。</summary>
+    /// <summary>侧栏（Plan 计划卡）翻页动作判定。</summary>
     private static bool IsSidebarScrollAction(string? action)
         => action is KeybindingDefaults.ActionSidebarPageUp
             or KeybindingDefaults.ActionSidebarPageDown;

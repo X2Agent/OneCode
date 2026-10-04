@@ -18,9 +18,9 @@ public sealed class TranscriptWidthAdaptiveTests
     [Fact]
     public void ModeBanner_NarrowWidth_TruncatesToViewport()
     {
-        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team, maxWidth: 40);
+        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Goal, maxWidth: 16);
         lines.Select(l => TextWidthHelper.GetDisplayWidth(l.FullText))
-            .Should().OnlyContain(w => w <= 40);
+            .Should().OnlyContain(w => w <= 16);
         lines.Should().Contain(l => l.FullText.Contains("…"));
     }
 

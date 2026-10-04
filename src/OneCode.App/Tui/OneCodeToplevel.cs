@@ -101,9 +101,6 @@ public sealed partial class OneCodeToplevel : Window
                 "Switch to a multimodal model (e.g., claude-sonnet-4) to use images."));
         };
 
-        // Ctrl+Shift+T — TEAM 模式下循环切换已注册团队
-        _shell.ChatInput.CycleTeamRequested += OnCycleTeamRequested;
-
         _maxContextTokens = ModelContextDefaults.Resolve(ctx.GetModel(), ctx.ModelCatalog);
         _shell.SessionContextBar.SetContextUsage(_maxContextTokens, 0);
 
@@ -113,10 +110,6 @@ public sealed partial class OneCodeToplevel : Window
         // ChatInputView handles Tab mode cycling through its WorkingModeController bridge.
 
         WireBackendCallbacks();
-
-        RefreshTeamDisplay();
-        // 模式切换时刷新团队标签可见性（离开 TEAM 模式时自动隐藏）
-        modeController.ModeChanged += (_, _) => RefreshTeamDisplay();
 
         // Subscribe to LSP diagnostics changes so the status bar indicator
         // refreshes when servers publish new diagnostics. The event fires on
@@ -179,40 +172,6 @@ public sealed partial class OneCodeToplevel : Window
         {
             PlanDecisionReceived?.Invoke(decision);
         };
-    }
-
-    /// <summary>
-    /// 刷新 AgentStatusBar 上的团队名显示。仅在 TEAM 模式下显示当前活跃团队；
-    /// 其他模式下传 null 隐藏团队标签。
-    /// </summary>
-    private void RefreshTeamDisplay()
-    {
-        var inTeamMode = (_ctx.ModeController?.Mode ?? WorkingMode.Build) == WorkingMode.Team;
-        var teamName = inTeamMode ? _ctx.GetActiveTeam?.Invoke() : null;
-        var resolvedMode = inTeamMode && teamName is not null
-            ? _ctx.GetTeamModeLabel?.Invoke(teamName)
-            : null;
-        _shell.AgentStatusBar.SetActiveTeam(teamName, resolvedMode);
-    }
-
-    /// <summary>
-    /// Shift+Tab 事件处理：调用 TuiContext.CycleTeam 切换到下一个已注册团队，
-    /// 然后刷新 AgentStatusBar 显示并给出系统提示。
-    /// </summary>
-    private void OnCycleTeamRequested()
-    {
-        if ((_ctx.ModeController?.Mode ?? WorkingMode.Build) != WorkingMode.Team)
-            return;
-
-        var newTeam = _ctx.CycleTeam?.Invoke();
-        if (string.IsNullOrEmpty(newTeam))
-        {
-            _shell.Transcript.AddSystem("没有已注册的团队可切换。使用 /team list 查看可用团队。");
-            return;
-        }
-
-        RefreshTeamDisplay();
-        _shell.Transcript.AddSystem($"已切换到团队: {newTeam}");
     }
 
     /// <summary>
@@ -401,7 +360,6 @@ public sealed partial class OneCodeToplevel : Window
         _shell.SessionContextBar.SetTurn(0);
 
         _shell.ClearPlan();
-        _shell.ClearTeamRun();
         _shell.ClearTodoPanel();
 
         _shell.FocusChatInput();

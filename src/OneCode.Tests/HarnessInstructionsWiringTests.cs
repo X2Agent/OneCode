@@ -5,7 +5,6 @@ using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
-using OneCode.App.Services.Coordinator;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Domain;
@@ -25,14 +24,14 @@ namespace OneCode.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 缺陷背景：<c>HarnessInstructions</c> 曾无任何生产赋值点——Team 与 Fork 路径把片段取进局部变量
+/// 缺陷背景：<c>HarnessInstructions</c> 曾无任何生产赋值点——Fork 路径把片段取进局部变量
 /// 后丢弃，所有 agent 于是回落到 MAF 通用默认指令，「敏感文件保护 / prompt 注入防御」从未到达模型。
 /// 这些用例断言的正是「取到并传下去」这一步，而不是片段内容。
 /// </para>
 /// <para>
 /// §4.6 缺陷背景：<c>ChatOptions.Instructions</c> 曾被文档、ADR 与 <see cref="PromptComposer"/> 描述为
 /// 主体的唯一入口，实际却无任何生产赋值点——主体被调用方自行拼成一条 system 消息。现在三条路径
-/// （Main / Fork / Team）都把主体交给 <c>ChatOptions.Instructions</c>，本文件同时守「主体不得再以
+/// （Main / Fork）都把主体交给 <c>ChatOptions.Instructions</c>，本文件同时守「主体不得再以
 /// system 消息重复下发」。
 /// </para>
 /// <para>
@@ -147,58 +146,6 @@ public sealed class HarnessInstructionsWiringTests
         MainAgentRunner.BuildMessages(options).Should().NotContain(m => m.Role == ChatRole.System);
     }
 
-    /// <summary>
-    /// Team 路径：片段经 <c>HarnessInstructions</c>、角色正文经 <c>ChatOptions.Instructions</c> 下发，
-    /// 两段由 MAF 合成（片段在前）。
-    /// </summary>
-    [Fact]
-    public async Task TeamAgentFactory_ForwardsHarnessFragmentToModel()
-    {
-        var client = new CapturingChatClient();
-        var promptManager = CreatePromptManager();
-        var modeProvider = new PermissionModeProvider(TestConfigManager.Create());
-        var (shared, main) = TestAgentContextProviderAssembly.Create(modeProvider: modeProvider);
-
-        var agentFactory = new TeamAgentFactory(
-            client,
-            NullLoggerFactory.Instance,
-            NullLogger<TeamAgentFactory>.Instance,
-            Substitute.For<IServiceProvider>(),
-            Substitute.For<IModelManager>(),
-            promptManager,
-            new PromptComposer(promptManager),
-            new TeamAgentToolSources(
-                Substitute.For<ICacheSafeParamsProvider>(),
-                new ToolCatalog(new Lazy<List<AIFunction>>(() => []), new ToolMetadataRegistry(), null)),
-            new TeamAgentPipelineDependencies(
-                new AgentContextPipeline(shared, main),
-                CreateSubAgentPipelineFactory(modeProvider),
-                new CompactionStrategyFactory(
-                    client,
-                    Substitute.For<IModelManager>(),
-                    new CompactPromptBuilder(promptManager)),
-                Substitute.For<ISessionConversationAccess>(),
-                new ToolMetadataRegistry()));
-
-        var agent = await agentFactory.BuildAgentAsync(
-            new TeamMember("member-1", "executor", RoleBody),
-            workingDirectory: Path.GetTempPath());
-
-        await agent.RunAsync(
-            "hello",
-            await agent.CreateSessionAsync(TestContext.Current.CancellationToken),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        client.LastInstructions.Should().Contain(HarnessFragment,
-            "the Team path must hand the shared fragment to MAF instead of dropping it");
-        client.LastInstructions.Should().Contain(RoleBody,
-            "the role body is the MAF instructions input for the Team member");
-        client.LastInstructions!.IndexOf(HarnessFragment, StringComparison.Ordinal)
-            .Should().BeLessThan(client.LastInstructions.IndexOf(RoleBody, StringComparison.Ordinal),
-                "MAF composes the harness fragment ahead of the role body");
-        client.LastMessages.Should().NotContain(m => m.Text.Contains(RoleBody, StringComparison.Ordinal),
-            "the role body must not be sent a second time as a system message");
-    }
 
     /// <summary>
     /// Fork（Worker，无角色 overlay）路径：片段仍必须经 <c>HarnessInstructions</c> 抵达模型。

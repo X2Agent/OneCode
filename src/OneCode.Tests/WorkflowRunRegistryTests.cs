@@ -80,8 +80,8 @@ public sealed class WorkflowRunRegistryTests : IAsyncLifetime
     public async Task ActiveScan_IgnoresCheckpointOrphansAndTerminalRuns()
     {
         var registry = CreateRegistry();
-        var active = new WorkflowRunRegistration("run-active", "team", "definition-a");
-        var completed = new WorkflowRunRegistration("run-completed", "team", "definition-b");
+        var active = new WorkflowRunRegistration("run-active", "goal", "definition-a");
+        var completed = new WorkflowRunRegistration("run-completed", "goal", "definition-b");
 
         await using var activeLease = await registry.TryAcquireAsync(active, TestContext.Current.CancellationToken);
         await using var completedLease = await registry.TryAcquireAsync(completed, TestContext.Current.CancellationToken);

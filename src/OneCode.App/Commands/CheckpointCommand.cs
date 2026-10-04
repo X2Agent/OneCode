@@ -13,7 +13,7 @@ namespace OneCode.App.Commands;
 ///   /checkpoint delete [name]   — 删除指定快照
 ///   数据存储：conv.Metadata["checkpoints"] JSON 数组，持久化到 session JSONL。
 ///
-/// 工作流级恢复（Goal/Team 中断续跑）见 /resume。
+/// 工作流级恢复（Goal 中断续跑）见 /resume。
 /// </summary>
 public sealed class CheckpointCommand(ISessionManager sessionManager) : Command
 {
@@ -31,7 +31,7 @@ public sealed class CheckpointCommand(ISessionManager sessionManager) : Command
         // 会话级子命令需要活跃会话
         var conv = sessionManager.ForegroundConversation;
         if (conv is null)
-            return CommandResult.Error("No active conversation. Use '/resume' to resume interrupted Goal/Team tasks.");
+            return CommandResult.Error("No active conversation. Use '/resume' to resume interrupted Goal tasks.");
 
         return sub switch
         {

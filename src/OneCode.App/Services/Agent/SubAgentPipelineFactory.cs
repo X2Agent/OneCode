@@ -7,7 +7,7 @@ using OneCode.Core.Tokens;
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
-/// Request to assemble a sub-agent pipeline (Forked / Team member).
+/// Request to assemble a sub-agent pipeline (forked sub-agent).
 /// </summary>
 public sealed record SubAgentPipelineRequest
 {
@@ -21,11 +21,10 @@ public sealed record SubAgentPipelineRequest
     public IReadOnlyList<string>? AllowedTools { get; init; }
     public Action<OrchestrationEvent>? OrchestrationEventSink { get; init; }
     public Action<FileChange>? FileChangeCallback { get; init; }
-    public string? TeamMemberId { get; init; }
 }
 
 /// <summary>
-/// Unified sub-agent pipeline factory — single assembly path for Forked and Team agents.
+/// Unified sub-agent pipeline factory — single assembly path for forked agents.
 /// Main agent uses <see cref="AgentPipelineAssembly.BuildMainOptions"/> directly.
 /// </summary>
 public sealed class SubAgentPipelineFactory(
@@ -59,9 +58,7 @@ public sealed class SubAgentPipelineFactory(
         // consistent by hand across all four.
         var behavior = PipelineProfileBehavior.For(request.Profile);
 
-        var permissionMode = request.Profile == PipelineProfile.TeamMember
-            ? PermissionMode.Team
-            : modeProvider.CurrentMode;
+        var permissionMode = modeProvider.CurrentMode;
 
         // Capability decides whether verification applies at all; the permission profile then decides
         // whether it is active. Both gates apply (permission profile alone would enable it for read-only
@@ -94,7 +91,6 @@ public sealed class SubAgentPipelineFactory(
     private static PipelineRoleOverrides BuildRoleOverrides(SubAgentPipelineRequest request)
     {
         var profile = request.Profile;
-        var memberLabel = request.TeamMemberId ?? "sub-agent";
 
         Func<string, bool>? isToolAllowed = null;
         if (request.AllowedTools is { Count: > 0 } allowed)
@@ -105,13 +101,6 @@ public sealed class SubAgentPipelineFactory(
 
         return profile switch
         {
-            // Approval stays enabled: member approval requests surface as external requests on
-            // the workflow stream and are bridged to the product approval events by
-            // TeamWorkflowRunner — the pipeline itself never holds a broker.
-            PipelineProfile.TeamMember => new PipelineRoleOverrides(
-                MaxToolCalls: request.MaxToolCalls,
-                ToolLimitMessage: $"Team member '{memberLabel}' tool call limit ({request.MaxToolCalls}) reached.",
-                IsToolAllowed: isToolAllowed),
             PipelineProfile.Explore or PipelineProfile.Plan => new PipelineRoleOverrides(
                 MaxToolCalls: request.MaxToolCalls,
                 ToolLimitMessage: $"Sub-agent tool call limit ({request.MaxToolCalls}) reached.",

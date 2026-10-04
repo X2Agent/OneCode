@@ -6,7 +6,7 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// Shared helpers for constructing lightweight <see cref="AIAgent"/> instances in tests.
-/// Avoids the heavy dependency chain of <c>TeamAgentFactory</c>.
+/// Avoids the heavy dependency chain of the full agent pipeline.
 /// </summary>
 internal static class TestAgents
 {

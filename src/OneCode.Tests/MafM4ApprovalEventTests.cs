@@ -51,17 +51,4 @@ public sealed class MafM4ApprovalEventTests
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("UI crashed");
     }
 
-    [Fact]
-    public void MapOrchestrationEventToTuiEvent_TeamApprovalRequest_HidesSessionEscalation()
-    {
-        // Team 桥只做单次批准：成员策略固定 PermissionMode.Team，AllowAllConversation
-        // 会被桥按拒绝处理。弹窗因此不得提供该档位，否则用户选了什么都不会生效。
-        var evt = new OrchestrationEvent.ApprovalRequest(
-            new ApprovalRequest("req-team", "Bash", "dotnet test", "team-alpha"));
-
-        var tuiEvt = (TuiApprovalRequest)TuiEventMapper.MapOrchestrationEventToTuiEvent(evt)!;
-
-        tuiEvt.AllowSessionEscalation.Should().BeFalse(
-            "the Team bridge approves single calls only — an escalated decision would be denied");
-    }
 }

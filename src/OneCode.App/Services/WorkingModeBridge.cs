@@ -75,13 +75,6 @@ public sealed class WorkingModeBridge : IDisposable
                 _logger?.LogDebug("WorkingModeBridge: entered PLAN mode");
                 break;
 
-            case WorkingMode.Team:
-                ExitPlanIfNeeded();
-                _prePlanAdvancedMode = null;
-                _permissionModeProvider.SetCurrentMode(PermissionMode.Team);
-                _logger?.LogDebug("WorkingModeBridge: entered TEAM mode (PermissionMode.Team)");
-                break;
-
             case WorkingMode.Goal:
                 ExitPlanIfNeeded();
                 _prePlanAdvancedMode = null;

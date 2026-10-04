@@ -30,7 +30,7 @@ public sealed class ToolCallEventMiddlewareTests
             },
         };
         var agent = Substitute.For<AIAgent>();
-        agent.Name.Returns("team-agent");
+        agent.Name.Returns("agent-1");
         var middleware = ToolCallEventMiddleware.Create(options, NullLogger.Instance);
 
         await middleware(

@@ -40,7 +40,7 @@ public static class TestAgentContextProviderAssembly
         promptManager ??= new PromptManager();
         if (promptManager is PromptManager concretePrompts)
         {
-            foreach (var name in new[] { "system/build", "system/plan", "system/team", "system/goal" })
+            foreach (var name in new[] { "system/build", "system/plan", "system/goal" })
                 concretePrompts.RegisterTemplate(new PromptTemplate(name, $"[TEST MODE PROMPT: {name}]"));
         }
         planModeService ??= Substitute.For<IPlanModeService>();

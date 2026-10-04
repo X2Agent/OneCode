@@ -12,7 +12,7 @@ public sealed class AgentContextPipeline(
     SharedContextProviderBuilder shared,
     MainModeContextProviderBuilder main)
 {
-    /// <summary>Shared providers only (Worker / Explore / Plan / TeamMember).</summary>
+    /// <summary>Shared providers only (Worker / Explore / Plan).</summary>
     public List<AIContextProvider> BuildShared(
         PipelineProfile profile,
         AgentContextProviderOptions options)

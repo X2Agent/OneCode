@@ -6,8 +6,8 @@ namespace OneCode.Core.Domain;
 /// 通过回调传递给上层（App/TUI 层负责转换为 TuiFileChange 或其他 UI 事件）。
 ///
 /// 此类型位于 Core 层以解耦 Infrastructure 中间件对 App/Tui 类型的依赖。
-/// Contributors 为 TEAM 模式下修改过该文件的成员 ID 列表（去重、按首次修改排序）；
-/// 非 Team 路径为 null。交付报告据此汇总各成员贡献。
+/// Contributors 为多代理工作流中修改过该文件的代理 ID 列表（去重、按首次修改排序）；
+/// 主 agent 路径为 null。
 /// </summary>
 public sealed record FileChange(
     string FileName,

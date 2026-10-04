@@ -131,16 +131,13 @@ public sealed class MainAgentRunnerTests : IDisposable
     [InlineData(WorkingMode.Plan, PermissionMode.Plan, "plan")]
     [InlineData(WorkingMode.Plan, PermissionMode.BypassPermissions, "plan")] // WorkingMode wins
     [InlineData(WorkingMode.Plan, null, "plan")]
-    [InlineData(WorkingMode.Team, PermissionMode.Default, "team")]
-    [InlineData(WorkingMode.Team, null, "team")]
-    [InlineData(WorkingMode.Team, PermissionMode.Plan, "team")] // WorkingMode wins
     [InlineData(WorkingMode.Goal, PermissionMode.Default, "goal")]
     [InlineData(WorkingMode.Goal, null, "goal")]
     [InlineData(WorkingMode.Goal, PermissionMode.Plan, "goal")] // WorkingMode wins
     public void ResolveAgentMode_NonBuildWorkingModes_TakePrecedenceOverPermissionMode(
         WorkingMode workingMode, PermissionMode? permissionMode, string expected)
     {
-        // Plan/Team/Goal working modes always win over permissionMode.
+        // Plan/Goal working modes always win over permissionMode.
         var actual = MainModeContextProviderBuilder.ResolveAgentMode(workingMode, permissionMode);
         actual.Should().Be(expected);
     }

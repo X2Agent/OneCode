@@ -23,7 +23,7 @@ public sealed class AgentDefinitionParseException(string sourcePath, string reas
 
 /// <summary>
 /// 严格解析 <c>.onecode/agents/*.md</c>：未知 frontmatter 字段、缺失 description、坏 YAML
-/// 一律显式报错——不重蹈 team.yaml <c>IgnoreUnmatchedProperties</c> 静默忽略的覆辙。
+/// 一律显式报错——未知字段不静默忽略（历史教训：静默忽略让配置错误长期潜伏）。
 /// </summary>
 public static partial class AgentDefinitionParser
 {

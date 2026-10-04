@@ -9,7 +9,7 @@ namespace OneCode.App.Services.Agent;
 /// 模式指令注入 Provider——接管原 MAF <c>AgentModeProvider</c> 的指令注入职能。
 ///
 /// <para>
-/// 每次 invocation 注入当前工作模式（build/plan/team/goal）的完整系统提示词，
+/// 每次 invocation 注入当前工作模式（build/plan/goal）的完整系统提示词，
 /// 行为对齐 AgentModeProvider 官方语义（"included in the instructions provided
 /// to the agent on each invocation"）。与 AgentModeProvider 的区别：
 /// 不注册 mode_get/mode_set 工具、不维护 MAF session state mode——

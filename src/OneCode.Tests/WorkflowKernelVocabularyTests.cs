@@ -1,5 +1,4 @@
 using OneCode.Core.Config;
-using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Core.PlanMode;
@@ -29,27 +28,6 @@ public sealed class WorkflowKernelVocabularyTests
     [Fact]
     public void RunTerminalReasonMap_FromGoalState_NonTerminalFallsBackToAgentException()
         => RunTerminalReasonMap.FromGoalState(GoalRunState.Executing).Should().Be(RunTerminalReason.AgentException);
-
-    [Theory]
-    [InlineData(TeamRunStatus.Succeeded, false, RunTerminalReason.Completed)]
-    [InlineData(TeamRunStatus.Cancelled, false, RunTerminalReason.Cancelled)]
-    [InlineData(TeamRunStatus.Blocked, false, RunTerminalReason.Blocked)]
-    [InlineData(TeamRunStatus.Failed, true, RunTerminalReason.ValidationFailed)]
-    [InlineData(TeamRunStatus.RolledBack, true, RunTerminalReason.ValidationFailed)]
-    public void RunTerminalReasonMap_FromTeamStatusMapsTerminalStates(
-        TeamRunStatus status, bool hasError, RunTerminalReason expected)
-        => RunTerminalReasonMap.FromTeamStatus(status, hasError).Should().Be(expected);
-
-    [Fact]
-    public void RunTerminalReasonMap_FromTeamStatus_ErrorBeatsDefaultButNotFailed()
-    {
-        // 非终态 + 携带错误 → AgentException（原 { Error: not null } 分支）。
-        RunTerminalReasonMap.FromTeamStatus(TeamRunStatus.Created, hasError: true)
-            .Should().Be(RunTerminalReason.AgentException);
-        // 非终态无错误 → 兜底 Completed。
-        RunTerminalReasonMap.FromTeamStatus(TeamRunStatus.Created)
-            .Should().Be(RunTerminalReason.Completed);
-    }
 }
 
 /// <summary>CommandId 幂等内核能力防回归（Plan 聚合实现 ICommandIdempotent）。</summary>

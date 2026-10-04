@@ -7,7 +7,7 @@ namespace OneCode.Tests;
 /// End-to-end tests verifying that InMemory checkpointing allows
 /// resuming a workflow from a previously captured checkpoint.
 ///
-/// These tests cover the in-memory, same-instance restore mechanics used by the current Team path:
+/// These tests cover the in-memory, same-instance restore mechanics used by the Goal workflow path:
 ///   1. Run workflow with CheckpointManager.CreateInMemory to capture superstep checkpoints.
 ///   2. Dispose StreamingRun to release Workflow ownership.
 ///   3. Resume from a selected checkpoint in the same process.

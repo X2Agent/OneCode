@@ -525,7 +525,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             SystemPrompt = request.SystemPrompt,
             // HarnessInstructions is deliberately absent: the fragment is injected by MAF at agent
             // build time for every agent, so a forked child that reuses the parent's product fragment
-            // (TeamAgentFactory / ForkedAgentRunner read it directly) must not also receive it here.
+            // (ForkedAgentRunner reads it directly) must not also receive it here.
             ModelId = request.ModelId,
             ThinkingBudget = request.ThinkingBudget,
             Tools = toolList.Count > 0 ? toolList : null,

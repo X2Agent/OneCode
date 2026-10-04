@@ -117,7 +117,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Stamp the foreground conversation's working mode (build/plan/team/goal).
+    /// Stamp the foreground conversation's working mode (build/plan/goal).
     /// In-memory only — the value persists with the next transcript save.
     /// </summary>
     public void SetForegroundMode(string mode)

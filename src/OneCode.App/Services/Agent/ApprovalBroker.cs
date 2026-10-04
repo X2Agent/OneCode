@@ -100,33 +100,6 @@ public sealed class ApprovalBroker : IApprovalBroker
         return broker;
     }
 
-    /// <summary>
-    /// Team 路径 broker（R4）：由 <c>TeamWorkflowRunner.BridgeToolApprovalAsync</c> 在成员审批请求
-    /// 以 <c>RequestInfoEvent</c> 浮出时调用，推送 <c>OrchestrationEvent.ApprovalRequest</c> 并等待
-    /// TUI 决策；决策经 <c>SendResponseAsync</c> 送回同一工作流。
-    /// 「总是允许」经该桥接当前只提供单次批准（standing rule 包装未验证通过端口响应类型校验）。
-    /// </summary>
-    public static ApprovalBroker ForTeam(
-        string agentName,
-        Action<OrchestrationEvent>? eventSink,
-        ILogger<ApprovalBroker>? logger = null)
-    {
-        return new ApprovalBroker(async (request, ct) =>
-        {
-            if (eventSink is null)
-                return ApprovalDecision.Deny;
-
-            var evt = new OrchestrationEvent.ApprovalRequest(
-                request with { AgentName = string.IsNullOrEmpty(request.AgentName) ? agentName : request.AgentName });
-            eventSink(evt);
-
-            // 与 Main 路径一致：只依赖 ct 取消，不设独立超时。
-            // 审批的本质是等待用户决策，固定超时会在用户思考时错误地自动 Deny。
-            // TUI 不消费事件的场景属于 bug，应修 TUI 而非用超时掩盖。
-            return await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
-        }, logger);
-    }
-
     private async Task<ApprovalDecision> RequestCoreAsync(
         ApprovalRequest request,
         CancellationToken ct)

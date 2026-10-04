@@ -9,12 +9,12 @@ namespace OneCode.App.Services.Streaming;
 
 /// <summary>
 /// Orchestrates the TUI query streaming pipeline: dispatches user input to
-/// Normal / GOAL / TEAM streams based on <see cref="WorkingMode"/>, and streams
+/// Normal / GOAL streams based on <see cref="WorkingMode"/>, and streams
 /// command-produced prompts (e.g. <c>/review</c>) through the normal TuiEvent
 /// pipeline so the user sees the same UX as a regular query.
 /// </summary>
 /// <remarks>
-/// GOAL/TEAM streaming is
+/// GOAL streaming is
 /// delegated to <see cref="OrchestrationStreamService"/>; Normal and
 /// command-prompt streaming talk to <see cref="InteractiveSession.ConversationRunner"/>
 /// directly while draining file-change events and generating next-prompt
@@ -32,12 +32,11 @@ public sealed class QueryStreamService(
     private ThinkingParamsResolver thinkingParamsResolver => runtime.ThinkingParams;
     private OrchestrationStreamService orchestrationStreamService => orchestration.OrchestrationStream;
     private AutoCompactService autoCompactService => orchestration.AutoCompact;
-    private OneCode.Core.Coordinator.ITeamOrchestrationService teamOrchestrationService => orchestration.TeamOrchestration;
     /// <summary><c>/loop</c> 有界确定性循环后端。</summary>
     private Services.Loop.IIterativeLoopService iterativeLoop => orchestration.IterativeLoop;
     /// <summary>
     /// Main streaming entry point: logs the user message, resolves the current
-    /// model, and dispatches to Normal/Goal/Team streams based on WorkingMode.
+    /// model, and dispatches to Normal/Goal streams based on WorkingMode.
     /// </summary>
     public async IAsyncEnumerable<TuiEvent> StreamQueryAsync(
         InteractiveSession session,
@@ -64,28 +63,6 @@ public sealed class QueryStreamService(
             await foreach (var evt in EmitAutoCompactIfNeededAsync(
                 conversationId is { } goalConversationId
                     ? session.SessionManager.GetConversation(goalConversationId)
-                    : null,
-                session.SystemPrompt,
-                ct).ConfigureAwait(false))
-                yield return evt;
-            yield break;
-        }
-
-        // TEAM mode dispatch (explicit error if no teams registered)
-        if (session.ModeController.Mode == WorkingMode.Team)
-        {
-            if (teamOrchestrationService is not { } teamService || teamService.RegisteredTeams.Count == 0)
-            {
-                logger.LogWarning("TEAM mode active but no teams registered; refusing to fall back to Normal");
-                yield return new TuiError("TEAM mode is active but no teams are registered. Use /team register to add a team, or switch to BUILD mode.");
-                yield break;
-            }
-
-            await foreach (var evt in orchestrationStreamService.StreamTeamAsync(session, teamService, text, imagePaths, ct).ConfigureAwait(false))
-                yield return evt;
-            await foreach (var evt in EmitAutoCompactIfNeededAsync(
-                conversationId is { } teamConversationId
-                    ? session.SessionManager.GetConversation(teamConversationId)
                     : null,
                 session.SystemPrompt,
                 ct).ConfigureAwait(false))
@@ -207,7 +184,7 @@ public sealed class QueryStreamService(
     }
 
     /// <summary>
-    /// Resumes a durable workflow (Goal/Team) from a checkpoint.
+    /// Resumes a durable Goal workflow from a checkpoint.
     /// Called directly by the TUI dispatch layer when <see cref="CommandResult.ResumeWorkflowResult"/>
     /// is returned by a command, bypassing the LLM query pipeline entirely.
     /// </summary>
@@ -231,19 +208,6 @@ public sealed class QueryStreamService(
                 await foreach (var evt in orchestrationStreamService.StreamResumeGoalAsync(
                     sessionId, currentModelId, session.SystemPrompt, ct).ConfigureAwait(false))
                     yield return evt;
-                break;
-
-            case WorkflowResumeKind.Team:
-                if (teamOrchestrationService is { } teamService)
-                {
-                    await foreach (var evt in orchestrationStreamService.StreamResumeTeamAsync(
-                        teamService, sessionId, ct).ConfigureAwait(false))
-                        yield return evt;
-                }
-                else
-                {
-                    yield return new TuiError("Team mode is not available for resume.");
-                }
                 break;
         }
     }
@@ -318,7 +282,7 @@ public sealed class QueryStreamService(
     }
 
     /// <summary>
-    /// Shared post-turn auto-compaction check for all streaming paths (Normal/Goal/Team/Command).
+    /// Shared post-turn auto-compaction check for all streaming paths (Normal/Goal/Command).
     /// Yields a <see cref="TuiCompactSuggested"/> event when token usage crosses 70%.
     ///
     /// Actual compaction runs inside the MAF CompactionProvider pipeline; this method

@@ -43,10 +43,6 @@ public sealed class MainModeContextProviderBuilder(
                 contextProviders.Add(new GoalContextProvider(modeProvider, goalContextState));
                 break;
 
-            case WorkingMode.Team:
-                // Team orchestration context comes from Team path; Main Team mode needs instructions only.
-                break;
-
             case WorkingMode.Build:
             default:
                 contextProviders.Add(buildModeAttachmentProvider);
@@ -63,7 +59,6 @@ public sealed class MainModeContextProviderBuilder(
         return workingMode switch
         {
             WorkingMode.Plan => "plan",
-            WorkingMode.Team => "team",
             WorkingMode.Goal => "goal",
             _ => permissionMode == PermissionMode.Plan ? "plan" : "build",
         };
@@ -83,7 +78,6 @@ public sealed class MainModeContextProviderBuilder(
         {
             "build" => "system/build",
             "plan" => "system/plan",
-            "team" => "system/team",
             "goal" => "system/goal",
             _ => null,
         };

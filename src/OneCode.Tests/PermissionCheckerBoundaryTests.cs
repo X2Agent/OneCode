@@ -334,7 +334,6 @@ public sealed class PermissionCheckerBoundaryTests
 
     [Theory]
     [InlineData(PermissionMode.GoalAuto, PermissionDecision.Deny, "GOAL mode")]
-    [InlineData(PermissionMode.Team, PermissionDecision.Ask, "Team mode")]
     [InlineData(PermissionMode.AcceptEdits, PermissionDecision.Ask, null)]
     public async Task CheckAsync_DestructiveShellCommand_PerModePolicy(
         PermissionMode mode, PermissionDecision expected, string? expectedMessageFragment)
@@ -359,7 +358,6 @@ public sealed class PermissionCheckerBoundaryTests
     [Theory]
     [InlineData(PermissionMode.Default, "MysteryTool", PermissionDecision.Ask)]
     [InlineData(PermissionMode.GoalAuto, "MysteryTool", PermissionDecision.Allow)]
-    [InlineData(PermissionMode.Team, "SomeUnknownTool", PermissionDecision.Ask)]
     public async Task CheckAsync_UnknownTool_PerModePolicy(
         PermissionMode mode, string toolName, PermissionDecision expected)
     {
@@ -388,7 +386,6 @@ public sealed class PermissionCheckerBoundaryTests
     [InlineData(PermissionMode.AcceptEdits, "Write", PermissionDecision.Allow)]
     [InlineData(PermissionMode.DontAsk, "Write", PermissionDecision.Deny)]
     [InlineData(PermissionMode.GoalAuto, "Write", PermissionDecision.Allow)]
-    [InlineData(PermissionMode.Team, "Write", PermissionDecision.Allow)]
     public async Task CheckAsync_ModeToolCategoryMatrix_WriteTool(
         PermissionMode mode, string toolName, PermissionDecision expected)
     {
@@ -408,7 +405,6 @@ public sealed class PermissionCheckerBoundaryTests
     [InlineData(PermissionMode.Plan, "git status", PermissionDecision.Allow)]
     [InlineData(PermissionMode.Plan, "dotnet build", PermissionDecision.Deny)]
     [InlineData(PermissionMode.GoalAuto, "dotnet build", PermissionDecision.Allow)]
-    [InlineData(PermissionMode.Team, "dotnet build", PermissionDecision.Allow)]
     public async Task CheckAsync_ModeToolCategoryMatrix_ShellCommand(
         PermissionMode mode, string command, PermissionDecision expected)
     {

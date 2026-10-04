@@ -9,14 +9,14 @@ namespace OneCode.Infrastructure.Middleware;
 /// <summary>
 /// 工具调用事件中间件：向 <see cref="AgentPipelineOptions.OrchestrationEventSink"/>
 /// 发射 <see cref="OrchestrationEvent.ToolStart"/> / <see cref="OrchestrationEvent.ToolDone"/> 事件，
-/// 供 TEAM 模式实时流式展示工具活动。
+/// 供多代理工作流实时流式展示工具活动。
 ///
 /// 放在权限中间件之前，确保即使工具被拒绝也能发射事件（拒绝体现在 ToolDone.IsError）。
 ///
 /// 设计要点：
 /// 1. IsError 检测 — 工具拒绝（PermissionChecker/Hook/SafetyInvariant 拒绝）通过返回
 ///    ToolResult.Error + ctx.Terminate=true 体现，不抛异常。必须在 result 拿到后立即判定
-///    tr.IsError（或从 ToolExecutionContext 读取），否则 TEAM TUI 会把"被拒绝"显示为"成功"。
+///    tr.IsError（或从 ToolExecutionContext 读取），否则 TUI 会把"被拒绝"显示为"成功"。
 /// 2. sink 调用全部 try-catch 保护 — 订阅者异常不应掩盖原始工具异常或阻断流程。
 /// 3. sink=null 在构建期 fail-closed，而非运行时 NRE。
 /// 4. catch (Exception) 排除 OperationCanceledException 以保留取消传播。
@@ -56,7 +56,7 @@ public static class ToolCallEventMiddleware
                 var result = await next(ctx, ct).ConfigureAwait(false);
                 // 工具拒绝（PermissionChecker/Hook/SafetyInvariant 拒绝）通过返回
                 // ToolResult.Error + ctx.Terminate=true 体现，不抛异常。必须在 result 拿到后
-                // 立即判定错误，否则 TEAM TUI 会把"被拒绝"显示为"成功"。
+                // 立即判定错误，否则 TUI 会把"被拒绝"显示为"成功"。
                 // 从结构化 context 读取 IsError（与 StateMachine 判定逻辑一致，
                 // ToolResult 直接到达走 tr.IsError，string 走 context.IsError）。
                 // stateBag 不可用（异常降级）时仅对 ToolResult 判定，string 无法可靠识别错误。

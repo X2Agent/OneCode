@@ -109,7 +109,7 @@ public static class PermissionAndLimitMiddleware
         // Ask 处理（单通道）：唯一通道是 MAF 的审批协议。放行到 next 后，
         // FunctionInvokingChatClient 遇到带 ApprovalRequiredAIFunction 标记的工具会产生
         // ToolApprovalRequestContent 而不是执行；由 ToolApprovalAgent 的自动规则决定放行，
-        // 否则交给上层桥（Main 流式审批拆分 / Team 工作流审批桥）呈现给用户。
+        // 否则交给上层桥（Main 流式审批拆分）呈现给用户。
         // 中间件自身从不询问用户，也不持有 broker——那会形成第二套审批通道。
         // 路径未启用审批时不存在可应答的通道，fail-safe Deny。
         if (perm.Decision == PermissionDecision.Ask)

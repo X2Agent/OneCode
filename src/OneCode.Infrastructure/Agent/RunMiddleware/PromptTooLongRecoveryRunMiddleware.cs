@@ -17,7 +17,7 @@ namespace OneCode.Infrastructure.Agent.RunMiddleware;
 ///   <c>agent.RunAsync</c>/<c>agent.RunStreamingAsync</c>，属于 <b>Agent Run 级</b>关注点。
 ///   Run middleware 包裹 <c>innerAgent.RunAsync</c>，在异常层处理恢复，而非在 Runner 层重建 pipeline。</item>
 ///   <item><b>Agent-level 注册</b>：在 <see cref="AgentPipelineBuilder.BuildHarnessAgent"/> 中注册，
-///   对所有 run 生效（Main/Worker/Team/Goal 自动获得恢复能力）。</item>
+///   对所有 run 生效（Main/Worker/Goal 自动获得恢复能力）。</item>
 ///   <item><b>不重建 pipeline</b>：Run middleware 收到的是已构建的 <c>innerAgent</c>，
 ///   无法重建。恢复策略为：截断消息历史 + 重试，而非切换 CompactionProvider/模型。</item>
 /// </list>

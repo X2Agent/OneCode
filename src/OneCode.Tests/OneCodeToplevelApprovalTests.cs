@@ -85,33 +85,6 @@ public sealed class OneCodeToplevelApprovalTests
     }
 
     [Fact]
-    public async Task ApprovalRequest_WithoutSessionEscalation_SameKeysLandOnDeny()
-    {
-        var applied = false;
-        var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput)
-        {
-            AllowSessionEscalation = false,
-        };
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
-        shell.Toplevel.ConfigureSessionPermissionEscalation(() => applied = true);
-
-        await shell.SubmitQueryAsync("执行构建");
-        shell.TranscriptText.Should().NotContain("本次对话全部允许");
-
-        shell.TypeKey(Key.CursorDown);
-        shell.TypeKey(Key.CursorDown);
-        shell.TypeKey(Key.Enter);
-
-        var decision = await approval.ResponseSource.Task.WaitAsync(
-            TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-
-        decision.Should().Be(ApprovalDecision.Deny,
-            "少一档时同样两下 Down 必须落到拒绝 —— 升级档门控失效会让这里变成放行");
-        applied.Should().BeFalse();
-        shell.Shell.HasActiveInteractionSession().Should().BeFalse("决策回传后必须交还键盘");
-    }
-
-    [Fact]
     public async Task ApprovalRequest_EscDismiss_ReturnsDeny()
     {
         var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput);

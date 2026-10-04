@@ -65,10 +65,9 @@ public sealed class HelpCommand(Func<ICommandRegistry> registryFactory) : Comman
             ]),
             ("模式与补全",
             [
-                ("Tab",              "空输入接受建议；/ 补全循环；否则切 BUILD/PLAN/TEAM/GOAL"),
+                ("Tab",              "空输入接受建议；/ 补全循环；否则切 BUILD/PLAN/GOAL"),
                 ("/",                "斜杠命令补全"),
                 ("Ctrl+← / Ctrl+→",  "循环占位建议"),
-                ("Shift+Tab",        "TEAM 模式循环切换已注册团队（编排模式由团队 YAML 固定）"),
             ]),
             ("历史与搜索",
             [

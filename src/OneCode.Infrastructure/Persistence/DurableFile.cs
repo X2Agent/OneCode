@@ -2,7 +2,7 @@ namespace OneCode.Infrastructure.Persistence;
 
 /// <summary>
 /// 单机 JSON 落盘的共享持久化原语：跨进程文件锁 + 临时文件原子替换 + .bak 兜底。
-/// Build / Goal / Workflow / Team 四个 run store 共用，避免各写一套耐久性机制。
+/// Build / Goal / Workflow 各 run store 共用，避免各写一套耐久性机制。
 /// 聚合语义（事件序列校验、版本围栏、checksum 格式）由各 store 自持，不走这里。
 /// </summary>
 internal static class DurableFile
@@ -72,7 +72,7 @@ internal static class DurableFile
 
     /// <summary>
     /// 异步变体：锁与原子替换语义同 <see cref="WriteAtomic"/>，但**不提供**校验钩子——
-    /// 异步调用方的落盘后复核是 store 专属逻辑（TeamRun 的 checksum 头校验需读回并 await），
+    /// 异步调用方的落盘后复核是 store 专属逻辑（需读回并 await 的校验场景），
     /// 收进本原语只会多一个异步回调参数而不减少重复。
     /// </summary>
     public static async Task WriteAtomicAsync(

@@ -22,6 +22,15 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<CompactionStrategyFactory>();
         services.AddSingleton<AgentSessionPersistence>();
 
+        // 子代理执行引擎（Agent/ParallelAgents 派工链路）。
+        // IVerificationProvider 的全仓唯一注册点：Build/Goal 质量验证与子代理编辑守卫依赖它。
+        services.AddSingleton<Core.Tools.IVerificationProvider, Infrastructure.Tools.GenericVerificationProvider>();
+        services.AddSingleton<ForkedAgentRuntimeDependencies>();
+        services.AddSingleton<ForkedAgentRunner>();
+        services.AddSingleton<WorkerAgentService>();
+        // IAgentRunner 唯一绑定：AgentTool / ParallelAgents DAG executor 的执行入口。
+        services.AddSingleton<Core.Tools.IAgentRunner>(sp => sp.GetRequiredService<WorkerAgentService>());
+
         // 待办清单投影（Harness TodoProvider 会话状态 → 统一事件总线 → TUI 横条）。
         // 与 PlanCardPublisher 同构：App 层发射器 + TUI 宿主订阅。
         services.AddSingleton<TodoProjectionService>();

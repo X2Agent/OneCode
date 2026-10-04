@@ -51,7 +51,7 @@ public sealed class CompactionStrategyFactory(
     }
 
     /// <summary>
-    /// 构建 Worker / Forked / Team 子 Agent 压缩策略（更激进阈值 + 同一摘要 prompt）。
+    /// 构建 Worker / Forked 子 Agent 压缩策略（更激进阈值 + 同一摘要 prompt）。
     /// </summary>
     public async Task<CompactionStrategy> BuildForWorkerAsync(
         string? modelId,

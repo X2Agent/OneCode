@@ -3,7 +3,7 @@ using OneCode.Core.Workflows;
 namespace OneCode.Infrastructure.Workflows;
 
 /// <summary>
-/// S-04 ledger 序列共享封装——收敛 Build / Goal / Team 三处逐字同构的
+/// S-04 ledger 序列共享封装——收敛 Build / Goal 两处逐字同构的
 /// 「新执行世代开启」序列：先回滚上一世代残留（<see cref="IOperationLedger.ReconcileRunAsync"/>），
 /// 再开启本世代持久化事务（<see cref="IOperationLedger.BeginTransactionAsync"/>），
 /// 并把文件编辑 intent 落盘（<see cref="Agent.EditTransaction.PersistTo"/>）。

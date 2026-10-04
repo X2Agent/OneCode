@@ -80,7 +80,7 @@ public static class CompactionPipelineBuilder
     }
 
     /// <summary>
-    /// Builds the standard compaction strategy for worker agents (sub-agents / team members).
+    /// Builds the standard compaction strategy for worker agents (sub-agents).
     /// Worker 的阈值比 Main 更激进，因为 sub-agent 上下文更短、生命周期更短。
     /// </summary>
     public static CompactionStrategy BuildForWorkerAgent(

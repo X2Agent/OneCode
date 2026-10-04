@@ -78,31 +78,6 @@ public sealed class TranscriptEventPresenterTests
     }
 
     [Fact]
-    public void TryPresent_TeamClarificationProgress_ShowsHeaderWithoutQuestionDetails()
-    {
-        // 澄清请求只保留摘要行；问题明细由澄清向导组件完整展示，
-        // transcript 中重复打印问题全文会造成干扰（用户反馈）。
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
-
-        transcript.BeginStreaming();
-        presenter.TryPresent(new TuiTeamProgress(
-            "团队 'impl' 需要澄清 2 个问题后才能规划",
-            new List<(string Label, string Detail, string Status)>
-            {
-                ("问题 1", "第一个里程碑想验证什么核心能力？", "待回答"),
-                ("问题 2", "交付物是什么？", "待回答"),
-            },
-            "请在随后的澄清向导中回答")).Should().BeTrue();
-        transcript.EndStreaming();
-
-        var text = string.Join('\n', transcript.MessageView.RenderedLines);
-        text.Should().Contain("团队 'impl' 需要澄清 2 个问题后才能规划");
-        text.Should().NotContain("里程碑");
-        text.Should().NotContain("交付物是什么");
-    }
-
-    [Fact]
     public void TryPresent_GoalPlan_RendersNumberedStepList()
     {
         // P1：Goal 分解结果渲染为编号清单（一次性块），执行前用户可见计划。

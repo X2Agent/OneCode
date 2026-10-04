@@ -35,7 +35,6 @@ colors:
   diff-context: "#8B949E"
   mode-build: "#4CAF84"
   mode-plan: "#5B8DEE"
-  mode-team: "#A386D8"
   mode-goal: "#5BB8C8"
   agent-orchestrator: "#A386D8"
   agent-researcher: "#5B8DEE"
@@ -91,7 +90,7 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 
 ### Roles and Modes
 
-`user-message`、`assistant-message`、`tool-use`、`tool-result`、`system-message` 用于消息角色。`diff-added`、`diff-removed`、`diff-hunk`、`diff-context` 用于差异视图。`mode-build`、`mode-plan`、`mode-team`、`mode-goal` 用于工作模式。
+`user-message`、`assistant-message`、`tool-use`、`tool-result`、`system-message` 用于消息角色。`diff-added`、`diff-removed`、`diff-hunk`、`diff-context` 用于差异视图。`mode-build`、`mode-plan`、`mode-goal` 用于工作模式。
 
 TEAM 角色使用 `agent-orchestrator`、`agent-researcher`、`agent-planner`、`agent-executor`、`agent-reviewer`、`agent-tester`、`agent-debugger`、`agent-assistant`。角色色只用于识别，不替代状态符号或文字。
 

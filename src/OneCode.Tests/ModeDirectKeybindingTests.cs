@@ -21,7 +21,6 @@ public sealed class ModeDirectKeybindingTests
     [Theory]
     [InlineData("1", "app:modeBuild")]
     [InlineData("2", "app:modePlan")]
-    [InlineData("3", "app:modeTeam")]
     [InlineData("4", "app:modeGoal")]
     public void Resolve_AltDigit_MatchesModeDirectAction(string digit, string expectedAction)
     {

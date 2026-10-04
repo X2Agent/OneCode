@@ -13,9 +13,9 @@ namespace OneCode.App.Commands;
 /// 追加 <c>--session</c>（别名 <c>--once</c>）时跳过持久化，仅设运行时覆盖——
 /// 当前对话内全放行（bypass）等一次性配置不应泄漏到之后的会话。
 ///
-/// 工作模式（PLAN/TEAM/GOAL）与权限的联动由 <see cref="Services.WorkingModeBridge"/>
+/// 工作模式（PLAN/GOAL）与权限的联动由 <see cref="Services.WorkingModeBridge"/>
 /// 统一桥接——本命令不再操作 WorkingModeController / IPlanModeService。
-/// plan / team / goalAuto 是工作模式派生的权限策略而非用户档位，直接写入会造成
+/// plan / goalAuto 是工作模式派生的权限策略而非用户档位，直接写入会造成
 /// 权限轴与模式轴不一致的半状态，故本命令显式拒绝（不用 Enum.TryParse 兜底放行）。
 /// 此处设置的 Auto/DontAsk/BypassPermissions 属于 CLI 高级档位，
 /// WorkingModeBridge 会保护它们不被后续模式切换静默覆盖。
@@ -30,7 +30,7 @@ public sealed class PermissionsCommand(
     public override string? ArgumentHint => "[mode] [--session]";
 
     // 用户可直接设置的档位白名单（单一事实源）。刻意不做 Enum.TryParse 兜底：
-    // plan / team / goalAuto 只能由 WorkingModeBridge 从工作模式派生。
+    // plan / goalAuto 只能由 WorkingModeBridge 从工作模式派生。
     private static new readonly Dictionary<string, PermissionMode> Aliases = new(StringComparer.OrdinalIgnoreCase)
     {
         ["default"] = PermissionMode.Default,
@@ -51,7 +51,6 @@ public sealed class PermissionsCommand(
     private static readonly Dictionary<string, WorkingMode[]> DerivedModes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["plan"] = [WorkingMode.Plan],
-        ["team"] = [WorkingMode.Team],
         ["goalauto"] = [WorkingMode.Goal],
         ["goal-auto"] = [WorkingMode.Goal],
         ["goal_auto"] = [WorkingMode.Goal],

@@ -8,7 +8,7 @@ namespace OneCode.Tests;
 
 /// <summary>
 /// /permissions 的档位白名单与 --session 作用域契约。
-/// plan / team / goalAuto 由 WorkingModeBridge 从工作模式派生，直接写入会造成
+/// plan / goalAuto 由 WorkingModeBridge 从工作模式派生，直接写入会造成
 /// 权限轴与模式轴不一致的半状态（plan 白名单生效但 SubmitPlan 被拒、跨会话泄漏），
 /// 故命令层必须拒绝；--session 只设运行时覆盖、不写配置——一次性全放行
 /// （对话内 bypass）不得泄漏到之后的会话。
@@ -18,7 +18,6 @@ public sealed class PermissionsCommandTests
     [Theory]
     [InlineData("plan")]
     [InlineData("Plan")]
-    [InlineData("team")]
     [InlineData("goalAuto")]
     [InlineData("goal-auto")]
     public async Task ExecuteAsync_ModeDerivedValue_IsRejectedWithWorkingModeHint(string modeArg)

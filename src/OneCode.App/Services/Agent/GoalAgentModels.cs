@@ -32,7 +32,7 @@ public sealed record GoalRunOptions
 
     /// <summary>
     /// 编排事件回调。当设置时，子目标执行期间的工具调用（ToolStart/ToolDone）
-    /// 会通过此 sink 推送到 TUI，实现与 Team 模式一致的实时进度透明度。
+    /// 会通过此 sink 推送到 TUI，实现多步执行期间的实时进度透明度。
     /// 由 InteractiveModeExecutor 创建 Channel 并传入。
     /// </summary>
     public Action<OneCode.Core.Coordinator.OrchestrationEvent>? OrchestrationEventSink { get; init; }

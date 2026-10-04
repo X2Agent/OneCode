@@ -1,7 +1,7 @@
 namespace OneCode.Core.Permissions;
 
 /// <summary>
-/// Immutable approval request shared by Main, Worker, Team, TUI and headless
+/// Immutable approval request shared by Main, Worker, TUI and headless
 /// execution paths.
 /// </summary>
 public sealed record ApprovalRequest(

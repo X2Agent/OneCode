@@ -7,7 +7,7 @@ namespace OneCode.App.Tui;
 /// 清单快照（Harness <c>TodoProvider</c> 会话状态的权威投影，经
 /// <see cref="OrchestrationEvent.TodoProjectionChanged"/> 到达）。
 ///
-/// 布局选择：放在输入框上方的全宽横条而非右侧 sidebar——Plan/TEAM 侧边栏互斥，
+/// 布局选择：放在输入框上方的全宽横条而非右侧 sidebar——与 Plan 侧边栏相互独立，
 /// 而计划执行期间最需要同时看到计划步骤（右）与待办（下）；横条也不参与
 /// 侧边栏的宽度让位逻辑，对话列宽度不受影响（仅高度让位，见
 /// <c>ReplShell.ApplyTodoStripLayout</c>）。

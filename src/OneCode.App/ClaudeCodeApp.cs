@@ -9,7 +9,6 @@ using OneCode.App.Query;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.AutoDream;
 using OneCode.App.Services.Compact;
-using OneCode.App.Services.Coordinator;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Setup;
 using OneCode.App.Services.Context;
@@ -83,7 +82,6 @@ public sealed class OneCodeApp(
             .AddPromptServices(workingDir)
             .AddLspServices()
             .AddNamedHttpClients()
-            .AddTeamServices()
             .AddAutoDreamServices()
             .AddPlatformServices()
             .AddCommands()

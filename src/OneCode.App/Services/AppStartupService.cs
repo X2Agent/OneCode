@@ -1,7 +1,6 @@
 using OneCode.Core.Config;
 using System.Runtime.InteropServices;
 using OneCode.App.Services.Hooks;
-using OneCode.Core.Coordinator;
 using OneCode.Core.Product;
 using OneCode.Infrastructure;
 using OneCode.Core.IO;
@@ -12,13 +11,12 @@ using OneCode.Infrastructure.Media;
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Owns one-time host warm-up: process cache, builtin teams, hot-reload watchers,
+/// Owns one-time host warm-up: process cache, hot-reload watchers,
 /// image cleanup, code index, hook bootstrap + config hot-reload, and ToolCatalog cache.
 /// Hosted-service start remains at the composition root (<c>IHost.StartAsync</c>).
 /// </summary>
 public sealed class AppStartupService(
     IProcessRunner processRunner,
-    ITeamOrchestrationService teamOrchestration,
     CodeIndexHotReloader codeIndexHotReloader,
     ImagePipeline imagePipeline,
     ICodeIndexService codeIndexService,
@@ -34,8 +32,6 @@ public sealed class AppStartupService(
         if (_warmedUp) return;
 
         await processRunner.WarmCommandCacheAsync("pwsh", "rg", "git").ConfigureAwait(false);
-
-        await teamOrchestration.RegisterBuiltinTeamsAsync(ct).ConfigureAwait(false);
 
         codeIndexHotReloader.StartWatching(Environment.CurrentDirectory);
 

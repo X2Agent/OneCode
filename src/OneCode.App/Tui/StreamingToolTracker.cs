@@ -9,7 +9,7 @@ internal sealed class StreamingToolTracker
     private readonly Dictionary<string, (int LineIndex, long StartTick)> _pendingToolLines = new();
     private readonly HashSet<string> _seenToolIds = new();
 
-    // 同类工具组：key = 工具名 + TEAM 归属（同名同归属才并组），value = 组行索引 + 成员。
+    // 同类工具组：key = 工具名 + 代理归属（同名同归属才并组），value = 组行索引 + 成员。
     private readonly Dictionary<string, ToolGroupState> _groups = new(StringComparer.Ordinal);
     // 最近一次完成并入组的工具键——组只在"相邻同类"时延续，异名工具完成即断开。
     private string? _lastGroupKey;

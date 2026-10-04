@@ -467,7 +467,7 @@ public sealed class MessageFlowRenderer
             new($"{TuiGlyphs.ToolCall} ", TuiPalette.Accent),
             new(name, TuiPalette.Warning),
         ];
-        // TEAM 归属前缀：显示执行该工具调用的成员 ID（角色专属色）。
+        // 代理归属前缀：显示执行该工具调用的代理 ID（角色专属色）。
         if (!string.IsNullOrWhiteSpace(agentName))
             segments.Add(new($" [{agentName}]", TuiPalette.FromAgentName(agentName)));
 

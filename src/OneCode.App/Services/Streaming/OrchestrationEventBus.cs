@@ -7,7 +7,7 @@ namespace OneCode.App.Services.Streaming;
 /// （Core/Coordinator）是跨模式唯一的领域事件信封，本类型是其 App 层承载——
 /// 模式侧发射器（<c>PlanCardPublisher</c> 等）调用 <see cref="Publish"/>，
 /// TUI 宿主等长生命周期订阅者经 <see cref="Subscribe"/> 接收。
-/// Team/Goal 的 run 级事件流仍走 per-operation Channel（OrchestrationStreamService），
+/// Goal 的 run 级事件流仍走 per-operation Channel（OrchestrationStreamService），
 /// 本总线服务跨 run 的投影事件（计划卡片等）。
 /// </summary>
 /// <remarks>

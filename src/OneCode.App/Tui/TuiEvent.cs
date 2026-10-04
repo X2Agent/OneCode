@@ -66,9 +66,9 @@ public sealed record TuiMcpServersChanged : TuiEvent;
 /// 查询完成 — 含 token 统计和终止原因。
 /// TerminalReason 表示运行终止的具体原因（正常完成、轮次上限、预算超支、取消、验证失败等）。
 /// TransactionRolledBack=true 表示文件变更已回滚（验证失败或取消时）。
-/// SessionId: Goal/Team 模式下的 Checkpoint 会话 ID，
-/// 用户可凭此 ID 通过 /resume-goal 或 /resume-team 恢复中断的执行。
-/// 为 null 表示非 Goal/Team 模式或分解失败未产生会话。
+/// SessionId: Goal 模式下的 Checkpoint 会话 ID，
+/// 用户可凭此 ID 通过 /resume 恢复中断的执行。
+/// 为 null 表示非 Goal 模式或分解失败未产生会话。
 /// </summary>
 public sealed record TuiWorkflowRunStarted(
     string PlanId,
@@ -113,21 +113,10 @@ public sealed record TuiTurnStarted(int TurnNumber) : TuiEvent;
 /// <summary>轮次结束 — 含是否执行了工具调用的标记。</summary>
 public sealed record TuiTurnCompleted(int TurnNumber, bool HadToolCalls) : TuiEvent;
 
-/// <summary>TEAM 模式下 agent 之间的协调消息。</summary>
-public sealed record TuiAgentCoordination(string FromName, string? FromColor, string ToName, string? ToColor, string? Content) : TuiEvent;
-
-/// <summary>TEAM 模式下单个 agent 的消息输出。</summary>
+/// <summary>单个 agent 的消息输出（子代理 DAG / Goal 工作流产生）。</summary>
 public sealed record TuiAgentMessage(string AgentName, string? AgentColor, string Content) : TuiEvent;
 
-/// <summary>TEAM 模式下任务分解进度更新。TeamName 为结构化标识（优先消费），
-/// Header 仅供展示——不要从展示文案反解业务数据。</summary>
-public sealed record TuiTeamProgress(
-    string Header,
-    IReadOnlyList<(string Label, string Detail, string Status)> Tasks,
-    string? Footer = null,
-    string? TeamName = null) : TuiEvent;
-
-/// <summary>Plan/Team/Goal 共用的轻量进度投影；主对话只渲染当前用户可理解阶段。</summary>
+/// <summary>Plan/Goal 共用的轻量进度投影；主对话只渲染当前用户可理解阶段。</summary>
 public sealed record TuiModeProgress(
     WorkingMode Mode,
     string Message,
@@ -161,42 +150,15 @@ public sealed record TuiGoalPlan(IReadOnlyList<string> Steps) : TuiEvent;
 
 
 /// <summary>
-/// Team 计划审批通知事件（display-only）。审批决策通过 MAF RequestPort 持久化，
-/// 不再通过 TUI-side TaskCompletionSource 桥接。TUI 仅展示审批卡片。
-/// </summary>
-public sealed record TuiTeamPlanApproval(
-    string TeamName,
-    string Summary,
-    IReadOnlyList<string> Tasks,
-    IReadOnlyList<string> RequiredGates) : TuiEvent;
-
-/// <summary>用户在澄清/审批交互中给出的回答回显，TUI 写入会话记录。</summary>
-public sealed record TuiTeamUserResponse(string TeamName, string Response) : TuiEvent;
-
-/// <summary>TEAM 模式结构化交付报告。仅在 TeamRun 完成质量门禁和事务决策后发出。</summary>
-public sealed record TuiTeamDelivery(OneCode.Core.Coordinator.DeliveryReport Report) : TuiEvent;
-
-/// <summary>
 /// 文件修改事件 — EditTransactionMiddleware 检测到 Write/Edit 后发射。
 /// 携带增量 Diff（added/removed lines），TUI 通过 RenderDiffBlock 渲染。
-/// AgentName 为 TEAM 模式下执行修改的成员 ID，用于 diff 头归属标注；非 Team 路径为 null。
+/// AgentName 为多代理工作流（子代理 DAG / Goal）中执行修改的代理 ID，用于 diff 头归属标注；主 agent 路径为 null。
 /// </summary>
 public sealed record TuiFileChange(
     string FileName,
     IReadOnlyList<string> AddedLines,
     IReadOnlyList<string> RemovedLines,
     string? AgentName = null) : TuiEvent;
-
-/// <summary>TEAM 模式任务级进度快照 — 进度面板数据源（源自 OrchestrationEvent.TeamTaskProgress）。</summary>
-public sealed record TuiTeamTaskProgress(
-    string TaskId,
-    string TaskTitle,
-    string AssigneeRole,
-    string? Status,
-    int CompletedTasks,
-    int TotalTasks,
-    int ActiveTasks = 0,
-    int BlockedTasks = 0) : TuiEvent;
 
 /// <summary>
 /// 下一步提示建议 — turn 完成后由规则引擎生成，TUI 在输入框显示为占位符。
@@ -223,12 +185,6 @@ public sealed record TuiApprovalRequest(
 {
     /// <summary>用于回传用户决策的 TaskCompletionSource。</summary>
     public TaskCompletionSource<OneCode.Core.Permissions.ApprovalDecision> ResponseSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    /// <summary>
-    /// 是否提供「本次对话全部允许」升级档。Main 路径默认 true；
-    /// Team 工作流审批桥置 false——成员策略固定 PermissionMode.Team，桥只做单次批准。
-    /// </summary>
-    public bool AllowSessionEscalation { get; init; } = true;
 }
 
 /// <summary>

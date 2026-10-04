@@ -23,14 +23,6 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderModeBanner_Team_MentionsYamlFixedMode()
-    {
-        var lines = ChatBlockRenderers.RenderModeBanner(WorkingMode.Team);
-        lines[1].FullText.Should().Contain("TEAM");
-        lines[1].FullText.Should().Contain("team.yaml");
-    }
-
-    [Fact]
     public void RenderBuildRunPanel_Planning_HidesInternalStateAndQuestions()
     {
         var state = new TuiBuildRunState(
@@ -273,133 +265,10 @@ public sealed class ChatBlockRenderersTests
         withAgent[0].FullText.Should().Contain("A.cs");
         withAgent.Should().Contain(l => l.FullText.Contains("by executor-1"));
 
-        // 无归属（非 Team 路径）不出现 by 标注。
+        // 无归属（主 agent 路径）不出现 by 标注。
         var withoutAgent = ChatBlockRenderers.RenderDiffBlock(
             "B.cs", new[] { "+ x" }, []);
         withoutAgent.Should().NotContain(l => l.FullText.Contains("by "));
-    }
-
-    [Fact]
-    public void MapOrchestrationEvent_TeamTaskProgress_MapsAllFields()
-    {
-        var mapped = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-            new OrchestrationEvent.TeamTaskProgress(
-                "t1", "实现解析器", "executor", null,
-                CompletedTasks: 2, TotalTasks: 5, ActiveTasks: 1, BlockedTasks: 0));
-        var progress = mapped.Should().BeOfType<TuiTeamTaskProgress>().Subject;
-        progress.TaskId.Should().Be("t1");
-        progress.TaskTitle.Should().Be("实现解析器");
-        progress.AssigneeRole.Should().Be("executor");
-        progress.Status.Should().BeNull();
-        progress.CompletedTasks.Should().Be(2);
-        progress.TotalTasks.Should().Be(5);
-        progress.ActiveTasks.Should().Be(1);
-
-        var done = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-            new OrchestrationEvent.TeamTaskProgress(
-                "t1", "实现解析器", "executor", TeamTaskStatus.Succeeded.ToString(),
-                CompletedTasks: 3, TotalTasks: 5))
-            .Should().BeOfType<TuiTeamTaskProgress>().Subject;
-        done.Status.Should().Be("Succeeded");
-    }
-
-    [Fact]
-    public void MapOrchestrationEvent_TeamClarificationRequest_MapsToStructuredProgress()
-    {
-        // 澄清请求不再映射为 TuiError（会被截断成单行红字），
-        // 而是结构化 TuiTeamProgress：标题 + 编号问题清单，多行完整显示。
-        var mapped = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-            new OrchestrationEvent.TeamClarificationRequest(
-                new TeamRunId("r1"), "impl", "目标",
-                ["第一个里程碑想验证什么核心能力？", "交付物是什么？"]));
-        var progress = mapped.Should().BeOfType<TuiTeamProgress>().Subject;
-        progress.Header.Should().Contain("impl").And.Contain("2 个问题");
-        progress.Tasks.Should().HaveCount(2);
-        progress.Tasks[0].Detail.Should().Contain("里程碑");
-    }
-
-    [Fact]
-    public void MapOrchestrationEvent_AgentEvents_CarryAgentAttribution()
-    {
-        var fileChange = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-                new OrchestrationEvent.FileChanged("executor-1", "A.cs", ["+ a"], []))
-            .Should().BeOfType<TuiFileChange>().Subject;
-        fileChange.AgentName.Should().Be("executor-1");
-
-        var toolStart = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-                new OrchestrationEvent.ToolStart("executor-1", "id1", "read_file"))
-            .Should().BeOfType<TuiToolStart>().Subject;
-        toolStart.AgentName.Should().Be("executor-1");
-
-        var toolDone = TuiEventMapper.MapOrchestrationEventToTuiEvent(
-                new OrchestrationEvent.ToolDone("executor-1", "read_file", IsError: false, ToolId: "id1"))
-            .Should().BeOfType<TuiToolDone>().Subject;
-        toolDone.AgentName.Should().Be("executor-1");
-    }
-
-    [Fact]
-    public void RenderPlanCard_TitleAndStepsRendered()
-    {
-        var steps = new List<PlanStep>
-        {
-            new("Extract TuiInitializer class", Assignee: "executor", Status: PlanStepStatus.Done),
-            new("Inject ITuiInitializer", Assignee: "executor", Status: PlanStepStatus.Current),
-            new("Update unit tests", Assignee: "reviewer", Status: PlanStepStatus.Pending),
-        };
-        var lines = ChatBlockRenderers.RenderPlanCard("重构计划", steps);
-        lines.Should().Contain(l => l.FullText.Contains("重构计划"));
-        lines.Should().Contain(l => l.FullText.Contains("→ executor"));
-        lines.Should().Contain(l => l.FullText.Contains("→ reviewer"));
-    }
-
-    [Fact]
-    public void RenderPlanCard_PendingApproval_ShowsFullPlan()
-    {
-        var lines = ChatBlockRenderers.RenderPlanCard(
-            "最终计划",
-            [new PlanStep("修改渲染链路", "统一处理 Unicode")],
-            viewWidth: 60,
-            markdown: "# 最终计划\n\n## 验证\n\n- 运行测试");
-        var text = string.Join("\n", lines.Select(line => line.FullText));
-
-        text.Should().Contain("完整计划");
-        text.Should().Contain("验证");
-        text.Should().Contain("运行测试");
-        // 审批操作引导由对话流中的 InlineSelector 决策面板承担——侧边栏卡片
-        // 不再渲染"在下方选择…"提示（"下方"指对话流，出现在侧边栏是语义错位）。
-        text.Should().NotContain("在下方选择");
-        lines.Should().OnlyContain(line => TextWidthHelper.GetDisplayWidth(line.FullText) <= 60);
-    }
-
-    // 提交/审批阶段渲染完整计划全文，但不含任何硬编码辅助说明——辅助性文字由
-    // LLM 在对话流中提供，侧边栏只保留纯计划内容（回归守卫：删除后若有人
-    // 重新在卡片里加入操作引导/提示文字，此测试会失败）。
-    [Fact]
-    public void RenderPlanCard_ShowsOnlyPlanContentWithoutAuxiliaryText()
-    {
-        var lines = ChatBlockRenderers.RenderPlanCard(
-            "草稿计划",
-            [new PlanStep("第一步")],
-            viewWidth: 60,
-            markdown: "# 草稿计划\n\n## 思路\n\n- 先扫描再改写");
-        var text = string.Join("\n", lines.Select(line => line.FullText));
-
-        text.Should().Contain("完整计划");
-        text.Should().Contain("先扫描再改写");
-        text.Should().NotContain("计划整理中");
-        text.Should().NotContain("输入修改意见");
-        text.Should().NotContain("批准并执行");
-    }
-
-    [Fact]
-    public void RenderPlanCard_LongStepContent_WrapsToViewWidth()
-    {
-        var lines = ChatBlockRenderers.RenderPlanCard(
-            "Plan",
-            [new PlanStep("Step", string.Join("", Enumerable.Repeat("详细说明", 30)))],
-            viewWidth: 40);
-
-        lines.Should().OnlyContain(line => TextWidthHelper.GetDisplayWidth(line.FullText) <= 40);
     }
 
     [Fact]
@@ -421,7 +290,6 @@ public sealed class ChatBlockRenderersTests
 
     [Theory]
     [InlineData(WorkingMode.Plan, "正在整理计划", ModeProgressState.Running)]
-    [InlineData(WorkingMode.Team, "团队任务已完成", ModeProgressState.Completed)]
     [InlineData(WorkingMode.Goal, "目标未完成", ModeProgressState.Failed)]
     public void RenderModeProgress_RendersOneUserFacingLine(
         WorkingMode mode,

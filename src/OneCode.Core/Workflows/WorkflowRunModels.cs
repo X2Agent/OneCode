@@ -42,7 +42,7 @@ public enum RunTerminalReason
 
 /// <summary>
 /// <see cref="RunTerminalReason"/> 与各模式持久化状态词汇的映射单源。
-/// Goal/Team 的终态 reason 投影由本类承担，替代散落在流式装配层的内联 switch。
+/// Goal 的终态 reason 投影由本类承担，替代散落在流式装配层的内联 switch。
 /// </summary>
 public static class RunTerminalReasonMap
 {
@@ -55,21 +55,6 @@ public static class RunTerminalReasonMap
         OneCode.Core.Goals.GoalRunState.Blocked => RunTerminalReason.Blocked,
         OneCode.Core.Goals.GoalRunState.Failed => RunTerminalReason.ValidationFailed,
         _ => RunTerminalReason.AgentException,
-    };
-
-    /// <summary>
-    /// TeamRunStatus → 终结原因。<paramref name="hasError"/> 对应非终态但携带错误的状态，
-    /// 优先级位于 Failed/RolledBack 之后、兜底 Completed 之前。
-    /// </summary>
-    public static RunTerminalReason FromTeamStatus(OneCode.Core.Coordinator.TeamRunStatus status, bool hasError = false) => status switch
-    {
-        OneCode.Core.Coordinator.TeamRunStatus.Succeeded => RunTerminalReason.Completed,
-        OneCode.Core.Coordinator.TeamRunStatus.Cancelled => RunTerminalReason.Cancelled,
-        OneCode.Core.Coordinator.TeamRunStatus.Blocked => RunTerminalReason.Blocked,
-        OneCode.Core.Coordinator.TeamRunStatus.RolledBack or OneCode.Core.Coordinator.TeamRunStatus.Failed
-            => RunTerminalReason.ValidationFailed,
-        _ when hasError => RunTerminalReason.AgentException,
-        _ => RunTerminalReason.Completed,
     };
 }
 

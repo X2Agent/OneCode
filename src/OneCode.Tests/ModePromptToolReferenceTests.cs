@@ -26,18 +26,18 @@ public sealed class ModePromptToolReferenceTests
     /// <summary>
     /// 主代理模式管线实际加载的提示词（<c>MainModeContextProviderBuilder</c> /
     /// <c>BuildModeAttachmentProvider</c> / <c>PlanModeAttachmentProvider</c> /
-    /// <c>GoalSubGoalExecutor</c> / Team orchestrator 角色的 <c>system/coordinator</c>）。
+    /// <c>GoalSubGoalExecutor</c> / Plan orchestrator 角色的 <c>system/coordinator</c>）。
     /// 只有这组会被主模型逐轮看到，工具名引用必须与注册表一致。
     /// </summary>
     private static readonly string[] ModePrompts =
     [
-        "build", "plan", "team", "goal",
+        "build", "plan", "goal",
         "goal-subgoal", "default", "coordinator",
     ];
 
     /// <summary>
-    /// 派工工具集合——与 <see cref="ToolCapabilitySet.IsAllowed"/> 中 <c>AllowSubAgents</c>
-    /// 门禁的判定集合同源（该处硬编码 <c>toolName is "Agent" or "ParallelAgents"</c>）。
+    /// 派工工具集合——与 <see cref="ToolCapabilitySet.SubAgentDispatchTools"/> 的
+    /// <c>AllowSubAgents</c> 门禁判定集合同源。
     /// </summary>
     private static readonly string[] DelegationTools = ["Agent", "ParallelAgents"];
 

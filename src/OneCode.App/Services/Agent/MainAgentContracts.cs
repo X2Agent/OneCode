@@ -45,7 +45,7 @@ public sealed record MainAgentRunOptions
     public long? MaxBudgetTokens { get; init; }
 
     /// <summary>
-    /// 当前 UI 工作模式（Build/Plan/Team/Goal）。
+    /// 当前 UI 工作模式（Build/Plan/Goal）。
     /// 用于 AgentModeProvider 注入模式特定指令到 LLM。
     /// 默认 Build；调用方应根据 modeController.Mode 传入。
     /// </summary>
@@ -82,7 +82,7 @@ public sealed record MainAgentRunOptions
 
     /// <summary>
     /// 编排事件回调。当设置时，Pipeline 中间件会发射 OrchestrationEvent.ToolStart/ToolDone
-    /// 事件到此 sink，供 GOAL/Team 等编排模式实时推送工具调用进度到 TUI。
+    /// 事件到此 sink，供 GOAL 等编排模式实时推送工具调用进度到 TUI。
     /// 为 null 时不发射事件（Build/Plan 模式默认不设置）。
     /// </summary>
     public Action<OneCode.Core.Coordinator.OrchestrationEvent>? OrchestrationEventSink { get; init; }

@@ -56,13 +56,13 @@ public sealed class AgentContextPipelineTests
     }
 
     [Fact]
-    public void BuildShared_TeamMember_AppliesProfileDefaults()
+    public void BuildShared_Worker_AppliesProfileDefaults()
     {
         var (shared, main) = TestAgentContextProviderAssembly.Create();
         var pipeline = new AgentContextPipeline(shared, main);
 
         var providers = pipeline.BuildShared(
-            PipelineProfile.TeamMember,
+            PipelineProfile.Worker,
             new AgentContextProviderOptions { WorkingDirectory = Path.GetTempPath() });
 
         providers.Should().NotBeEmpty();

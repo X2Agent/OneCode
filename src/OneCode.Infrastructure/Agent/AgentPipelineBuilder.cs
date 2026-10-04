@@ -68,7 +68,7 @@ public sealed record ChatClientAgentBuildOptions
     /// <summary>
     /// MAF chat history contract. Null keeps the framework default
     /// (<c>InMemoryChatHistoryProvider</c>), which is correct for single-turn paths
-    /// (Team members, forked agents, Goal sub-goals).
+    /// (Forked agents, Goal sub-goals).
     /// The interactive Main path supplies <c>TranscriptChatHistoryProvider</c> so multi-turn
     /// history flows through the framework contract instead of host-injected request messages.
     /// </summary>
@@ -139,7 +139,7 @@ public sealed record AgentPipelineOptions
 
     /// <summary>
     /// Optional sink for tool call events. When set, the pipeline emits
-    /// OrchestrationEvent.ToolStart/ToolDone for every tool invocation, enabling TEAM mode
+    /// OrchestrationEvent.ToolStart/ToolDone for every tool invocation, enabling multi-agent
     /// to stream tool activity to the TUI in real time.
     /// </summary>
     public Action<OrchestrationEvent>? OrchestrationEventSink { get; init; }
@@ -158,7 +158,7 @@ public sealed record AgentPipelineOptions
     /// <summary>
     /// ITokenLedger 实例（可选）。当设置时，UsageTrackingRunMiddleware 会在
     /// Agent Run 级统一拦截 LLM 返回的 Usage 并写入 ITokenLedger，确保所有路径
-    /// （流式/非流式/Goal/Team/headless）的 token 用量都被记录，使
+    /// （流式/非流式/Goal/headless）的 token 用量都被记录，使
     /// <c>--max-budget-tokens</c> 预算熔断在所有路径下生效。
     /// </summary>
     public ITokenLedger? TokenLedger { get; init; }
@@ -206,7 +206,7 @@ public static class AgentPipelineBuilder
 
         // The approval boundary is an opt-in marker on each tool, not something the framework infers
         // from a permission decision. Applying it here keeps one policy source
-        // (ToolMetadataRegistry.ApprovalMode) across Main / forked / Team assembly. Tools that providers
+        // (ToolMetadataRegistry.ApprovalMode) across Main / forked assembly. Tools that providers
         // inject afterwards (Harness todo list / working memory) are not in this list yet — they are
         // marked per request by ToolApprovalMarkingContextProvider. Skipped when this path has no
         // approval machinery, because an unresolvable approval request would otherwise block every
@@ -235,7 +235,7 @@ public static class AgentPipelineBuilder
             ChatOptions = chatOptions,
             AIContextProviders = BuildContextProviders(options),
             // Main hands in TranscriptChatHistoryProvider (session transcript bridge);
-            // single-turn paths (Team members / forked / Goal sub-goals) keep the InMemory default.
+            // single-turn paths (forked / Goal sub-goals) keep the InMemory default.
             ChatHistoryProvider = options.ChatHistoryProvider ?? new InMemoryChatHistoryProvider(),
             ToolApprovalAgentOptions = harnessToolApproval,
             DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
@@ -324,7 +324,7 @@ public static class AgentPipelineBuilder
         }
 
         // Agent Run 级中间件（次外层）：Usage 追踪
-        // 统一拦截所有 agent run（流式/非流式/Goal/Team/headless）的 LLM Usage，
+        // 统一拦截所有 agent run（流式/非流式/Goal/headless）的 LLM Usage，
         // 写入 ITokenLedger，确保 --max-budget-tokens 预算熔断在所有路径下生效。
         // 放在 BudgetGuard 内层：BudgetGuard 放行后，本层记录本次 run 的实际 usage；
         // 下一次 run 时 BudgetGuard 读取更新后的累计 token 进行检查。
@@ -342,7 +342,7 @@ public static class AgentPipelineBuilder
         // MAF 最佳实践：PromptTooLong 是模型推理阶段的异常，应在 Run middleware 层拦截，
         // 而非在 Runner 层重建 pipeline。中间件包裹 innerAgent.RunAsync，catch 异常后
         // 截断消息历史 + 重试。注册为 agent-level（对所有 run 生效），
-        // Main/Worker/Team/Goal 路径自动获得恢复能力。
+        // Main/Worker/Goal 路径自动获得恢复能力。
         //
         // 层次顺序：BudgetGuard → UsageTracking → PromptTooLongRecovery → [function calling]
         // PromptTooLongRecovery 在 UsageTracking 内层：retry 时只有最终成功的 response
