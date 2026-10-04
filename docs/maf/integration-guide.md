@@ -653,7 +653,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 |------|-------------|-------------|------|
 | Agent 构造 | `HarnessAgent` + Options | [`AgentPipelineBuilder.cs`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 单一装配汇合处，profile 驱动 | 符合 |
 | 方法命名 | — | `BuildHarnessAgent` 产出 `HarnessAgent`，命名与产物一致 | 符合 |
-| Agent 装配汇合 | 单一装配点最省心 | [`AgentPipelineBuilder.BuildHarnessAgent`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 覆盖 Main / Forked / Team 成员三条路径；AutoDream 后台服务直接 `new HarnessAgent(...)` + [`OneCodeToolMiddleware.Apply`](../../src/OneCode.Infrastructure/Agent/OneCodeToolMiddleware.cs) | **偏差（有意）**：AutoDream 无交互会话、无审批 broker、无编辑事务，走完整装配只会挂上无意义的门；它复用的是**共享安全门**（安全不变量 + 结果预算）而非装配函数，故两条路径的安全门不会漂移 |
+| Agent 装配汇合 | 单一装配点最省心 | [`AgentPipelineBuilder.BuildHarnessAgent`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 覆盖 Main / Forked 两条路径；AutoDream 后台服务直接 `new HarnessAgent(...)` + [`OneCodeToolMiddleware.Apply`](../../src/OneCode.Infrastructure/Agent/OneCodeToolMiddleware.cs) | **偏差（有意）**：AutoDream 无交互会话、无审批 broker、无编辑事务，走完整装配只会挂上无意义的门；它复用的是**共享安全门**（安全不变量 + 结果预算）而非装配函数，故两条路径的安全门不会漂移 |
 | 中间件顺序 | 第一个 `Use` 最外层 | 源码顺序即装配顺序，注释已写明 | 符合 |
 | 函数调用中间件 | 必须挂在有 FICC 的 agent 上 | 全部挂在 `HarnessAgent` 上 | 符合 |
 | Harness opt-out | `DisableXxx` + 追加自己的 provider | [`OneCodeHarnessDefaults.cs`](../../src/OneCode.Infrastructure/Agent/OneCodeHarnessDefaults.cs) 设 3 个（AgentMode / AgentSkills / WebSearch），Todo / FileMemory 按 profile | 符合 |
@@ -678,7 +678,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 | `AsAIFunction` / `AsIChatClient` | 子 Agent 暴露成工具 / 反向适配 | 未使用（子 Agent 走产品 `IAgentRunner` 确定性编排） | 符合（有意为之） |
 | BackgroundAgents | `HarnessAgentOptions.BackgroundAgents` / `BackgroundAgentsProvider` | 未采用——不挂载任何路径，也不用作 `AgentTool`/`ParallelAgentsTool` 底层实现（决策与四条硬证据见 [子代理派工边界](../adr/0011-background-agents-delegation-boundary.md)） | 符合（有意为之；[MAF 集成边界](../adr/0007-maf-integration-boundaries.md) 禁令不变） |
 | 决策模型（Jev 等） | `IDecisionClient` 决策抽象（MEAI 提案，上游未受理） | 未接入——不引用 MAF `[Experimental(MAAI001)]` 决策类型，也不预依赖未受理的 MEAI API；现有辅助判断（工具短名单、GOAL 子目标判定、记忆相关性）统一复用同一个 `IChatClient` | 符合（有意为之；抽象归属、接入点白名单与重评触发条件见[决策模型接入](../adr/0012-decision-model-integration-jev.md)） |
-| 结构化输出 | `RunAsync<T>` / `ResponseFormat` / `GetResponseAsync<T>` | [`StructuredChatCall.cs`](../../src/OneCode.App/Services/StructuredChatCall.cs) 三段式（schema 请求 → 同响应文本降级 → 无格式重试），GoalDecomposer / ClarificationQuestionGenerator 已接入；AutoDream 工具循环 Agent 有意保持 prompt-only | 符合（见 §2.4 与[结构化输出文本降级策略](../adr/0008-structured-output-text-fallback.md)） |
+| 结构化输出 | `RunAsync<T>` / `ResponseFormat` / `GetResponseAsync<T>` | [`StructuredChatCall.cs`](../../src/OneCode.App/Services/StructuredChatCall.cs) 三段式（schema 请求 → 同响应文本降级 → 无格式重试），GoalDecomposer 已接入；AutoDream 工具循环 Agent 有意保持 prompt-only | 符合（见 §2.4 与[结构化输出文本降级策略](../adr/0008-structured-output-text-fallback.md)） |
 | 循环上限 | `LoopAgentOptions.MaxIterations` 限制 agent **调用次数** | GOAL 子目标 1:1 映射 `GoalLoopDefaults.MaxAttemptsPerSubGoal`；`/loop` 1:1 映射 `loop.maxIterations`。上限强停发生在评估**之前**，因此 N 次调用 = 最多 N-1 次完整“评估→重试” | 符合（语义已在校验层与文档中固化，见[代理循环边界](../adr/0010-agent-loop-boundaries.md)） |
 | Loop 装配层序 | 用 `HarnessAgentOptions.LoopEvaluators` 时 `LoopAgent` 由 Harness 挂在**最外层**（`HarnessAgent.cs` 先注册该装饰器 → 位于 Harness 自身 `UseToolApproval` + `UseOpenTelemetry` **之上**，即每轮独立审批、独立 trace） | 不设 `LoopEvaluators`（[`OneCodeHarnessDefaultsTests`](../../src/OneCode.Tests/OneCodeHarnessDefaultsTests.cs) 守卫为 null）；`/loop` 与 GOAL 子目标在 [`AgentPipelineBuilder.BuildHarnessAgent()`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 的 run middleware **之外**自建 `LoopAgent`，层级为 `LoopAgent → BudgetGuard / UsageTracking / … → HarnessAgent → FICC` | **偏差（有意）**：预算按**轮**校验，比 MAF 原生路径更严；代价是 `LoopAgent` 落在 Harness 遥测覆盖之外，且内层 agent 以 `SuppressToolApproval` 装配（无审批中间件、无原生审批标记），自主性由 [`LoopCommand`](../../src/OneCode.App/Commands/LoopCommand.cs) 的自主权限模式门 + `PermissionChecker` 保证 |
 
@@ -707,7 +707,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 
 1. **核对实际版本**：读 `project.assets.json`，不要用旧 artifacts 或本地 NuGet 缓存代替。
 2. **审批协议**【版本敏感】：重跑「暂停 → 恢复 → 审批响应绑定」与「只回显响应、不回放请求」两组用例
-   （`TeamToolApprovalBridgeTests`）。1.22（`#8432`）把「只承认框架自身记录过的请求」作为授权依据（1.21.0
+   （审批协议行为测试）。1.22（`#8432`）把「只承认框架自身记录过的请求」作为授权依据（1.21.0
    仍允许回放历史请求），并**同时**改写了 `ToolApprovalAgent` 与 `ApprovalResponseBindingChatClient` 两侧的
    "已浮出"登记语义（整批登记 → 只登记真正交给调用方者；上限轮返回前补登记），用例必须覆盖上限轮与排队出队
    两条路径，不能只测 binding 一侧。
@@ -745,4 +745,3 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 - 审批与权限的职责划分：[Permission / ToolApproval / Filter](../adr/0001-permission-vs-toolapproval-vs-filter.md)
 - 压缩阈值取值：[压缩阈值](../compact-thresholds.md)
 - 技能系统：[技能系统](../skills.md)
-- 团队编排模式：[Team 编排模式选型](../team-modes.md)

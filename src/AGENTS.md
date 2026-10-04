@@ -897,7 +897,7 @@ public PermissionCheckResult Check(...)
 - 组合根 `OneCodeApp.Create` 保留**显式有序**的 `AddXxx()` 调用列表；领域内部不得假设其他领域的注册时机——组合根的调用顺序即注册顺序。
 - **顺序敏感点（变更须人工审查并重新生成快照基线）**：
   1. HostedService 启动顺序 = `AddHostedService` 注册顺序（由 `ServiceCollectionSnapshotTests.HostedServices_ResolveInRegistrationOrder` 锁定）；
-  2. `IEnumerable<T>` 注入顺序（`AddToolInstance` 注册流、`IHookExecutor`、`IWorkflowQualityGateValidator`、`INotificationProvider`、`IDynamicCommandSource`）。
+  2. `IEnumerable<T>` 注入顺序（`AddToolInstance` 注册流、`IHookExecutor`、`INotificationProvider`、`IDynamicCommandSource`）。
 - 其余单实现/惰性工厂注册与位置无关，但跨领域搬移仍视为 DI 面变更。
 
 **快照护栏**：`src/OneCode.Tests/ServiceCollectionSnapshotTests.cs` 将完整注册面（类型+生命周期+实现+顺序）与 `ServiceRegistrationSnapshot.approved.txt` 基线比对。任何 DI 注册变更导致快照测试失败时：审查 diff 是否符合预期 → 设置环境变量 `ONECODE_UPDATE_SNAPSHOT=1` 运行该测试重新生成基线 → 人工确认 diff 后提交。

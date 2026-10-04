@@ -72,7 +72,7 @@ public sealed class CustomAgentTests : IDisposable
     [Fact]
     public void Parse_UnknownFrontmatterField_ThrowsInsteadOfIgnoring()
     {
-        // team.yaml 的教训：未知字段必须显式报错，不静默忽略
+        // 历史教训：配置加载静默忽略未知字段会让错误长期潜伏，必须显式报错
         var act = () => AgentDefinitionParser.Parse(
             "---\nname: a\ndescription: d\nmodel: gpt-x\n---\nBody.", @"C:\x\a.md");
 

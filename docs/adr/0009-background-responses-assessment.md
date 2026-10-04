@@ -128,7 +128,7 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
 | 客户端 | `ChatClientFactory.CreateOpenAiClient` 分支：`GetResponsesClient(model).AsIChatClient()`；`ChatClientServiceCollectionExtensions` 读 `Effective` 传入 |
 | 令牌修复 | `RetryOnOverloadChatClient.CloneUpdate` 补 `ContinuationToken`（注意：实现所在文件是 `RetryOnOverloadMiddleware.cs`，但文件中没有该同名类型）；`MaxOutputTokensDecorator` 对未完成响应（token 非 null）跳过 Length 恢复；`OpenAiResponseSanitizer.TryExtractUpstreamError`（2026-09-11 起已能识别通用 `{"error": {…}}` 错误体形态，Responses 错误体同形）回归验证即可，不再新增分类逻辑 |
 | 编排 | 新装饰器 `BackgroundResponseChatClient`：非流式轮询到完成（空 messages + token、指数退避、MaxBackgroundWait 默认 30min）；流式传输异常时以最后非 null token 自动重订阅（有上限），消费者看到连续流；MEAI001 pragma |
-| 打通 | `MainAgentRunOptions.AllowBackgroundResponses`（null=按能力默认）→ `BuildChatOptions`；`BuildAsAIAgentAsync`/Forked/Team 三条装配路径经 `AgentPipelineBuilder.BuildChatClientAgent` 自动流透 |
+| 打通 | `MainAgentRunOptions.AllowBackgroundResponses`（null=按能力默认）→ `BuildChatOptions`；`BuildAsAIAgentAsync`/Forked 两条装配路径经 `AgentPipelineBuilder.BuildChatClientAgent` 自动流透 |
 | 持久化 | `BackgroundRunStateStore`（`~/{userConfigDir}/background-runs/{conversationId}.json`，原子写 + .bak，仿 `JsonTaskStore`）；`/resume`（docs/commands.md）扩展为可续后台 run；TUI 复用 `TuiNotice` 提示 |
 
 风险与对策：Responses 语义漂移（reasoning items、服务端 store、tool items）冲击 transcript/compaction/ReasoningPassback → opt-in 默认关 + e2e 矩阵；token 体积随流增长 → 体积指标与阈值告警；approval 流与后台响应交互（ToolApprovalAgent break 流后服务端响应成孤儿）→ 行为测试验证，必要时交互 run 禁用；Harness 降级警告噪音 → ADR/日志说明；MEAI001 版本漂移 → 集中实验面 + 复查清单；第三方兼容端点无 Responses API → 非官方端点开启时启动 Warning。

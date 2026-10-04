@@ -30,7 +30,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 
 > **会话工作记忆**不属本模块：它由原生 MAF `FileMemoryProvider` 承载，落在 `{cwd}/.onecode/agent-file-memory/`，是 AutoDream 整合的首选数据源，归属见 [ADR 0007](./adr/0007-maf-integration-boundaries.md)。
 >
-> Team 模式的多 Agent 共享记忆不设独立子系统——Team 成员经 `MemorySearchProviderFactory`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
+> 子代理派工（Agent/ParallelAgents）不设独立记忆子系统——子代理经 `MemorySearchProviderFactory`（`search_memories`）共享检索同一份 project 级 `MEMORY.md`，决策见 [记忆模块架构设计 §8](./adr/0004-memory-module-design.md#8-决策不实现独立团队记忆子系统)。
 
 ---
 
@@ -62,7 +62,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 | **System Prompt 注入** | `PromptConfigBuilder` 调用 `MemoryService.LoadMemoryPromptAsync` | 摘要索引常驻 |
 | **工具按需检索** | `MemorySearchProviderFactory` 暴露 `search_memories` 工具（MAF `TextSearchProvider`） | LLM 主动检索完整记忆内容 |
 
-> Team 成员与 Explore/Plan fork 子代理经 `PromptComposer.RenderRoleBody` 在 role prompt 末尾追加一行 `search_memories` 引导，无需架构变更。
+> Explore/Plan fork 子代理经 `PromptComposer.RenderRoleBody` 在 role prompt 末尾追加一行 `search_memories` 引导，无需架构变更。
 
 ---
 

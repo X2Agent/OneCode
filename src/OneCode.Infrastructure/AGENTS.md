@@ -16,7 +16,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Config/` | 配置解析与持久化 |
 | `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
 | `Agent/` | **MAF 管道装配层**：Agent 构建与中间件栈（`AgentPipelineBuilder`）、Harness 产品化默认值（`OneCodeHarnessDefaults` / `PipelineProfile`）、上下文压缩策略（`CompactionPipelineBuilder` / `GuardedSummarizationCompactionStrategy`）、工具审批标记与自动批准规则（`ToolApprovalMarker` 装配期标记 + `ToolApprovalMarkingContextProvider` 请求期标记 provider + `HarnessProviderTools` provider 工具名单/元数据/按名放行规则 + `AutoApprovalRulesFactory`）、Run 级中间件（`RunMiddleware/`：BudgetGuard / PromptTooLongRecovery / UsageTracking）、会话状态扩展（`SessionStateExtensions`）、Hyperlight 代码执行服务（`HyperlightCodeActService`）、SSH shell（`SshShellExecutor`） |
-| `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底），供 Build / Goals / Workflows / Teams 的 run store 复用 |
+| `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底），供 Build / Goals / Workflows 的 run store 复用 |
 | `Remote/` | 远程 Agent 通信 |
 
 > Memory 记忆持久化契约在 `OneCode.Core/Memory/`（`IMemoryEntryStore` / `MemoryEntry` / `MemoryScope`），

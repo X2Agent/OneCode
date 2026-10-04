@@ -47,7 +47,7 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 - `using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 之外 23 文件（装配层 9 + 引擎层 14），是 P0 解耦的工作量底盘；
 - 有利面：`Terminal.Gui` 依赖封闭在 `Tui/`；`IConversationRunner`/QueryEvent 流 public；会话事件溯源**全局**存储
   （`FileSessionEventStore` 挂 `PathsHelper.UserHome`，跨项目 attach 天然可行）；Automation 已在无 TUI 上下文运行；
-- 已有地基：`SessionContextBar`（每会话项目/分支/用量身份行）、`TeamSidebar`、`/resume`、`ApprovalBroker`、
+- 已有地基：`SessionContextBar`（每会话项目/分支/用量身份行）、Plan 侧边栏、`/resume`、`ApprovalBroker`、
   `Process.Start + UseShellExecute` 先例（`KeybindingsCommand`）；
 - 真实缺口：`CronSchedulerService` 挂在主进程，TUI 一关定时任务即停（P2 守护进程的立项理由）。
 

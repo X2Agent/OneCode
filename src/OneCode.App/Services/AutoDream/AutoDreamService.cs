@@ -297,7 +297,7 @@ public sealed class AutoDreamService : BackgroundService
     ///
     /// <para><b>为何不设 ResponseFormat（结构化输出）</b>：本 Agent 带 Read/Glob/Grep 工具循环与
     /// 会话，schema 约束会作用于循环内每条助手消息——模型无法在工具调用之间自由叙述，与现有行为
-    /// 有实质差异（GoalDecomposer / ClarificationQuestionGenerator 的直连调用没有这个问题，已采用
+    /// 有实质差异（GoalDecomposer 等直连调用的场景没有这个问题，已采用
     /// "结构化请求 + 文本降级"策略）。且输出侧已有 <see cref="AutoDreamOutputSanitizer"/>
     /// 消毒、50 条配额与"记 Warning 返回 0"的完整降级链，schema 增益有限。故维持 prompt-only
     ///（整合提示词内嵌 JSON 数组契约）+ ExtractJsonArray 容错提取。</para>

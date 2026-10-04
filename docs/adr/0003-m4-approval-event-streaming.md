@@ -1,6 +1,6 @@
 # M4 完全事件驱动审批
 
-**状态**: Accepted
+**状态**: Accepted（2026-10-05 更新：本文「Team 路径」审批桥与 `OrchestrationEvent.ApprovalRequest` 载体已随 Team 模式砍除移除；Main 路径事件驱动审批决策不变）
 **日期**: 2026-07-10
 **关联**: 生产级重构计划 §9.2 M4（纯 MAF 流式审批 UX 原型）
 **修订**: R2 — 从"双路径并行原型"彻底重构为"完全事件驱动"
@@ -80,8 +80,8 @@ Team 成员保留 MAF 的 `ToolApprovalAgent`（`EnableToolApproval` 为 true）
 | `MainAgentRunner.Approval.cs` | `HandleToolApprovalAsync` 改为纯事件驱动（推送事件 + await ResponseSource） |
 | `MainAgentRunner.cs` | `BuildChatOptions` 不再包装危险工具；该职责集中于 `AgentPipelineBuilder` 的 `ToolApprovalMarker` |
 | `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射 + Team 路径 `OrchestrationEvent.ApprovalRequest` → `TuiApprovalRequest` 映射，均桥接 ResponseSource |
-| `TeamEventMapper.cs`（已删除） | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest`；该职责现由 `ApprovalBroker.ForTeam` 承担 |
-| `TeamAgentFactory.cs` / `TeamOrchestrationService.cs` | 移除 `IApprovalUi` 构造参数 |
+| `TeamEventMapper.cs`（已删除） | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest`；该职责当时由 `ApprovalBroker.ForTeam` 承担 |
+| `TeamAgentFactory.cs` / `TeamOrchestrationService.cs`（两者均已删除） | 移除 `IApprovalUi` 构造参数 |
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 headless 工作模式实现无审批 UI 的只读策略（`workingMode: WorkingMode.Goal`） |
 | `QueryStreamEngine.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数；`ApprovalRequestEvent` 透传后移至 `StreamingSession.Digest`（`QueryStreamEngine` 消费） |

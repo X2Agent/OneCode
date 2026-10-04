@@ -1039,7 +1039,7 @@ services.AddHttpClient<SlackNotificationProvider>();
 
 4. **确认拦截点已在产品路径接线**：`input` / `output` 只在 `QueryStreamEngine` 主链路生效；
    `pre_tool_call` / `post_tool_call` 只对走 `AgentPipelineBuilder` 的工具型 Agent 生效
-   （Main / Worker / Team / Goal 子目标）。`GoalDecomposer` 等直连模型路径不构造 agent 生命周期，
+   （Main / Worker / Goal 子目标）。`GoalDecomposer` 等直连模型路径不构造 agent 生命周期，
    **不触发**任何拦截点。
 
 ### 12.2 Hook 执行失败

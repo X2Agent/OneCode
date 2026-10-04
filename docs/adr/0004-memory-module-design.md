@@ -1,6 +1,6 @@
 # 记忆模块架构设计
 
-**状态**: Accepted
+**状态**: Accepted（2026-10-05 更新：Team 模式已砍除，§8 决策的事实前提（多成员团队）不复存在；Team 共享记忆由 project 级 MEMORY.md 覆盖的结论对子代理派工（Agent/ParallelAgents）依然成立）
 **日期**: 2026-07-17
 **关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)、
 [MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)
@@ -301,8 +301,8 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 > 注入顺序 = `AgentCapability` 枚举声明顺序，保证同一 profile 的 provider 顺序恒定。
 > 原 `TaskContextProvider` 已删除：普通清单由 Harness `todos_*` 承担，宿主执行记录仍归 `ITaskService`。
 > 各 profile 的能力差异见 `PipelineProfileBehavior.For`（以「全集减去若干能力」形式表达）。
-> Team 子 Agent 的角色指令不再由专属 Provider 注入：`TeamAgentFactory` 将角色正文交给
-> `ChatOptions.Instructions`，由 MAF 与 Harness 通用指令合成，产品侧不再持有重复的注入职责。
+> 子 Agent 的角色指令不由专属 Provider 注入：角色正文交给
+> `ChatOptions.Instructions`，由 MAF 与 Harness 通用指令合成，产品侧不持有重复的注入职责。
 > MAF `AIContextProvider` 实例不注册到 DI——它们在 Agent Runner 构建管线时按需创建。
 
 ### 11. 记忆治理与演进方向

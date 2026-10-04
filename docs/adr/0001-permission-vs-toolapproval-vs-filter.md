@@ -1,6 +1,6 @@
 # Permission Middleware vs ToolApproval vs FunctionInvocationFilter 职责边界
 
-**状态**: Accepted
+**状态**: Accepted（2026-10-05 更新：Team 工作流审批桥已随 Team 模式砍除移除，见 docs/plan/ 提交历史；本文其余决策不变）
 **日期**: 2026-07-09
 **关联**: 生产级重构计划 §3.0（PERM 核实结论）、AGENTS.md「不许重复造轮子」（§6，库选型表）
 
@@ -44,7 +44,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
   → [ResultBudget / ResultUnwrap（工具结果预算与解包）]
   → ToolApproval（AutoApprovalRules / ApprovalBroker 事件桥）
       ├─ 规则匹配 → 自动放行
-      └─ 不匹配   → ToolApprovalRequestContent → ApprovalBroker 事件桥（Main 流式拆分 / Team 工作流审批桥）→ 续跑
+      └─ 不匹配   → ToolApprovalRequestContent → ApprovalBroker 事件桥（Main 流式拆分）→ 续跑
   → 实际工具执行
 （图外：Agent Run 级最外层还有 BudgetGuard / UsageTracking / PromptTooLongRecovery 三个 .Use() 观测中间件，
  见「当前实现形态」。）
@@ -77,7 +77,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 1. `IsToolAllowed` 白名单过滤（超限只失败当前调用，保留批次完整性）
 2. 权限检查（`PermissionChecker.CheckAsync`，Allow/Deny/Ask 三路决策）
 3. 工具调用计数 + `MaxToolCalls` 上限（`ExecuteWithLimitAsync` 包裹在权限通过之后，被拒绝的调用不计入）
-4. 审批路由：Ask → MAF 审批协议（单通道，标记工具产生审批请求；Main 由流式审批拆分、Team 由工作流审批桥呈现；无标记 fail-closed 拒绝）
+4. 审批路由：Ask → MAF 审批协议（单通道，标记工具产生审批请求；Main 由流式审批拆分呈现；无标记 fail-closed 拒绝）
 
 **审批标记有两个施加点，缺一会让 Ask 静默降级为「照常执行」**（标记类型：MAF 的 `ApprovalRequiredAIFunction`；判定统一走 `ToolMetadataRegistry.RequiresApprovalBoundary`，即 `ApprovalMode != Never`）：
 
@@ -95,7 +95,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 - **确定性单一源**：AutoApprovalRulesFactory 复用与 PermissionAndLimitMiddleware 同一 `IPermissionChecker`（`CreateFromChecker`）；无 checker 的调用方才回退 `PermissionProfiles.Check`（fallback，非第二权威）；仅当结果为 Allow 时自动批准。
 - **不含 YOLO 双跑**：YOLO 只有一份实现（即 checker 本身，含 Auto 模式规则）；审批层 AutoApprovalRules 与 PermissionAndLimitMiddleware 共用同一 checker，不存在平行旗标。
 - **产品定义**：MAF 自动批集合 = 确定性 Permission Allow 集合（含 Default/Plan 下只读工具）+ 按名放行的 provider 注入工具（`todos_*` / `file_memory_*`，见上文「第二类自动批准例外」）。
-- **仍保留**：Permission 为唯一 Allow/Deny 安全门；Ask 一律进入 MAF 审批协议（Main 流式拆分 / Team 工作流审批桥）；EnableVerification 仍在 PermissionProfile。
+- **仍保留**：Permission 为唯一 Allow/Deny 安全门；Ask 一律进入 MAF 审批协议（Main 流式拆分）；EnableVerification 仍在 PermissionProfile。
 
 **编辑生命周期只有一道 `EditGuardMiddleware`**（`OneCode.Infrastructure/Middleware/EditGuardMiddleware.cs`），替代了早期的 `ContractMiddleware` + `VerificationMiddleware` 两道结构；其内部分两段：
 

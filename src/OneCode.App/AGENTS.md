@@ -17,7 +17,7 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
 | `Session/` | 会话上下文和生命周期管理 |
-| `prompts/` | Prompt 模板文件（`system/*.prompt` + `teams/*.yaml`） |
+| `prompts/` | Prompt 模板文件（`system/*.prompt`） |
 
 ---
 
@@ -275,11 +275,11 @@ var harness = await promptManager.GetPromptAsync(HarnessPromptName, ct).Configur
 |------|------|----------|----------|
 | **Harness** | `system/harness.prompt` | 敏感文件、注入防御、并行工具、代码库分析顺序 | 所有 Agent system 的公共前缀 |
 | **Default** | `system/default.prompt` | 产品身份、CLI 任务/工具说明、`{{…}}` 运行时占位符 | 主会话：`harness + default`（`PromptConfigBuilder`） |
-| **Mode** | `system/build\|plan\|team\|goal.prompt` | WorkingMode 工作流 overlay | 主会话 ContextProvider（Turn 1+），不替代 harness |
-| **Role** | `system/{role}.prompt`（含 `planner`） | Team 成员身份与汇报格式；可含角色特有增量（如 coordinator 对 worker 结果的防御） | Team：`harness + role`（`TeamAgentFactory`） |
+| **Mode** | `system/build\|plan\|goal.prompt` | WorkingMode 工作流 overlay | 主会话 ContextProvider（Turn 1+），不替代 harness |
+| **Role** | `system/{role}.prompt`（含 `planner`） | 角色身份与汇报格式；可含角色特有增量（如 coordinator 对 worker 结果的防御） | Fork：`harness + role`（`ForkedAgentRunner`，自定义代理 `.onecode/agents/*.md` 正文同理） |
 | **Fork overlay** | `PipelineProfileBehavior.GetRoleInstruction` | Explore/Plan 子代理短角色句（勿误用 `system/plan.prompt` 主会话工作流） | Fork：`harness + overlay`（`ForkedAgentRunner`） |
 
-覆盖 `system/harness.prompt`（项目/用户层）会同时影响主会话、Team 工人与 Explore/Plan fork。角色文件只写差异化约束。
+覆盖 `system/harness.prompt`（项目/用户层）会同时影响主会话与全部子代理。角色文件只写差异化约束。
 
 ---
 

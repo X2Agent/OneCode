@@ -53,8 +53,6 @@
 4. **`src/OneCode.App/Services/Agent/ForkedAgentRunner.cs:119-121`**
    - `BuildForWorkerAsync(...)` 解构补第三项（值未使用处直接解构忽略）。
 
-5. **`src/OneCode.App/Services/Coordinator/TeamAgentFactory.cs:82-86`**
-   - 同样解构补第三项并注入；第 121 行 `MaxOutputTokens = 4096` 改为走共享收敛规则。
 
 6. **`src/OneCode.App/Services/Agent/MainAgentRunner.cs:346`**
    - `MaxOutputTokens = options.MaxOutputTokens ?? 4096` → 委托
@@ -260,7 +258,7 @@ dotnet test    src/OneCode.slnx     # 全绿
 
 **不需要**重新生成 `src/OneCode.Tests/ServiceRegistrationSnapshot.approved.txt`：
 `MaxOutputTokensDecorator` 与 `ProviderAwareDecorator` 都不是 DI 注册项（分别在
-`MainAgentRunner.Pipeline.cs:36` / `TeamAgentFactory.cs:86` 与 `ChatClientFactory.CreateWithDecorators` 内手工组装），
+`MainAgentRunner.Pipeline.cs:36` 与 `ChatClientFactory.CreateWithDecorators` 内手工组装），
 A/B/C 都不新增任何 DI 注册。
 
 ## 实施顺序与排期

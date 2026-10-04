@@ -48,7 +48,7 @@
       Workflows.Declarative 评估结论：
       该包要求 ResponseAgentProvider（Azure AI Foundry），与本地 IChatClient 架构不兼容。
       未来如需声明式 YAML 工作流，需实现自定义 ResponseAgentProvider 适配器。
-      Microsoft.Agents.AI.Workflows 仍被 TeamOrchestrationService 使用（GroupChat/Magentic）。
+      Microsoft.Agents.AI.Workflows 仍被 AgentTaskWorkflow（ParallelAgents DAG 底座）使用。
     -->
     <!-- Mcp：MCP 工具 → AIFunction 桥接 + 2026-07-28 Tasks extension（long-running 工具）透明处理 -->
     <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.22.0-alpha.260918.1" />

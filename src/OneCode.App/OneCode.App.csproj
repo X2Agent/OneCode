@@ -44,12 +44,4 @@
     <EmbeddedResource Include="prompts\**\*.prompt" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- 团队模板 YAML：嵌入式资源（供 RegisterBuiltinTeamsAsync 加载） -->
-    <Content Include="prompts\teams\**\*.yaml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <EmbeddedResource Include="prompts\teams\**\*.yaml" />
-  </ItemGroup>
-
 </Project>

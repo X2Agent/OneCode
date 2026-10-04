@@ -13,7 +13,7 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 
 | 工具 | 作用 | 关键参数 | 注册形态 |
 |---|---|---|---|
-| `Agent` | 起一个子代理跑委派任务，返回其最终输出 | `prompt`（自包含）、`agent`（`general-purpose`/`Explore`/`Plan`）、`description`、`runInBackground` | `ToolRisk.Safe`、`Contextual`（keywords: agent/sub-agent/delegate）、`PlanAllowed` |
+| `Agent` | 起一个子代理跑委派任务，返回其最终输出 | `prompt`（自包含）、`agent`（`general-purpose`/`Explore`/`Plan` 或自定义名，见 §5）、`description`、`runInBackground` | `ToolRisk.Safe`、`Contextual`（keywords: agent/sub-agent/delegate）、`PlanAllowed` |
 | `ParallelAgents` | 把一组任务编译成 DAG 并行/带依赖执行 | `tasks[]`（`id`/`prompt`/`agent`/`description`/`dependsOn`/`executionAccess`）、`injectUpstreamResults`（默认 true） | `ToolRisk.Safe`、`Contextual`、`PlanAllowed` |
 | `Task` | 宿主后台任务的检查/控制（**不是派工工具**） | `action`（`get`/`list`/`stop`/`output`）、`taskId`、`maxLines` | `ToolRisk.Safe`、`Contextual`、`PlanAllowed` |
 
@@ -38,16 +38,16 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 `PipelineProfileBehavior.FromAgentType` 把工具参数字符串映射到 profile：`Explore`→Explore、
 `Plan`→Plan、其余→Worker。
 
-| 能力 | Full（主） | Worker | TeamMember | Explore / Plan |
-|---|---|---|---|---|
-| 状态机 / 三振恢复 | ✅ | ❌ | ❌ | ❌ |
-| 行为契约（改后必验） | ✅ | ✅ | ✅ | ❌ |
-| 工具审批 | ✅ | ✅（继承父权限模式） | ✅（固定 `PermissionMode.Team`，经 Team 工作流桥接） | ✅（但工具全只读，不会触发） |
-| 只读工具白名单 | ❌ | ❌ | ❌ | ✅ |
-| LSP 诊断 / Shell 环境 | ✅ | ❌ | ✅ | ❌ |
-| 工作记忆（FileMemory） | ✅ | ❌ | ❌ | ❌ |
-| Todo（自持清单） | ✅ | ✅ | ✅ | ❌ |
-| CodeAct 沙箱 / 编辑后验证 | ✅ | ✅ | ❌ | ❌ |
+| 能力 | Full（主） | Worker | Explore / Plan |
+|---|---|---|---|
+| 状态机 / 三振恢复 | ✅ | ❌ | ❌ |
+| 行为契约（改后必验） | ✅ | ✅ | ❌ |
+| 工具审批 | ✅ | ✅（继承父权限模式） | ✅（但工具全只读，不会触发） |
+| 只读工具白名单 | ❌ | ❌ | ✅ |
+| LSP 诊断 / Shell 环境 | ✅ | ❌ | ❌ |
+| 工作记忆（FileMemory） | ✅ | ❌ | ❌ |
+| Todo（自持清单） | ✅ | ✅ | ❌ |
+| CodeAct 沙箱 / 编辑后验证 | ✅ | ✅ | ❌ |
 
 只读白名单（Explore/Plan）：`Read`、`Grep`、`Glob`、`LS`、`WebFetch`、`WebSearch`、`ToolSearch`、
 `FindReferences`、`SymbolSearch`——全为 `ToolRisk.ReadOnly`，按 `ToolPolicyDefaults.ForRisk`
@@ -100,15 +100,25 @@ AgentTool.RunAgentAsync
 
 ---
 
-## 5. Team / Goal 的派工（同一套原件的不同编排）
+## 5. 自定义子代理（.onecode/agents/*.md）
 
-- **Team**：成员经 `TeamAgentFactory` 以 TeamMember profile 构建；`AllowedTools` =
-  成员声明 ∩ 任务要求（`ReadOnly` 工具策略时取只读白名单）；编排由 MAF Workflows 承担
-  （GroupChat 轮询 / Magentic orchestrator 委派 / ParallelDag 单成员 Sequential）；
-  成员审批请求作为工作流外部请求经 `TeamWorkflowRunner` 桥接到产品审批事件。
-- **Goal**：子目标经 `GoalSubGoalExecutor` 构造 `MainAgentRunOptions`——
-  `system/goal-subgoal` 提示词、按 `RequiredTools` 白名单裁剪工具（**fail-closed**：无匹配即抛错，
-  不回退全量）、共享事务、`MaxTurnsPerSubGoal`；进度经 `GoalContextProvider` 注入后续子目标上下文。
+固定 specialist 角色不想每次重新描述时，用定义文件把代理固化下来：
+
+- **定义文件**：`{cwd}/.onecode/agents/*.md`（项目级）与 `~/.onecode/agents/*.md`（用户级），
+  项目级覆盖同名用户级（与 skills 的用户级→项目级覆盖语义一致）。
+- **frontmatter 字段**：`name`（缺省取文件名）/ `description`（必填，注入 Agent 工具 description 保证可发现性）/
+  `allowed_tools`（可选，与父级能力取交集——只减不增）；正文 = instructions。
+- **解析严格**：未知 frontmatter 字段、缺失 description、坏 YAML 显式报错（带文件路径 + 行号），
+  不静默忽略；解析失败的定义文件会让派工入口直接报错，修复保存后自动恢复。
+- **加载**：启动扫描 + 文件 mtime 签名变更惰性重扫（无 `FileSystemWatcher` 常驻监听）。
+- **派工**：`Agent` / `ParallelAgents` 的 `agent` 参数接受自定义名；自定义代理 instructions 接管角色 overlay
+  （harness 片段仍无条件注入）。第一版不支持按代理配模型 / profile。
+- **嵌套派工上限 1**：所有子代理的工具面无条件摘除 `Agent` / `ParallelAgents`——主 agent 可派工，
+  子代理不可再派工（`ForkedAgentRunner.FilterChildTools` + `ToolCapabilitySet.SubAgentDispatchTools`）。
+
+Goal 模式的子目标执行不经 `ForkedAgentRunner`：子目标经 `GoalSubGoalExecutor` 构造 `MainAgentRunOptions`——
+`system/goal-subgoal` 提示词、按 `RequiredTools` 白名单裁剪工具（**fail-closed**：无匹配即抛错，
+不回退全量）、共享事务、`MaxTurnsPerSubGoal`；进度经 `GoalContextProvider` 注入后续子目标上下文。
 
 ---
 

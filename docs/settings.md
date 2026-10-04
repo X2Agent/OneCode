@@ -102,14 +102,13 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `acceptEdits` | 文件写入 + 常规 Shell 自动放行 |
 | `dontAsk` | 不询问，直接拒绝危险操作 |
 | `goalAuto` | 供 GOAL 模式使用：自主执行不中断，危险 Shell 直接 Deny |
-| `team` | 供 TEAM 模式使用：多 Agent 协作，危险命令走事件审批 |
 
-> `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述 8 个成员均可手写；
-> 未识别的值会回落为 `default`。`goalAuto` / `team` 是 GOAL、TEAM 工作模式在运行期派生的内部值——
+> `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述成员均可手写；
+> 未识别的值会回落为 `default`。`goalAuto` 是 GOAL 工作模式在运行期派生的内部值——
 > 手写在交互启动时会被 `WorkingModeBridge.SyncInitialState` 覆盖为 BUILD 默认档，因此只应作为派生结果出现。
 > **会话级一次性配置请用 `/permissions <mode> --session`**（别名 `--once`；只设运行时覆盖、不写本键），
-> 例如 `/permissions bypass --session` 仅在本次对话全放行；`plan` / `team` / `goalAuto`
-> 不是 `/permissions` 的合法参数（那是工作模式，用 Tab / Alt+1..4 切换）。
+> 例如 `/permissions bypass --session` 仅在本次对话全放行；`plan` / `goalAuto`
+> 不是 `/permissions` 的合法参数（那是工作模式，用 Tab / Alt+1 / Alt+2 / Alt+4 切换）。
 
 ### 会话约束（Conversation）
 

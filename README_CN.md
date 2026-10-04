@@ -43,7 +43,6 @@
 > **已知限制**：
 > - `Microsoft.Agents.AI.Hyperlight` (preview)：沙箱功能受限，默认启用（运行时不可用则静默降级）
 > - GOAL 模式流式输出不支持自动重试（非流式模式支持 PromptTooLong 恢复）
-> - Team 子 Agent 审批经 Team 工作流桥呈现：成员保留 MAF `ToolApprovalAgent`，审批请求以 `RequestInfoEvent` 浮出后由 `TeamWorkflowRunner` 推 `OrchestrationEvent.ApprovalRequest`；Main 路径为流式审批拆分（见 M4 完全事件驱动审批）
 
 ---
 
@@ -65,7 +64,7 @@ src/
 │   └── Session/                #   会话上下文与事件溯源存储
 │
 ├── OneCode.Core/                # 纯接口与领域模型（167 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
-│   ├── Permissions/            #   权限系统（8 种模式 + Bash/PowerShell 分类器）
+│   ├── Permissions/            #   权限系统（7 种模式 + Bash/PowerShell 分类器）
 │   ├── Hooks/                  #   11 种钩子事件 + 3 种执行器
 │   ├── Keybindings/            #   按键绑定系统
 │   ├── Commands/               #   命令抽象
@@ -190,7 +189,7 @@ onecode --version
 
 > **Headless / CI 模式**：非交互式终端（无 TTY）下自动进入无交互路径（`AskUserQuestion` 等交互工具返回错误而不是阻塞）。权限模式通过 `settings.json` 的 `permissionMode` 键配置（可选值见 [权限模式](#权限与安全系统)）。
 
-**工作模式切换**：在 TUI 中通过 `Tab` 键循环切换 BUILD → PLAN → TEAM → GOAL。代码审查请在 TUI 中使用 `/review --staged` 斜杠命令。
+**工作模式切换**：在 TUI 中通过 `Tab` 键循环切换 BUILD → PLAN → GOAL。代码审查请在 TUI 中使用 `/review` 斜杠命令（默认三视角并行审查 + 聚合去重；`--focus` 单视角，`--staged` 限定范围）。
 
 ### 使用 OpenCode Zen 免费模型
 
@@ -354,15 +353,14 @@ HarnessAgent
 |------|----------|----------|----------|
 | **BUILD** | 用户输入 → Agent 直接分析并执行 | 小改动、探索性任务、快速修复 | 绿色 |
 | **PLAN** | 用户输入 → Agent 生成计划卡片 → 用户批准 → 执行 | 复杂重构、多步骤任务 | 蓝色 |
-| **TEAM** | team.yaml 驱动多 Agent 协作（模式由团队 YAML 固定声明：Magentic / GroupChat / ParallelDag，运行期不可覆盖，只能通过切换团队改变执行方式） | 方案评审、复杂多步协调 | 紫色 |
 | **GOAL** | Agent 自主分解目标、迭代执行、AI 验证完成度 | 开放式高层目标 | 青色 |
 
 **模式切换方式**：
-- `Tab`（输入框内）→ 循环 BUILD → PLAN → TEAM → GOAL
+- `Tab`（输入框内）→ 循环 BUILD → PLAN → GOAL
 
 ### 权限与安全系统
 
-8 种 `PermissionMode`：
+7 种 `PermissionMode`：
 
 | 模式 | 行为 |
 |------|------|
@@ -373,10 +371,9 @@ HarnessAgent
 | BypassPermissions | 跳过所有权限检查（Layer 0 安全不变量仍生效） |
 | DontAsk | 不询问，直接拒绝危险操作 |
 | GoalAuto | GOAL 模式自动派生：自主执行不中断，危险 Shell 直接 Deny |
-| Team | TEAM 模式自动派生：多 Agent 协作，危险命令走事件审批 |
 
-> Plan / GoalAuto / Team 由对应工作模式经 `WorkingModeBridge` 自动派生，`/permissions` 不接受这三个值
-> （会造成权限轴与模式轴不一致的半状态）——切换工作模式用 Tab / Alt+1..4。
+> Plan / GoalAuto 由对应工作模式经 `WorkingModeBridge` 自动派生，`/permissions` 不接受这两个值
+> （会造成权限轴与模式轴不一致的半状态）——切换工作模式用 Tab / Alt+1 / Alt+2 / Alt+4。
 > **会话级一次性配置**：`/permissions bypass --session` 让本次对话自动执行所有操作而不写配置文件；
 > 审批弹窗中也可直接选「本次对话全部允许」。两者都不影响 Layer 0 安全不变量（危险命令 / 敏感路径 / 符号链接越狱）。
 
@@ -396,7 +393,6 @@ HarnessAgent
     ├── groupchat → 循环发言（MAF GroupChatWorkflow）
     └── DAG       → 依赖并行（ParallelAgentsTool → AgentTaskWorkflowCompiler + AgentTaskWorkflowHost）
 
-配置：~/.onecode/teams/{name}/team.yaml
 ```
 
 **Agent 8 色身份系统**：orchestrator 紫、researcher 蓝、planner 绿、executor 橙、reviewer 黄、tester 红、debugger 粉、assistant 青。
@@ -431,7 +427,7 @@ HarnessAgent
 ├──────────────────────────────────────────────────────┤
 │                                                       │
 │              CHAT — 唯一主视图                          │  Dim.Fill()
-│              （BUILD / PLAN / TEAM / GOAL 共享）        │
+│              （BUILD / PLAN / GOAL 共享）              │
 │                                                       │
 ├─ Status Bar ─────────────────────────────────────────┤  1 row
 │  Opus · 🔒 Sandbox               BUILD · 13:19       │
@@ -476,11 +472,11 @@ HarnessAgent
 
 ## 斜杠命令
 
-45 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
+44 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
 
-### Builtin 类别命令（23 个）
+### Builtin 类别命令（22 个）
 
-`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/loop` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/team` `/think` `/upgrade` `/version`
+`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/loop` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/think` `/upgrade` `/version`
 
 ### Session 类别命令（11 个）
 
@@ -510,7 +506,6 @@ HarnessAgent
 | **LSP 集成** | `EnhancedLspService` + `LspServerManager`，编辑后实时诊断更新 |
 | **代码语义索引** | `CodeIndexService` 语义符号搜索（精确 / 模糊 / 关键字匹配） |
 | **DAG 并行调度** | `ParallelAgentsTool` → MAF 工作流运行时（`AgentTaskWorkflowCompiler` + `AgentTaskWorkflowHost`），依赖驱动的并行 |
-| **Agent 间消息路由** | `TeamOrchestrationService` 多 Agent 协作编排，Channel<T> 消息传递 |
 | **AutoDream 记忆整合** | 后台自动提取关键信息写入记忆文件 |
 | **Git Worktree 管理** | `EnterWorktreeTool` / `ExitWorktreeTool`，任务级隔离 |
 | **Cron 定时任务** | 单 `Cron` 工具（`action` = create/list/delete/pause/resume），跨会话持续运行 |
@@ -528,7 +523,7 @@ HarnessAgent
 
 | 文档 | 说明 |
 |------|------|
-| [docs/commands.md](docs/commands.md) | 全部 45 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
+| [docs/commands.md](docs/commands.md) | 全部 44 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
 | [docs/settings.md](docs/settings.md) | `settings.json` 全部合法配置项、默认值、优先级与环境变量说明 |
 | [docs/skills.md](docs/skills.md) | 8 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
 
@@ -539,7 +534,6 @@ HarnessAgent
 | 限制项 | 说明 |
 |--------|------|
 | GOAL 模式流式输出 | 不支持自动重试（非流式模式支持 PromptTooLong 恢复） |
-| Team 子 Agent 审批 | 审批请求经 Team 工作流桥（`TeamWorkflowRunner` → `OrchestrationEvent.ApprovalRequest`）呈现；「总是允许」暂按单次批准生效（standing rule 包装未经验证，见 ADR 0007 §5.1） |
 | 鼠标点击模式标签 | Terminal.Gui 中未实现鼠标处理 |
 | Hyperlight 沙箱 | `Microsoft.Agents.AI.Hyperlight` 为 preview 包，沙箱功能受限（运行时不可用时自动降级） |
 

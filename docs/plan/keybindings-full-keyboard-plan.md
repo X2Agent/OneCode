@@ -28,7 +28,7 @@
 
 | # | 盲区 | 代码证据 | 严重度 |
 |---|---|---|---|
-| 1 | **侧边栏内容键盘滚动**：Plan/Team 面板内容超出屏幕时只能鼠标滚轮滚动 | `SidebarViewBase.cs`：`CanFocus = false`、无键盘处理；内部 `_content`（`MessageListView`）滚动 API 齐全但无外部触发路径 | 🔴 阻断 |
+| 1 | **侧边栏内容键盘滚动**：Plan 面板内容超出屏幕时只能鼠标滚轮滚动 | `SidebarViewBase.cs`：`CanFocus = false`、无键盘处理；内部 `_content`（`MessageListView`）滚动 API 齐全但无外部触发路径 | 🔴 阻断 |
 | 2 | **折叠块键盘展开/折叠**：思考过程/工具详情/错误详情仅鼠标点击切换 | `MessageListView.cs:476` 起：`ToggleToolExpansion` / `ToggleThinkingExpansion` / `ToggleErrorExpansion` 均为私有方法，仅 `OnMouseEvent` 的 `LeftButtonClicked` 分支调用 | 🔴 阻断 |
 | 3 | **行内搜索无键盘入口**：仅 `/find <keyword>` 命令行入口，无 Ctrl+F 呼出、无跳上一处 | `ChatTranscriptView.Search.cs`：有 `FindNext` 无 `FindPrevious`；`FindCommand` 为唯一入口 | 🟡 体验 |
 | 4 | **窗格焦点轮转缺失**：无法把焦点交给侧边栏做长文沉浸漫游 | `SidebarViewBase` 构造函数：`CanFocus = false; TabStop = TabBehavior.NoStop` | 🟡 体验 |
@@ -48,7 +48,7 @@
 
 ### 2.1 侧边栏滚动（盲区 #1）
 
-`SidebarViewBase` 的设计意图是"纯数据投影、显示专用"（类头注释明确 `Display-only by design`），因此 `CanFocus = false` 且不处理键盘。但 Plan 步骤与 Team 任务卡内容长度不可控，"显示专用"不等于"只读到看不见"。
+`SidebarViewBase` 的设计意图是"纯数据投影、显示专用"（类头注释明确 `Display-only by design`），因此 `CanFocus = false` 且不处理键盘。但 Plan 步骤卡内容长度不可控，"显示专用"不等于"只读到看不见"。
 
 **根因**：缺一条"焦点不离开输入框也能滚动侧边栏"的事件管道，以及一条"把焦点交给侧边栏"的轮转管道。
 
@@ -99,7 +99,7 @@
 
 **路径 A（直发热键，首期落地）**：
 - 适用：输入框打字时瞥到右侧步骤更新，顺手翻两行，焦点不离开输入框。
-- 分发：`ChatInputView.Keys.cs` 拦截 `sidebar:*` 动作 → 触发 `SidebarScrollRequested(direction, amount)` 事件 → `ReplShell` 路由到当前可见侧边栏（`PlanSidebarView` / `TeamSidebarView`）的 `MessageListView` 滚动 API。
+- 分发：`ChatInputView.Keys.cs` 拦截 `sidebar:*` 动作 → 触发 `SidebarScrollRequested(direction, amount)` 事件 → `ReplShell` 路由到当前可见侧边栏（`PlanSidebarView`）的 `MessageListView` 滚动 API。
 - 兜底：焦点不在输入框时，`ReplShell.Keyboard.cs` 的 Resolver 兜底分支直接处理（与 `app:sidebarWider/Narrower` 双路径同构）。
 
 **路径 B（窗格轮转，进阶）**：
@@ -192,7 +192,6 @@
 
 - [ ] **基础闭环**：输入消息 → `Enter` 提交 → `Esc` 中断运行 → `Ctrl+D` 退出
 - [ ] **侧边栏微调**：PLAN 模式生成计划后，`Alt+Up/Down` 滚动 Plan 面板，焦点始终在输入框（继续打字不丢字符）
-- [ ] **侧边栏翻页**：`Alt+PgUp/PgDn` 翻页滚动 Team 任务卡
 - [ ] **窗格轮转**：`F6` 聚焦侧边栏 → `↑↓/PgUp/PgDn/Home/End` 漫游 → `Esc` 切回输入框
 - [ ] **折叠块**：Agent 执行工具调用后，`Ctrl+O` 展开最近工具详情 → 再按折叠；思考过程、错误详情同理
 - [ ] **行内搜索**：`Ctrl+F` 呼出搜索条 → 输入关键词即时高亮 → `Enter`/`Shift+Enter` 前后跳转 → `Esc` 关闭

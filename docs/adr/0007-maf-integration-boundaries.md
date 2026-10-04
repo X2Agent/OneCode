@@ -1,12 +1,12 @@
 # MAF 集成边界与禁止清单
 
-**状态**: Accepted
+**状态**: Accepted（2026-10-05 更新：Team 模式与 TeamRun 控制面已砍除——§2 的 ParallelDag 拓扑、§5.1 的 Team 工作流审批桥与 `TeamToolApprovalBridgeTests` 随之移除，真并行 DAG 由 `ParallelAgents` 工具承接；其余决策不变）
 **日期**: 2026-09-16
 **关联**: [Permission vs ToolApproval vs Filter](./0001-permission-vs-toolapproval-vs-filter.md)、
 [Declarative 工作流评估](./0002-declarative-workflow-assessment.md)、
 [子代理派工边界：不迁移 MAF BackgroundAgents](./0011-background-agents-delegation-boundary.md)、
 [记忆模块架构设计](./0004-memory-module-design.md)、
-[技能系统](../skills.md)、[Team 编排模式选型](../team-modes.md)、[记忆总览](../memory-overview.md)、
+[技能系统](../skills.md)、[记忆总览](../memory-overview.md)、
 [压缩阈值](../compact-thresholds.md)、[后台服务](../background-services.md)
 
 ## 语境
@@ -40,7 +40,7 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 |---|---|---|
 | Todo | Harness `TodoProvider`（`todos_*`），按 profile 启用 | 宿主执行记录（Worker 状态、后台任务、Build 依赖）仍归 `ITaskService` / `BuildTaskLinker`；`TaskTool` 只保留 get/list/stop/output，不再提供普通清单的 create/update |
 | AgentMode | 宿主模式 + Main `ModeInstructionProvider` | 不恢复 LLM `mode_set` 形成双状态；子代理由角色/profile 约束 |
-| FileMemory | Harness `FileMemoryProvider`（`file_memory_*`），store 根绑定项目 | 仅 Main 启用；Worker/Team/Explore/Plan 关闭（只读 Agent 不应有写面，并发成员不应共享可写目录）。长期 MEMORY.md + `TextSearchProvider` 仍是治理后的知识，两者分目录共存 |
+| FileMemory | Harness `FileMemoryProvider`（`file_memory_*`），store 根绑定项目 | 仅 Main 启用；Worker/Explore/Plan 关闭（只读 Agent 不应有写面）。长期 MEMORY.md + `TextSearchProvider` 仍是治理后的知识，两者分目录共存 |
 | AgentSkills | 官方 `AgentSkillsProviderBuilder` + 文件/内联/MCP/runner | 双入口共用 `SkillDiscovery` 的发现规则；runner 有超时/输出上限/进程树清理；宿主通过 `AgentContextProviderLease` 释放每 run 的 provider |
 | WebSearch | 产品 AIFunction 搜索后端链（Tavily + DuckDuckGo 两个 `IWebSearchProvider`） | 关闭默认 hosted tool；两个提供方的适配都在 Infrastructure |
 | Compaction | Harness 策略入口（`HarnessAgentOptions.CompactionStrategy`） | 产品提供策略（比例、formatter、摘要守卫、prompt），Harness 挂载唯一 provider；不再双挂 |
@@ -64,8 +64,9 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 
 ### 2. ParallelDag 不是 MAF Concurrent
 
-`docs/team-modes.md` 的 ParallelDag 矩阵描述是**产品语义**（「静态扇出/扇入（编译期确定）」），而**实现是按 `AssigneeRole`
-选单成员 + `SequentialWorkflowBuilder`**——产品语义是「并行视角分支」，不是真并行扇出（该文自身也以实现说明段澄清并反链本 ADR）。
+> 2026-10-05：ParallelDag 拓扑已随 Team 模式砍除移除。本节禁令作为决策记录保留：真并行 DAG 的产品承接者是
+> `ParallelAgents` 工具（MAF `AddFanOutEdge` / `AddFanInBarrierEdge`，编译期 Kahn 查环）。若未来重建多成员编排，
+> 不得以「等价替换」为名引入 MAF Concurrent 而绕过产品闸。
 
 **禁止**：把 ParallelDag「等价替换」为 MAF Concurrent 工作流。名称保留；多成员误配保持「单成员断言 + 日志」。
 
@@ -142,8 +143,7 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
 - `dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgent.cs` 被重写（`#8432`，+232/-121，共 353 行变动），
   「哪些请求算已浮出」这一绑定权威随之变化：1.21.0 在把未批准请求交还调用方时把**整批**未批准请求都登记为 surfaced，
   而达到自动批准上限的那一轮**完全不登记**；HEAD 只登记**真正交给调用方的那些**（排队项在出队呈现时才登记），
-  且上限轮返回前也会登记（否则调用方对它的「总是允许」无法绑定）。OneCode 的 `AllowAlways` 经 Team 桥接当前只提供
-  单次批准（§5.1 下文），若日后放开 standing rule，必须先按该语义核对绑定路径。
+  且上限轮返回前也会登记（否则调用方对它的「总是允许」无法绑定）。OneCode 若日后放开 standing rule，必须先按该语义核对绑定路径。
 - `dotnet/src/Microsoft.Agents.AI/Skills/**` 有改动（4 文件 +107）：`SKILL.md` frontmatter 校验变严——已知字段名必须
   全小写、重复字段被拒；`metadata` 映射内的键大小写不敏感且首个值胜出；custom source 默认缓存并新增缓存隔离键说明。
   **1.21.0 没有这层校验**，因此技能发现与 frontmatter 解析的结论不能再标【已核对】。
@@ -169,19 +169,10 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
 包括原本不需要审批的工具，再由 bypass/binding 装饰器区分。技能工具默认需要审批，因此会与普通工具调用同批
 出现在一个响应里，这是审批链必须覆盖的真实场景（`MainAgentRunner` 的混合内容拆分即为此而设）。
 
-**Team 工作流审批桥（R4 落地形态）**：Team 成员保留 MAF `ToolApprovalAgent`（`PipelineProfileBehavior`
-不减 `ToolApproval` 能力）；Ask 决策产生的审批请求在工作流中作为外部请求浮出（`RequestInfoEvent`），
-由 `TeamWorkflowRunner.BridgeToolApprovalAsync` 经 `ApprovalBroker.ForTeam` 推送
-`OrchestrationEvent.ApprovalRequest`，用户决策经 `SendResponseAsync` 送回同一工作流。注意：
-`AIAgentHostOptions.InterceptUserInputRequests`（消息模式）在单成员 Sequential 链上会把请求发往
-**不存在的下游 executor 而被静默丢弃**（`SendMessageAsync` 无出边即无投递），因此 Team 一律走端口模式。
-「以后允许」（`AllowAlways`）经桥接当前**只提供单次批准**：原生 standing rule 依赖
-`AlwaysApproveToolApprovalResponseContent` 包装（非 `ToolApprovalResponseContent` 子类），能否无损通过
-工作流端口响应类型校验未经验证，按「不得静默降级」原则显式降为单次并记录日志；待单独验证后放开。
-**端到端覆盖**：`TeamToolApprovalBridgeTests` 不 mock 上述五层（`FunctionInvokingChatClient` →
-`ToolApprovalAgent` → `ChatClientAgent` → `AIAgentHostExecutor` → `AIAgentUnservicedRequestsCollector`），
-只脚本化最外层 `IChatClient` 与产品审批通道（`eventSink` 完成 `ResponseSource`），断言审批请求浮出的
-工具名/参数、批准后工具真的执行且 turn 恢复、拒绝后不执行且同样恢复、无审批通道时 fail-closed 且不挂起。
+> 2026-10-05：Team 工作流审批桥（`TeamWorkflowRunner.BridgeToolApprovalAsync` / `ApprovalBroker.ForTeam` /
+> `OrchestrationEvent.ApprovalRequest`）与其端到端测试 `TeamToolApprovalBridgeTests` 已随 Team 模式砍除移除。
+> 其时保留的一条经验仍然有效：`AIAgentHostOptions.InterceptUserInputRequests`（消息模式）在单成员 Sequential 链上
+> 会把请求发往**不存在的下游 executor 而被静默丢弃**（`SendMessageAsync` 无出边即无投递），审批类外部请求必须走端口模式。
 **待定政策**：「每次询问」强制确认无法仅靠自动批准规则实现（standing rules 先于
 自定义规则短路），产品尚未裁决是否需要，当前 TUI 直接提供「总是允许」。
 
@@ -294,13 +285,12 @@ OpenAI `reasoning_effort`；Ollama 顶层 `think` + `options.num_ctx`）与 `Thi
   `HarnessProviderTools.cs`、`AutoApprovalRulesFactory.cs`、
   `src/OneCode.Infrastructure/Agent/CompactionPipelineBuilder.cs`、`GuardedSummarizationCompactionStrategy.cs`、
   `src/OneCode.App/Services/Agent/AgentContextPipeline.cs`、`AgentContextProviderLease.cs`、
-  `src/OneCode.App/Services/Coordinator/TeamWorkflowRunner.cs`（Team 工作流审批桥 §5.1）、
   `src/OneCode.Infrastructure/Ai/ProviderAwareDecorator.cs`、`src/OneCode.Infrastructure/Ai/ChatClientFactory.cs`、
   `src/OneCode.App/Services/Agent/MainAgentRunner.cs`（`BuildChatOptions`，§7 类型化推理参数出口）、
   `src/OneCode.Core/Domain/EffortThinking.cs`（`ToReasoningEffort`，§7 有损映射）、
   `src/OneCode.App/Services/Skills/SkillDiscovery.cs`、`SkillProviderFactory.cs`
 - 测试：`src/OneCode.Tests/OneCodeHarnessDefaultsTests.cs`、`ToolApprovalMarkerTests.cs`、
-  `AutoApprovalRulesFactoryTests.cs`、`TeamToolApprovalBridgeTests.cs`、`ProviderWireContractTests.cs`、
+  `AutoApprovalRulesFactoryTests.cs`、`ProviderWireContractTests.cs`、
   `ThinkingOptionsContractTests.cs`、`HarnessInstructionsCompositionTests.cs`、
   `FileMemoryProfilePolicyTests.cs`、`AgentContextProviderLeaseTests.cs`、
   `GuardedSummarizationCompactionStrategyTests.cs`、`CompactionBudgetValidatorTests.cs`、

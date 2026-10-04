@@ -92,7 +92,6 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 
 `user-message`、`assistant-message`、`tool-use`、`tool-result`、`system-message` 用于消息角色。`diff-added`、`diff-removed`、`diff-hunk`、`diff-context` 用于差异视图。`mode-build`、`mode-plan`、`mode-goal` 用于工作模式。
 
-TEAM 角色使用 `agent-orchestrator`、`agent-researcher`、`agent-planner`、`agent-executor`、`agent-reviewer`、`agent-tester`、`agent-debugger`、`agent-assistant`。角色色只用于识别，不替代状态符号或文字。
 
 ## Grid and Spacing
 
@@ -148,7 +147,7 @@ TEAM 角色使用 `agent-orchestrator`、`agent-researcher`、`agent-planner`、
 
 ### Sidebars and Overlays
 
-- Plan 与 Team 侧栏互斥，右侧停靠；分隔线支持鼠标拖动和键盘宽度调整。
+- Plan 侧栏右侧停靠；分隔线支持鼠标拖动和键盘宽度调整。
 - 侧栏使用左侧竖向分隔线；拖动或悬停时使用 `accent`。
 - Overlay 使用 `bg-card` 和方角边界；顶层 Overlay 使用 `border-accent`，非顶层使用 `border`。
 - Overlay 打开后焦点必须落在可交互叶子控件上，不能停在容器或标题上。

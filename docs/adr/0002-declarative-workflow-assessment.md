@@ -1,6 +1,6 @@
 # MAF Workflows.Declarative 评估结论
 
-**状态**: Rejected (议题关闭)
+**状态**: Rejected (议题关闭；2026-10-05 更新：表中「现有实现」列的 Team 编排（TeamWorkflowRunner / team.yaml / prompts/teams）已随 Team 模式砍除移除，并行派工由 `Agent` / `ParallelAgents` 工具承接)
 **日期**: 2026-07-09
 **关联**: 原生产级重构计划 §9.2 M3（该计划文档未随仓库提交——工作区与 git 历史均无此路径）
 
@@ -12,9 +12,11 @@
 
 ### 能力已被覆盖
 
-项目已具备等价的声明式工作流能力，无需引入 MAF Declarative：
+评估当时项目具备等价的代码式工作流能力（YAML 团队配置 / GroupChat / Magentic 编排 / team.yaml 自定义模板，
+均由 `TeamWorkflowRunner` + `AgentTemplateConfig` 提供——2026-10-05 起 Team 模式已砍除，并行派工由
+`Agent` / `ParallelAgents` 工具承接），无需引入 MAF Declarative：
 
-| 能力 | 现有实现 | MAF Declarative 对应 |
+| 能力 | 评估时的实现（已随 Team 砍除移除） | MAF Declarative 对应 |
 |------|----------|---------------------|
 | YAML 团队配置 | `AgentTemplateConfig.FromYaml()` + `prompts/teams/*.yaml` | Declarative YAML spec |
 | GroupChat 编排 | `TeamWorkflowRunner` 使用 `AgentWorkflowBuilder.CreateGroupChatBuilderWith` | Declarative schema 可表达（如 next-speaker 公式类多 Agent 协作） |
@@ -39,6 +41,6 @@
 
 ## 影响
 
-- 维持现有代码式工作流路径（`TeamWorkflowRunner` + `AgentTemplateConfig`）
+- 维持代码式工作流路径（评估时为 `TeamWorkflowRunner` + `AgentTemplateConfig`；现为 `Agent` / `ParallelAgents` 工具）
 - 不引入 `Microsoft.Agents.AI.Workflows.Declarative` 包依赖
 - 未来如需重新评估，需先确认 MAF 是否提供不依赖 Azure Foundry 的 Declarative 实现

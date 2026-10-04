@@ -21,7 +21,7 @@
 | 配置方法 | 角色 | ToolResult 折叠 | LLM 摘要 | 截断兜底 |
 |----------|------|----------------|----------|----------|
 | `BuildForMainAgent` | 主 Agent | 0.50 | 0.70 | 0.85 |
-| `BuildForWorkerAgent` | Worker / Forked / Team 子 Agent | 0.40 | 0.60 | 0.80 |
+| `BuildForWorkerAgent` | Worker / Forked 子 Agent | 0.40 | 0.60 | 0.80 |
 
 - Worker 阈值更激进：子 Agent 上下文更短、生命周期更短。
 - 模型上下文窗口与最大输出 token 由 `CompactionStrategyFactory` 从 `IModelManager` 解析（主 Agent 输出上限缺省 8,192，Worker 缺省 4,096，可被 `maxOutputTokensOverride` 覆盖）。

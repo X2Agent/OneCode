@@ -11,7 +11,6 @@ OneCode 有三处「模型输出 → JSON」消费点：
 | 位置 | 形态 | 类型 |
 |---|---|---|
 | `Services/Agent/GoalDecomposer.cs` | 直连 chat client（decompose / replan / sub-decompose 三个调用点） | `GoalPlan` |
-| `Services/ClarificationQuestionGenerator.cs` | 直连 chat client | `RequirementIntake` |
 | `Services/AutoDream/AutoDreamService.cs` | **带 Read/Glob/Grep 工具循环的 Agent** + 会话 | `List<ConsolidationChange>` |
 
 三处此前都是手搓的 prompt-only JSON：提示词内写 JSON 契约，模型返回后用手写提取器

@@ -81,11 +81,10 @@ MAF 提供三层「子代理委派」入口，BackgroundAgents 占中间层：
 |---|---|---|
 | Build | 单主代理（`MainAgentRunner` → `AgentPipelineBuilder.BuildHarnessAgent` → `HarnessAgent`）；受控构建走 `ControlledBuildAttemptWorkflow`（MAF Workflow 幂等单元） | `Agent` 工具（→ `IAgentRunner` → `WorkerAgentService` → `ForkedAgentRunner`，profile Worker/Explore/Plan）；`ParallelAgents` 工具（`AgentTaskWorkflowCompiler` 编译 DAG，MAF InProc fan-out/fan-in） |
 | Plan | 单主代理 + Plan 白名单（`ToolCapabilityResolver`，`AllowSubAgents=true`） | 同上；`plan.prompt` 已有 Explore/Plan 子代理指引 |
-| Team | **多代理**：MAF Workflows（GroupChat / Magentic / ParallelDag） | 成员经 `TeamAgentFactory` 以 TeamMember profile 构建；审批经 `TeamWorkflowRunner` 桥接 |
 | Goal | **checkpointed 工作流**（plan→step→router→completion），每步一次主代理 run + `RequiredTools` 白名单裁剪（fail-closed） | 子目标级裁剪；进度经 `GoalContextProvider` 注入 |
 
 派工体系已有的产品闸（均无 MAF 对应物）：`PipelineProfile` / `PipelineProfileBehavior`
-（Worker/Explore/Plan/TeamMember 能力矩阵与只读白名单）、`ToolCapabilitySet`
+（Worker/Explore/Plan 能力矩阵与只读白名单）、`ToolCapabilitySet`
 （不可变工具可见边界，含 `AllowSubAgents` 闸）、`TaskService`（持久化任务清单 + per-task 取消 +
 TUI 呈现）、`ForkedAgentRunner` 的 fail-closed 审批检测。
 
@@ -94,7 +93,7 @@ TUI 呈现）、`ForkedAgentRunner` 的 fail-closed 审批检测。
 ### 1. 不挂载：任何路径均不启用 BackgroundAgentsProvider
 
 不设置 `HarnessAgentOptions.BackgroundAgents`，也不经 `AIContextProviders` 挂载
-`BackgroundAgentsProvider`——Full 主路径、Worker、Team、Goal 与受控 Build 全部适用。
+`BackgroundAgentsProvider`——Full 主路径、Worker、Goal 与受控 Build 全部适用。
 本条重申并补强 [MAF 集成边界](./0007-maf-integration-boundaries.md)，四条硬证据：
 
 **证据 1 — 工具门禁被绕过。** 产品工具可见性的唯一执行点是 `ToolCatalog` + `ToolCapabilitySet`：
@@ -154,7 +153,7 @@ BackgroundAgents 在途工作重启即 `lost`（设计如此）且无取消工�
 | 自建等价 provider「复刻」生命周期 | 代码一行没少（还要补产品闸），却丢掉 MAF 已处理的 `SyncRoot` 竞态、ExecutionContext 隔离、`lost` 标记——纯负优化 |
 
 **正确框架映射**：OneCode 的并行派工**已经在用 MAF 原生层**——Workflows
-（`ParallelAgents` 的 InProc fan-out/fan-in、Team 的 GroupChat/Magentic、Goal 的 checkpointed 工作流）。
+（`ParallelAgents` 的 InProc fan-out/fan-in、Goal 的 checkpointed 工作流）。
 「切换底层」在 MAF 当前 API 下的答案是：provider 不是产品工具的可替换后端（没有可调用后端），
 Workflows 才是，而且已经切过了。
 
@@ -226,7 +225,7 @@ Workflows 才是，而且已经切过了。
   （§4 版本证据）。
 - 产品源码：`src/OneCode.App/Tools/AgentTool.cs`、`Tools/ParallelAgentsTool.cs`、
   `Services/Agent/ForkedAgentRunner.cs`、`Services/Agent/AgentTaskWorkflow.cs`、
-  `Services/Coordinator/WorkerAgentService.cs`、`Services/Agent/SubAgentPipelineFactory.cs`、
+  `Services/Agent/WorkerAgentService.cs`、`Services/Agent/SubAgentPipelineFactory.cs`、
   `src/OneCode.Infrastructure/Agent/PipelineProfile.cs`、`src/OneCode.App/Query/ToolCapabilityResolver.cs`、
   `src/OneCode.Infrastructure/Middleware/PermissionAndLimitMiddleware.cs`、
   `src/OneCode.Tests/ModePromptToolReferenceTests.cs`（F1 守卫）。

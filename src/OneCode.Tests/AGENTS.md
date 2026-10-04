@@ -70,7 +70,7 @@ result.Should().Be("ok", "invocation must be delegated to the wrapped function")
 ❌ 禁止：
 ```csharp
 public void LastCacheSafeParams_StartsNull() { ... }
-public void RegisteredTeams_Empty_ByDefault() { ... }
+public void Items_Empty_ByDefault() { ... }
 public void EmptyRegistry_GetAllTools_ReturnsEmpty() { ... }
 ```
 对象的初始状态是构造函数的职责，不是业务逻辑。初始状态错了，依赖它的真实测试自然会失败。
@@ -359,9 +359,9 @@ public void IsReadOnly_CorrectlyClassifies(string command, bool expectedReadOnly
 **同名/同义用例 ≠ 重复**。删除前必须核实：**这些用例调用的是不是同一个生产方法？**
 
 ```text
-GoalWorkflowTests / ControlledBuildAttemptWorkflowTests / TeamTaskWorkflowTests
-  各自覆盖 GoalWorkflowCompiler / ControlledBuildAttemptWorkflowCompiler /
-  TeamTaskWorkflowCompiler 三份独立实现（contract 标记不同），
+GoalWorkflowTests / ControlledBuildAttemptWorkflowTests
+  各自覆盖 GoalWorkflowCompiler / ControlledBuildAttemptWorkflowCompiler
+  两份独立实现（contract 标记不同），
   测试名相同但被测类不同 → 全部保留。
 ```
 
