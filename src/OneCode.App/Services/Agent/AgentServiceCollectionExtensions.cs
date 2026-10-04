@@ -40,6 +40,10 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<AgentTaskWorkflowCompiler>();
         services.AddSingleton<AgentTaskWorkflowHost>();
 
+        // 自定义子代理定义（.onecode/agents/*.md 用户级 + 项目级）：Agent/ParallelAgents 派工按名解析。
+        services.AddSingleton<CustomAgentCatalog>(sp => new CustomAgentCatalog(
+            sp.GetRequiredService<Core.Tools.IWorkingDirectoryAccessor>().WorkingDirectory));
+
         return services;
     }
 }

@@ -17,7 +17,11 @@ public sealed record AgentRunRequest(
     ToolCapabilitySet? ParentCapabilities = null,
     // 调用方预建的任务 ID（AgentTool background 模式）。非空时 WorkerAgentService
     // 更新该任务而非新建，避免任务列表出现重复条目。
-    string? TaskId = null);
+    string? TaskId = null,
+    // 自定义代理（.onecode/agents/*.md）：Instructions 覆盖内置角色 overlay；
+    // AllowedToolNames 与父级能力取交集（只减不增）。两者为空即按内置代理处理。
+    string? Instructions = null,
+    IReadOnlyList<string>? AllowedToolNames = null);
 
 /// <summary>
 /// 子 Agent 执行结果。<see cref="Error"/> 非 null 表示执行失败（异常已捕获并转换为

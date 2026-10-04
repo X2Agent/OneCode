@@ -13,20 +13,37 @@ public sealed class AgentTool(
     IAgentRunner runner,
     ICacheSafeParamsProvider cacheSafeParams,
     ITaskService taskService,
+    CustomAgentCatalog? customAgents = null,
     ILogger<AgentTool>? logger = null)
 {
-    [Description("Spawn a sub-agent to handle a delegated coding or analysis task in a separate session, returning its final output when complete. " +
-                 "Use this to parallelize independent investigation work (e.g. 'research the auth flow while I draft the API spec') or to delegate a self-contained subtask. " +
-                 "The sub-agent runs with its OWN system prompt and tool access; it does NOT inherit the current conversation history. " +
-                 "Write self-contained prompts: include file paths, line numbers, and exact instructions — the agent cannot see your prior messages. " +
-                 "Synchronous mode (default): blocks until the sub-agent finishes and returns its output. " +
-                 "Background mode (runInBackground=true): returns a taskId immediately; use Task tool with action='output' to poll or action='stop' to cancel. " +
-                 "Failure handling: exceptions in the sub-agent are logged and surfaced as an error result, not thrown to the caller. " +
-                 "Do NOT use this tool to ask simple questions you can answer yourself, or to trivially report file contents.")]
+    /// <summary>基础描述（不含自定义代理清单）；工具注册处以此 + 清单动态合成最终 description。</summary>
+    public const string BaseDescription =
+        "Spawn a sub-agent to handle a delegated coding or analysis task in a separate session, returning its final output when complete. " +
+        "Use this to parallelize independent investigation work (e.g. 'research the auth flow while I draft the API spec') or to delegate a self-contained subtask. " +
+        "The sub-agent runs with its OWN system prompt and tool access; it does NOT inherit the current conversation history. " +
+        "Write self-contained prompts: include file paths, line numbers, and exact instructions — the agent cannot see your prior messages. " +
+        "Synchronous mode (default): blocks until the sub-agent finishes and returns its output. " +
+        "Background mode (runInBackground=true): returns a taskId immediately; use Task tool with action='output' to poll or action='stop' to cancel. " +
+        "Failure handling: exceptions in the sub-agent are logged and surfaced as an error result, not thrown to the caller. " +
+        "Do NOT use this tool to ask simple questions you can answer yourself, or to trivially report file contents.";
+
+    /// <summary>合成最终工具 description：基础描述 + 自定义代理清单（保证可发现性）。</summary>
+    public string BuildDescription()
+    {
+        var custom = customAgents?.GetAll();
+        if (custom is not { Count: > 0 })
+            return BaseDescription;
+
+        return BaseDescription +
+            "\n\nCustom agents (from .onecode/agents/*.md, project overrides user level): " +
+            string.Join("; ", custom.Select(a => $"'{a.Name}' — {a.Description}"));
+    }
+
+    [Description(AgentTool.BaseDescription)]
     public async Task<ToolResult> RunAgentAsync(
         [Description("Detailed, self-contained instructions for the sub-agent. Include all context the agent needs (file paths, line numbers, requirements) since it cannot see your conversation history.")] string prompt,
-        [Description("Built-in agent type: 'general-purpose' (default, full tool access), 'Explore' (read-only research), 'Plan' (designs implementation approaches). " +
-                     "Choose based on the task: Explore for codebase research, Plan for design, general-purpose for implementation.")] string agent = "general-purpose",
+        [Description("Agent type: 'general-purpose' (default, full tool access), 'Explore' (read-only research), 'Plan' (designs implementation approaches), " +
+                     "or a custom agent name defined in .onecode/agents/*.md (project) / ~/.onecode/agents/*.md (user).")] string agent = "general-purpose",
         [Description("Short one-line description of the subtask, shown in task tracking UI. Not shown to the sub-agent.")] string? description = null,
         [Description("When true, the agent runs as a background task and returns a taskId immediately instead of blocking. Use Task tool (action='output') to poll for results and (action='stop') to cancel.")] bool runInBackground = false,
         CancellationToken ct = default)
@@ -34,12 +51,18 @@ public sealed class AgentTool(
         if (string.IsNullOrWhiteSpace(prompt))
             return ToolResult.Error("prompt is required");
 
+        var (definition, resolutionError) = CustomAgentResolver.Resolve(customAgents, agent);
+        if (resolutionError is not null)
+            return ToolResult.Error(resolutionError);
+
         var agentRequest = new AgentRunRequest(
             Prompt: prompt,
             Agent: agent,
             Description: description,
             CacheSafeParams: cacheSafeParams.Current,
-            ParentCapabilities: ToolActivationContext.CurrentCapabilities);
+            ParentCapabilities: ToolActivationContext.CurrentCapabilities,
+            Instructions: definition?.Instructions,
+            AllowedToolNames: definition?.AllowedTools);
 
         if (runInBackground)
         {

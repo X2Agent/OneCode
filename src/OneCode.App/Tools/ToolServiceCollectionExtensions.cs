@@ -77,7 +77,8 @@ public static class ToolServiceCollectionExtensions
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["background"]);
 
         // AgentTool resolves via normal DI (ICacheSafeParamsProvider) — no conversation-runner locator.
-        services.AddToolInstance("Agent", (AgentTool tool) => AIFunctionFactory.Create(tool.RunAgentAsync, name: "Agent"), ToolRisk.Safe, searchHint: "run a sub-agent on a delegated task",
+        // description 动态合成：基础语义 + 自定义代理清单（.onecode/agents/*.md），保证可发现性。
+        services.AddToolInstance("Agent", (AgentTool tool) => AIFunctionFactory.Create(tool.RunAgentAsync, name: "Agent", description: tool.BuildDescription()), ToolRisk.Safe, searchHint: "run a sub-agent on a delegated task",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["agent", "sub-agent", "delegate"], category: ToolCategory.PlanAllowed);
         services.AddToolInstance("ParallelAgents", (ParallelAgentsTool tool) => AIFunctionFactory.Create(tool.RunParallelAsync, name: "ParallelAgents"), ToolRisk.Safe, searchHint: "run sub-agents with DAG dependencies",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["agent", "parallel"], category: ToolCategory.PlanAllowed);

@@ -13,7 +13,10 @@ public sealed record AgentWorkflowTask(
     string? Description = null,
     IReadOnlyList<string>? DependsOn = null,
     bool InjectUpstreamResults = true,
-    AgentTaskExecutionAccess ExecutionAccess = AgentTaskExecutionAccess.ReadOnly)
+    AgentTaskExecutionAccess ExecutionAccess = AgentTaskExecutionAccess.ReadOnly,
+    // 自定义代理（.onecode/agents/*.md）派工时由工具层填充。
+    string? Instructions = null,
+    IReadOnlyList<string>? AllowedTools = null)
 {
     /// <summary>Returns the normalized dependency list supplied by the approved graph.</summary>
     public IReadOnlyList<string> Dependencies { get; } = DependsOn ?? [];
@@ -279,7 +282,9 @@ internal sealed class AgentTaskExecutor(
                     task.Agent,
                     task.Description,
                     CacheSafeParams: CreateTaskCacheSafeParams(task, cacheSafeParams),
-                    ParentCapabilities: parentCapabilities),
+                    ParentCapabilities: parentCapabilities,
+                    Instructions: task.Instructions,
+                    AllowedToolNames: task.AllowedTools),
                 cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
 

@@ -10,7 +10,8 @@ namespace OneCode.App.Tools;
 public sealed class ParallelAgentsTool(
     AgentTaskWorkflowCompiler compiler,
     AgentTaskWorkflowHost host,
-    ICacheSafeParamsProvider? cacheSafeParams = null)
+    ICacheSafeParamsProvider? cacheSafeParams = null,
+    CustomAgentCatalog? customAgents = null)
 {
 
     [Description("Run multiple sub-agents in parallel with optional DAG task dependencies. Tasks without depends_on run in parallel; tasks with depends_on wait for their dependencies to complete.")]
@@ -29,14 +30,21 @@ public sealed class ParallelAgentsTool(
             if (string.IsNullOrWhiteSpace(task.Prompt))
                 return ToolResult.Error("Each task must have a non-empty 'prompt'.");
 
+            var agentName = task.Agent ?? "general-purpose";
+            var (definition, resolutionError) = CustomAgentResolver.Resolve(customAgents, agentName);
+            if (resolutionError is not null)
+                return ToolResult.Error($"Task '{task.Id ?? $"task_{index + 1}"}': {resolutionError}");
+
             workflowTasks.Add(new AgentWorkflowTask(
                 task.Id ?? $"task_{index + 1}",
                 task.Prompt,
-                task.Agent ?? "general-purpose",
+                agentName,
                 task.Description,
                 task.DependsOn ?? [],
                 injectUpstreamResults,
-                task.ExecutionAccess));
+                task.ExecutionAccess,
+                Instructions: definition?.Instructions,
+                AllowedTools: definition?.AllowedTools));
         }
 
         try

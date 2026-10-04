@@ -214,6 +214,16 @@ public sealed class ForkedAgentRunner(
             .Where(tool => !ToolCapabilitySet.SubAgentDispatchTools.Contains(tool.Name))
             .ToList() ?? [];
 
+    /// <summary>自定义代理 allowed_tools 与父级能力取交集（只减不增）；无自定义限制时原样返回。</summary>
+    internal static ToolCapabilitySet? ApplyCustomAllowedTools(
+        ToolCapabilitySet? capabilities, IReadOnlyList<string>? customAllowedTools)
+    {
+        if (customAllowedTools is not { Count: > 0 })
+            return capabilities;
+        var customSet = ToolCapabilitySet.CreateUnrestricted(customAllowedTools);
+        return capabilities is null ? customSet : capabilities.Intersect(customSet);
+    }
+
     public async Task<AgentRunResult> RunAsync(AgentRunRequest request, CancellationToken ct = default)
     {
         var profile = PipelineProfileBehavior.FromAgentType(request.Agent);
@@ -222,10 +232,10 @@ public sealed class ForkedAgentRunner(
         // 片段是**所有**子 Agent 的公共输入：父级 CacheSafeParams.SystemPrompt 自 §4.6 起只承载
         // 主 Agent 正文，不再包含片段，所以 Worker 分支不能靠继承父级 system 消息拿到它。
         // 只有角色 overlay 是 Explore/Plan 专属；两段保持分离，合成交给 MAF。
+        // 自定义代理（.onecode/agents/*.md）的定义正文接管角色 overlay。
         var harnessInstructions = await _promptComposer.GetHarnessAsync(ct).ConfigureAwait(false);
-        var agentInstructions = roleInstruction is null
-            ? null
-            : _promptComposer.RenderRoleBody(roleInstruction);
+        var agentInstructions = request.Instructions
+            ?? (roleInstruction is null ? null : _promptComposer.RenderRoleBody(roleInstruction));
 
         var childAllowedTools = profile is PipelineProfile.Explore or PipelineProfile.Plan
             ? PipelineProfileBehavior.ReadOnlyAgentTools
@@ -234,6 +244,7 @@ public sealed class ForkedAgentRunner(
         var capabilities = request.ParentCapabilities is not null && requestedCapabilities is not null
             ? request.ParentCapabilities.Intersect(requestedCapabilities)
             : request.ParentCapabilities ?? requestedCapabilities;
+        capabilities = ApplyCustomAllowedTools(capabilities, request.AllowedToolNames);
 
         var parameters = new ForkedAgentParams
         {
