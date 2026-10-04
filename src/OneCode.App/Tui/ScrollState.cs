@@ -59,8 +59,9 @@ internal sealed class ScrollState(
         var visibleLines = Math.Max(1, _getViewportHeight());
         var maxOffset = Math.Max(0, _getLineCount() - visibleLines);
         _scrollOffset = Math.Min(maxOffset, _scrollOffset + lines);
-        if (_scrollOffset >= maxOffset)
-            _autoScroll = true;
+        // 主动下翻与上翻同语义：未到底 = 用户在阅读（脱离贴底，内容更新保留位置）；
+        // 到底 = 恢复跟随。
+        _autoScroll = _scrollOffset >= maxOffset;
         _needsScrollToBottom = false;
         _onScrolled?.Invoke(_scrollOffset);
         _onNeedsDraw?.Invoke();
@@ -80,8 +81,8 @@ internal sealed class ScrollState(
         var visibleLines = Math.Max(1, _getViewportHeight());
         var maxOffset = Math.Max(0, _getLineCount() - visibleLines);
         _scrollOffset = Math.Min(maxOffset, _scrollOffset + Math.Max(1, visibleLines));
-        if (_scrollOffset >= maxOffset)
-            _autoScroll = true;
+        // 与 ScrollDown 同语义：未到底脱离贴底（保留阅读位置），到底恢复跟随。
+        _autoScroll = _scrollOffset >= maxOffset;
         _needsScrollToBottom = false;
         _onScrolled?.Invoke(_scrollOffset);
         _onNeedsDraw?.Invoke();
@@ -107,6 +108,9 @@ internal sealed class ScrollState(
 
     /// <summary>由行变更方法调用：当 AutoScroll 为 true 时标记需要滚动到底部。</summary>
     public void RequestScrollToBottomIfAutoScroll() => _needsScrollToBottom = _autoScroll;
+
+    /// <summary>恢复贴底跟随状态（Clear/Reset 之后的阅读位置保留路径用）。</summary>
+    internal void SetAutoScroll(bool value) => _autoScroll = value;
 
     /// <summary>
     /// 整体重渲后恢复滚动位置：重渲不改变 AutoScroll 语义，

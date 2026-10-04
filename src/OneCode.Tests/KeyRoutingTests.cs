@@ -212,6 +212,41 @@ public sealed class KeyRoutingTests
     }
 
     [Fact]
+    public void DispatchInputKey_ShiftPageDown_RoutesToSidebar()
+    {
+        // 分区滚动：Shift+PageDown 翻右侧计划/团队侧栏，不触发主对话区翻页。
+        var shell = CreateShell();
+        var sidebarPageDown = 0;
+        var transcriptPageDown = 0;
+        shell.ChatInput.SidebarPageDownRequested += () => sidebarPageDown++;
+        shell.ChatInput.PageDownRequested += () => transcriptPageDown++;
+
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown.WithShift);
+
+        sidebarPageDown.Should().Be(1, "Shift+PageDown 路由到侧栏翻页");
+        transcriptPageDown.Should().Be(0, "不得误触主对话区翻页");
+    }
+
+    [Fact]
+    public void DispatchInputKey_ShiftPageUp_PassesThroughWhileSelectorSuspended()
+    {
+        // 审批计划卡（挂起态）时 Shift+PageUp 仍可向上翻阅右侧计划。
+        var shell = CreateShell();
+        var selector = new InlineSelector("权限", [
+            new InlineSelectorOption("allow", "允许"),
+            new InlineSelectorOption("deny", "拒绝"),
+        ]);
+        shell.ShowInlineSelector(selector);
+        var sidebarPageUp = 0;
+        shell.ChatInput.SidebarPageUpRequested += () => sidebarPageUp++;
+
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageUp.WithShift);
+
+        sidebarPageUp.Should().Be(1, "挂起态侧栏翻页放行");
+        selector.SelectedIndex.Should().Be(0, "翻页不得移动选择器高亮");
+    }
+
+    [Fact]
     public void ShellKeyDown_ScrollActions_RouteToTranscriptWithoutInputFocus()
     {
         // 焦点异常离开输入框时的兜底：ReplShell.OnKeyDown 也要分发 chat 滚动。

@@ -438,6 +438,9 @@ public sealed partial class MessageListView : View
     /// <summary>内容替换后钳制恢复阅读偏移（侧栏更新保留阅读位置用）。</summary>
     public void RestoreOffset(int preferredOffset) => _scroll.RestoreOffset(preferredOffset);
 
+    /// <summary>恢复贴底跟随状态（Clear 会 Reset 该标志，替换内容后按调用方语义回设）。</summary>
+    public void SetAutoScroll(bool value) => _scroll.SetAutoScroll(value);
+
     public void PageDown() => _scroll.PageDown();
 
     /// <summary>滚动到指定行索引（居中显示）。</summary>

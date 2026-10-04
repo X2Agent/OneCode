@@ -97,9 +97,16 @@ internal abstract class SidebarViewBase : View
         if (!wasAutoScroll)
         {
             _content.RestoreOffset(preferredOffset);
+            _content.SetAutoScroll(false);
             SetNeedsDraw();
         }
     }
+
+    /// <summary>当前滚动偏移（行）——供测试与诊断读取。</summary>
+    public int ScrollOffset => _content.ScrollOffset;
+
+    /// <summary>是否处于贴底跟随状态。</summary>
+    public bool IsAutoScroll => _content.IsAutoScroll;
 
     /// <summary>侧栏内容按视口高度向上翻页（Shift+PageUp）。</summary>
     public void PageUp() => _content.PageUp();

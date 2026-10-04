@@ -91,6 +91,9 @@ Debug 构建启动时把日志文件路径打印到 stderr（`Log file: ...`）�
 | ● | 让 agent 执行一次 WebSearch，展开该工具行 | 折叠行显示 query 与 "N results"；展开显示"搜索: <query> · <provider> · N 条"及每条的标题 / URL（青色）/ 摘要，无原始 JSON 转义串、无 `<footer>` 等 HTML 标签 | |
 | ● | 让 agent 连续执行多次 WebSearch（同轮 ≥3 次） | 完成行合并为一行 `WebSearch ×N · 累计时长`；展开列出每次的搜索词 / 结果摘要 / 单条时长；穿插其他工具时分组断开 | |
 | ● | PLAN 模式让模型只输出文字总结、不调 SubmitPlan 结束运行 | 运行结束出现系统提示"模型未提交计划…"，给出补交引导 | |
+| ● | 流式长对话中按 PageUp / PageDown | 首次按键即按页滚动（一页 = 视口高），不会一步到顶/到底，也不被流式输出拉回底部 | |
+| ● | 侧栏显示计划后按 Shift+PageUp / Shift+PageDown | 右侧计划侧栏按页滚动，左侧主对话区不动；鼠标悬停侧栏滚轮同理；主区 PageUp/PageDown 与侧栏互不干扰 | |
+| ● | 批准计划并执行一个无验证 profile 的任务（如生成 HTML 报告） | 全程执行完成，不出现"任务执行失败"误报；BuildRun 不被标为 Failed | |
 | ● | PLAN 模式调研型任务（无文件路径/技术栈）让模型调 SubmitPlan | 含编号后续行动步骤的调研型计划能通过质量门槛，侧栏出现计划卡与批准/修改/拒绝选项 | |
 | ● | 让 agent 执行一次 LS 并展开 | 折叠行显示目录路径与 "N entries"；展开为条目文本而非 JSON | |
 | ● | 工具执行中按 `Esc` | 工具停止或标记取消，不残留孤儿 shell | |
