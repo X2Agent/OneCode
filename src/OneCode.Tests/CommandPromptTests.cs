@@ -1,9 +1,11 @@
 using OneCode.Core.Config;
 using OneCode.App.Commands;
 using OneCode.App.Services;
+using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Commands;
 using OneCode.Core.Prompt;
+using OneCode.Core.Tools;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -248,10 +250,10 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "abc123 commit", "hash1\nhash2");
 
-        var pm = CreatePromptManager("system/review",
+        var pm = CreatePromptManager("system/review-security",
             "Review\nScope: {{scopeDescription}}\nDiff: {{diff}}");
-        var sut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
-        var result = await sut.ExecuteAsync([], ct);
+        var sut = CreateReviewCommand(gitHelper, pm);
+        var result = await sut.ExecuteAsync(["--focus", "security"], ct);
 
         var prompt = result.Should().BeOfType<CommandResult.PromptResult>().Subject;
         prompt.Content.Should().Contain("+ Added line");
@@ -267,7 +269,7 @@ public sealed class CommandPromptTests : IDisposable
             .Returns(new GitCommandResult(true, "", ""));
 
         // 不走 prompt 路径，空 PromptManager 即可
-        var sut = new ReviewCommand(gitHelper, new PromptManager(), new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
+        var sut = CreateReviewCommand(gitHelper, new PromptManager());
         var result = await sut.ExecuteAsync([], ct);
 
         result.Should().BeOfType<CommandResult.TextResult>()
@@ -284,10 +286,10 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "log", "hash1");
 
-        var pm = CreatePromptManager("system/review",
+        var pm = CreatePromptManager("system/review-security",
             "Review\nScope: {{scopeDescription}}\nDiff: {{diff}}");
-        var sut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
-        var result = await sut.ExecuteAsync(["--no-edit"], ct);
+        var sut = CreateReviewCommand(gitHelper, pm);
+        var result = await sut.ExecuteAsync(["--focus", "security", "--no-edit"], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
         prompt.AllowedTools.Should().NotContain("Edit(*)");
@@ -304,12 +306,12 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "log", "hash1");
 
-        // 空 PromptManager，没有注册模板
-        var sut = new ReviewCommand(gitHelper, new PromptManager(), new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
+        // 空 PromptManager，没有注册模板——默认三视角路径显式报错而非静默降级
+        var sut = CreateReviewCommand(gitHelper, new PromptManager());
         var result = await sut.ExecuteAsync([], ct);
 
         result.Should().BeOfType<CommandResult.ErrorResult>()
-            .Which.Message.Should().Contain("system/review");
+            .Which.Message.Should().Contain("system/review-aggregate");
     }
 
     [Fact]
@@ -322,11 +324,11 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "log", "hash1");
 
-        var pm = CreatePromptManager("system/review",
+        var pm = CreatePromptManager("system/review-security",
             "CUSTOM REVIEW\nScope: {{scopeDescription}}\nDiff: {{diff}}");
 
-        var sut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
-        var result = await sut.ExecuteAsync([], ct);
+        var sut = CreateReviewCommand(gitHelper, pm);
+        var result = await sut.ExecuteAsync(["--focus", "security"], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
         prompt.Content.Should().Contain("CUSTOM REVIEW");
@@ -353,7 +355,7 @@ public sealed class CommandPromptTests : IDisposable
         var pm = CreatePromptManager(promptName,
             "FOCUS=" + focus + "\nScope: {{scopeDescription}}\nDiff: {{diff}}");
 
-        var sut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
+        var sut = CreateReviewCommand(gitHelper, pm);
         var result = await sut.ExecuteAsync(["--focus", focus], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
@@ -371,11 +373,11 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "log", "hash1");
 
-        // 只注册 system/review-security，不注册 system/review
+        // 只注册 system/review-security，不注册其他模板
         var pm = CreatePromptManager("system/review-security",
             "SECURITY ONLY\nDiff: {{diff}}");
 
-        var sut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
+        var sut = CreateReviewCommand(gitHelper, pm);
         var result = await sut.ExecuteAsync(["--focus", "security"], ct);
 
         var prompt = result.As<CommandResult.PromptResult>();
@@ -391,7 +393,7 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.RunAsync(Arg.Any<string[]>(), ct)
             .Returns(new GitCommandResult(true, "should-not-reach", ""));
 
-        var sut = new ReviewCommand(gitHelper, new PromptManager(), new LspDiagnosticRegistry(), new ReviewCacheService(NullLogger<ReviewCacheService>.Instance));
+        var sut = CreateReviewCommand(gitHelper, new PromptManager());
         var result = await sut.ExecuteAsync(["--focus", "nonexistent"], ct);
 
         result.Should().BeOfType<CommandResult.ErrorResult>()
@@ -410,15 +412,15 @@ public sealed class CommandPromptTests : IDisposable
         gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
             .Returns("main", "log", "hash1");
 
-        var pm = CreatePromptManager("system/review", "S: {{severityScope}}");
+        var pm = CreatePromptManager("system/review-security", "S: {{severityScope}}");
         var cache = () => new ReviewCacheService(NullLogger<ReviewCacheService>.Instance);
 
-        var warningSut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), cache());
-        var warningResult = await warningSut.ExecuteAsync(["--severity", "warning"], ct);
+        var warningSut = CreateReviewCommand(gitHelper, pm, cache());
+        var warningResult = await warningSut.ExecuteAsync(["--severity", "warning", "--focus", "security"], ct);
         var warningText = warningResult.As<CommandResult.PromptResult>().Content;
 
-        var allSut = new ReviewCommand(gitHelper, pm, new LspDiagnosticRegistry(), cache());
-        var allResult = await allSut.ExecuteAsync([], ct); // 默认 all
+        var allSut = CreateReviewCommand(gitHelper, pm, cache());
+        var allResult = await allSut.ExecuteAsync(["--focus", "security"], ct); // 默认 all
         var allText = allResult.As<CommandResult.PromptResult>().Content;
 
         allText.Should().NotBe(warningText);
@@ -448,6 +450,22 @@ public sealed class CommandPromptTests : IDisposable
         var pm = new PromptManager();
         pm.RegisterTemplate(new PromptTemplate(name, template));
         return pm;
+    }
+
+    /// <summary>
+    /// 构造 ReviewCommand：并行三视角路径需要 DAG 编译器/宿主；不跑并行路径的测试
+    /// 传默认 stub runner 即可（永不被调用）。
+    /// </summary>
+    private static ReviewCommand CreateReviewCommand(
+        IGitHelper gitHelper, IPromptManager pm, ReviewCacheService? cache = null)
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        return new ReviewCommand(
+            gitHelper, pm, new LspDiagnosticRegistry(),
+            cache ?? new ReviewCacheService(NullLogger<ReviewCacheService>.Instance),
+            new AgentTaskWorkflowCompiler(runner, NullLogger<AgentTaskWorkflowCompiler>.Instance),
+            new AgentTaskWorkflowHost(NullLogger<AgentTaskWorkflowHost>.Instance),
+            cacheSafeParams: null);
     }
 
     private static IGitHelper CreateGitHelperReturning(

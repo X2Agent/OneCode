@@ -1,7 +1,10 @@
+using OneCode.App.Query;
 using OneCode.App.Services;
+using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 
 using OneCode.Core.Prompt;
+using OneCode.Core.Tools;
 using OneCode.Infrastructure.Git;
 using System.Text;
 
@@ -12,21 +15,25 @@ namespace OneCode.App.Commands;
 /// <summary>
 /// /review — AI-powered code review with severity levels, scope control and structured output.
 ///
-/// Prompt loaded from prompts/system/review.prompt (overridable via project/user-level
-/// .onecode/prompts/). Use --focus to switch to a specialized review prompt:
+/// Default (no --focus) runs a **three-perspective parallel review** through the shared MAF DAG
+/// (AgentTaskWorkflowCompiler, same base as ParallelAgents): security / performance / style
+/// read-only branches execute in parallel, then an aggregate task dedupes and merges findings
+/// into one report. All branches are read-only (Read/Grep/… only — no Bash, no Edit/Write).
+///
+/// --focus switches to a single specialized streaming review:
 ///   - --focus security     → prompts/system/review-security.prompt (OWASP, secrets, injection, crypto)
 ///   - --focus crashes      → prompts/system/review-crashes.prompt (null deref, bounds, races, leaks)
 ///   - --focus performance  → prompts/system/review-performance.prompt (N+1, allocations, blocking I/O)
 ///   - --focus style        → prompts/system/review-style.prompt (naming, consistency, readability)
 ///
 /// Usage:
-///   /review                   → review unstaged changes
+///   /review                   → three-perspective parallel review (security+performance+style)
 ///   /review --staged          → review staged changes only
 ///   /review --all             → review staged + unstaged (git diff HEAD)
 ///   /review --base main       → review diff against a branch/commit
 ///   /review --severity critical|warning|all  → filter output severity
-///   /review --focus security  → specialize review on security
-///   /review --no-edit         → report only, do not suggest edits
+///   /review --focus security  → single specialized streaming review
+///   /review --no-edit         → report only, do not suggest edits (single-view path)
 ///   /review --blame           → attach git blame context for changed lines
 ///   /review [file-path]       → restrict review to a specific file or directory
 /// </summary>
@@ -35,6 +42,9 @@ public sealed class ReviewCommand(
     IPromptManager promptManager,
     LspDiagnosticRegistry lspRegistry,
     ReviewCacheService reviewCacheService,
+    AgentTaskWorkflowCompiler workflowCompiler,
+    AgentTaskWorkflowHost workflowHost,
+    ICacheSafeParamsProvider? cacheSafeParams = null,
     ILogger<ReviewCommand>? logger = null) : Command
 {
     public override string Name => "review";
@@ -55,6 +65,24 @@ public sealed class ReviewCommand(
         ["performance"] = "system/review-performance",
         ["style"] = "system/review-style",
     };
+
+    /// <summary>
+    /// Default (no --focus) parallel perspectives. Each key doubles as the DAG task id
+    /// (<c>review-&lt;key&gt;</c>) and the specialized prompt name (<c>system/review-&lt;key&gt;</c>).
+    /// </summary>
+    internal static readonly (string Key, string PromptName)[] ParallelPerspectives =
+    [
+        ("security", "system/review-security"),
+        ("performance", "system/review-performance"),
+        ("style", "system/review-style"),
+    ];
+
+    internal const string AggregateTaskId = "review-aggregate";
+    internal const string AggregatePromptName = "system/review-aggregate";
+
+    /// <summary>Read-only sub-agents have no edit tools; the edit instruction is always report-only.</summary>
+    private const string ReadOnlyEditInstruction =
+        "This is a read-only review. Do NOT use Edit or Write tools — report findings only.";
 
     private static readonly string[] AllowedTools =
     [
@@ -203,7 +231,15 @@ public sealed class ReviewCommand(
             ["outputFormat"] = outputFormat,
         };
 
-        var promptName = focus is null ? "system/review" : FocusToPromptName[focus];
+        // Defer cache write until the review completes successfully. The single-view path
+        // commits via QueryStreamService.CommitPending after the prompt stream; the parallel
+        // path commits itself. Cancel/error discards the stage.
+        reviewCacheService.ScheduleCommit(baseRef, recentHashes);
+
+        if (focus is null)
+            return await RunParallelReviewAsync(variables, ct).ConfigureAwait(false);
+
+        var promptName = FocusToPromptName[focus];
         var prompt = await LoadPromptAsync(promptManager, promptName, variables, ct).ConfigureAwait(false);
         if (prompt is null)
         {
@@ -212,11 +248,106 @@ public sealed class ReviewCommand(
         }
         var tools = noEdit ? AllowedTools : AllowedToolsWithEdit;
 
-        // Defer cache write until the command-prompt stream completes successfully
-        // (QueryStreamService.CommitPending). Cancel/error discards the stage.
-        reviewCacheService.ScheduleCommit(baseRef, recentHashes);
-
         return CommandResult.Prompt(prompt, tools);
+    }
+
+    /// <summary>
+    /// 三视角并行评审（默认路径）：security / performance / style 三个只读分支经共享 MAF DAG
+    /// （<see cref="AgentTaskWorkflowCompiler"/>，与 ParallelAgents 同一底座）并行执行，聚合任务
+    /// 等三视角全部完成后汇总结论并去重。全部任务 <see cref="AgentTaskExecutionAccess.ReadOnly"/>，
+    /// 工具面收敛到 ReadOnlyAgentTools（无 Bash/Edit/Write），比单视角串行路径更严格。
+    /// 聚合失败时降级返回各视角原始分段（FinalOutput 已含每任务错误行），不静默丢报告。
+    /// </summary>
+    internal async Task<CommandResult> RunParallelReviewAsync(
+        IReadOnlyDictionary<string, string> variables,
+        CancellationToken ct)
+    {
+        var tasks = BuildPerspectiveTasks(
+            await RenderPerspectivePromptsAsync(variables, ct).ConfigureAwait(false),
+            await LoadPromptAsync(promptManager, AggregatePromptName, variables, ct).ConfigureAwait(false));
+        if (tasks.Count == 0)
+            return CommandResult.Error(
+                $"Parallel review requires prompts {string.Join(", ", ParallelPerspectives.Select(p => p.PromptName))} and {AggregatePromptName}.");
+
+        try
+        {
+            var workflow = workflowCompiler.Compile(
+                tasks,
+                cacheSafeParams?.Current,
+                ToolActivationContext.CurrentCapabilities);
+            var result = await workflowHost.RunAsync(workflow, tasks, ct).ConfigureAwait(false);
+
+            var aggregate = result.TaskOutcomes.Single(outcome => outcome.TaskId == AggregateTaskId);
+            if (aggregate.Success)
+            {
+                // 非流式命令路径没有 QueryStreamService.CommitPending，评审完整跑完即落缓存。
+                reviewCacheService.CommitPending();
+                return CommandResult.Text(aggregate.Output!.Trim());
+            }
+
+            reviewCacheService.DiscardPending();
+            return CommandResult.Text(
+                $"{result.FinalOutput}\n\n(Aggregation task failed: {aggregate.Error}; raw perspective sections shown above.)");
+        }
+        catch (InvalidOperationException ex)
+        {
+            reviewCacheService.DiscardPending();
+            return CommandResult.Error($"Parallel review failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>渲染三视角 prompt；任一模板缺失返回 null（调用方显式报错，不静默降级）。</summary>
+    private async Task<IReadOnlyDictionary<string, string>?> RenderPerspectivePromptsAsync(
+        IReadOnlyDictionary<string, string> variables,
+        CancellationToken ct)
+    {
+        // 只读子代理没有 Edit/Write 工具，编辑指令固定为 report-only。
+        var perspectiveVariables = new Dictionary<string, string>(variables)
+        {
+            ["editInstruction"] = ReadOnlyEditInstruction,
+        };
+
+        var rendered = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (_, promptName) in ParallelPerspectives)
+        {
+            var prompt = await LoadPromptAsync(promptManager, promptName, perspectiveVariables, ct).ConfigureAwait(false);
+            if (prompt is null)
+                return null;
+            rendered[promptName] = prompt;
+        }
+        return rendered;
+    }
+
+    /// <summary>
+    /// 组装 4 任务 DAG：三个只读视角分支（不注入上游、互不依赖 → MAF fan-out 并行）+
+    /// 一个聚合任务（依赖全部视角，barrier 汇聚，上游输出由 DAG 自动注入 prompt）。
+    /// </summary>
+    internal static IReadOnlyList<AgentWorkflowTask> BuildPerspectiveTasks(
+        IReadOnlyDictionary<string, string>? renderedPerspectivePrompts,
+        string? aggregatePrompt)
+    {
+        if (renderedPerspectivePrompts is null || aggregatePrompt is null)
+            return [];
+
+        var tasks = new List<AgentWorkflowTask>(ParallelPerspectives.Length + 1);
+        foreach (var (key, promptName) in ParallelPerspectives)
+        {
+            tasks.Add(new AgentWorkflowTask(
+                $"review-{key}",
+                renderedPerspectivePrompts[promptName],
+                "general-purpose",
+                $"{key} perspective review",
+                [],
+                InjectUpstreamResults: false));
+        }
+        tasks.Add(new AgentWorkflowTask(
+            AggregateTaskId,
+            aggregatePrompt,
+            "general-purpose",
+            "aggregate and dedupe review findings",
+            ParallelPerspectives.Select(p => $"review-{p.Key}").ToArray(),
+            InjectUpstreamResults: true));
+        return tasks;
     }
 
     /// <summary>

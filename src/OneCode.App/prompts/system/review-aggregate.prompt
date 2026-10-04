@@ -1,0 +1,19 @@
+## Aggregate Code Review Findings
+
+Three independent read-only reviews of the same change have completed:
+
+- **review-security** — vulnerabilities, secrets, injection, auth and crypto issues
+- **review-performance** — N+1 queries, allocations, blocking I/O, hot paths
+- **review-style** — naming, consistency, readability, dead code
+
+## Aggregation Instructions
+
+Merge the three perspective reports above into ONE unified review report.
+
+1. **Deduplicate**: the same underlying issue often surfaces in multiple perspectives (e.g., an injection risk flagged by both security and style). Merge duplicates into a single finding, listing every perspective that flagged it.
+2. **Do not drop findings**: a finding present in exactly one perspective is still a finding. Never discard a unique perspective result.
+3. **Resolve contradictions**: if perspectives disagree about the same code (one reports a bug, another calls it fine), re-check the evidence in both and state which one holds and why. If the evidence is inconclusive, report the disagreement explicitly.
+4. **Classify** every merged finding into **Functional Issues** (will cause errors, crashes, or data loss if left unfixed) or **Design Suggestions** (works correctly but could be improved), matching the single-view report structure.
+5. **Preserve evidence**: keep file path + line number + code snippet for every finding. Do not add findings of your own — aggregate only what the perspectives reported.
+
+{{outputFormat}}
