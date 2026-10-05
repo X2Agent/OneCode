@@ -72,7 +72,7 @@ public sealed class FileOperationLedgerTests : IDisposable
     public async Task ReconcileAndRollback_CommittedTransaction_DoesNotTouchFiles()
     {
         var ledger = new FileOperationLedger(_root);
-        var op = "team/tr-1/fence/9";
+        var op = "ledger/tr-1/fence/9";
         var file = Path.Combine(_root, "a.txt");
         await File.WriteAllTextAsync(file, "original", TestContext.Current.CancellationToken);
         await ledger.BeginTransactionAsync(op, "file-transaction", 9, TestContext.Current.CancellationToken);
