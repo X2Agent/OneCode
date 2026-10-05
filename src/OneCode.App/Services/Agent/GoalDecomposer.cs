@@ -196,11 +196,16 @@ internal sealed class GoalDecomposer(
                 return null;
             }
 
-            // 重新编号子目标 ID（从失败子目标 ID + 1 开始）
-            var baseId = failedGoal.Id + 1;
-            var replannedGoals = newPlan.Goals.ToList();
-            for (int i = 0; i < replannedGoals.Count; i++)
-                replannedGoals[i] = replannedGoals[i] with { Id = baseId + i };
+            // 重新编号：与按需递归分解同规则（当前计划最大 Id + 1）——失败步之前可能已有
+            // 分解产物的高位 Id，按 failedGoal.Id + 1 编号会与保留段撞 Id，导致
+            // ApplyEvidenceAsync 按 Id 寻址错位（plan/证据/预算三源错乱）。
+            var baseId = currentPlan.Goals.Count == 0 ? 1 : currentPlan.Goals.Max(g => g.Id) + 1;
+            var replannedGoals = new List<GoalItem>(newPlan.Goals.Count);
+            foreach (var goal in newPlan.Goals)
+            {
+                replannedGoals.Add(goal with { Id = baseId });
+                baseId++;
+            }
 
             _logger.LogInformation(
                 "Replanning succeeded: {Count} new sub-goals replacing original remaining goals",

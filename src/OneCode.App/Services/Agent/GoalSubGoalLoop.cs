@@ -61,7 +61,7 @@ internal sealed class GoalSubGoalLoop(
                 state.Iterations = loopContext.Iteration;
 
                 // 从 LastResponse 提取本轮输出文本和 token（FreshContextPerIteration=true
-                // 保证每轮 session 独立，不会跨轮累积输出）
+                // 保证每轮 session 独立，不会跨轮累积输出）。
                 var lastOutputBuilder = new StringBuilder();
                 foreach (var message in loopContext.LastResponse.Messages)
                 {
@@ -72,12 +72,16 @@ internal sealed class GoalSubGoalLoop(
                         {
                             lastOutputBuilder.Append(textContent.Text);
                         }
-                        else if (content is UsageContent usageContent && usageContent.Details is { } details)
-                        {
-                            state.InputTokens += (long)(details.InputTokenCount ?? 0);
-                            state.OutputTokens += (long)(details.OutputTokenCount ?? 0);
-                        }
                     }
+                }
+
+                // M.E.AI 契约：usage 聚合在 response.Usage 上，不留在 Messages 里
+                // （MAF LoopAgentTests: AggregatedTranscript_DoesNotDuplicateUsageIntoMessages）——
+                // 从 Messages 扫 UsageContent 是死代码，token 会全部漏计。
+                if (loopContext.LastResponse.Usage is { } usage)
+                {
+                    state.InputTokens += (long)(usage.InputTokenCount ?? 0);
+                    state.OutputTokens += (long)(usage.OutputTokenCount ?? 0);
                 }
 
                 var lastOutput = lastOutputBuilder.ToString();

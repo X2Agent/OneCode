@@ -159,7 +159,11 @@ public sealed class JsonGoalRunStore : IGoalRunStore
                 throw new InvalidDataException("Completed GoalRun requires a publish receipt.");
             if (run.FinalValidation.Count == 0 || run.FinalValidation.Any(gate => !gate.Passed && !gate.Skipped))
                 throw new InvalidDataException("Completed GoalRun requires successful final validation evidence.");
-            if (run.Plan.Any(step => !step.Optional && step.State != GoalStepState.Completed))
+            // 必需步骤的完成态：Completed，或被按需分解/replan 取代（Skipped 标记）——
+            // 与 GoalCompletionService 的豁免口径一致，否则分解父步/replan 失败步的 run
+            // 永远无法以 Completed 落盘。
+            if (run.Plan.Any(step => !step.Optional && step.State != GoalStepState.Completed
+                && !(step.State == GoalStepState.Skipped && (step.NeedsFurtherDecomposition || step.SupersededByReplan))))
                 throw new InvalidDataException("Completed GoalRun contains an incomplete required step.");
         }
     }

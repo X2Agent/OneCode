@@ -20,7 +20,9 @@ public sealed class ResumeCommand(IGoalRunStore goalRunStore) : Command
     public override string Name => "resume";
     public override string Description => "Resume an interrupted Goal workflow";
     public override CommandCategory Category => CommandCategory.Session;
-    public override bool Immediate => true;
+    // 不可设 Immediate：Immediate 路径的展示映射不识别 ResumeWorkflowResult（落 _ => null），
+    // 会导致恢复流静默丢失。非 Immediate 路径才把结果派发给 RunResumeWorkflowAsync；
+    // 运行中提交则入队，query 结束后自动执行。
     public override string? ArgumentHint => "[sessionId]";
 
     public override Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)

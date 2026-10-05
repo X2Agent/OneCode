@@ -45,7 +45,11 @@ public sealed record GoalStepSnapshot(
     bool RequiresTests,
     bool Optional,
     // 子目标分解失败回退直执行，或深度上限后未再拆分即执行时置位，供 TUI 卡片与事后审计。
-    bool DecompositionFallback = false);
+    bool DecompositionFallback = false,
+    // 是否已被 replan 取代：该步失败后重规划产出替代步骤，本步标记 Skipped 并保留在
+    // plan 中（聚合不变式要求回执引用的步骤必须存在于 plan）。完成完整性检查与
+    // 聚合校验据此豁免该步。
+    bool SupersededByReplan = false);
 
 public sealed record GoalStepExecutionEvidence(
     int GoalId,

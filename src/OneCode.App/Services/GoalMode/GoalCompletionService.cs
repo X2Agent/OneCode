@@ -70,7 +70,7 @@ internal sealed class GoalCompletionService(
             return await PublishAsync(current, fencingToken, ct).ConfigureAwait(false);
 
         var incompleteRequired = current.Plan
-            .Where(step => !step.Optional && !IsSatisfied(step))
+            .Where(step => !step.Optional && !IsSatisfied(step) && !step.SupersededByReplan)
             .ToArray();
         report.Add(new GoalGateEvidence(
             "state-integrity",
@@ -86,7 +86,7 @@ internal sealed class GoalCompletionService(
             .GroupBy(execution => execution.GoalId)
             .ToDictionary(group => group.Key, group => group.Last());
         var evidenceComplete = current.Plan
-            .Where(step => !step.Optional && !IsReplacedByDecomposition(step))
+            .Where(step => !step.Optional && !IsReplacedByDecomposition(step) && !step.SupersededByReplan)
             .All(step => executionByGoalId.TryGetValue(step.Id, out var execution)
                 && execution.State == GoalStepState.Completed
                 && execution.Validations.All(gate => gate.Passed || gate.Skipped));

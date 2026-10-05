@@ -149,6 +149,35 @@ public sealed class GoalSubGoalLoopTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_InnerAgentUsage_AccumulatesIntoExecutionTokens()
+    {
+        // 回归锚定：M.E.AI 契约是 usage 聚合在 response.Usage 上、不留在 Messages 里
+        // （MAF LoopAgentTests: AggregatedTranscript_DoesNotDuplicateUsageIntoMessages）。
+        // 旧实现从 Messages 扫 UsageContent 是死代码——inner 迭代的 token 全部漏计，
+        // Goal 预算的 token 轴只剩 judge 调用。修复后必须从 LastResponse.Usage 读取。
+        var inner = ScriptedStreamingAgent.WithRawUpdates(
+            [[
+                new AgentResponseUpdate(ChatRole.Assistant, "iteration-1 work")
+                {
+                    MessageId = Guid.NewGuid().ToString("N"),
+                },
+                new AgentResponseUpdate(ChatRole.Assistant, [new UsageContent(
+                    new UsageDetails { InputTokenCount = 30, OutputTokenCount = 12 })])
+                {
+                    MessageId = Guid.NewGuid().ToString("N"),
+                },
+            ]]);
+        var judge = CreateJudgeClient("VERDICT: DONE");
+        var loop = CreateLoop(judge);
+
+        var result = await RunAsync(loop, inner, CreateGoal());
+
+        result.Status.Should().Be(GoalStatus.Completed);
+        result.InputTokens.Should().Be(30, "inner 迭代的 usage 必须从 response.Usage 读取并计入");
+        result.OutputTokens.Should().Be(12);
+    }
+
+    [Fact]
     public async Task RunAsync_InvokedTwice_PerRunStateDoesNotLeakBetweenRuns()
     {
         // per-run 状态必须保持在 run 作用域内；若被提升为共享/静态，第二次 run 会继承第一次的轮次与 token。
@@ -294,6 +323,10 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         /// <summary>按原始消息脚本化（用于 pending tool approval 等非文本响应）。</summary>
         public static ScriptedStreamingAgent WithMessages(params ChatMessage[] messages)
             => new(messages.Select(m => new[] { new AgentResponseUpdate(m.Role, (IList<AIContent>)m.Contents) }));
+
+        /// <summary>按原始 update 脚本化（用于注入 <see cref="UsageContent"/> 等聚合期内容）。</summary>
+        public static ScriptedStreamingAgent WithRawUpdates(params AgentResponseUpdate[][] iterations)
+            => new(iterations);
 
         public int CallCount => MessagesPerCall.Count;
 

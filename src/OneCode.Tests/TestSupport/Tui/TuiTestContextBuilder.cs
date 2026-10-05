@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 
+using OneCode.App.Services;
 using OneCode.App.Tui;
 using OneCode.Core.Commands;
 using OneCode.Core.Keybindings;
@@ -30,6 +31,8 @@ internal sealed class TuiTestContextBuilder
     private readonly List<Action> _sessionCreatedObservers = [];
     private readonly List<Action> _commandExecutedObservers = [];
     private readonly List<Action> _streamExhaustedObservers = [];
+    private readonly List<Action> _resumeStartedObservers = [];
+    private List<TuiEvent>? _resumeScript;
 
     /// <summary>
     /// 观测点：<c>CreateSession</c> 被调用。这是查询流水线唯一「已进入」的确定性信号，
@@ -52,6 +55,26 @@ internal sealed class TuiTestContextBuilder
     public TuiTestContextBuilder OnStreamExhausted(Action handler)
     {
         _streamExhaustedObservers.Add(handler);
+        return this;
+    }
+
+    /// <summary>
+    /// 观测点：<c>StreamResumeWorkflow</c> 被调用（/resume 派发已真正进入恢复流）。
+    /// 回归锚点：ResumeCommand 一旦改回 Immediate，恢复流将静默丢失、该观测点不再触发。
+    /// </summary>
+    public TuiTestContextBuilder OnResumeStarted(Action handler)
+    {
+        _resumeStartedObservers.Add(handler);
+        return this;
+    }
+
+    /// <summary>
+    /// 声明 /resume 的恢复流脚本：启用 <c>TryResolvePromptCommand</c> / <c>StreamResumeWorkflow</c>
+    /// 的脚本化实现（仅识别 resume 命令，等价于生产 <c>SlashCommandPipeline</c> 的映射）。
+    /// </summary>
+    public TuiTestContextBuilder Resume(params TuiEvent[] events)
+    {
+        _resumeScript = [.. events];
         return this;
     }
 
@@ -130,7 +153,12 @@ internal sealed class TuiTestContextBuilder
             StreamQuery: (text, images, ct) => Compose(ResolveStream()(text, images, ct), ct),
             CreateSession: _ => OnSessionCreated(),
             ExecuteCommand: ExecuteCommandAsync,
-            IsImmediateCommand: IsImmediate),
+            IsImmediateCommand: IsImmediate,
+            TryResolvePromptCommand: ResolvePromptCommand(),
+            // /resume 派发分支要求 TryResolvePromptCommand 与 StreamCommandPrompt 同时非空
+            //（与生产接线一致）；本测试基建的命令提示流恒为空流。
+            StreamCommandPrompt: ResolveCommandPromptStream(),
+            StreamResumeWorkflow: _resumeScript is null ? null : ResumeScripted),
         Session: new TuiSessionServices(
             GetSessionUserPrompts: () => _sessionPrompts,
             GitHelper: _gitHelper),
@@ -215,6 +243,43 @@ internal sealed class TuiTestContextBuilder
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         foreach (var evt in _script)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return evt;
+            await Task.Yield();
+        }
+    }
+
+    private Func<string, CancellationToken, Task<CommandDispatchResult?>>? ResolvePromptCommand()
+        => _resumeScript is null
+            ? null
+            : (text, _) =>
+            {
+                var name = text.TrimStart('/').Split(' ')[0];
+                return Task.FromResult<CommandDispatchResult?>(
+                    name.Equals("resume", StringComparison.OrdinalIgnoreCase)
+                        ? new CommandDispatchResult.ResumeWorkflow(text["resume".Length..].Trim(), WorkflowResumeKind.Goal)
+                        : null);
+            };
+
+    private Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? ResolveCommandPromptStream()
+        => _resumeScript is null ? null : (_, _, ct) => EmptyStream(ct);
+
+    private static async IAsyncEnumerable<TuiEvent> EmptyStream(
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    private async IAsyncEnumerable<TuiEvent> ResumeScripted(
+        string sessionId,
+        WorkflowResumeKind kind,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var observer in _resumeStartedObservers)
+            observer();
+        foreach (var evt in _resumeScript!)
         {
             ct.ThrowIfCancellationRequested();
             yield return evt;

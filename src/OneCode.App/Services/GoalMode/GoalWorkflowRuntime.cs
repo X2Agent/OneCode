@@ -321,7 +321,17 @@ internal sealed class GoalWorkflowRuntime(
                     ct).ConfigureAwait(false);
                 if (replan is { RemainingGoals.Count: > 0 })
                 {
-                    var retained = applied.Plan.Take(applied.CurrentIndex).ToList();
+                    // 失败步保留在 plan 中（聚合不变式：回执引用的步骤必须存在于 plan），
+                    // 标记 Skipped + SupersededByReplan——完成完整性检查与聚合校验据此豁免。
+                    // 不标记的话 replan 后的 run 终态必为 Failed，replan 形同虚设。
+                    // replan 语义：替换失败步之后的全部剩余步骤；游标指向首个 replanned 步。
+                    var failedIndex = applied.CurrentIndex - 1;
+                    var retained = applied.Plan.Take(failedIndex + 1).ToList();
+                    retained[failedIndex] = retained[failedIndex] with
+                    {
+                        State = GoalStepState.Skipped,
+                        SupersededByReplan = true,
+                    };
                     retained.AddRange(replan.Value.RemainingGoals.Select(ToSnapshot));
                     applied = applied with
                     {

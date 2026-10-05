@@ -131,6 +131,49 @@ public sealed class GoalDecomposerTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [Fact]
+    public async Task Replan_RenumbersFromMaxPlanId_NotFromFailedGoalId()
+    {
+        // 回归锚定：按需递归分解用 Max(Id)+1 插入高位 Id，replan 若按 failedGoal.Id+1 编号，
+        // 产出会与保留段的分解子步骤撞 Id——ApplyEvidenceAsync 按 Id 寻址会错位
+        // （plan/证据/预算三源错乱）。replan 必须与分解同规则：当前计划最大 Id + 1。
+        // 场景：初始 [1,2,3]，2 分解出 4,5 → plan=[1,2,4,5,3]，3（index 4）失败触发 replan。
+        var responseText = """
+            {"goals":[{"id":1,"description":"retry via refactor","successCriteria":"done"},
+                      {"id":2,"description":"validate","successCriteria":"done"}]}
+            """;
+        var decomposer = CreateDecomposer(out var chatClient);
+        chatClient.GetResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult(CreateResponse(responseText)));
+
+        var currentPlan = new GoalPlan
+        {
+            Goals =
+            [
+                new GoalItem { Id = 1, Description = "done step", SuccessCriteria = "done" },
+                new GoalItem { Id = 2, Description = "decomposed parent", SuccessCriteria = "done" },
+                new GoalItem { Id = 4, Description = "decomposed child a", SuccessCriteria = "done" },
+                new GoalItem { Id = 5, Description = "decomposed child b", SuccessCriteria = "done" },
+                new GoalItem { Id = 3, Description = "failed step", SuccessCriteria = "done" },
+            ],
+        };
+
+        var result = await decomposer.ReplanAsync(
+            "original goal",
+            currentPlan,
+            failedGoalIndex: 4,
+            [],
+            modelId: null,
+            TestContext.Current.CancellationToken);
+
+        var goals = result!.Value.RemainingGoals;
+        goals.Select(g => g.Id).Should().BeEquivalentTo([6, 7],
+            "replan 从当前计划最大 Id+1 起编号，LLM 自报的 Id 被覆盖");
+    }
+
     private static ChatResponse CreateResponse(string text) => new(
         new ChatMessage(ChatRole.Assistant, text))
     {
