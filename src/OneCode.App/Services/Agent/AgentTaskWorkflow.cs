@@ -16,7 +16,9 @@ public sealed record AgentWorkflowTask(
     AgentTaskExecutionAccess ExecutionAccess = AgentTaskExecutionAccess.ReadOnly,
     // 自定义代理（.onecode/agents/*.md）派工时由工具层填充。
     string? Instructions = null,
-    IReadOnlyList<string>? AllowedTools = null)
+    IReadOnlyList<string>? AllowedTools = null,
+    // 工作目录覆盖（GOAL 隔离 worktree 场景）。null 时 fork 使用会话工作目录访问器。
+    string? WorkingDirectory = null)
 {
     /// <summary>Returns the normalized dependency list supplied by the approved graph.</summary>
     public IReadOnlyList<string> Dependencies { get; } = DependsOn ?? [];
@@ -55,9 +57,15 @@ public sealed record AgentTaskOutcome(
     string? Error,
     int TurnsCompleted,
     bool MaxTurnsReached,
-    long DurationMs)
+    long DurationMs,
+    // fork 事务提交的变更文件与 token 消耗（GOAL 步内 DAG 的证据与预算依赖此聚合）。
+    IReadOnlyList<string>? ChangedFiles = null,
+    long InputTokens = 0,
+    long OutputTokens = 0)
 {
     public bool Success => Status == AgentTaskOutcomeStatus.Succeeded;
+
+    public IReadOnlyList<string> ChangedFiles { get; } = ChangedFiles ?? [];
 }
 
 /// <summary>Contains the aggregate result returned by the workflow host.</summary>
@@ -284,7 +292,8 @@ internal sealed class AgentTaskExecutor(
                     CacheSafeParams: CreateTaskCacheSafeParams(task, cacheSafeParams),
                     ParentCapabilities: parentCapabilities,
                     Instructions: task.Instructions,
-                    AllowedToolNames: task.AllowedTools),
+                    AllowedToolNames: task.AllowedTools,
+                    WorkingDirectory: task.WorkingDirectory),
                 cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
 
@@ -298,7 +307,10 @@ internal sealed class AgentTaskExecutor(
                     $"[{error.Type}] {error.Detail}",
                     result.TurnsCompleted,
                     result.MaxTurnsReached,
-                    stopwatch.ElapsedMilliseconds));
+                    stopwatch.ElapsedMilliseconds,
+                    result.ChangedFiles ?? [],
+                    result.InputTokens,
+                    result.OutputTokens));
             }
 
             return outcomeRegistry.Set(new AgentTaskOutcome(
@@ -309,7 +321,10 @@ internal sealed class AgentTaskExecutor(
                 null,
                 result.TurnsCompleted,
                 result.MaxTurnsReached,
-                stopwatch.ElapsedMilliseconds));
+                stopwatch.ElapsedMilliseconds,
+                result.ChangedFiles ?? [],
+                result.InputTokens,
+                result.OutputTokens));
         }
         catch (OperationCanceledException)
         {

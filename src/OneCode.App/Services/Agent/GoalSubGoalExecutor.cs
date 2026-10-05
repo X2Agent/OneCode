@@ -44,6 +44,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     private readonly GoalContextState _goalContextState;
     private readonly GoalSubGoalLoop _loop;
     private readonly GoalSubGoalJudge _judge;
+    private readonly GoalSubTaskDagRunner _dagRunner;
 
     public GoalSubGoalExecutor(
         IMainAgentRunner mainAgentRunner,
@@ -52,14 +53,17 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         ILogger<GoalSubGoalExecutor> logger,
         IPromptManager promptManager,
         GoalContextState goalContextState,
-        IVerificationProvider? verificationProvider = null,
-        LspDiagnosticRegistry? diagnosticRegistry = null)
+        GoalSubGoalGateDependencies gateDependencies,
+        GoalSubTaskDagRunner dagRunner)
     {
         _mainAgentRunner = mainAgentRunner;
         _logger = logger;
         _promptManager = promptManager;
         _goalContextState = goalContextState;
-        var hardGate = new GoalSubGoalHardGate(verificationProvider, diagnosticRegistry);
+        _dagRunner = dagRunner;
+        var hardGate = new GoalSubGoalHardGate(
+            gateDependencies.VerificationProvider,
+            gateDependencies.DiagnosticRegistry);
         _judge = new GoalSubGoalJudge(chatClient, promptManager);
         _loop = new GoalSubGoalLoop(hardGate, _judge, loggerFactory);
     }
@@ -72,6 +76,11 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(eventWriter);
+
+        // 步内并行分支：subTasks 非空时走共享 DAG 执行器（fork 自管事务，step 级事务空壳）。
+        if (goal.SubTasks is { Count: > 0 })
+            return await _dagRunner.RunAsync(goal, options, eventWriter, ct).ConfigureAwait(false);
+
         try
         {
             List<GoalToolExecutionEvidence> toolExecutions = [];

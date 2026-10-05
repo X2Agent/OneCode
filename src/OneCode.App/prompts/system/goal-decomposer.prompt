@@ -24,6 +24,16 @@ For each sub-goal provide:
    and should be broken down further before execution. The orchestrator will
    recursively decompose it on-demand. Set to false for leaf sub-goals that
    can be executed directly.
+10. subTasks — OPTIONAL list of parallel sub-tasks for this sub-goal (max 5).
+   Use ONLY when the sub-goal naturally splits into 2-5 fully independent work
+   items whose file scopes do not overlap and each can be verified on its own
+   (e.g. "add CLAUDE/AGENTS/cursor docs" or "migrate these independent modules").
+   Each sub-task: id (string, unique within the list), description, prompt
+   (self-contained instructions — sub-tasks cannot see the conversation or each
+   other's output except for declared dependsOn), dependsOn (ids that must
+   finish first; [] for fully parallel), readOnly (true when the task only
+   reads files — read-only tasks run concurrently). When in doubt, omit
+   subTasks entirely and let the sub-goal execute as a single agent.
 
 Output ONLY valid JSON in this exact format, no other text:
 {
@@ -38,7 +48,23 @@ Output ONLY valid JSON in this exact format, no other text:
       "requiresBuild": true,
       "requiresTests": true,
       "optional": false,
-      "needsFurtherDecomposition": false
+      "needsFurtherDecomposition": false,
+      "subTasks": [
+        {
+          "id": "docs-claude",
+          "description": "Write CLAUDE.md",
+          "prompt": "Create CLAUDE.md describing build commands and conventions.",
+          "dependsOn": [],
+          "readOnly": false
+        },
+        {
+          "id": "review-styles",
+          "description": "Review doc styles for consistency",
+          "prompt": "Read CLAUDE.md and AGENTS.md; report inconsistencies.",
+          "dependsOn": ["docs-claude"],
+          "readOnly": true
+        }
+      ]
     }
   ]
 }

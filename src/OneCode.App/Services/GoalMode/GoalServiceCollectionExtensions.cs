@@ -25,6 +25,10 @@ public static class GoalServiceCollectionExtensions
 
         services.AddSingleton<GoalDecomposer>();
         services.AddSingleton<IGoalPlanningService>(sp => sp.GetRequiredService<GoalDecomposer>());
+        services.AddSingleton(sp => new GoalSubGoalGateDependencies(
+            sp.GetService<IVerificationProvider>(),
+            sp.GetService<Services.Lsp.LspDiagnosticRegistry>()));
+        services.AddSingleton<GoalSubTaskDagRunner>();
         services.AddSingleton(sp => new GoalSubGoalExecutor(
             sp.GetRequiredService<IMainAgentRunner>(),
             sp.GetRequiredService<IChatClient>(),
@@ -32,8 +36,8 @@ public static class GoalServiceCollectionExtensions
             sp.GetRequiredService<ILogger<GoalSubGoalExecutor>>(),
             sp.GetRequiredService<IPromptManager>(),
             sp.GetRequiredService<GoalContextState>(),
-            sp.GetService<IVerificationProvider>(),
-            sp.GetService<Services.Lsp.LspDiagnosticRegistry>()));
+            sp.GetRequiredService<GoalSubGoalGateDependencies>(),
+            sp.GetRequiredService<GoalSubTaskDagRunner>()));
         services.AddSingleton<IGoalStepExecutionService>(sp => sp.GetRequiredService<GoalSubGoalExecutor>());
         services.AddSingleton<IGoalCompletionService>(sp => new GoalCompletionService(
             sp.GetRequiredService<IGoalRunStore>(),

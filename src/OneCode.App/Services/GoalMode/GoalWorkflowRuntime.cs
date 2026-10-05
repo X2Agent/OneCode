@@ -260,14 +260,17 @@ internal sealed class GoalWorkflowRuntime(
                 transaction,
                 context.EventWriter,
                 ct).ConfigureAwait(false);
-            // H4: 失败路径先回滚再构造证据——回执不得记录已回滚的文件，否则
-            // GoalCompletionService 的 change-scope 门禁会按"声称改过、实际已还原"的
-            // 路径误杀整 run。
-            var rolledBack = execution.Status != GoalStatus.Completed;
+            // DAG 步（subTasks）：fork 各自提交独立事务，step 级事务为空壳——失败时不回滚
+            // 也不清空 ChangedFiles（成功兄弟的改动保留在 worktree，replan 可续建），标记
+            // partial-committed。单代理步骤维持「失败即回滚」语义。
+            var isDagStep = step.SubTasks is { Count: > 0 };
+            var rolledBack = !isDagStep && execution.Status != GoalStatus.Completed;
             if (rolledBack)
                 transaction.Rollback();
             if (step.DecompositionFallback)
                 execution = execution with { Evaluation = $"{execution.Evaluation} [decomposition-fallback]" };
+            if (isDagStep && execution.Status != GoalStatus.Completed)
+                execution = execution with { Evaluation = $"{execution.Evaluation} [partial-committed]" };
             var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
             // S-04 修订：ledger 提交必须先于 git 回执提交——「回执存在 ⇒ ledger 已提交」是不变式。
             // 若回执先落而 ledger 仍 Active，崩溃后新世代的 ReconcileRunAsync 会按 before-content
@@ -519,7 +522,9 @@ internal sealed class GoalWorkflowRuntime(
             item.AllowedPaths,
             item.RequiresBuild,
             item.RequiresTests,
-            item.Optional);
+            item.Optional,
+            DecompositionFallback: false,
+            SubTasks: item.SubTasks);
 
     private static GoalItem ToGoalItem(GoalStepSnapshot item)
         => new()
@@ -536,6 +541,7 @@ internal sealed class GoalWorkflowRuntime(
             RequiresBuild = item.RequiresBuild,
             RequiresTests = item.RequiresTests,
             Optional = item.Optional,
+            SubTasks = item.SubTasks,
         };
 
     private static GoalStepExecutionEvidence ToEvidence(

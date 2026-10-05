@@ -49,7 +49,21 @@ public sealed record GoalStepSnapshot(
     // 是否已被 replan 取代：该步失败后重规划产出替代步骤，本步标记 Skipped 并保留在
     // plan 中（聚合不变式要求回执引用的步骤必须存在于 plan）。完成完整性检查与
     // 聚合校验据此豁免该步。
-    bool SupersededByReplan = false);
+    bool SupersededByReplan = false,
+    // 步内并行任务（非空时该步不走 LoopAgent 单代理循环，改走共享 DAG 执行器：
+    // ReadOnly 任务并发、Write 任务按依赖拓扑序串行——与 ParallelAgents 同一底座）。
+    IReadOnlyList<GoalSubTask>? SubTasks = null);
+
+/// <summary>
+/// 步内并行子任务：由分解器产出（goal-decomposer.prompt 的 subTasks 契约），
+/// 经 <c>GoalSubTaskDagRunner</c> 编译为 MAF fan-out/fan-in 工作流执行。
+/// </summary>
+public sealed record GoalSubTask(
+    string Id,
+    string Description,
+    string Prompt,
+    IReadOnlyList<string> DependsOn,
+    bool ReadOnly);
 
 public sealed record GoalStepExecutionEvidence(
     int GoalId,

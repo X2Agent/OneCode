@@ -83,5 +83,8 @@ public sealed class ForkedAgentResult
 
     /// <summary>Structured error details when the forked agent fails (ERR-1.4).</summary>
     public AgentProblemDetails? Error { get; init; }
+
+    /// <summary>fork 事务提交的变更文件（GOAL 步内 DAG 证据与 build 门禁依赖此透传）。</summary>
+    public IReadOnlyList<string> ChangedFiles { get; init; } = [];
 }
 

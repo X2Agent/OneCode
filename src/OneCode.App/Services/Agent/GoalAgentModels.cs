@@ -118,6 +118,12 @@ public sealed record GoalItem
 
     /// <summary>是否为可选子目标。可选子目标失败不会阻止最终发布。</summary>
     public bool Optional { get; init; }
+
+    /// <summary>
+    /// 步内并行子任务（goal-decomposer.prompt 的 subTasks 契约）。非空时该子目标
+    /// 经 <see cref="GoalSubTaskDagRunner"/> 以共享 DAG 底座并行执行，不走单代理循环。
+    /// </summary>
+    public IReadOnlyList<GoalSubTask>? SubTasks { get; set; }
 }
 
 /// <summary>
@@ -146,6 +152,14 @@ public sealed record GoalToolExecutionEvidence(
     string ToolName,
     bool IsError,
     string? Result);
+
+/// <summary>
+/// GOAL 子目标执行链的确定性验证依赖束（硬门禁消费）。DI 单例，
+/// 由 <see cref="GoalSubGoalExecutor"/> 与 <see cref="GoalSubTaskDagRunner"/> 共享。
+/// </summary>
+public sealed record GoalSubGoalGateDependencies(
+    IVerificationProvider? VerificationProvider,
+    OneCode.App.Services.Lsp.LspDiagnosticRegistry? DiagnosticRegistry);
 
 /// <summary>确定性验证步骤的可审计证据。</summary>
 public sealed record GoalValidationEvidence(

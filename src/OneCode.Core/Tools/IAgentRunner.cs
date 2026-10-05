@@ -21,7 +21,9 @@ public sealed record AgentRunRequest(
     // 自定义代理（.onecode/agents/*.md）：Instructions 覆盖内置角色 overlay；
     // AllowedToolNames 与父级能力取交集（只减不增）。两者为空即按内置代理处理。
     string? Instructions = null,
-    IReadOnlyList<string>? AllowedToolNames = null);
+    IReadOnlyList<string>? AllowedToolNames = null,
+    // 工作目录覆盖（如 GOAL 隔离 worktree）。null 时 fork 使用会话工作目录访问器。
+    string? WorkingDirectory = null);
 
 /// <summary>
 /// 子 Agent 执行结果。<see cref="Error"/> 非 null 表示执行失败（异常已捕获并转换为
@@ -33,4 +35,8 @@ public sealed record AgentRunResult(
     string? Output,
     int TurnsCompleted,
     bool MaxTurnsReached,
-    AgentProblemDetails? Error = null);
+    AgentProblemDetails? Error = null,
+    // fork 事务提交的变更文件与 token 消耗（GOAL 步内 DAG 的证据与预算依赖此透传）。
+    IReadOnlyList<string>? ChangedFiles = null,
+    long InputTokens = 0,
+    long OutputTokens = 0);

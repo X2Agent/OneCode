@@ -120,6 +120,8 @@ Debug 构建启动时把日志文件路径打印到 stderr（`Log file: ...`）�
 | ○ | 自定义子代理 | 在 `.onecode/agents/` 放一个 `*.md`（name/description/allowed_tools + 正文），重启后 Agent 工具 description 可见、按名派工生效；坏 frontmatter 显式报错 | |
 | ○ | 子代理嵌套派工 | 让子代理尝试调用 `Agent` 工具 | 工具面对子代理不可见（深度上限 1） | |
 | ○ | GOAL 模式提交自主目标，中途 `Esc` 后 `/resume` | 循环过程与预算消耗可见；中断后可跨进程恢复 Goal 运行 | |
+| ○ | GOAL 目标含 subTasks 并行步骤（分解器产出 2-5 个互不重叠子任务） | 任务并行执行、进度按子任务可见；全部成功则该步完成 | |
+| ○ | GOAL 并行步骤部分失败 → replan | 失败步标记为被取代、成功兄弟改动保留（partial-committed）；replan 步骤完成后 run 可 Completed 并发布 | |
 | ○ | agent 执行中产生待办，待办全部完成后继续对话 | 底部待办横条出现并在完成后消失 | |
 | ○ | 各模式下执行 `/permissions`（无参），再执行 `/permissions plan` | 无参显示当前模式派生档位；`plan` 被拒绝并提示用 `Tab` / `Alt+1..4` 切模式，不留半状态 | |
 | ○ | 交互审批模式下执行 `/loop <任务>` | 报错并提示先切自主权限，不替用户放权 | |

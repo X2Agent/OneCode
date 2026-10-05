@@ -69,7 +69,10 @@ public sealed class ForkedAgentRunner(
             var csp = parameters.CacheSafeParams;
             var maxTurns = parameters.MaxTurns ?? 10;
             var tools = FilterChildTools(csp?.Tools, parameters.Capabilities);
-            var cwd = _workingDirectoryAccessor.WorkingDirectory;
+            // cwd 决策：显式覆盖（GOAL 隔离 worktree 等）优先，否则会话工作目录访问器。
+            // ParentWorkingDirectory 此前声明但从未被消费，导致 GOAL worktree 中派生的
+            // 子代理落在会话根目录——现在生效。
+            var cwd = parameters.ParentWorkingDirectory ?? _workingDirectoryAccessor.WorkingDirectory;
             var profile = parameters.Profile;
 
             var contextProviders = _contextPipeline.BuildShared(
@@ -168,6 +171,7 @@ public sealed class ForkedAgentRunner(
                 TotalInputTokens = (long)(response.Usage?.InputTokenCount ?? 0),
                 TotalOutputTokens = (long)(response.Usage?.OutputTokenCount ?? 0),
                 TurnCount = 1 + pipeline.Metrics.ToolCallCount,
+                ChangedFiles = transaction.GetModifiedFiles(),
             };
 
             _logger.LogDebug(
@@ -261,6 +265,7 @@ public sealed class ForkedAgentRunner(
                 ? PipelineProfileBehavior.ReadOnlyAgentTools
                 : null,
             Capabilities = capabilities,
+            ParentWorkingDirectory = request.WorkingDirectory,
         };
 
         var result = await RunForkedAgentAsync(parameters, ct).ConfigureAwait(false);
@@ -278,7 +283,10 @@ public sealed class ForkedAgentRunner(
             Output: result.Text ?? "",
             TurnsCompleted: result.TurnCount,
             MaxTurnsReached: result.TurnCount >= (parameters.MaxTurns ?? 50),
-            Error: result.Error);
+            Error: result.Error,
+            ChangedFiles: result.ChangedFiles,
+            InputTokens: result.TotalInputTokens,
+            OutputTokens: result.TotalOutputTokens);
     }
 
     private sealed class ForkedAgentRun
