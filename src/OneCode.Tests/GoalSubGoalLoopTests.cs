@@ -285,7 +285,6 @@ public sealed class GoalSubGoalLoopTests : IDisposable
                 transaction,
                 channel.Writer,
                 toolExecutions?.ToList() ?? [],
-                "system prompt",
                 $"## Sub-goal {goal.Id}: {goal.Description}",
                 TestContext.Current.CancellationToken).ConfigureAwait(false);
         }

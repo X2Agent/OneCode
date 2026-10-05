@@ -62,6 +62,14 @@ internal sealed class GoalWorkflowRuntime(
         ct.ThrowIfCancellationRequested();
         if (run.WorkflowFencingToken != fencingToken || fencingToken <= 0)
             throw new InvalidOperationException("Goal runtime received a stale fencing token.");
+        // B4：每次世代绑定把活动时间锚定为 now——Paused/进程离线区间不计入墙钟
+        // （否则 resume 后第一次 RollForwardWallClock 会把整段离线时间一次性计入，
+        // 立即再次触发 ShouldForceTerminate，形成「resume 即暂停」空转）。
+        if (run.Budget.LastActivityAt is not null)
+        {
+            run = run with { Budget = run.Budget with { LastActivityAt = DateTimeOffset.UtcNow } };
+            await goalRunStore.SaveFencedAsync(run, run.Version, fencingToken, ct).ConfigureAwait(false);
+        }
         _run = run;
         _fencingToken = fencingToken;
     }
@@ -139,26 +147,22 @@ internal sealed class GoalWorkflowRuntime(
 
         var step = state.Plan[state.CurrentIndex];
         // Fix-7/N-01：守卫不依赖游标位置——resume 到 index 0 时同样受剩余尝试额度约束。
+        // B3 修订：额度不足时以 Paused 收束而非 skip-and-continue——跳过回执会让该步在
+        // resume 后永不重执行（回执回放判 Skipped），「追加预算 + /resume 续跑」承诺失效。
+        // Paused 保留游标，追加预算续跑后从当前步开始。旧数据的 Skipped 回执由
+        // GoalCompletionService.IsBudgetSkipped 向后兼容兜底。
         if (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalLoopDefaults.MaxAttemptsPerSubGoal)
         {
-            var skippedEvidence = new GoalStepExecutionEvidence(
-                step.Id,
-                GoalStepState.Skipped,
-                0,
-                0,
-                0,
-                string.Empty,
-                "Skipped because the remaining attempt budget cannot safely execute another sub-goal.",
-                [],
-                [],
-                [new GoalGateEvidence("budget", false, true, "Insufficient remaining attempt budget.")],
-                []);
-            var skippedReceipt = await workspaceService.RecordStepAsync(
-                run,
-                skippedEvidence,
-                _fencingToken,
-                ct).ConfigureAwait(false);
-            return await ApplyEvidenceAsync(state, skippedReceipt.Evidence, ct).ConfigureAwait(false);
+            var paused = run with
+            {
+                Budget = budget,
+                State = GoalRunState.Paused,
+                TerminalReason = OneCode.Core.Workflows.RunTerminalReason.BudgetExceeded,
+                FailureSummary = "剩余尝试额度不足以安全执行下一个子目标，已暂停（追加预算后 /resume 继续）。",
+            };
+            await SaveAsync(paused, ct).ConfigureAwait(false);
+            _progress.Progress("剩余尝试额度不足，已暂停（追加预算后 /resume 继续）");
+            return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
         }
 
         var existingReceipt = await workspaceService.FindStepReceiptAsync(
@@ -239,6 +243,9 @@ internal sealed class GoalWorkflowRuntime(
         }
 
         SubGoalExecution execution;
+        // A2：回执是否已持久化（RecordStepAsync 成功或由 ledger 重入确认）。已记录后
+        // 取消/异常路径不得回滚文件，否则回执=Completed 而工作树已还原，永久分叉。
+        var receiptRecorded = false;
         try
         {
             var options = context.Options with
@@ -262,6 +269,17 @@ internal sealed class GoalWorkflowRuntime(
             if (step.DecompositionFallback)
                 execution = execution with { Evaluation = $"{execution.Evaluation} [decomposition-fallback]" };
             var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
+            // S-04 修订：ledger 提交必须先于 git 回执提交——「回执存在 ⇒ ledger 已提交」是不变式。
+            // 若回执先落而 ledger 仍 Active，崩溃后新世代的 ReconcileRunAsync 会按 before-content
+            // 回滚文件，而回执回放却把该步判 Completed——回执与工作树永久分叉。
+            if (ledger is not null)
+            {
+                await ledger.CommitTransactionAsync(
+                    stepOperationId,
+                    _fencingToken,
+                    $"goal-step:{run.Id}:{step.Id}:{_fencingToken}",
+                    ct).ConfigureAwait(false);
+            }
             GoalStepReceipt receipt;
             try
             {
@@ -270,6 +288,7 @@ internal sealed class GoalWorkflowRuntime(
                     evidence,
                     _fencingToken,
                     ct).ConfigureAwait(false);
+                receiptRecorded = true;
             }
             catch (Exception receiptEx)
             {
@@ -295,15 +314,7 @@ internal sealed class GoalWorkflowRuntime(
                     ExceptionDispatchInfo.Capture(receiptEx).Throw();
                 }
                 receipt = reconciled;
-            }
-            // S-04: 先持久化提交（ledger receipt）再内存提交——防止"内存已提交、ledger 未提交"崩溃后误回滚。
-            if (ledger is not null)
-            {
-                await ledger.CommitTransactionAsync(
-                    stepOperationId,
-                    _fencingToken,
-                    $"goal-step:{run.Id}:{step.Id}:{_fencingToken}",
-                    ct).ConfigureAwait(false);
+                receiptRecorded = true;
             }
 
             transaction.Commit();
@@ -352,14 +363,18 @@ internal sealed class GoalWorkflowRuntime(
         }
         catch (OperationCanceledException)
         {
-            SafeRollback(transaction);
+            // A2：回执已记录（或已从 ledger 确认）时不得回滚——该步已是持久提交，
+            // 回滚会造成「回执=Completed 而工作树已还原」的永久分叉。
+            if (!receiptRecorded)
+                SafeRollback(transaction);
             // Cancellation is an interruption. Keep the GoalRun Executing so the
             // next workflow generation can reacquire it and retry the unfinished step.
             throw;
         }
         catch (Exception ex)
         {
-            SafeRollback(transaction);
+            if (!receiptRecorded)
+                SafeRollback(transaction);
             await SaveTerminalAsync(
                 GoalRunState.Failed,
                 OneCode.Core.Workflows.RunTerminalReason.AgentException,

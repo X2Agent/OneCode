@@ -20,11 +20,13 @@ internal sealed class GoalCompletionService(
     IVerificationProvider? verificationProvider = null,
     LspDiagnosticRegistry? diagnosticRegistry = null,
     TimeSpan? diagnosticQuietPeriod = null,
-    TimeSpan? diagnosticTimeout = null) : IGoalCompletionService
+    TimeSpan? diagnosticTimeout = null,
+    ILogger<GoalCompletionService>? logger = null) : IGoalCompletionService
 {
     // Fix-3：读取诊断前等待 quiescent——连续 quietPeriod 无新 Error 视为稳定，上限 timeout。
     private readonly TimeSpan _diagnosticQuietPeriod = diagnosticQuietPeriod ?? TimeSpan.FromSeconds(2);
     private readonly TimeSpan _diagnosticTimeout = diagnosticTimeout ?? TimeSpan.FromSeconds(30);
+    private readonly ILogger<GoalCompletionService>? _logger = logger;
 
     public async Task<GoalRun> CompleteAsync(GoalRun run, long fencingToken, CancellationToken ct)
     {
@@ -242,6 +244,16 @@ internal sealed class GoalCompletionService(
             FailureSummary = null,
         };
         await SaveAsync(completed, fencingToken, ct).ConfigureAwait(false);
+        // B6：发布成功后清理隔离 worktree 与 goal 分支（改动已 cherry-pick 回目标分支）。
+        // best-effort——清理失败不影响发布结果，残留资源可事后手工移除。
+        try
+        {
+            await workspaceService.CleanupAsync(completed, fencingToken, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Goal worktree cleanup failed for run {RunId}; leftover resources can be removed manually.", current.Id);
+        }
         return await ReloadAsync(current.Id, ct).ConfigureAwait(false);
     }
 

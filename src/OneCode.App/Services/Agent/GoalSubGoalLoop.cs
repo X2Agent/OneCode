@@ -8,7 +8,8 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
-/// W4-C: MAF LoopAgent wiring for a single sub-goal (DelegateLoopEvaluator + FeedbackMessageTemplate).
+/// W4-C: MAF LoopAgent wiring for a single sub-goal（DelegateLoopEvaluator；
+/// 反馈注入由 LoopAgent 的聚合反馈日志承担——LoopAgentOptions 无 FeedbackMessageTemplate 选项）。
 /// </summary>
 internal sealed class GoalSubGoalLoop(
     GoalSubGoalHardGate hardGate,
@@ -38,7 +39,6 @@ internal sealed class GoalSubGoalLoop(
         EditTransaction sharedTransaction,
         ChannelWriter<TuiEvent> eventWriter,
         List<GoalToolExecutionEvidence> toolExecutions,
-        string systemPrompt,
         string userPrompt,
         CancellationToken ct)
     {
@@ -53,8 +53,8 @@ internal sealed class GoalSubGoalLoop(
             var changeVersion = sharedTransaction.CaptureChangeVersion();
 
             // 用 DelegateLoopEvaluator 包装自定义评估逻辑。
-            // LoopAgent 会自动将 Feedback 通过 FeedbackMessageTemplate 注入下一轮 user message，
-            // 实现"执行→评估→反馈注入重试"循环，无需手写 for 循环。
+            // LoopAgent 把评估器返回的 Feedback 追加进聚合反馈日志并随下一轮输入重发
+            //（框架硬编码行为），实现"执行→评估→反馈注入重试"循环，无需手写 for 循环。
             var evaluator = new DelegateLoopEvaluator(async (loopContext, evalCt) =>
             {
                 loopContext.AdditionalProperties.TryAdd(RunStateKey, state);
@@ -150,9 +150,11 @@ internal sealed class GoalSubGoalLoop(
                 },
                 _loggerFactory);
 
+            // system prompt 只经 inner agent 的 ChatOptions.Instructions 下达（BuildSubGoalRunOptionsAsync
+            // 已设置），此处不再放一条 System 消息——否则 fresh context 每轮重放 InitialMessages 时
+            // 同一段 prompt 会双份送达模型。
             var messages = new List<ChatMessage>
             {
-                new(ChatRole.System, systemPrompt ?? string.Empty),
                 BuildUserMessage(userPrompt, options.ImagePaths),
             };
 

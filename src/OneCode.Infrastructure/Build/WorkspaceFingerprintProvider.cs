@@ -26,7 +26,10 @@ public sealed class WorkspaceFingerprintProvider : IWorkspaceFingerprintProvider
             ct.ThrowIfCancellationRequested();
             var info = new FileInfo(file);
             var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            var entry = $"{relative}\0{info.Length}\0{info.LastWriteTimeUtc.Ticks}\n";
+            // B5：指纹只含相对路径 + 文件长度（内容语义），不含 mtime——mtime 入哈希会让
+            // 「用户仅保存未改内容」的文件漂移指纹，Goal 的恢复与发布被永久卡死。
+            // 内容变化的文件通常长度也变；同长度内容替换的极端场景由 build/test 门禁兜底。
+            var entry = $"{relative}\0{info.Length}\n";
             hash.AppendData(Encoding.UTF8.GetBytes(entry));
         }
 

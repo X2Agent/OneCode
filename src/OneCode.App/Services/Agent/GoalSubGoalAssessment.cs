@@ -45,6 +45,20 @@ internal static class GoalSubGoalAssessment
         builder.AppendLine("Deterministic validation:");
         foreach (var validation in evidence.Validations)
             builder.AppendLine(CultureInfo.InvariantCulture, $"- {validation.Gate}: {(validation.Skipped ? "SKIPPED" : validation.Passed ? "PASSED" : "FAILED")} — {validation.Summary}");
+        // 工具执行明细与诊断也是确定性证据：缺失会让 judge 只能对照 agent 自述
+        //（门禁全 Skipped 的只读子目标尤其如此），违背 ADR 0010 决策 1.2 的意图。
+        if (evidence.ToolExecutions.Count > 0)
+        {
+            builder.AppendLine("Tool executions:");
+            foreach (var tool in evidence.ToolExecutions)
+                builder.AppendLine(CultureInfo.InvariantCulture, $"- {tool.ToolName}: {(tool.IsError ? "ERROR" : "OK")}{(string.IsNullOrWhiteSpace(tool.Result) ? "" : $" — {TruncateForSummary(tool.Result, 200)}")}");
+        }
+        if (evidence.Diagnostics.Count > 0)
+        {
+            builder.AppendLine("Diagnostics:");
+            foreach (var diagnostic in evidence.Diagnostics)
+                builder.AppendLine(CultureInfo.InvariantCulture, $"- {TruncateForSummary(diagnostic, 200)}");
+        }
         return builder.ToString();
     }
 

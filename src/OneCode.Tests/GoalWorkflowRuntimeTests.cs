@@ -238,9 +238,11 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExecuteNext_FirstStep_SkipsWhenAttemptBudgetInsufficient()
+    public async Task ExecuteNext_FirstStep_AttemptBudgetInsufficient_PausesWithoutSkipReceipt()
     {
-        // Fix-7/N-01：守卫不再依赖 CurrentIndex > 0——resume 到 index 0 时同样受剩余额度约束。
+        // Fix-7/N-01：守卫不依赖 CurrentIndex > 0——resume 到 index 0 时同样受剩余额度约束。
+        // B3 修订：额度不足改为 Paused（不再产出 Skipped 回执）——跳过回执会让该步在
+        // resume 后永不重执行，「追加预算 + /resume 续跑」承诺失效。
         var store = new JsonGoalRunStore(Path.Combine(_root, "first-step-guard"));
         var step = Snapshot(1);
         var run = await CreateClaimedRunAsync(store, [step], GoalRunState.Executing);
@@ -258,10 +260,13 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         var result = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
 
         steps.ExecuteCalls.Should().Be(0, "the remaining attempt budget cannot safely start a sub-goal");
-        workspace.RecordCalls.Should().Be(1);
-        result.Plan.Should().ContainSingle().Which.State.Should().Be(GoalStepState.Skipped);
-        workspace.LastRecordedEvidence!.Validations.Should()
-            .Contain(gate => gate.Gate == "budget" && gate.Skipped);
+        workspace.RecordCalls.Should().Be(0, "不得留下 Skipped 回执——它会让该步在续跑时永不重执行");
+        result.State.Should().Be(GoalRunState.Paused);
+        result.CurrentIndex.Should().Be(0, "游标保留，追加预算续跑后从当前步开始");
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.State.Should().Be(GoalRunState.Paused);
+        persisted.Plan.Should().ContainSingle().Which.State.Should().Be(GoalStepState.Pending);
+        persisted.TerminalReason.Should().Be(RunTerminalReason.BudgetExceeded);
     }
 
     [Fact]

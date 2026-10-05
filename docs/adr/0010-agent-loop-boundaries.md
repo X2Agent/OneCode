@@ -1,6 +1,6 @@
 # 代理循环能力边界：GOAL 子目标循环与 /loop 运行时有界循环
 
-**状态**: Accepted
+**状态**: Accepted（2026-10-06 修订：①决策 4 的机制声明修正——GoalAuto 下**带审批标记**的工具（破坏性 shell 等）被规则 Deny 后以 pending request 上浮、LoopAgent 立即早停（安全方向），「中间件 Deny→反馈重试」仅适用于**未带标记**的工具；②表格中「FeedbackMessageTemplate」措辞修正——LoopAgentOptions 无此选项，反馈注入是 LoopAgent 的聚合反馈日志硬编码行为；③token 证据口径修正——inner 迭代 usage 从 `LastResponse.Usage` 读取（M.E.AI 契约：usage 不进 Messages）。）
 **日期**: 2026-09-21
 **关联**: [MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)、
 [结构化请求 + 文本降级](./0008-structured-output-text-fallback.md)、
@@ -18,7 +18,7 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
 
 | 实现 | 形态 | 上限 | 判据 |
 |---|---|---|---|
-| GOAL 模式子目标循环 | MAF `LoopAgent` + `DelegateLoopEvaluator`（硬门禁 → AI judge） | `GoalLoopDefaults.MaxAttemptsPerSubGoal = 3` | 确定性门禁 + LLM judge |
+| GOAL 模式子目标循环 | MAF `LoopAgent` + `DelegateLoopEvaluator`（硬门禁 → LLM judge） | `GoalLoopDefaults.MaxAttemptsPerSubGoal = 3` | 确定性门禁 + LLM judge |
 | `/loop` "技能" | 一段**提示词模板**（`BundledSkills.CreateLoopSkill`） | **无运行时强制**（由模型自行解释"最大迭代次数"） | **模型自评**——让产生输出的同一个模型判定是否匹配期望结果 |
 
 第二套的三个缺陷都不是风格问题：上限不可强制（兜底只有 agent 的 `maxTurns` 工具调用计数，与循环次数不是一回事）、
@@ -44,8 +44,12 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
 3. **`FreshContextPerIteration = true`** —— 对编码任务正确：失败尝试的污染历史不带入下一轮；代价仅是每轮重放
    原始 prompt + 聚合反馈日志（3 轮以内可接受）。
 4. **审批不会卡死循环** —— 对应官方"审批 heuristics + loop"范式：`AgentPipelineAssembly.BuildMainRoleOverrides`
-   在 `PermissionMode.GoalAuto` 下强制挂审批中间件 + GoalAuto 自动放行规则（破坏性 shell 仍 Deny，但 Deny 在执行期
-   中间件即被拒，不会变成 pending request——`AutoApprovalRulesFactory` 仅 Allow 才自动批准）。
+   在 `PermissionMode.GoalAuto` 下强制挂审批中间件 + GoalAuto 自动放行规则。两条 Deny 路径分开看：
+   **未带审批标记**的工具（只读路径越界等）在执行期中间件即被拒（ToolResult error），错误证据进入硬门禁反馈下一轮重试；
+   **带审批标记**的工具（Bash/Destructive 等，FICC 先把整个响应转成 ToolApprovalRequestContent）被
+   `ToolApprovalAgent` 规则 Deny 后以 **pending request 上浮**，LoopAgent 立即早停（`HasPendingApprovalRequests`）
+   ——方向安全（不越权、不卡死），但该子目标整轮 abort、仅享一次 replan，模型收不到"换安全命令"的迭代反馈。
+   `AutoApprovalRulesFactory` 仅 Allow 才自动批准。
 
 ### 2. `/loop` 从提示词技能下沉为运行时有界循环
 

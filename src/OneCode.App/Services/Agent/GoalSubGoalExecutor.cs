@@ -91,7 +91,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 sharedTransaction,
                 eventWriter,
                 toolExecutions,
-                runOptions.SystemPrompt ?? string.Empty,
                 userPrompt,
                 ct).ConfigureAwait(false);
         }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services.Agent;
@@ -39,7 +40,8 @@ public static class GoalServiceCollectionExtensions
             sp.GetRequiredService<IGoalWorkspaceService>(),
             sp.GetRequiredService<IGoalStepExecutionService>(),
             sp.GetService<IVerificationProvider>(),
-            sp.GetService<Services.Lsp.LspDiagnosticRegistry>()));
+            sp.GetService<Services.Lsp.LspDiagnosticRegistry>(),
+            logger: sp.GetRequiredService<ILogger<GoalCompletionService>>()));
         services.AddSingleton<IGoalWorkflowRuntimeFactory, GoalWorkflowRuntimeFactory>();
 
         return services;
