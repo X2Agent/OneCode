@@ -14,6 +14,7 @@ public sealed class AgentTool(
     ICacheSafeParamsProvider cacheSafeParams,
     ITaskService taskService,
     CustomAgentCatalog? customAgents = null,
+    IToolCatalog? toolCatalog = null,
     ILogger<AgentTool>? logger = null)
 {
     /// <summary>基础描述（不含自定义代理清单）；工具注册处以此 + 清单动态合成最终 description。</summary>
@@ -51,7 +52,7 @@ public sealed class AgentTool(
         if (string.IsNullOrWhiteSpace(prompt))
             return ToolResult.Error("prompt is required");
 
-        var (definition, resolutionError) = CustomAgentResolver.Resolve(customAgents, agent);
+        var (definition, resolutionError) = CustomAgentResolver.Resolve(customAgents, agent, toolCatalog);
         if (resolutionError is not null)
             return ToolResult.Error(resolutionError);
 

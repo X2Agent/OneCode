@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tools;
@@ -178,6 +179,40 @@ public sealed class CustomAgentTests : IDisposable
         error.Should().Contain("broken.md");
     }
 
+    [Fact]
+    public async Task Resolve_UnknownAllowedToolName_RejectsDispatch()
+    {
+        // 反证：allowed_tools 拼错的工具名会被 fork 侧「只减不增」语义静默过滤，
+        // 必须在派工入口显式拒绝，否则用户无从自诊断。
+        WriteAgent(ProjectAgentsDir, "reviewer.md",
+            "name: reviewer\ndescription: reviews\nallowed_tools:\n  - Read\n  - Writee");
+        var catalog = CreateCatalog();
+        var toolCatalog = Substitute.For<IToolCatalog>();
+        toolCatalog.Tools.Returns([
+            AIFunctionFactory.Create(() => { }, name: "Read"),
+            AIFunctionFactory.Create(() => { }, name: "Grep"),
+        ]);
+
+        var (_, error) = CustomAgentResolver.Resolve(catalog, "reviewer", toolCatalog);
+
+        error.Should().Contain("unknown tool(s): Writee");
+    }
+
+    [Fact]
+    public async Task Resolve_KnownAllowedToolNames_PassThrough()
+    {
+        WriteAgent(ProjectAgentsDir, "reviewer.md",
+            "name: reviewer\ndescription: reviews\nallowed_tools:\n  - Read");
+        var catalog = CreateCatalog();
+        var toolCatalog = Substitute.For<IToolCatalog>();
+        toolCatalog.Tools.Returns([AIFunctionFactory.Create(() => { }, name: "Read")]);
+
+        var (definition, error) = CustomAgentResolver.Resolve(catalog, "reviewer", toolCatalog);
+
+        error.Should().BeNull();
+        definition.Should().NotBeNull();
+    }
+
     // ---- AgentTool 派工 ----
 
     private static ICacheSafeParamsProvider NullParams() => new FixedCacheSafeParamsProvider(null);
@@ -266,5 +301,32 @@ public sealed class CustomAgentTests : IDisposable
         ForkedAgentRunner.ApplyCustomAllowedTools(parent, null).Should().BeSameAs(parent);
         ForkedAgentRunner.ApplyCustomAllowedTools(parent, []).Should().BeSameAs(parent);
         ForkedAgentRunner.ApplyCustomAllowedTools(null, ["Read"]).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void RejectEmptyAllowedToolSet_EmptyIntersection_ReturnsExplicitError()
+    {
+        // 反证：全量拼错的 allowed_tools 交集为空集，必须显式拒绝而非静默产出零工具 fork。
+        var parent = ToolCapabilitySet.CreateUnrestricted(["Read", "Grep"]);
+        var merged = ForkedAgentRunner.ApplyCustomAllowedTools(parent, ["Writee", "Editx"]);
+
+        var rejection = ForkedAgentRunner.RejectEmptyAllowedToolSet(merged, ["Writee", "Editx"], "reviewer");
+
+        rejection.Should().NotBeNull();
+        rejection!.Error.Should().NotBeNull();
+        rejection.Error!.Detail.Should().Contain("Writee");
+        rejection.Output.Should().Be("");
+    }
+
+    [Fact]
+    public void RejectEmptyAllowedToolSet_NonEmptyOrNoLimit_AllowsDispatch()
+    {
+        var parent = ToolCapabilitySet.CreateUnrestricted(["Read"]);
+
+        var partial = ForkedAgentRunner.ApplyCustomAllowedTools(parent, ["Read", "Writee"]);
+        ForkedAgentRunner.RejectEmptyAllowedToolSet(partial, ["Read", "Writee"], "r")
+            .Should().BeNull("部分交集仍可用，未知名校验由派工入口负责");
+        ForkedAgentRunner.RejectEmptyAllowedToolSet(parent, null, "r").Should().BeNull();
+        ForkedAgentRunner.RejectEmptyAllowedToolSet(null, ["Read"], "r").Should().BeNull();
     }
 }

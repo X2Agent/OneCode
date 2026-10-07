@@ -169,11 +169,15 @@ public sealed class OrchestrationStreamService(
         var tools = toolCatalog.Tools.ToList<AITool>();
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(systemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
+        // 与 StreamGoalAsync 同源：hash 契约含「显式 JsonSerializerOptions」签名成分，
+        // 漏传会使 DescribeSerializerOptions 落到 "default"，与 Begin 持久化的 hash 恒不一致。
+        var serializerOptions = new JsonSerializerOptions();
         var expectedHash = GoalWorkflowCompiler.ComputeDefinitionHash(
             goalRun,
             currentModelId,
             systemPromptHash,
-            toolCapabilityHash);
+            toolCapabilityHash,
+            serializerOptions);
         if (!string.Equals(expectedHash, goalRun.DefinitionHash, StringComparison.Ordinal))
             throw new InvalidOperationException("Goal workflow definition changed and cannot be resumed.");
         var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions { SingleReader = true });
@@ -199,7 +203,7 @@ public sealed class OrchestrationStreamService(
                     systemPromptHash,
                     toolCapabilityHash,
                     runtime,
-                    new JsonSerializerOptions(),
+                    serializerOptions,
                     ct: ct).ConfigureAwait(false);
                 var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after resume.");

@@ -110,6 +110,8 @@ AgentTool.RunAgentAsync
   项目级覆盖同名用户级（与 skills 的用户级→项目级覆盖语义一致）。
 - **frontmatter 字段**：`name`（缺省取文件名）/ `description`（必填，注入 Agent 工具 description 保证可发现性）/
   `allowed_tools`（可选，与父级能力取交集——只减不增）；正文 = instructions。
+  `allowed_tools` 中的未知工具名在派工时显式拒绝（拼写错误可自诊断）；交集为空（全部拼错或与父级
+  能力完全不相交）时 fork 拒绝启动而非静默零工具运行（`ForkedAgentRunner.RejectEmptyAllowedToolSet`）。
 - **解析严格**：未知 frontmatter 字段、缺失 description、坏 YAML 显式报错（带文件路径 + 行号），
   不静默忽略；解析失败的定义文件会让派工入口直接报错，修复保存后自动恢复。
 - **加载**：启动扫描 + 文件 mtime 签名变更惰性重扫（无 `FileSystemWatcher` 常驻监听）。

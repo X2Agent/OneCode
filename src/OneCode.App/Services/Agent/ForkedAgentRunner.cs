@@ -233,6 +233,28 @@ public sealed class ForkedAgentRunner(
         return capabilities is null ? customSet : capabilities.Intersect(customSet);
     }
 
+    /// <summary>
+    /// allowed_tools 与父级能力交集为空 = 该 fork 将零工具运行，必为配置错误（拼错工具名或
+    /// 与父级能力完全不相交）。返回拒绝结果；null 即放行。这是派工入口未知名校验的兜底——
+    /// 静默产出无工具子代理是最难自诊断的一类故障。
+    /// </summary>
+    internal static AgentRunResult? RejectEmptyAllowedToolSet(
+        ToolCapabilitySet? capabilities, IReadOnlyList<string>? allowedToolNames, string agentName)
+    {
+        if (allowedToolNames is not { Count: > 0 } || capabilities is not { AllowedToolNames.Count: 0 })
+            return null;
+        return new AgentRunResult(
+            Agent: agentName,
+            ConversationId: SessionId.NewId(),
+            Output: "",
+            TurnsCompleted: 0,
+            MaxTurnsReached: false,
+            Error: AgentProblemDetails.ToolExecutionFailed(
+                detail: $"allowed_tools [{string.Join(", ", allowedToolNames)}] intersected with parent capabilities is empty; " +
+                        "check tool name spelling (unknown names are silently filtered out of the fork's tool set).",
+                toolName: agentName));
+    }
+
     public async Task<AgentRunResult> RunAsync(AgentRunRequest request, CancellationToken ct = default)
     {
         var profile = PipelineProfileBehavior.FromAgentType(request.Agent);
@@ -254,6 +276,11 @@ public sealed class ForkedAgentRunner(
             ? request.ParentCapabilities.Intersect(requestedCapabilities)
             : request.ParentCapabilities ?? requestedCapabilities;
         capabilities = ApplyCustomAllowedTools(capabilities, request.AllowedToolNames);
+        if (RejectEmptyAllowedToolSet(capabilities, request.AllowedToolNames, request.Agent) is { } rejection)
+        {
+            _logger.LogWarning("Forked agent '{Agent}' rejected: {Detail}", request.Agent, rejection.Error!.Detail);
+            return rejection;
+        }
 
         var parameters = new ForkedAgentParams
         {
