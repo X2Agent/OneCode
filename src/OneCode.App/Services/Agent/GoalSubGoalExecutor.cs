@@ -2,7 +2,6 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.GoalMode;
-using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Prompt;

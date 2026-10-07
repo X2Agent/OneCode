@@ -4,7 +4,7 @@ using OneCode.Core.Build;
 namespace OneCode.Infrastructure.Build;
 
 /// <summary>
-/// Computes a deterministic workspace fingerprint from relative paths, lengths and UTC write times.
+/// Computes a deterministic workspace fingerprint from relative paths and file lengths.
 /// Build artifacts and VCS metadata are excluded so recovery checks represent user-source changes.
 /// </summary>
 public sealed class WorkspaceFingerprintProvider : IWorkspaceFingerprintProvider
@@ -26,9 +26,10 @@ public sealed class WorkspaceFingerprintProvider : IWorkspaceFingerprintProvider
             ct.ThrowIfCancellationRequested();
             var info = new FileInfo(file);
             var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            // B5：指纹只含相对路径 + 文件长度（内容语义），不含 mtime——mtime 入哈希会让
+            // B5：指纹只含相对路径 + 文件长度，不含 mtime——mtime 入哈希会让
             // 「用户仅保存未改内容」的文件漂移指纹，Goal 的恢复与发布被永久卡死。
-            // 内容变化的文件通常长度也变；同长度内容替换的极端场景由 build/test 门禁兜底。
+            // 代价：等长内容替换不会漂移指纹，恢复/发布守卫不拦（build/test 门禁只覆盖
+            // 步骤自身 ChangedFiles，兜不住目标工作区的外部漂移）。这是有意取舍，非遗漏。
             var entry = $"{relative}\0{info.Length}\n";
             hash.AppendData(Encoding.UTF8.GetBytes(entry));
         }

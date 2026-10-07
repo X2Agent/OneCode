@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using OneCode.Core.Domain;
 using OneCode.Core.Models;
 
 namespace OneCode.App.Services.Agent;

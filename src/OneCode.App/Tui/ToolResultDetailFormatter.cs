@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-using OneCode.Core.Tools;
 
 namespace OneCode.App.Tui;
 

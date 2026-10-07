@@ -1,11 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
-using OneCode.App.Services.GoalMode;
-using OneCode.App.Services.Lsp;
 using OneCode.App.Tui;
-using OneCode.Core.Goals;
-using OneCode.Core.Tools;
-using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
@@ -22,11 +17,9 @@ namespace OneCode.App.Services.Agent;
 /// 与单代理步骤「失败即回滚」不同，这是并行写入的必然语义，运行时据此区分处理。
 /// </remarks>
 internal sealed class GoalSubTaskDagRunner(
-    IAgentRunner agentRunner,
     AgentTaskWorkflowCompiler compiler,
     AgentTaskWorkflowHost host,
     GoalSubGoalGateDependencies gateDependencies,
-    ILoggerFactory loggerFactory,
     ILogger<GoalSubTaskDagRunner> logger)
 {
     private readonly GoalSubGoalHardGate _hardGate = new(

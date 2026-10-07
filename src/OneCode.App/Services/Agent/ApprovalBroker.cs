@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using OneCode.App.Query;
-using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Services.Agent;
 

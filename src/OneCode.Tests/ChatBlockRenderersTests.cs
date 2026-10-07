@@ -1,5 +1,4 @@
 using OneCode.App.Tui;
-using OneCode.Core.Coordinator;
 
 namespace OneCode.Tests;
 

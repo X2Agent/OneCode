@@ -1,6 +1,5 @@
 using OneCode.App.Query;
 using OneCode.App.Tui;
-using OneCode.Core.Coordinator;
 using OneCode.Core.Permissions;
 
 namespace OneCode.Tests;

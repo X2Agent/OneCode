@@ -5,8 +5,6 @@ using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
-using OneCode.App.Session;
-using OneCode.App.Tools;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;

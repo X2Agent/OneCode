@@ -252,7 +252,7 @@ internal sealed class GoalCompletionService(
         }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "Goal worktree cleanup failed for run {RunId}; leftover resources can be removed manually.", current.Id);
+            _logger?.LogWarning(ex, "Goal worktree cleanup failed for run {RunId}; leftover resources can be removed manually.", current.Id);
         }
         return await ReloadAsync(current.Id, ct).ConfigureAwait(false);
     }

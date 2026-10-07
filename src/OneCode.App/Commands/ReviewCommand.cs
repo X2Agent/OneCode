@@ -4,7 +4,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 
 using OneCode.Core.Prompt;
-using OneCode.Core.Tools;
 using OneCode.Infrastructure.Git;
 using System.Text;
 

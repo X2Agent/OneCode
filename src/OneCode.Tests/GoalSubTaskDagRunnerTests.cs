@@ -3,7 +3,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.GoalMode;
 using OneCode.App.Tui;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
@@ -125,11 +124,9 @@ public sealed class GoalSubTaskDagRunnerTests
             .Returns(new VerificationResult { Success = true, Errors = [] });
 
         return new GoalSubTaskDagRunner(
-            runner,
             new AgentTaskWorkflowCompiler(runner, NullLogger<AgentTaskWorkflowCompiler>.Instance),
             new AgentTaskWorkflowHost(NullLogger<AgentTaskWorkflowHost>.Instance),
             new GoalSubGoalGateDependencies(verification, null),
-            NullLoggerFactory.Instance,
             NullLogger<GoalSubTaskDagRunner>.Instance);
     }
 
