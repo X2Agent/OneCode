@@ -131,6 +131,8 @@ public static class SettingDescriptors
             ["nextPromptSuggesterEnabled"] = new("nextPromptSuggesterEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: true),
             ["notificationsEnabled"] = new("notificationsEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: false),
             ["ollamaContextWindow"] = new("ollamaContextWindow", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 32_768),
+            ["streamIdleTimeoutSeconds"] = new("streamIdleTimeoutSeconds", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 180),
+            ["streamMaxRetries"] = new("streamMaxRetries", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 6),
             ["autodream.enabled"] = new("autodream.enabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, EnvironmentVariable: "ONECODE_AUTODREAM", BuiltInDefault: true),
             ["autodream.minHours"] = new("autodream.minHours", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_HOURS", BuiltInDefault: 6),
             ["autodream.minSessions"] = new("autodream.minSessions", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_SESSIONS", BuiltInDefault: 3),

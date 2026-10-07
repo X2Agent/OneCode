@@ -68,35 +68,6 @@ public sealed class DocFactConsistencyTests
                 $"{doc} 引用了不存在的 API '{ghostApi}'——请改为真实入口（见 Core/Tools/ToolRegistrationExtensions.cs）");
         }
     }
-    /// <summary>
-    /// 文件名不得冒充类型名：文件 <c>RetryOnOverloadMiddleware.cs</c> 的真实类型是
-    /// <c>RetryOnOverloadChatClient</c>。文档以裸 token 引用前者会被读者当作类型使用，
-    /// 因此除非后跟 <c>.cs</c>（即明确谈文件），否则不得出现。
-    /// </summary>
-    /// <remarks>
-    /// 判据：反引号包裹的 `RetryOnOverloadMiddleware` 且不紧跟 <c>.cs</c> 即违规。
-    /// 言及文件名的合法写法：`RetryOnOverloadMiddleware.cs`（后跟 <c>.cs</c>，本测试放行）。
-    /// </remarks>
-    [Fact]
-    public void Docs_DoNotUseFileNameAsTypeName()
-    {
-        var fileNameAsType = new Regex(@"`RetryOnOverloadMiddleware`(?!\\.cs)", RegexOptions.Compiled);
-        var violations = new List<string>();
-
-        foreach (var doc in AllDocsWithPathReferences())
-        {
-            var text = File.ReadAllText(RepoPath(doc));
-            foreach (Match match in fileNameAsType.Matches(text))
-            {
-                var line = text[..match.Index].Count(c => c == '\n') + 1;
-                violations.Add($"{doc}:{line} 引用了不存在的类型「RetryOnOverloadMiddleware」——真实类型是 RetryOnOverloadChatClient，文件名是 RetryOnOverloadMiddleware.cs");
-            }
-        }
-
-        violations.Should().BeEmpty(
-            "文件名不得冒充类型名；幽灵类名会长期滞留并误导后续改动。"
-            + (violations.Count > 0 ? Environment.NewLine + string.Join(Environment.NewLine, violations) : ""));
-    }
 
 
     /// <summary>

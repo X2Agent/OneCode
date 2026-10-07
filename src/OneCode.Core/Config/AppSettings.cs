@@ -22,6 +22,13 @@ public sealed class AppSettings
     public bool NotificationsEnabled { get => Get(CoreConstants.ConfigKeys.NotificationsEnabled, false); init => _values[CoreConstants.ConfigKeys.NotificationsEnabled] = value; }
     public int OllamaContextWindow { get => Get(CoreConstants.ConfigKeys.OllamaContextWindow, 32_768); init => _values[CoreConstants.ConfigKeys.OllamaContextWindow] = value; }
     /// <summary>
+    /// 流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即判定
+    /// 连接停滞（TCP 半开/代理停滞）并重试。取值需容忍推理模型两段内容之间的分钟级静默。
+    /// </summary>
+    public int StreamIdleTimeoutSeconds { get => Get(CoreConstants.ConfigKeys.StreamIdleTimeoutSeconds, 180); init => _values[CoreConstants.ConfigKeys.StreamIdleTimeoutSeconds] = value; }
+    /// <summary>流式请求过载/停滞的最大重试次数（总时长无独立上限，约为（次数+1）×空闲上限）。</summary>
+    public int StreamMaxRetries { get => Get(CoreConstants.ConfigKeys.StreamMaxRetries, 6); init => _values[CoreConstants.ConfigKeys.StreamMaxRetries] = value; }
+    /// <summary>
     /// WebSearch 主提供方（<see cref="CoreConstants.ConfigKeys.WebSearchProvider"/>）：
     /// <c>tavily</c> 或 <c>duckduckgo</c>。决定搜索链路首选提供者，失败时自动回退另一提供方。
     /// </summary>

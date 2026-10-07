@@ -86,12 +86,39 @@ public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
                 {
                     AutoFlush = true
                 };
+
+                // 保留上限：每进程一个 {sessionId}.log 且无轮转，不清扫会无限堆积。
+                // 后台清 7 天前的旧日志；并发占用等失败留给下一次启动。
+                var sweepDir = dir;
+                _ = Task.Run(() => SweepOldLogs(sweepDir));
             }
             catch (Exception ex)
             {
                 _writer = null;
                 Console.Error.WriteLine($"[DebugLog] Failed to create log file: {ex.Message}");
             }
+        }
+    }
+
+    private static void SweepOldLogs(string dir)
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow - TimeSpan.FromDays(7);
+            foreach (var file in Directory.EnumerateFiles(dir, "*.log"))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoff)
+                        File.Delete(file);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DebugLog] Log sweep failed: {ex.Message}");
         }
     }
 

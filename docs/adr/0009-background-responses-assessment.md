@@ -94,7 +94,7 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
    均假设「本地喂全量历史」，与服务端有状态模型需要专门适配与验证。
 4. **实验性 API**：读 `ContinuationToken` 触发 MEAI001，需集中抑制并有升级复查点。
 5. **装饰链存在令牌丢失缺陷**（详见候选方案 P2）：
-   `RetryOnOverloadChatClient`（实现所在的文件是 `RetryOnOverloadMiddleware.cs`，该文件中没有与文件同名的类型）的流式重试
+   `RetryOnOverloadChatClient`（`src/OneCode.Infrastructure/Ai/RetryOnOverloadChatClient.cs`）的流式重试
    `CloneUpdate` 不拷贝 `ContinuationToken`。
 
 ### 价值场景（若将来启用）
@@ -126,7 +126,7 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
 |---|---|
 | 配置 | `useResponsesApi`（Boolean、默认 false、RestartRequired）注册进 `ConfigModels.cs` descriptor 表（`ollamaContextWindow` 同款模式）；非 openai provider 开启时抛带指引的异常 |
 | 客户端 | `ChatClientFactory.CreateOpenAiClient` 分支：`GetResponsesClient(model).AsIChatClient()`；`ChatClientServiceCollectionExtensions` 读 `Effective` 传入 |
-| 令牌修复 | `RetryOnOverloadChatClient.CloneUpdate` 补 `ContinuationToken`（注意：实现所在文件是 `RetryOnOverloadMiddleware.cs`，但文件中没有该同名类型）；`MaxOutputTokensDecorator` 对未完成响应（token 非 null）跳过 Length 恢复；`OpenAiResponseSanitizer.TryExtractUpstreamError`（2026-09-11 起已能识别通用 `{"error": {…}}` 错误体形态，Responses 错误体同形）回归验证即可，不再新增分类逻辑 |
+| 令牌修复 | `RetryOnOverloadChatClient.CloneUpdate` 补 `ContinuationToken`；`MaxOutputTokensDecorator` 对未完成响应（token 非 null）跳过 Length 恢复；`OpenAiResponseSanitizer.TryExtractUpstreamError`（2026-09-11 起已能识别通用 `{"error": {…}}` 错误体形态，Responses 错误体同形）回归验证即可，不再新增分类逻辑 |
 | 编排 | 新装饰器 `BackgroundResponseChatClient`：非流式轮询到完成（空 messages + token、指数退避、MaxBackgroundWait 默认 30min）；流式传输异常时以最后非 null token 自动重订阅（有上限），消费者看到连续流；MEAI001 pragma |
 | 打通 | `MainAgentRunOptions.AllowBackgroundResponses`（null=按能力默认）→ `BuildChatOptions`；`BuildAsAIAgentAsync`/Forked 两条装配路径经 `AgentPipelineBuilder.BuildChatClientAgent` 自动流透 |
 | 持久化 | `BackgroundRunStateStore`（`~/{userConfigDir}/background-runs/{conversationId}.json`，原子写 + .bak，仿 `JsonTaskStore`）；`/resume`（docs/commands.md）扩展为可续后台 run；TUI 复用 `TuiNotice` 提示 |

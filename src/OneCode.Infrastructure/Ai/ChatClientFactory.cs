@@ -47,7 +47,9 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
         string? baseUrl = null,
         string? model = null,
         ILoggerFactory? loggerFactory = null,
-        int? ollamaNumCtx = null)
+        int? ollamaNumCtx = null,
+        int streamMaxRetries = 6,
+        int streamIdleTimeoutSeconds = 180)
     {
         var baseClient = CreateBaseClient(providerId, apiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
 
@@ -57,7 +59,11 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
             : baseClient;
 
         var retryLogger = loggerFactory?.CreateLogger<RetryOnOverloadChatClient>();
-        var retryClient = new RetryOnOverloadChatClient(passbackClient, retryLogger);
+        var retryClient = new RetryOnOverloadChatClient(
+            passbackClient,
+            retryLogger,
+            maxRetries: streamMaxRetries,
+            streamIdleTimeout: TimeSpan.FromSeconds(streamIdleTimeoutSeconds));
         return new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
     }
 

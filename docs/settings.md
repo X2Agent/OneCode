@@ -49,7 +49,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 |---|---|---|
 | 立即生效 | `showThinking`、`trustedDirectories`、`allowedDirectories`、`hasTrustAccepted` | 保存后立即更新当前进程 |
 | 下次操作生效 | `model`、`fastModel`、`permissionMode`、思考参数、`maxTurns`、`maxBudgetTokens`、`webSearchProvider`、通知、`autodream.*`、`goal.*` | 不影响正在执行的请求，下一次操作读取新快照 |
-| 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow` | `IChatClient` 构造时固化，重启后应用 |
+| 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow`、`streamIdleTimeoutSeconds`、`streamMaxRetries` | `IChatClient` 构造时固化，重启后应用 |
 
 ---
 
@@ -149,6 +149,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `ollamaContextWindow` | `int` | `32768` | Ollama 请求的 `num_ctx` 上下文窗口；重启后生效 |
+| `streamIdleTimeoutSeconds` | `int` | `180` | 流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即判定连接停滞并重试；重启后生效 |
+| `streamMaxRetries` | `int` | `6` | 流式请求过载/停滞的最大重试次数（最坏反馈时长约为（次数+1）×空闲上限）；重启后生效 |
 
 > **本地模型的窗口真相源**：models.dev 不覆盖本地 Ollama 模型，因此该值同时决定三件事——下发给服务端的
 > `num_ctx`（服务端真正强制的窗口）、上下文预算，以及自动压缩阈值。catalog 中同名字符串对本地模型无效。
@@ -311,7 +313,9 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
   "showThinking": false,
   "nextPromptSuggesterEnabled": true,
   "notificationsEnabled": false,
-  "ollamaContextWindow": 32768
+  "ollamaContextWindow": 32768,
+  "streamIdleTimeoutSeconds": 180,
+  "streamMaxRetries": 6
 }
 ```
 
@@ -351,6 +355,8 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `nextPromptSuggesterEnabled` | `ConfigKeys.NextPromptSuggesterEnabled` | `AppSettings.NextPromptSuggesterEnabled` |
 | `notificationsEnabled` | `ConfigKeys.NotificationsEnabled` | `AppSettings.NotificationsEnabled` |
 | `ollamaContextWindow` | `ConfigKeys.OllamaContextWindow` | `AppSettings.OllamaContextWindow` |
+| `streamIdleTimeoutSeconds` | `ConfigKeys.StreamIdleTimeoutSeconds` | `AppSettings.StreamIdleTimeoutSeconds` |
+| `streamMaxRetries` | `ConfigKeys.StreamMaxRetries` | `AppSettings.StreamMaxRetries` |
 | `autodream.*` | —（字面量） | `AutoDreamService` |
 | `goal.*` | `ConfigKeys.GoalMax*` | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService`、`LoopCommand` 调用） |
 | `loop.maxIterations` | `ConfigKeys.LoopMaxIterations` | `ModeBudgetSettings.FromSettings`（`/loop`）；可经 `settings.json`、`/config set`、`/loop --max` 设置，超上限由 `ModeBudgetSettings.MaxLoopIterationsUpperBound` 夹取 |

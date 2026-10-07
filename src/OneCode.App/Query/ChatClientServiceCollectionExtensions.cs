@@ -65,7 +65,9 @@ public static class ChatClientServiceCollectionExtensions
 
             var ollamaNumCtx = isOllama ? settings.OllamaContextWindow : (int?)null;
             return chatClientFactory.CreateWithDecorators(
-                providerId, effectiveApiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
+                providerId, effectiveApiKey, baseUrl, model, loggerFactory, ollamaNumCtx,
+                streamMaxRetries: settings.StreamMaxRetries,
+                streamIdleTimeoutSeconds: settings.StreamIdleTimeoutSeconds);
         });
 
         return services;

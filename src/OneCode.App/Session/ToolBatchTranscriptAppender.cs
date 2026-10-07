@@ -34,7 +34,12 @@ internal sealed class ToolBatchTranscriptAppender(
         {
             var conversation = conversations.GetConversation(conversationId);
             if (conversation is null)
+            {
+                // 会话已不存在——其门闩不会再有竞争者，取走交由 GC 回收，
+                // 避免字典随已关闭会话无限增长（每个会话一把 SemaphoreSlim）。
+                _transcriptLocks.TryRemove(conversationId, out _);
                 return;
+            }
 
             List<Message> appended = [];
             foreach (var batch in batches)

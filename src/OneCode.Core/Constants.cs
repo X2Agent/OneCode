@@ -40,6 +40,10 @@ public static class Constants
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";
+        /// <summary>流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即重试。</summary>
+        public const string StreamIdleTimeoutSeconds = "streamIdleTimeoutSeconds";
+        /// <summary>流式请求过载/停滞的最大重试次数；最坏反馈时长约为（次数+1）×空闲上限。</summary>
+        public const string StreamMaxRetries = "streamMaxRetries";
         /// <summary>WebSearch 主提供方（tavily | duckduckgo），决定搜索链路首选提供者。</summary>
         public const string WebSearchProvider = "webSearchProvider";
         /// <summary>Tavily 搜索 API Key（密钥，允许项目作用域）。</summary>
