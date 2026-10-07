@@ -26,13 +26,13 @@ public sealed class ModePromptToolReferenceTests
     /// <summary>
     /// 主代理模式管线实际加载的提示词（<c>MainModeContextProviderBuilder</c> /
     /// <c>BuildModeAttachmentProvider</c> / <c>PlanModeAttachmentProvider</c> /
-    /// <c>GoalSubGoalExecutor</c> / Plan orchestrator 角色的 <c>system/coordinator</c>）。
+    /// <c>GoalSubGoalExecutor</c>）。
     /// 只有这组会被主模型逐轮看到，工具名引用必须与注册表一致。
     /// </summary>
     private static readonly string[] ModePrompts =
     [
         "build", "plan", "goal",
-        "goal-subgoal", "default", "coordinator",
+        "goal-subgoal", "default",
     ];
 
     /// <summary>

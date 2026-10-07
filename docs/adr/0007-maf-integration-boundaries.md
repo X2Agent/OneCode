@@ -197,19 +197,18 @@ provider 次序与状态 key、source/provider/client 所有权不误释放共�
 - **手写提供商线协议键**：向 `ChatOptions.AdditionalProperties` / `ChatMessage.AdditionalProperties` 塞
   提供商私有键（`cache_control`、`thinking`、`reasoning_effort` …）来「实现」缓存或推理参数（见 §7）
 
-**`FileAccess` 例外条款**：2026-09-18 评估后仍不接管通用文件工具（多根工作区、ignore 单一清单、远程读取三项硬性不满足；Grep 能力净损失；provider 自动批准规则会成为第二套政策源）。若未来立项，须先满足：多根 store 适配（或显式放弃 `/add-dir`）、ignore 政策注入 store、远程读取扩展或显式排除，并同批迁移 `Read`/`Write`/`Edit`/`Delete`/`LS`/`Glob`/`Grep` 的全部引用方（`AutoDreamService.AllowedTools`、`TeamRequirementService.RequiredTools`、`TeamCapabilityProfile`、`ToolResultSummarizer`、提示词、权限元数据）。可复用资产：`SplitLines`/`ScanContent` 行号原语（作对照基准）、`file_access_replace_lines` 的过期行检测（作为独立新工具候选）。
+**`FileAccess` 例外条款**：2026-09-18 评估后仍不接管通用文件工具（多根工作区、ignore 单一清单、远程读取三项硬性不满足；Grep 能力净损失；provider 自动批准规则会成为第二套政策源）。若未来立项，须先满足：多根 store 适配（或显式放弃 `/add-dir`）、ignore 政策注入 store、远程读取扩展或显式排除，并同批迁移 `Read`/`Write`/`Edit`/`Delete`/`LS`/`Glob`/`Grep` 的全部引用方（`AutoDreamService.AllowedTools`、`ToolResultSummarizer`、提示词、权限元数据）。可复用资产：`SplitLines`/`ScanContent` 行号原语（作对照基准）、`file_access_replace_lines` 的过期行检测（作为独立新工具候选）。
 
 **StateMachineMiddleware 例外**：它不是 MAF 的重复实现，而是产品侧「连续失败 → Recovering/Blocked → 仅允许
 AskUser*」恢复闸。**禁止**用主 Harness `LoopEvaluators` 替代。
-Profile 现状：Full 开（含 3-strike），Worker / TeamMember / Explore / Plan 全关。
+Profile 现状：Full 开（含 3-strike），Worker / Explore / Plan 全关。
 
 **`MainAgentRunner` 审批桥例外**：主路径的 `while (RunStreaming)` 审批桥**不落入**上述第一条禁令
 ——它桥接 MAF 的 `ToolApprovalRequestContent`，不是自写目标环。1.22 源码证据：`ToolApprovalAgent` 把多余的未批准
 请求排队、只 surface 一个（`agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgent.cs:211-216, 369-381`），
 工具执行只发生在宿主携响应重入之后（`InjectCollectedResponses`，同文件 `:565-582`）；官方示例驱动同一循环
 （`agent-framework/dotnet/samples/02-agents/Agents/Agent_Step01_UsingFunctionToolsWithApprovals/Program.cs:38-64`）。不存在可替代的
-框架 API（`AutoApprovalRules` 是策略而非人在环桥接）。Team 路径 `TeamWorkflowRunner.BridgeToolApprovalAsync`
-（`RequestPort` 形态）同理。
+框架 API（`AutoApprovalRules` 是策略而非人在环桥接）。
 
 ### 7. 提供商请求整形：只走公开扩展点与 MEAI 类型面
 
@@ -263,8 +262,8 @@ OpenAI `reasoning_effort`；Ollama 顶层 `think` + `options.num_ctx`）与 `Thi
 | AgentMode 自建 opt-out（`ModeInstructionProvider`） | 保留 | 官方 `AgentModeProvider`（1.22 `AgentModeProviderOptions`）是 agent 内部模式：暴露 `mode_set` / `mode_get` 由模型自切换；OneCode 四模式由宿主控制且运行期可变，语义不同域 |
 | durable run registry（fencing / lease / CAS / 代次） | 保留 | `Microsoft.Agents.AI.Hosting` 不做单写者协调（`HostedWorkflowState.cs` remarks：an application that needs a single writer per session owns that coordination）；二者是不同层（ASP.NET 托管层 vs durable run 协调层） |
 | `PlanWorkflow` 自研状态机 | 保留 | 业务聚合（计划审批 / 步骤证据）非 MAF Workflow 能力域 |
-| lease 回调（Build / Goal / Team 三处）、恢复策略（4 套）、验证证据与质量门（3 套） | 保留 | 聚合类型、状态校验集合与终止语义各不同域；泛型统一需引入多参数委托与约束，复杂度高于三份直白代码（抽象泄漏） |
-| JSON run store（Build / Goal / Team 三份 TrySave / Claim / CAS） | **未收敛** | 三者记录模型与状态机不同，收敛需先统一记录抽象；独立立项 |
+| lease 回调（Build / Goal 两处）、恢复策略（3 套）、验证证据与质量门（2 套） | 保留 | 聚合类型、状态校验集合与终止语义各不同域；泛型统一需引入多参数委托与约束，复杂度高于各域直白代码（抽象泄漏） |
+| JSON run store（Build / Goal 两份 TrySave / Claim / CAS） | **未收敛** | 两者记录模型与状态机不同，收敛需先统一记录抽象；独立立项 |
 
 ## 后果
 

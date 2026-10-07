@@ -235,18 +235,18 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 ### 8. 决策：不实现独立团队记忆子系统
 
-**决策**（2026-08-15 确立）：不为 Team 模式的多 Agent 团队引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不再实施）。Team 共享记忆需求由现有机制覆盖：
+**决策**（2026-08-15 确立）：不为多 Agent 协作引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不实施；决策针对的 Team 模式本身已于 2026-10-05 砍除，结论对现存的 fork 子代理依然成立）：
 
-- **共享知识库 = project 级 `MEMORY.md`**。Team 成员经 `SharedContextProviderBuilder.BuildCommon` 无条件获得 `MemorySearchProviderFactory` 创建的 `search_memories` 工具，可检索 project + user 级条目——`PipelineProfile.TeamMember` 关闭的仅是 `CodeAct`，MEMORY.md 检索通道始终开放。
-- **写入统一收口**：AutoDream / `/memory` 命令 / `IMemoryEntryStore`，成员 Agent 不直接写（防结构注入安全边界，见「影响」节）。
-- **会话内成员协作**（如 reviewer 结论传递给 implementer）由编排机制承担（GroupChat 共享对话流 / Magentic 经 orchestrator 中转），不属于记忆职责。
+- **共享知识库 = project 级 `MEMORY.md`**。fork 子代理（Explore / Plan 等）经 `SharedContextProviderBuilder.BuildCommon` 获得 `MemorySearchProviderFactory` 创建的 `search_memories` 工具，可检索 project + user 级条目。
+- **写入统一收口**：AutoDream / `/memory` 命令 / `IMemoryEntryStore`，子代理不直接写（防结构注入安全边界，见「影响」节）。
+- **会话内多 Agent 协作**（并行分支间的结论传递）由编排机制承担（Agent / ParallelAgents DAG 上游注入、GOAL subTasks 依赖注入），不属于记忆职责。
 
 **理由**：
 1. 与本 ADR §1 核心决策（消除多套存储抽象，统一 `MEMORY.md`）一致——引入第三套存储属于方向回退
-2. OneCode 是单用户 CLI，"Agent 团队"是同进程同工作目录的子 Agent；独立目录 + 环境变量路由的"团队"语义没有真实落点
-3. 独立 md 目录 + 自有 frontmatter 解析器 + 截断保护的维护成本，相对"成员多读一份 MEMORY.md"没有增量价值
+2. OneCode 是单用户 CLI，Agent 同进程同工作目录运行；独立目录 + 环境变量路由的"团队"语义没有真实落点
+3. 独立 md 目录 + 自有 frontmatter 解析器 + 截断保护的维护成本，相对"子代理多读一份 MEMORY.md"没有增量价值
 
-已知小缺口（已于 2026-08-15 补齐）：Team 成员的 system prompt 经 `PromptComposer.GetHarnessAsync` + `PromptComposer.RenderRoleBody` 两段取得（合成由 MAF 负责），不含主会话的 `{{memory_section}}` 摘要索引——现由 `RenderRoleBody` 在 role prompt 末尾追加一行 `search_memories` 引导（Team 成员与 Explore/Plan fork 子代理均生效），无需架构变更。
+已知小缺口（已于 2026-08-15 补齐）：fork 子代理的 system prompt 经 `PromptComposer.GetHarnessAsync` + `PromptComposer.RenderRoleBody` 两段取得（合成由 MAF 负责），不含主会话的 `{{memory_section}}` 摘要索引——由 `RenderRoleBody` 在 role prompt 末尾追加一行 `search_memories` 引导（Explore/Plan fork 子代理生效），无需架构变更。
 
 > 历史设计稿（目录解析 / MemdirFrontmatterParser / 截断保护 / 专用 Provider 注入）见 git history 本文件 2026-08-15 之前的版本。
 

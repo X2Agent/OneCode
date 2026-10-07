@@ -300,12 +300,6 @@ public sealed class SessionManager : ISessionManager
 
         _tokenUsageTracker.Reset();
 
-        if (conversation.Metadata.TryGetValue("mode", out var modeObj) && modeObj is string sessionMode)
-        {
-            if (sessionMode == "coordinator")
-                _logger.LogInformation("Resumed session was in coordinator mode; continuing in normal mode.");
-        }
-
         await PersistAsync(conversation, ct);
 
         _logger.LogInformation(

@@ -35,22 +35,18 @@ R1 原型（2026-07-09）采用"双路径并行"策略：事件推送用于 UX �
 4. `MainAgentRunner.HandleToolApprovalAsync` 经 `IApprovalBroker.RequestAsync`（`ApprovalBroker.ForQuery`）获取决策
 5. 决策映射为 MAF 响应：`AllowOnce` → `CreateResponse(true)`、`AllowAlways` → `CreateAlwaysApproveToolResponse`、`AllowAllConversation` → `CreateResponse(true)`（并置位 run 级全放行标志，见统一决策枚举）、`Deny` → `CreateResponse(false)`
 
-#### Team 路径
+#### Team 路径（已随 Team 模式砍除移除）
 
-Team 成员保留 MAF 的 `ToolApprovalAgent`（`EnableToolApproval` 为 true）。MAF workflow manager 无法直接处理
-`ToolApprovalRequestContent`，因此审批请求经工作流的外部请求通道桥接到 TUI：
-
-1. `TeamWorkflowRunner.BridgeToolApprovalAsync` 消费工作流浮出的 `RequestInfoEvent`
-2. `ApprovalBroker.ForTeam` 构造 `OrchestrationEvent.ApprovalRequest` 并经 `eventSink` 推送
-3. `TuiEventMapper.MapOrchestrationEventToTuiEvent` 映射为 `TuiApprovalRequest`，桥接 `ResponseSource`
-4. TUI 决策经 `ResponseSource` 回传，由 `SendResponseAsync` 送回同一工作流；无固定超时，仅依赖 `ct` 取消（fail-closed）
+Team 路径曾以 MAF `ToolApprovalAgent` + 工作流外部请求通道桥接审批（`TeamWorkflowRunner.BridgeToolApprovalAsync`
+消费 `RequestInfoEvent`，`ApprovalBroker.ForTeam` 推送 `OrchestrationEvent.ApprovalRequest`）。该桥随 Team
+模式砍除一并移除，事件驱动审批现仅存 Main 路径。
 
 ### 统一决策枚举
 
 `ApprovalDecision` 从 `IApprovalUi` 的内部枚举提升为 `OneCode.Core.Permissions` 命名空间的独立公共枚举：
 - `AllowOnce` — 允许本次执行
 - `AllowAlways` — 允许后续所有执行（MAF 会记住该工具）
-- `AllowAllConversation` — 本次对话全部允许：当前调用照常批准，同一 run 内后续审批由 `ApprovalBroker` 自动放行；跨 run 的会话级放行由 `PermissionModeProvider` 运行时覆盖（BypassPermissions）承担（Team 工作流桥不提供该档位）
+- `AllowAllConversation` — 本次对话全部允许：当前调用照常批准，同一 run 内后续审批由 `ApprovalBroker` 自动放行；跨 run 的会话级放行由 `PermissionModeProvider` 运行时覆盖（BypassPermissions）承担
 - `Deny` — 拒绝执行
 
 ## 影响
@@ -61,7 +57,7 @@ Team 成员保留 MAF 的 `ToolApprovalAgent`（`EnableToolApproval` 为 true）
 |------|------|------|
 | `ApprovalRequestEvent` | `Query/QueryEventTypes.cs` | QueryEvent 子类型，Main 路径审批请求载体 + ResponseSource |
 | `TuiApprovalRequest` | `Tui/TuiEvent.cs` | TuiEvent 子类型，TUI 层审批请求 + ResponseSource 回调 |
-| `OrchestrationEvent.ApprovalRequest` | `Coordinator/OrchestrationEvent.cs` | Team 路径审批请求载体 + ResponseSource |
+| `OrchestrationEvent.ApprovalRequest` | `Coordinator/OrchestrationEvent.cs`（已随 Team 砍除移除） | 当年 Team 路径审批请求载体 + ResponseSource |
 | `ApprovalDecision` | `Permissions/ApprovalDecision.cs` | 独立公共枚举（AllowOnce/AllowAlways/AllowAllConversation/Deny） |
 | 危险工具标记 | `ToolApprovalMarker` + `ToolMetadataRegistry.RequiresApprovalBoundary` | 管道构建期标记需审批边界的工具；判别用 `ToolNames.FileWriteTools`/`ReadOnlyTools` + `IsReadOnlyShell`/`IsDestructiveShell` 运行时分类 |
 
@@ -85,19 +81,18 @@ Team 成员保留 MAF 的 `ToolApprovalAgent`（`EnableToolApproval` 为 true）
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 headless 工作模式实现无审批 UI 的只读策略（`workingMode: WorkingMode.Goal`） |
 | `QueryStreamEngine.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数；`ApprovalRequestEvent` 透传后移至 `StreamingSession.Digest`（`QueryStreamEngine` 消费） |
-| 原 `ServiceCollectionExtensions.Business.cs`（已解散，现位于各领域注册类，如 `src/OneCode.App/Services/Coordinator/TeamServiceCollectionExtensions.cs`） | 移除 `IApprovalUi` DI 注册与 Team 路径注入 |
+| 原 `ServiceCollectionExtensions.Business.cs`（已解散，现位于各领域注册类，如 `src/OneCode.App/Services/Agent/AgentServiceCollectionExtensions.cs`） | 移除 `IApprovalUi` DI 注册 |
 | `PipelineSecurityContext` / `AgentPipelineOptionsFactory` | 移除 `ApprovalUi` 字段 |
 | `MainAgentRunner.Pipeline.cs` / `MainAgentContracts.cs` / `ForkedAgentRunner.cs` | 移除 `ApprovalUi` / `ApprovalHandler` 字段与传递 |
 | `GoalAgentModels.cs` / `GoalSubGoalExecutor.cs` / `OrchestrationStreamService.cs` | 移除 `ApprovalHandler` 传递 |
 
 ### 约束
 
-1. **所有路径统一事件驱动**：Main 路径（流式 + 非流式）与 Team 路径均通过事件推送审批请求，无同步阻塞调用
-2. **事件即决策通道**：TUI 必须通过 `ResponseSource` 回传决策，否则审批无法完成——Main 路径经 `IApprovalBroker`（`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 调 `IApprovalBroker.RequestAsync`，见 `OneCode.Core/Permissions/IApprovalBroker.cs`），Team 路径经 `ApprovalBroker.ForTeam`；两条路径均**无固定超时**，仅依赖 `ct` 取消（对 UI 异常/内部取消 fail-closed Deny，对调用方取消选择传播）
+1. **所有路径统一事件驱动**：Main 路径（流式 + 非流式）通过事件推送审批请求，无同步阻塞调用
+2. **事件即决策通道**：TUI 必须通过 `ResponseSource` 回传决策，否则审批无法完成——Main 路径经 `IApprovalBroker`（`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 调 `IApprovalBroker.RequestAsync`，见 `OneCode.Core/Permissions/IApprovalBroker.cs`）；**无固定超时**，仅依赖 `ct` 取消（对 UI 异常/内部取消 fail-closed Deny，对调用方取消选择传播）
 3. **ResponseSource 一次性设置**：`TaskCompletionSource` 只能设置一次结果，重复设置会被忽略
 4. **Cron 路径无审批 UI**：headless cron 运行依赖 `WorkingMode.Goal` 在权限检查层直接 Deny 写入工具，不触发审批事件（Plan 会进入持久化 AwaitingApproval，不适合无人值守）
 5. **危险工具判别为运行时分类**：`ToolNames.FileWriteTools` / `ReadOnlyTools` + `IsReadOnlyShell` / `IsDestructiveShell` 分类器 + `AutoAllowFileWriteAndShell`，标记经 `ToolApprovalMarker` 在管道构建期完成；只读工具不在危险集合
-6. **Team 路径走 MAF 审批协议 + 工作流层桥接**：Team 成员保留 MAF `ToolApprovalAgent`（`EnableToolApproval` 不固定为 `false`），Ask 决策产生的审批请求经工作流 `RequestInfoEvent` 由 `TeamWorkflowRunner.BridgeToolApprovalAsync` 桥接：`ApprovalBroker.ForTeam`（位于工作流 watch 循环，非成员级 inline 中间件）推送 `OrchestrationEvent.ApprovalRequest`，TUI 决策经 `SendResponseAsync` 送回同一工作流。权限中间件的 inline `ApprovalBroker` 分支与管道级 broker 传递已删除——Ask 单通道进入 MAF 审批协议
 
 ## 测试
 
