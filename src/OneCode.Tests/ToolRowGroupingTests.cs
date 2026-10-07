@@ -208,6 +208,24 @@ public sealed class ToolRowGroupingTests
         return (user, toolAssistant, result, textAssistant);
     }
 
+    // —— 孤儿结果兜底 ——
+
+    [Fact]
+    public void ToolDone_UnknownToolId_RendersResultInsteadOfDropping()
+    {
+        // 反证：未知 ToolId（未见起始行）的完成结果曾两条分支皆不命中而整条丢失。
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AddToolDone("WebSearch", isError: false, toolInput: "{\"query\":\"q\"}",
+            result: "{\"hits\":42}", toolId: "call_never_started");
+        view.EndStreaming();
+
+        view.MessageView.RenderedLines
+            .Where(l => l.Contains("WebSearch"))
+            .Should().NotBeEmpty("孤儿结果必须渲染为独立完成行（含结果摘要），不得静默丢弃");
+    }
+
     private static IApplication CreateImmediateApp()
     {
         var app = Substitute.For<IApplication>();

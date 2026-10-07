@@ -6,6 +6,7 @@ using OneCode.Infrastructure;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Config;
+using OneCode.Infrastructure.Persistence;
 using OneCode.Infrastructure.Media;
 
 namespace OneCode.App.Services;
@@ -39,6 +40,20 @@ public sealed class AppStartupService(
             .ContinueWith(
                 t => logger.LogWarning(t.Exception!, "Image temp-dir cleanup failed"),
                 TaskContinuationOptions.OnlyOnFaulted);
+
+        // DurableFile 崩溃残留清扫：WriteAtomic 崩溃时无法执行 finally，GUID 临时文件
+        // 会逐次堆积。各持久化 store 都落在用户配置根目录下，从根递归清扫即可全覆盖。
+        var durableRoot = PathsHelper.GetUserConfigDir();
+        _ = Task.Run(
+            () =>
+            {
+                var removed = DurableFile.SweepTempResidue(durableRoot, TimeSpan.FromHours(1));
+                if (removed > 0)
+                    logger.LogInformation("Swept {Count} durable-file temp residue file(s) under {Root}", removed, durableRoot);
+            },
+            ct).ContinueWith(
+            t => logger.LogWarning(t.Exception!, "Durable-file residue sweep failed"),
+            TaskContinuationOptions.OnlyOnFaulted);
 
         _ = codeIndexService.BuildIndexAsync(Environment.CurrentDirectory, ct);
 

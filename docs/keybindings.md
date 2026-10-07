@@ -154,6 +154,7 @@
 | `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Alt+1` / `Alt+2` / `Alt+4` | `app:modeBuild/Plan/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |
+| `Ctrl+Left` / `Ctrl+Right` | `chat:suggestionPrevious/Next` | 占位建议循环（占位符可见时） |
 | `Shift+PageUp` | `sidebar:pageUp` | 计划侧栏向上翻页（侧栏未显示时无操作） |
 | `Shift+PageDown` | `sidebar:pageDown` | 计划侧栏向下翻页 |
 

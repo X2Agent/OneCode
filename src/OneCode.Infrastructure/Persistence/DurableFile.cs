@@ -2,10 +2,10 @@ namespace OneCode.Infrastructure.Persistence;
 
 /// <summary>
 /// 单机 JSON 落盘的共享持久化原语：跨进程文件锁 + 临时文件原子替换 + .bak 兜底。
-/// Build / Goal / Workflow 各 run store 共用，避免各写一套耐久性机制。
+/// Build / Goal / Workflow / Task 各 store 共用，避免各写一套耐久性机制。
 /// 聚合语义（事件序列校验、版本围栏、checksum 格式）由各 store 自持，不走这里。
 /// </summary>
-internal static class DurableFile
+public static class DurableFile
 {
     /// <summary>
     /// 获取排他锁文件（<c>FileShare.None</c> + <c>DeleteOnClose</c>）。其他进程持有锁时
@@ -96,6 +96,39 @@ internal static class DurableFile
             if (File.Exists(tempPath))
                 File.Delete(tempPath);
         }
+    }
+
+    /// <summary>
+    /// 启动期清扫崩溃残留的 <c>*.tmp-*</c> 临时文件：WriteAtomic 在进程崩溃时无法执行
+    /// finally 清理，GUID 命名的临时文件会逐次堆积。只删 <paramref name="minAge"/> 之前的
+    /// 残留，避免误删并发进程刚创建、仍在写入的临时文件。返回删除数量。
+    /// </summary>
+    public static int SweepTempResidue(string rootDirectory, TimeSpan minAge)
+    {
+        if (!Directory.Exists(rootDirectory))
+            return 0;
+
+        var cutoff = DateTime.UtcNow - minAge;
+        var removed = 0;
+        foreach (var file in Directory.EnumerateFiles(rootDirectory, "*.tmp-*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(file) > cutoff)
+                    continue;
+                File.Delete(file);
+                removed++;
+            }
+            catch (IOException)
+            {
+                // 被并发进程占用等——留给下一次清扫。
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return removed;
     }
 
     private static void WritePayload(string tempPath, byte[] payload)

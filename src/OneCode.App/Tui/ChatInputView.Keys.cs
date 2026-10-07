@@ -241,14 +241,15 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+Right / Ctrl+Left — cycle through suggestions when placeholder is visible.
-        if (e == Key.CursorRight.WithCtrl && _placeholderLabel.Visible)
+        // 占位建议循环（chat:suggestionPrevious/Next，默认键 Ctrl+←/→，经 Resolver 可重映射）。
+        // 占位符不可见时不 Handled：按键落到编辑器做光标移动。
+        if (action == KeybindingDefaults.ActionChatSuggestionNext && _placeholderLabel.Visible)
         {
             CycleSuggestionNext();
             e.Handled = true;
             return;
         }
-        if (e == Key.CursorLeft.WithCtrl && _placeholderLabel.Visible)
+        if (action == KeybindingDefaults.ActionChatSuggestionPrevious && _placeholderLabel.Visible)
         {
             CycleSuggestionPrevious();
             e.Handled = true;

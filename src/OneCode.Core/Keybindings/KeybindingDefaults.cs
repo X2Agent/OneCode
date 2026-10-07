@@ -69,6 +69,9 @@ public static class KeybindingDefaults
     public const string ActionChatScrollDown = "chat:scrollDown";
     public const string ActionChatPageUp = "chat:pageUp";
     public const string ActionChatPageDown = "chat:pageDown";
+    // 占位建议循环（占位符可见时 Ctrl+←/→ 切换建议；分发在 ChatInputView）。
+    public const string ActionChatSuggestionPrevious = "chat:suggestionPrevious";
+    public const string ActionChatSuggestionNext = "chat:suggestionNext";
 
     // 侧栏（Plan 计划卡）键盘滚动——与主对话区滚动互不干扰的分区操作。
     public const string ActionSidebarPageUp = "sidebar:pageUp";
@@ -110,6 +113,8 @@ public static class KeybindingDefaults
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
+        ActionChatSuggestionPrevious, ActionChatSuggestionNext,
+        ActionSidebarPageUp, ActionSidebarPageDown,
         ActionAutocompletePrevious, ActionAutocompleteNext,
         ActionAutocompleteAccept, ActionAutocompleteDismiss,
         ActionDiffScrollUp, ActionDiffScrollDown,
@@ -151,6 +156,10 @@ public static class KeybindingDefaults
         [ActionChatScrollDown] = "对话区向下滚动（行级）",
         [ActionChatPageUp] = "对话区向上翻页",
         [ActionChatPageDown] = "对话区向下翻页",
+        [ActionChatSuggestionPrevious] = "上一条占位建议（占位符可见时）",
+        [ActionChatSuggestionNext] = "下一条占位建议（占位符可见时）",
+        [ActionSidebarPageUp] = "计划侧栏向上翻页（侧栏未显示时无操作）",
+        [ActionSidebarPageDown] = "计划侧栏向下翻页",
         // Autocomplete
         [ActionAutocompletePrevious] = "上一条补全建议",
         [ActionAutocompleteNext] = "下一条补全建议",
@@ -224,6 +233,10 @@ public static class KeybindingDefaults
             // 侧栏翻页（Shift+PageUp/PageDown）：主对话区与右侧计划侧栏分区滚动。
             ["shift+pgup"] = ActionSidebarPageUp,
             ["shift+pgdn"] = ActionSidebarPageDown,
+
+            // 占位建议循环（占位符可见时生效；占位符不可见时不 Handled，交给编辑器移动光标）。
+            ["ctrl+left"] = ActionChatSuggestionPrevious,
+            ["ctrl+right"] = ActionChatSuggestionNext,
 
             // 工作模式直达（Alt+数字独立绑定；裸 Tab 循环为硬编码行为，不经 Resolver，
             // 两者无共享前缀、互不干扰）。

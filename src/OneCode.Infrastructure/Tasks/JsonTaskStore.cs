@@ -1,4 +1,5 @@
 using OneCode.Core.Tasks;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.Infrastructure.Tasks;
 
@@ -52,27 +53,19 @@ public sealed class JsonTaskStore : ITaskStore
     {
         lock (_gate)
         {
-            var tempPath = $"{_path}.tmp-{Guid.NewGuid():N}";
-            try
-            {
-                var envelope = new TaskSnapshotEnvelope(
-                    SchemaVersion: CurrentSchemaVersion,
-                    Tasks: tasks.OrderBy(task => task.CreatedAt).ToArray());
-                File.WriteAllText(tempPath, JsonSerializer.Serialize(envelope, _options));
+            var envelope = new TaskSnapshotEnvelope(
+                SchemaVersion: CurrentSchemaVersion,
+                Tasks: tasks.OrderBy(task => task.CreatedAt).ToArray());
+            var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(envelope, _options));
 
-                _ = ReadSnapshot(tempPath);
-
-                if (File.Exists(_path) && TryReadSnapshot(_path) is not null)
-                    File.Copy(_path, _path + ".bak", overwrite: true);
-
-                File.Move(tempPath, _path, overwrite: true);
-                _ = ReadSnapshot(_path);
-            }
-            finally
-            {
-                if (File.Exists(tempPath))
-                    File.Delete(tempPath);
-            }
+            // 耐久写入走共享原语（临时文件 WriteThrough + 原子替换 + .bak），
+            // 校验钩子沿用本 store 的既有语义：临时文件可解析才替换、主文件可解析才备份。
+            DurableFile.WriteAtomic(
+                _path,
+                payload,
+                validateTemp: tempPath => _ = ReadSnapshot(tempPath),
+                canBackupSource: primaryPath => TryReadSnapshot(primaryPath) is not null,
+                validateWritten: writtenPath => _ = ReadSnapshot(writtenPath));
         }
     }
 

@@ -132,7 +132,8 @@ public sealed partial class ChatTranscriptView
         if (_stream.IsStreaming)
         {
             // 按 ToolId 精确匹配
-            if (_stream.ToolTracker.TryMatchByToolId(toolId, out var pending)
+            var matched = _stream.ToolTracker.TryMatchByToolId(toolId, out var pending);
+            if (matched
                 && pending.LineIndex < _stream.StatusLines.Count)
             {
                 // 同轮相邻同类调用并入组行（×N 递增），不再逐条平铺刷屏。
@@ -168,9 +169,16 @@ public sealed partial class ChatTranscriptView
                 }
             }
             // 已见过的 ToolId（ContinueStreaming 已提交到历史）— 跳过去重
-            else if (_stream.ToolTracker.WasSeen(toolId))
+            else if (!matched && _stream.ToolTracker.WasSeen(toolId))
             {
                 // ToolDone for an already-committed start line — skip to avoid duplicate.
+            }
+            // 兜底：孤儿结果——未知 ToolId（未见起始行），或起始行已随行表压缩消失
+            //（matched 但 LineIndex 越界）。不渲染即整条结果静默丢失，补为独立完成行。
+            else
+            {
+                _stream.StatusLines.Add(ConversationRenderer.MakeCompletedToolLine(
+                    name, isError, toolInput, null, result, agentName: agentName, maxWidth: ContentWidth));
             }
 
             if (isError && !string.IsNullOrWhiteSpace(result))
