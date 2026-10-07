@@ -59,6 +59,12 @@ public sealed class ForkedAgentParams
 
     /// <summary>Pipeline profile controlling middleware trimming and tool filtering.</summary>
     public PipelineProfile Profile { get; init; } = PipelineProfile.Worker;
+
+    /// <summary>
+    /// fork 级账本接线（GOAL 步内并行）。非 null 时 fork 的写入 intent 先于文件写入持久化、
+    /// fork 成功时先于事务提交落账，崩溃后新世代的 reconcile 才能回滚孤儿写入。
+    /// </summary>
+    public ForkLedgerScope? LedgerScope { get; init; }
 }
 
 /// <summary>

@@ -9,6 +9,11 @@ using System.Threading.Channels;
 
 namespace OneCode.Infrastructure.Ai;
 
+/// <summary>
+/// 过载/停滞重试装饰器。重试重发的只是模型 HTTP 请求，不会导致工具重复执行：
+/// FunctionInvokingChatClient 在每轮**整条流结束后**才执行工具调用（M.E.AI 10.x 契约），
+/// 而本层位于装配链最内层（wire 侧，见 ChatClientFactory）——重试发生时工具必然尚未执行。
+/// </summary>
 public sealed class RetryOnOverloadChatClient(
     IChatClient inner,
     ILogger<RetryOnOverloadChatClient>? logger = null,

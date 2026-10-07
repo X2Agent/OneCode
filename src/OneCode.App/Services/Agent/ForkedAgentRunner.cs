@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.Core.Errors;
 using OneCode.Core.Models;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.Agent;
 
@@ -66,6 +67,14 @@ public sealed class ForkedAgentRunner(
 
             using var transaction = new EditTransaction(
                 _loggerFactory.CreateLogger<EditTransaction>());
+
+            // fork 写入 intent 先于任何文件写入持久化；并发 fork 间不做 reconcile
+            //（会互踩彼此刚持久化的 intent），世代清扫由 step 级 BeginAsync 独占。
+            if (parameters.LedgerScope is { } ledgerScope)
+            {
+                await FencedLedgerTransaction.BeginForkAsync(
+                    ledgerScope.Ledger, ledgerScope, transaction, ct).ConfigureAwait(false);
+            }
 
             var csp = parameters.CacheSafeParams;
             var maxTurns = parameters.MaxTurns ?? 10;
@@ -172,6 +181,8 @@ public sealed class ForkedAgentRunner(
             {
                 Text = response.Text,
                 Messages = response.Messages.ToList(),
+                // 非流式 GetResponseAsync 的 Usage 是工具循环所有轮次的累计值（M.E.AI 契约），
+                // 不是末轮增量——直接取单值不会低估多轮 fork 的 token 消耗。
                 TotalInputTokens = (long)(response.Usage?.InputTokenCount ?? 0),
                 TotalOutputTokens = (long)(response.Usage?.OutputTokenCount ?? 0),
                 TurnCount = 1 + pipeline.Metrics.ToolCallCount,
@@ -181,6 +192,16 @@ public sealed class ForkedAgentRunner(
             _logger.LogDebug(
                 "Forked agent '{Label}' completed: {ToolCalls} tool calls, {Input}+{Output} tokens",
                 run.Label, pipeline.Metrics.ToolCallCount, result.TotalInputTokens, result.TotalOutputTokens);
+
+            // 账本提交先于 fork 事务提交——「回执存在 ⇒ ledger 已提交」的 fork 级镜像。
+            if (parameters.LedgerScope is { } commitScope)
+            {
+                await commitScope.Ledger.CommitTransactionAsync(
+                    commitScope.OperationId,
+                    commitScope.FencingToken,
+                    $"fork:{parameters.ForkLabel}",
+                    ct).ConfigureAwait(false);
+            }
 
             transaction.Commit();
             return result;
@@ -283,6 +304,7 @@ public sealed class ForkedAgentRunner(
 
         var parameters = new ForkedAgentParams
         {
+            LedgerScope = request.LedgerScope,
             PromptMessages = [new ChatMessage(ChatRole.User, request.Prompt)],
             AgentInstructions = agentInstructions,
             // Unconditional: the fragment is not part of the inherited cache-safe prompt any more,

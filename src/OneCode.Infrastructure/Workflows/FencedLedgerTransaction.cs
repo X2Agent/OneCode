@@ -33,4 +33,24 @@ public static class FencedLedgerTransaction
             ct).ConfigureAwait(false);
         transaction.PersistTo(ledger, operationId, fencingToken);
     }
+
+    /// <param name="scope">fork 级作用域（run 账本前缀 + 围栏 + 本 fork 的 operationId）。</param>
+    /// <summary>
+    /// fork 级事务开启：只做 Begin + PersistTo，**不做** <see cref="IOperationLedger.ReconcileRunAsync"/>——
+    /// 并发 fork 各自 reconcile 会回滚彼此刚持久化的 intent；世代清扫由 step 级
+    /// <see cref="BeginAsync"/> 独占执行。fork 失败时事务保持 Active，由下一次世代清扫幂等还原。
+    /// </summary>
+    public static async Task BeginForkAsync(
+        IOperationLedger ledger,
+        OneCode.Core.Tools.ForkLedgerScope scope,
+        Agent.EditTransaction transaction,
+        CancellationToken ct = default)
+    {
+        await ledger.BeginTransactionAsync(
+            scope.OperationId,
+            "file-transaction",
+            scope.FencingToken,
+            ct).ConfigureAwait(false);
+        transaction.PersistTo(ledger, scope.OperationId, scope.FencingToken);
+    }
 }

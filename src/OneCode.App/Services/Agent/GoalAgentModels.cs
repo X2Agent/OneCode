@@ -49,6 +49,12 @@ public sealed record GoalRunOptions
     /// attached to the first user message as DataContent blocks.
     /// </summary>
     public IReadOnlyList<string>? ImagePaths { get; init; }
+
+    /// <summary>
+    /// fork 级账本作用域（step 内并行 DAG 专用）：由 Runtime 按 stepOperationId 构造，
+    /// DAG runner 按 taskId 派生 fork 级事务。null（无 ledger 或单代理路径）时 fork 不入账本。
+    /// </summary>
+    public ForkLedgerScope? ForkLedgerScope { get; init; }
 }
 
 /// <summary>

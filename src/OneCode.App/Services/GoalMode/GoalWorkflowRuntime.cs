@@ -253,6 +253,10 @@ internal sealed class GoalWorkflowRuntime(
                 WorkingDirectory = run.Workspace?.IsolatedPath
                     ?? throw new InvalidOperationException("GoalRun has no isolated workspace."),
                 SharedTransaction = transaction,
+                // DAG fork 的写入 intent 挂到同一 run 账本：fork 崩溃不再留下无法回滚的孤儿写入。
+                ForkLedgerScope = ledger is null
+                    ? null
+                    : new ForkLedgerScope(ledger, $"goal/{run.Id}", stepOperationId, _fencingToken),
             };
             execution = await subGoalExecutor.ExecuteSubGoalWithLoopStreamingAsync(
                 currentGoal,

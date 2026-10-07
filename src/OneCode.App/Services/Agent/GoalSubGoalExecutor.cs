@@ -207,16 +207,19 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     /// - RequiredTools 包含 "*" → 返回全量工具集（显式通配）
     /// - 否则 → 仅保留名称匹配的工具
     /// - 过滤后为空 → 抛出异常（fail-closed），不回退到全量工具集
+    /// 所有路径无条件摘除派工工具（<see cref="ToolCapabilitySet.SubAgentDispatchTools"/>）：
+    /// 子目标不可再派工，与「嵌套派工深度上限 1」的 fork 路径语义一致
+    ///（docs/sub-agents.md「所有子代理的工具面无条件摘除」）。
     /// </summary>
-    private static IList<AITool> FilterToolsForSubGoal(
+    internal static IList<AITool> FilterToolsForSubGoal(
         IList<AITool> allTools,
         IReadOnlyList<string>? requiredTools)
     {
         if (requiredTools is null || requiredTools.Count == 0)
-            return allTools;
+            return WithoutSubAgentDispatchTools(allTools);
 
         if (requiredTools.Contains("*"))
-            return allTools;
+            return WithoutSubAgentDispatchTools(allTools);
 
         var allowedSet = new HashSet<string>(requiredTools, StringComparer.Ordinal);
         var filtered = allTools
@@ -234,8 +237,25 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 "Fix the plan or use '*' to explicitly allow all tools.");
         }
 
-        return filtered;
+        var withoutDispatch = WithoutSubAgentDispatchTools(filtered);
+        if (withoutDispatch.Count == 0)
+        {
+            // fail-closed：分解器把派工工具写进了 RequiredTools——子目标工具面摘除后为空集，
+            // 不得静默零工具运行。
+            throw new InvalidOperationException(
+                $"requiredTools [{string.Join(", ", requiredTools)}] only matched sub-agent dispatch tools, " +
+                "which are never available to sub-goals (nested dispatch depth limit 1). " +
+                "Fix the plan: dispatch is a main-agent capability.");
+        }
+
+        return withoutDispatch;
     }
+
+    /// <summary>摘除派工工具（Agent / ParallelAgents）——子目标不可再派工。</summary>
+    private static IList<AITool> WithoutSubAgentDispatchTools(IList<AITool> tools)
+        => tools
+            .Where(t => t is not AIFunction af || !ToolCapabilitySet.SubAgentDispatchTools.Contains(af.Name))
+            .ToList();
 
     /// <summary>
     /// 生成子目标的初始 user prompt。

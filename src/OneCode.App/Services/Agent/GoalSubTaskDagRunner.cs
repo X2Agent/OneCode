@@ -53,7 +53,8 @@ internal sealed class GoalSubTaskDagRunner(
                     task.DependsOn,
                     InjectUpstreamResults: true,
                     task.ReadOnly ? AgentTaskExecutionAccess.ReadOnly : AgentTaskExecutionAccess.Write,
-                    WorkingDirectory: options.WorkingDirectory))
+                    WorkingDirectory: options.WorkingDirectory,
+                    LedgerScope: options.ForkLedgerScope?.ForTask(task.Id)))
                 .ToList();
 
             try
