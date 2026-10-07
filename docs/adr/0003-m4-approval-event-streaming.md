@@ -1,6 +1,6 @@
 # M4 完全事件驱动审批
 
-**状态**: Accepted（2026-10-05 更新：本文「Team 路径」审批桥与 `OrchestrationEvent.ApprovalRequest` 载体已随 Team 模式砍除移除；Main 路径事件驱动审批决策不变）
+**状态**: Accepted
 **日期**: 2026-07-10
 **关联**: 生产级重构计划 §9.2 M4（纯 MAF 流式审批 UX 原型）
 **修订**: R2 — 从"双路径并行原型"彻底重构为"完全事件驱动"
@@ -19,7 +19,6 @@ MAF 1.13 的 `ToolApprovalAgentOptions` 仅暴露 `AutoApprovalRules`，**无 UX
 R1 原型（2026-07-09）采用"双路径并行"策略：事件推送用于 UX 增强，实际决策仍通过 `IApprovalUi` 获取。这导致：
 - `IApprovalUi` 抽象成为永久兼容负担，无法删除
 - 两条决策通道并存，逻辑分叉难以维护
-- Team 路径与 Main 路径的审批机制不一致（Team 用 `ApprovalHandler` 委托，Main 用 `IApprovalUi`）
 
 ## 决策
 
@@ -34,12 +33,6 @@ R1 原型（2026-07-09）采用"双路径并行"策略：事件推送用于 UX �
 3. TUI 渲染审批组件，用户决策通过 `TuiApprovalRequest.ResponseSource.TrySetResult(decision)` 回传
 4. `MainAgentRunner.HandleToolApprovalAsync` 经 `IApprovalBroker.RequestAsync`（`ApprovalBroker.ForQuery`）获取决策
 5. 决策映射为 MAF 响应：`AllowOnce` → `CreateResponse(true)`、`AllowAlways` → `CreateAlwaysApproveToolResponse`、`AllowAllConversation` → `CreateResponse(true)`（并置位 run 级全放行标志，见统一决策枚举）、`Deny` → `CreateResponse(false)`
-
-#### Team 路径（已随 Team 模式砍除移除）
-
-Team 路径曾以 MAF `ToolApprovalAgent` + 工作流外部请求通道桥接审批（`TeamWorkflowRunner.BridgeToolApprovalAsync`
-消费 `RequestInfoEvent`，`ApprovalBroker.ForTeam` 推送 `OrchestrationEvent.ApprovalRequest`）。该桥随 Team
-模式砍除一并移除，事件驱动审批现仅存 Main 路径。
 
 ### 统一决策枚举
 
@@ -57,7 +50,6 @@ Team 路径曾以 MAF `ToolApprovalAgent` + 工作流外部请求通道桥接审
 |------|------|------|
 | `ApprovalRequestEvent` | `Query/QueryEventTypes.cs` | QueryEvent 子类型，Main 路径审批请求载体 + ResponseSource |
 | `TuiApprovalRequest` | `Tui/TuiEvent.cs` | TuiEvent 子类型，TUI 层审批请求 + ResponseSource 回调 |
-| `OrchestrationEvent.ApprovalRequest` | `Coordinator/OrchestrationEvent.cs`（已随 Team 砍除移除） | 当年 Team 路径审批请求载体 + ResponseSource |
 | `ApprovalDecision` | `Permissions/ApprovalDecision.cs` | 独立公共枚举（AllowOnce/AllowAlways/AllowAllConversation/Deny） |
 | 危险工具标记 | `ToolApprovalMarker` + `ToolMetadataRegistry.RequiresApprovalBoundary` | 管道构建期标记需审批边界的工具；判别用 `ToolNames.FileWriteTools`/`ReadOnlyTools` + `IsReadOnlyShell`/`IsDestructiveShell` 运行时分类 |
 
@@ -75,9 +67,7 @@ Team 路径曾以 MAF `ToolApprovalAgent` + 工作流外部请求通道桥接审
 |------|------|
 | `MainAgentRunner.Approval.cs` | `HandleToolApprovalAsync` 改为纯事件驱动（推送事件 + await ResponseSource） |
 | `MainAgentRunner.cs` | `BuildChatOptions` 不再包装危险工具；该职责集中于 `AgentPipelineBuilder` 的 `ToolApprovalMarker` |
-| `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射 + Team 路径 `OrchestrationEvent.ApprovalRequest` → `TuiApprovalRequest` 映射，均桥接 ResponseSource |
-| `TeamEventMapper.cs`（已删除） | 重写 `CreateApprovalHandler`，移除 `IApprovalUi` 参数，改为 `CreateEventHandler` 推送 `OrchestrationEvent.ApprovalRequest`；该职责当时由 `ApprovalBroker.ForTeam` 承担 |
-| `TeamAgentFactory.cs` / `TeamOrchestrationService.cs`（两者均已删除） | 移除 `IApprovalUi` 构造参数 |
+| `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射，桥接 ResponseSource |
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
 | `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 headless 工作模式实现无审批 UI 的只读策略（`workingMode: WorkingMode.Goal`） |
 | `QueryStreamEngine.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数；`ApprovalRequestEvent` 透传后移至 `StreamingSession.Digest`（`QueryStreamEngine` 消费） |
@@ -107,7 +97,7 @@ Team 路径曾以 MAF `ToolApprovalAgent` + 工作流外部请求通道桥接审
 ## 反思
 
 R1 原型的"双路径并行"是典型的兼容性陷阱：为了不破坏现有代码而保留旧抽象，导致两套机制并存、维护成本翻倍。R2 彻底重构后：
-- 删除 4 个文件（`IApprovalUi` / `TuiPermissionUi` / `ConsolePermissionUi` / `TeamEventMapper`，后者职责移交 `ApprovalBroker.ForTeam`）
-- 统一了 Main 路径与 Team 路径的审批机制（均为事件驱动）
+- 删除 3 个文件（`IApprovalUi` / `TuiPermissionUi` / `ConsolePermissionUi`）
+- Main 路径审批机制收敛为纯事件驱动
 - `ApprovalDecision` 提升为公共枚举，消除对 `IApprovalUi` 的耦合
 - 危险工具判别收敛为 `PermissionCheckHelpers` 运行时分类 + 管道构建期 `ToolApprovalMarker` 标记，遵循"白名单统一来源"约定

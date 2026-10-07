@@ -5,11 +5,11 @@ namespace OneCode.App.Tui;
 ///
 ///   [U] 帮我重构 StartupFlowCoordinator                    13:14
 ///
-///   [O] orchestrator                                 13:14
+///   [A] general-purpose                              13:14
 ///     ● 分析中...
 ///     当前耦合了 Terminal.Gui 创建逻辑...
 ///
-///   [B] executor                                     13:14
+///   [E] Explore                                       13:14
 ///     ⚡ Read  StartupFlowCoordinator.cs             ✓
 ///     ⚡ Grep  TuiHost|Terminal.Gui                  ✓
 ///

@@ -15,7 +15,7 @@ public sealed class WelcomeRendererTests
         lines.Should().Contain(line => line.FullText.Contains('█'));
         lines.Should().Contain(line => line.FullText.Trim().Equals("v1.0.0"));
         lines.Should().Contain(line => line.FullText.Contains("斜杠命令") && line.FullText.Contains("/find"));
-        lines.Should().Contain(line => line.FullText.Contains("Alt+1..4") && line.FullText.Contains("/keybindings"));
+        lines.Should().Contain(line => line.FullText.Contains("Alt+1/2/4") && line.FullText.Contains("/keybindings"));
     }
 
     [Fact]

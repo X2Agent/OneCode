@@ -1,6 +1,6 @@
 # Permission Middleware vs ToolApproval vs FunctionInvocationFilter 职责边界
 
-**状态**: Accepted（2026-10-05 更新：Team 工作流审批桥已随 Team 模式砍除移除，见 docs/plan/ 提交历史；本文其余决策不变）
+**状态**: Accepted
 **日期**: 2026-07-09
 **关联**: 生产级重构计划 §3.0（PERM 核实结论）、AGENTS.md「不许重复造轮子」（§6，库选型表）
 

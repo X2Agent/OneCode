@@ -1,6 +1,6 @@
 # MAF 集成边界与禁止清单
 
-**状态**: Accepted（2026-10-05 更新：Team 模式与 TeamRun 控制面已砍除——§2 的 ParallelDag 拓扑、§5.1 的 Team 工作流审批桥与 `TeamToolApprovalBridgeTests` 随之移除，真并行 DAG 由 `ParallelAgents` 工具承接；其余决策不变）
+**状态**: Accepted
 **日期**: 2026-09-16
 **关联**: [Permission vs ToolApproval vs Filter](./0001-permission-vs-toolapproval-vs-filter.md)、
 [Declarative 工作流评估](./0002-declarative-workflow-assessment.md)、
@@ -21,7 +21,7 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 | 早期误判 | 核对结论 |
 |---|---|
 | Harness 压缩「双挂」 | 主路径未设 token 参数，本就不启用 → 降为【防御性关闭】 |
-| ParallelDag 可用 MAF Concurrent「等价替换」 | ParallelDag 是单成员 Sequential 分支 → 【保留】 |
+| ParallelDag 可用 MAF Concurrent「等价替换」 | 真并行 DAG 由 `ParallelAgents` 工具承接，不以 MAF Concurrent 等价替换 → 【保留】 |
 | MCP WebSocket / InProcess / Registry「冷代码可删」 | 均有实际调用方 → 【保留】，判断作废 |
 | ToolApproval「现存双挂」 | 已有 `harnessOwnsToolApproval` 挡住 → 【禁止回归】，非现存 bug |
 
@@ -62,13 +62,14 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 
 **测试边界**：Options 守卫只锁定配置，不证明生产路径实际无双挂；实际装配契约已由行为测试补齐——provider 工具集与 profile 一致、Session 保存/恢复、scope 隔离与资源释放、记忆取消传播与产品日志边界（见文末引用的测试清单）。
 
-### 2. ParallelDag 不是 MAF Concurrent
+### 2. 并行 DAG 由 `ParallelAgents` 承接，不是 MAF Concurrent
 
-> 2026-10-05：ParallelDag 拓扑已随 Team 模式砍除移除。本节禁令作为决策记录保留：真并行 DAG 的产品承接者是
+真并行 DAG 的产品承接者是 `ParallelAgents` 工具（MAF `AddFanOutEdge` / `AddFanInBarrierEdge`，编译期 Kahn 查环）。
+若未来重建多成员编排，不得以「等价替换」为名引入 MAF Concurrent 而绕过产品闸。
 > `ParallelAgents` 工具（MAF `AddFanOutEdge` / `AddFanInBarrierEdge`，编译期 Kahn 查环）。若未来重建多成员编排，
 > 不得以「等价替换」为名引入 MAF Concurrent 而绕过产品闸。
 
-**禁止**：把 ParallelDag「等价替换」为 MAF Concurrent 工作流。名称保留；多成员误配保持「单成员断言 + 日志」。
+**禁止**：把并行 DAG「等价替换」为 MAF Concurrent 工作流。多成员误配保持「单成员断言 + 日志」。
 
 ### 3. MCP 运输与 Registry 保留
 
@@ -169,10 +170,8 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
 包括原本不需要审批的工具，再由 bypass/binding 装饰器区分。技能工具默认需要审批，因此会与普通工具调用同批
 出现在一个响应里，这是审批链必须覆盖的真实场景（`MainAgentRunner` 的混合内容拆分即为此而设）。
 
-> 2026-10-05：Team 工作流审批桥（`TeamWorkflowRunner.BridgeToolApprovalAsync` / `ApprovalBroker.ForTeam` /
-> `OrchestrationEvent.ApprovalRequest`）与其端到端测试 `TeamToolApprovalBridgeTests` 已随 Team 模式砍除移除。
-> 其时保留的一条经验仍然有效：`AIAgentHostOptions.InterceptUserInputRequests`（消息模式）在单成员 Sequential 链上
-> 会把请求发往**不存在的下游 executor 而被静默丢弃**（`SendMessageAsync` 无出边即无投递），审批类外部请求必须走端口模式。
+审批类外部请求必须走端口模式：`AIAgentHostOptions.InterceptUserInputRequests`（消息模式）在单成员 Sequential 链上
+会把请求发往**不存在的下游 executor 而被静默丢弃**（`SendMessageAsync` 无出边即无投递）。
 **待定政策**：「每次询问」强制确认无法仅靠自动批准规则实现（standing rules 先于
 自定义规则短路），产品尚未裁决是否需要，当前 TUI 直接提供「总是允许」。
 

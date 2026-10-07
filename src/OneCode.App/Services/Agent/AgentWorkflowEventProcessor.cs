@@ -104,7 +104,7 @@ internal static class AgentWorkflowEventProcessor
                     break;
 
                 case WorkflowOutputEvent outputEvt:
-                    // 工作流最终输出（Magentic orchestrator 的结论消息走此事件）：
+                    // 工作流最终输出（run 的结论消息走此事件）：
                     // 此前被静默丢弃，导致 LLM 调用成功但 FinalOutput="(no output)"、turns=0，
                     // 被上层误报为 ChatClient 配置问题。
                     var outputText = ExtractOutputText(outputEvt.Data);
@@ -134,7 +134,7 @@ internal static class AgentWorkflowEventProcessor
     }
 
     /// <summary>
-    /// 从 WorkflowOutputEvent.Data 提取文本。Magentic 的最终结论可能是
+    /// 从 WorkflowOutputEvent.Data 提取文本。工作流的最终结论可能是
     /// ChatMessage、ChatMessage 集合或纯字符串，统一归一化为文本。
     /// </summary>
     private static string? ExtractOutputText(object? data) => data switch

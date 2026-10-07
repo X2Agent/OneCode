@@ -35,7 +35,7 @@ response_format 能力协商在 `StructuredChatCall` 内每次调用完成）。
 ③ 硬拒绝重试：结构化调用抛非取消异常 → 去掉 ResponseFormat 重试一次 → 再走 ②
 ```
 
-首批落地：`GoalDecomposer`（3 个调用点）、`ClarificationQuestionGenerator`。
+首批落地：`GoalDecomposer`（3 个调用点）。
 现有文本解析器全部保留为降级路径——它们是兼容层，不是死代码。
 
 **源码取证（决定实现细节，均已核对）**：
@@ -66,15 +66,15 @@ response_format 能力协商在 `StructuredChatCall` 内每次调用完成）。
    且其输出已有 `SanitizeKey/Value` 消毒、50 条配额与「记 Warning 返回 0」的完整降级链，schema 增益有限。
    MAF 自身的 judge 消费方（`AIJudgeLoopEvaluator`）也是「无工具、无会话」的直连调用。工具循环 Agent
    采用结构化输出须单独论证。
-2. **结构化路径不得旁路调用方归一化**。`ClarificationQuestionGenerator` 抽出 `Finalize()`：
-   清洗（trim/去空）、5 条上限、空问题 fail-closed——类型化结果与文本降级结果同样受产品契约约束。
+2. **结构化路径不得旁路调用方归一化**。类型化结果与文本降级结果必须同样受调用方的
+   产品契约约束（清洗/去空、条数上限、空结果 fail-closed 等归一化对两条路径一致生效）。
 3. **文本解析器是兼容层，不是死代码**。`ExtractJsonBlock` / `ExtractJsonObject` / `ExtractJsonArray`
    及对应单测禁止当冗余删除；②③ 两条路径都依赖它们。
 4. **provider 请求整形只走 SDK 公开扩展点 / MEAI 类型化字段**（承 [MAF 集成边界](./0007-maf-integration-boundaries.md)）：
    `AgentRunOptions.ResponseFormat` / `ChatOptions.ResponseFormat` / `GetResponseAsync<T>`，
    禁止往 `AdditionalProperties` 手写提供商线协议键。
 5. **诊断语义保持**：GoalDecomposer 的「空文本（reasoning budget 提示）」与「无 JSON 计划块」两条错误消息
-   逐字保留；ClarificationQuestionGenerator 的 fail-closed（无模板兜底）保持。
+   逐字保留；结构化消费方的 fail-closed 语义（无模板兜底即报错）保持。
 6. **澄清记录（防再次误判）**：**Todo 不是结构化输出**。Todo 是 Harness `TodoProvider` 的工具能力
    （`todos_*` AIFunction + `AgentSessionStateBag`，MAF 集成边界 能力归属表），与 ResponseFormat 是两种
    不同机制，互不替代；「OneCode 已用 MAF 的 Todo」不构成「已用 MAF 的结构化输出」。

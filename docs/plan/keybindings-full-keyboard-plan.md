@@ -38,7 +38,7 @@
 
 | 按键 | 行为 | 保留理由 |
 |---|---|---|
-| 裸 `Tab`（空输入/斜杠前缀/默认） | 占位建议采纳 / 打开命令补全 / 循环工作模式 | 单键复用三种运行时状态相关行为，无法映射为单一动作；`Alt+1..4` 已提供模式直达 |
+| 裸 `Tab`（空输入/斜杠前缀/默认） | 占位建议采纳 / 打开命令补全 / 循环工作模式 | 单键复用三种运行时状态相关行为，无法映射为单一动作；`Alt+1/2/4` 已提供模式直达 |
 | `Ctrl+Left/Right`（占位建议可见时） | 循环切换占位建议 | 同上，依赖 `_placeholderLabel.Visible` 运行时状态 |
 | `Esc` 关闭 Overlay | `OverlayHost.HandleEsc()` | 关闭必须永远可用，不可重映射（安全兜底） |
 
@@ -74,8 +74,8 @@
 |---|---|---|---|
 | `sidebar:scrollUp` | `Alt+Up` | Chat | 侧边栏上滚 3 行（焦点不动） |
 | `sidebar:scrollDown` | `Alt+Down` | Chat | 侧边栏下滚 3 行 |
-| `sidebar:pageUp` | `Alt+PgUp` | Chat | 侧边栏上翻页 |
-| `sidebar:pageDown` | `Alt+PgDn` | Chat | 侧边栏下翻页 |
+| `sidebar:pageUp` | `Shift+PageUp` | Chat | 侧边栏上翻页 |
+| `sidebar:pageDown` | `Shift+PageDown` | Chat | 侧边栏下翻页 |
 | `app:cyclePane` | `F6` | Global | 输入框 ↔ 侧边栏焦点轮转 |
 | `chat:toggleLastDetails` | `Ctrl+O` | Chat | 展开/折叠最近一条工具/思考/错误详情 |
 | `chat:find` | `Ctrl+F` | Chat | 呼出行内搜索条 |

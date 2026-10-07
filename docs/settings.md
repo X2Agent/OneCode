@@ -91,7 +91,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 >
 > 两者职责不同，不应合并。若合并会导致 `/add-dir` 添加的目录被当作“已信任目录”，从而在直接启动该目录时跳过信任确认，绕过安全门禁。
 
-**`permissionMode` 可选值**（`PermissionMode` 枚举，可写全部 8 个成员）：
+**`permissionMode` 可选值**（`PermissionMode` 枚举，可写 7 个成员）：
 
 | 值 | 说明 |
 |---|---|

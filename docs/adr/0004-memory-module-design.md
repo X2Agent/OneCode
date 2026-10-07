@@ -1,6 +1,6 @@
 # 记忆模块架构设计
 
-**状态**: Accepted（2026-10-05 更新：Team 模式已砍除，§8 决策的事实前提（多成员团队）不复存在；Team 共享记忆由 project 级 MEMORY.md 覆盖的结论对子代理派工（Agent/ParallelAgents）依然成立）
+**状态**: Accepted
 **日期**: 2026-07-17
 **关联**: [memory-overview.md](../memory-overview.md)、[background-services.md §5](../background-services.md#5-autodream-记忆整合)、
 [MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)
@@ -235,7 +235,7 @@ _Use the `search_memories` tool to retrieve full memory content._
 
 ### 8. 决策：不实现独立团队记忆子系统
 
-**决策**（2026-08-15 确立）：不为多 Agent 协作引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不实施；决策针对的 Team 模式本身已于 2026-10-05 砍除，结论对现存的 fork 子代理依然成立）：
+**决策**（2026-08-15 确立）：不为多 Agent 协作引入独立的团队记忆子系统（早期迁移规划中的 `team-memory/` 目录 + frontmatter 解析器 + 专用 `TeamMemoryContextProvider` 设计不实施）：
 
 - **共享知识库 = project 级 `MEMORY.md`**。fork 子代理（Explore / Plan 等）经 `SharedContextProviderBuilder.BuildCommon` 获得 `MemorySearchProviderFactory` 创建的 `search_memories` 工具，可检索 project + user 级条目。
 - **写入统一收口**：AutoDream / `/memory` 命令 / `IMemoryEntryStore`，子代理不直接写（防结构注入安全边界，见「影响」节）。
@@ -369,7 +369,7 @@ services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 
 | 问题 | 当前实现 | 应有机制 |
 |---|---|---|
-| 记忆膨胀 | ~~LRU 200 条~~ → 已改按 `HitCount`（§11.2） | ✅ 已改善 |
+| 记忆膨胀 | 按 `HitCount` 淘汰（§11.2） | ✅ 已改善 |
 | 记忆矛盾 | prompt 提示 Agent“用 upsert 覆盖同 Key” | ⛔ **主动冲突检测**：与现有条目比对，显式合并/取代 |
 | 记忆不准 | 无验证 | ✅ 使用反馈闭环（§11.2） |
 

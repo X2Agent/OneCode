@@ -13,7 +13,7 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
 | `Tools/` | AI 工具实现：Agent 调用的 31 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
-| `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Coordinator、Hooks、Lsp、Mcp 等 |
+| `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Hooks、Lsp、Mcp 等 |
 | `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
 | `Session/` | 会话上下文和生命周期管理 |

@@ -1,6 +1,6 @@
 # MAF Workflows.Declarative 评估结论
 
-**状态**: Rejected (议题关闭；2026-10-05 更新：表中「现有实现」列的 Team 编排（TeamWorkflowRunner / team.yaml / prompts/teams）已随 Team 模式砍除移除，并行派工由 `Agent` / `ParallelAgents` 工具承接)
+**状态**: Rejected (议题关闭)
 **日期**: 2026-07-09
 **关联**: 原生产级重构计划 §9.2 M3（该计划文档未随仓库提交——工作区与 git 历史均无此路径）
 
@@ -13,10 +13,10 @@
 ### 能力已被覆盖
 
 评估当时项目具备等价的代码式工作流能力（YAML 团队配置 / GroupChat / Magentic 编排 / team.yaml 自定义模板，
-均由 `TeamWorkflowRunner` + `AgentTemplateConfig` 提供——2026-10-05 起 Team 模式已砍除，并行派工由
-`Agent` / `ParallelAgents` 工具承接），无需引入 MAF Declarative：
+由 `TeamWorkflowRunner` + `AgentTemplateConfig` 提供）。该 Team 编排整体移除后，并行派工由
+`Agent` / `ParallelAgents` 工具承接，无需引入 MAF Declarative：
 
-| 能力 | 评估时的实现（已随 Team 砍除移除） | MAF Declarative 对应 |
+| 能力 | 评估时的实现 | MAF Declarative 对应 |
 |------|----------|---------------------|
 | YAML 团队配置 | `AgentTemplateConfig.FromYaml()` + `prompts/teams/*.yaml` | Declarative YAML spec |
 | GroupChat 编排 | `TeamWorkflowRunner` 使用 `AgentWorkflowBuilder.CreateGroupChatBuilderWith` | Declarative schema 可表达（如 next-speaker 公式类多 Agent 协作） |
@@ -28,19 +28,19 @@
 1. **API 阻抗失配**：`ResponseAgentProvider` 是 Response API 抽象，与本地 `IChatClient` 的 messages API 模型不一致，适配器需转换消息格式并可能模拟状态语义
 2. **API 形状未知**：包未还原到本地（截至 2026-07-09 评估时），无法预先检视 `ResponseAgentProvider` 抽象成员，POC 需先做信息收集阶段
 3. **实验性 API 漂移**：项目大量 MAF API 带 `[Experimental]`，编译期由 `src/Directory.Build.props` 的全局 `NoWarn` 抑制 `MAAI001`（见 `src/OneCode.Infrastructure/AGENTS.md`），Declarative 子包稳定性更不可控
-4. **双轨风险**：引入 MAF Declarative YAML spec 后与现有 `AgentTemplateConfig` 体系可能并存，需明确替换策略
+4. **双轨风险**：引入 MAF Declarative YAML spec 后与现有代码式编排可能并存，需明确替换策略
 
 ## 决策
 
 **关闭 M3 议题，不做本地 Declarative 适配器 POC。**
 
 理由：
-- 声明式工作流能力已被现有 YAML 体系覆盖，边际收益弱
+- 声明式工作流能力已被现有代码式编排（`Agent` / `ParallelAgents`）覆盖，边际收益弱
 - 适配器实现成本高且不确定（API 未知 + 阻抗失配 + 实验性 API 风险）
 - 与原计划"不成则关闭议题"的退出路径一致（原生产级重构计划.md:338，该文档未随仓库提交）
 
 ## 影响
 
-- 维持代码式工作流路径（评估时为 `TeamWorkflowRunner` + `AgentTemplateConfig`；现为 `Agent` / `ParallelAgents` 工具）
+- 并行派工与多任务编排由 `Agent` / `ParallelAgents` 工具承接
 - 不引入 `Microsoft.Agents.AI.Workflows.Declarative` 包依赖
 - 未来如需重新评估，需先确认 MAF 是否提供不依赖 Azure Foundry 的 Declarative 实现

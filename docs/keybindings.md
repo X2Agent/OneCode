@@ -154,6 +154,8 @@
 | `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Alt+1` / `Alt+2` / `Alt+4` | `app:modeBuild/Plan/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |
+| `Shift+PageUp` | `sidebar:pageUp` | 计划侧栏向上翻页（侧栏未显示时无操作） |
+| `Shift+PageDown` | `sidebar:pageDown` | 计划侧栏向下翻页 |
 
 ### Autocomplete（自动补全）
 
@@ -259,7 +261,7 @@
 - 按 `Escape` 可取消当前挂起的和弦
 - 和弦序列在配置文件中用空格分隔：`"ctrl+x ctrl+k": "chat:killAgents"`（用户自定义示例）
 - **Eager-fire（立即触发）**：若某个按键自身已精确绑定动作、同时又是更长和弦的前缀，该键会**立即触发自身绑定**，并在 1s 窗口内继续监听和弦尾键。纯前缀键（自身无绑定，如 `ctrl+x ctrl+k` 的 `ctrl+x`）不受影响，仍等待尾键。
-- 模式直达为独立单键 `Alt+1..4`，不与任何和弦共享监听窗口；裸 Tab 循环为硬编码行为，不经 Resolver。
+- 模式直达为独立单键 `Alt+1/2/4`，不与任何和弦共享监听窗口；裸 Tab 循环为硬编码行为，不经 Resolver。
 
 ---
 

@@ -377,7 +377,7 @@ HarnessAgent
 > **会话级一次性配置**：`/permissions bypass --session` 让本次对话自动执行所有操作而不写配置文件；
 > 审批弹窗中也可直接选「本次对话全部允许」。两者都不影响 Layer 0 安全不变量（危险命令 / 敏感路径 / 符号链接越狱）。
 
-**12 层渐进式安全带机制**：核心循环 → 工具调度 → 计划 → 子代理 → 按需知识 → 上下文压缩 → 持久化任务 → 后台任务 → 代理团队 → 团队协议 → 自主代理 → 工作树隔离。
+**10 层渐进式安全带机制**：核心循环 → 工具调度 → 计划 → 子代理 → 按需知识 → 上下文压缩 → 持久化任务 → 后台任务 → 自主代理 → 工作树隔离。
 
 **命令分类器**：
 - `BashCommandClassifier`：Shell 命令 Safe / Warning / Dangerous 三级分类
@@ -389,13 +389,11 @@ HarnessAgent
 ```
 主代理 (MainAgentRunner)
     ├── simple    → 单次派生子代理（ForkedAgentRunner）
-    ├── magentic  → Orchestrator + Workers 并发（MAF MagenticWorkflow）
-    ├── groupchat → 循环发言（MAF GroupChatWorkflow）
-    └── DAG       → 依赖并行（ParallelAgentsTool → AgentTaskWorkflowCompiler + AgentTaskWorkflowHost）
+    └── DAG       → 依赖并行（ParallelAgents 工具与 GOAL 步内并行共用
+                   AgentTaskWorkflowCompiler + AgentTaskWorkflowHost 底座）
 
 ```
 
-**Agent 8 色身份系统**：orchestrator 紫、researcher 蓝、planner 绿、executor 橙、reviewer 黄、tester 红、debugger 粉、assistant 青。
 
 ### 记忆系统
 
@@ -419,15 +417,14 @@ HarnessAgent
 
 ## TUI 交互
 
-### 四层布局
+### 三层布局
 
 ```
-┌─ Title Bar ──────────────────────────────────────────┐  1 row
-│ ● Code Assistant  [● Magentic]  │ orchestrator │ F1 F2 F3 ?│
-├──────────────────────────────────────────────────────┤
+┌──────────────────────────────────────────────────────┐
 │                                                       │
 │              CHAT — 唯一主视图                          │  Dim.Fill()
 │              （BUILD / PLAN / GOAL 共享）              │
+│      计划侧栏按需弹出（Shift+PageUp/PageDown 翻页）      │
 │                                                       │
 ├─ Status Bar ─────────────────────────────────────────┤  1 row
 │  Opus · 🔒 Sandbox               BUILD · 13:19       │
@@ -436,7 +433,8 @@ HarnessAgent
 └──────────────────────────────────────────────────────┘
 ```
 
-**设计原则**：Chat 是唯一永久主视图，无侧边栏、无底部永久面板，辅助功能按需弹出覆盖层。
+**设计原则**：Chat 是唯一永久主视图，无标题栏、无底部永久面板，辅助功能（计划侧栏、
+审批、选择器）按需弹出覆盖层。
 
 ### 覆盖层系统
 

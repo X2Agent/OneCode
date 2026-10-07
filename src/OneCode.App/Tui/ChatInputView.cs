@@ -85,7 +85,7 @@ public sealed partial class ChatInputView : View
     public event Action? SidebarToggleRequested;
 
     /// <summary>
-    /// 直达指定工作模式（Alt+1..4，app:mode* 动作）。
+    /// 直达指定工作模式（Alt+1/2/4，app:mode* 动作）。
     /// 视图内部接线到 <see cref="WorkingModeController.Mode"/>，复用 ModeChanged
     /// 徽章闪烁（AgentStatusBar 订阅），无需跨层订阅。
     /// </summary>

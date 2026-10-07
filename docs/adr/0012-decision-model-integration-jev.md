@@ -146,7 +146,6 @@ OneCode 只认「决策客户端」一种形态。
 | 2 | GOAL 子目标判定级联 | `src/OneCode.App/Services/Agent/GoalSubGoalJudge.cs`：LLM + 文本解析 `VERDICT` | Noul `P(完成)` 先判，低置信度回落 LLM | 每轮省一次完整 LLM 判断；与上游 `DecisionLoopEvaluator` 同构 | **fail-safe**：继续 / 交下一评估器，**绝不提前终止** | P0 |
 | 3 | 权限风险加严 | `src/OneCode.Core/Permissions/Yolo/YoloClassifier.cs`（纯规则）+ `src/OneCode.Core/Permissions/PermissionChecker.cs` 未命中即 Ask | Score 风险分 | 减少无谓打断 | **fail-safe**：视为未命中，保持现有 Ask | P1（安全敏感，须独立立项 + 反证测试） |
 | 4 | 记忆相关性 | `src/OneCode.App/Services/Memory/MemoryService.cs` 的确定性打分 top-6 | Score / Choice | 相关性提升 | **fail-open**：回退确定性打分 | P2 |
-| 5 | ~~Team 需求澄清门~~（2026-10-05：Team 模式砍除，`TeamRequirementService.cs` 已移除，该接入点撤销） | — | — | — | — | 撤销 |
 
 ### 4. 排除项（附理由）
 

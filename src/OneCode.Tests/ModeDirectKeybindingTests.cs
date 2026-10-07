@@ -8,7 +8,7 @@ using Terminal.Gui.Input;
 namespace OneCode.Tests;
 
 /// <summary>
-/// Alt+1..4 模式直达（app:mode*）行为守护：
+/// Alt+1/2/4 模式直达（app:mode*）行为守护：
 /// - Resolver 层：alt+数字单键精确命中 / 裸数字放行编辑器 / 裸 Tab 无和弦前缀；
 /// - 分发层守卫四场景：正常直达 / 补全激活入文 / 选择器挂起交给选择器 /
 ///   提问模式数字留给答案文本。

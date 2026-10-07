@@ -87,7 +87,7 @@ public static class WelcomeRenderer
 
         RenderTipLine(
         [
-            ("Alt+1..4 ", "直达模式"),
+            ("Alt+1/2/4 ", "直达模式"),
             ("/keybindings ", "快捷键面板"),
         ]);
 
