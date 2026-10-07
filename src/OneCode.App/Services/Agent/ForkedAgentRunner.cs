@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using OneCode.Core.Domain;
 using OneCode.Core.Errors;
 using OneCode.Core.Models;
 using OneCode.Infrastructure.Agent;
@@ -38,6 +39,7 @@ public sealed class ForkedAgentRunner(
     private readonly SubAgentPipelineFactory _pipelineFactory = pipelineFactory;
     private readonly IModelManager _modelManager = runtime.ModelManager;
     private readonly IWorkingDirectoryAccessor _workingDirectoryAccessor = runtime.WorkingDirectory;
+    private readonly ISessionIdProvider _sessionIds = runtime.SessionIds;
     private readonly Core.Tools.ToolMetadataRegistry _toolMetadata = runtime.ToolMetadata;
     private readonly CompactionStrategyFactory _compactionBuilder = runtime.CompactionBuilder;
     private readonly PromptComposer _promptComposer = promptComposer;
@@ -98,7 +100,10 @@ public sealed class ForkedAgentRunner(
                 MaxToolCalls = maxTurns,
                 ModelId = csp?.ModelId,
                 ProviderId = providerId,
-                ConversationId = parameters.ConversationId,
+                // usage 归属当前会话（UsageTrackingRunMiddleware 据此写会话桶，/status 才能看到
+                // 子代理消耗）；上下文提供器仍取 parameters.ConversationId（fork 本地，
+                // 派工路径均为 null），子代理不得读/写主会话的转录与设计上下文。
+                ConversationId = _sessionIds.CurrentSessionId,
                 AllowedTools = parameters.AllowedTools,
             });
 

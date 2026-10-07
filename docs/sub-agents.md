@@ -79,6 +79,8 @@ AgentTool.RunAgentAsync
   `SharedTransaction`（多子目标共用，提交/回滚由 Goal 控制面负责）。
 - **记账**：子代理经 `PipelineSecurityContext` 共享 `ITokenLedger` 与 `MaxBudgetTokens`，
   预算熔断（`BudgetGuardRunMiddleware`）与用量追踪（`UsageTrackingRunMiddleware`）在子代理链上同样生效。
+  用量按当前会话入账（fork 建管道时取 `ISessionIdProvider.CurrentSessionId`），`/status stats` 的
+  会话统计包含子代理消耗；上下文提供器不消费该会话 ID（子代理转录保持 fork 本地）。
 - **任务清单**：`TaskService` 生产实现**持久化**（conversation / BuildRun 作用域跨重启存活），
   TUI 经 `Task` 工具与任务侧栏可见；输出日志可增量取（`AppendTaskOutput` / `GetTaskOutput`）。
 - **上下文 provider 释放**：每 run 构建的 provider（如 skills）经 `AgentContextProviderLease`

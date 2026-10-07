@@ -96,6 +96,15 @@ public sealed class ReviewCommand(
         "Bash(git blame:*)", "Bash(grep:*)", "Read(*)", "Edit(*)", "Write(*)",
     ];
 
+    /// <summary>单份 AGENTS.md 注入上限（字符），规则文件过长时截断，防止撑爆 prompt。</summary>
+    private const int MaxAgentsMdChars = 2_000;
+
+    /// <summary>注入的 AGENTS.md 数量上限：取变更文件祖先链上最深的 N 个目录（浅层规则随链自然包含）。</summary>
+    private const int MaxAgentsMdFiles = 3;
+
+    /// <summary>diff 注入 prompt 的体量上限（字符），超出按整文件截断，防止超大变更打爆上下文。</summary>
+    internal const int MaxDiffPromptChars = 50_000;
+
     public override async Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default)
     {
         var a = CommandArgs.Parse(args, ["severity", "base", "focus"]);
@@ -154,17 +163,25 @@ public sealed class ReviewCommand(
         if (string.IsNullOrWhiteSpace(diff))
             return CommandResult.Text($"No changes to review ({scopeDescription}).");
 
-        // Gather context in parallel
+        var changedFiles = ParseChangedFilesFromDiff(diff);
+        // blame 只依赖 diff，与下方 git 查询并行启动
+        var blameTask = includeBlame
+            ? TryGatherBlameContextAsync(diff, gitHelper, ct)
+            : Task.FromResult<string?>(null);
+
+        // Gather context in parallel：独立的 git 查询一批并发
         var branchTask = gitHelper.ReadAsync(["branch", "--show-current"], ct);
         var logTask = gitHelper.ReadAsync(["log", "--oneline", "-5"], ct);
         var hashTask = gitHelper.ReadAsync(["log", "--format=%H", "-5"], ct);
-        await Task.WhenAll(branchTask, logTask, hashTask).ConfigureAwait(false);
+        var repoRootTask = gitHelper.ReadAsync(["rev-parse", "--show-toplevel"], ct);
+        await Task.WhenAll(branchTask, logTask, hashTask, repoRootTask).ConfigureAwait(false);
         var branch = await branchTask;
         var recentLog = await logTask;
         var recentHashes = (await hashTask)?.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(h => h.Trim())
             .Where(h => h.Length > 0)
             .ToList() ?? [];
+        var repoRoot = (await repoRootTask)?.Trim();
 
         // Incremental review: skip already-reviewed commits
         var reviewCache = reviewCacheService.Load(baseRef);
@@ -185,17 +202,14 @@ public sealed class ReviewCommand(
             recentLogDisplay = recentLog.Trim();
         }
 
-        // Try to read AGENTS.md for project-specific review rules
-        var repoRoot = await gitHelper.ReadAsync(["rev-parse", "--show-toplevel"], ct).ConfigureAwait(false);
-        var agentRules = await TryReadAgentsMdAsync(repoRoot?.Trim(), ct).ConfigureAwait(false);
+        // Try to read AGENTS.md for project-specific review rules（沿变更文件祖先目录分层收集）
+        var agentRules = await TryReadAgentsMdAsync(repoRoot, changedFiles, ct).ConfigureAwait(false);
 
-        // Optionally gather git blame for changed files
-        string? blameContext = null;
-        if (includeBlame)
-            blameContext = await TryGatherBlameContextAsync(diff, gitHelper, ct).ConfigureAwait(false);
+        // Optionally gather git blame for changed files（与上方 git 查询并行的任务在此收口）
+        var blameContext = await blameTask.ConfigureAwait(false);
 
         // Gather LSP diagnostics for changed files (provides static analysis backing)
-        string? lspContext = TryGatherLspDiagnostics(diff);
+        string? lspContext = TryGatherLspDiagnostics(changedFiles, repoRoot);
 
         var outputFormat = await promptManager.GetPromptAsync("system/review-output-text", ct).ConfigureAwait(false)
             ?? "Structure your response with Summary, Functional Issues, and Design Suggestions sections.";
@@ -219,7 +233,7 @@ public sealed class ReviewCommand(
             ["agentRulesSection"] = agentRules is not null
                 ? $"\n## Project-Specific Rules (from AGENTS.md)\n{agentRules}\n"
                 : "",
-            ["diff"] = diff.TrimEnd(),
+            ["diff"] = CapDiffForPrompt(diff.TrimEnd()),
             ["blameSection"] = blameContext is not null
                 ? $"\n## Git Blame Context (changed files)\n{blameContext}\n"
                 : "",
@@ -277,23 +291,64 @@ public sealed class ReviewCommand(
                 ToolActivationContext.CurrentCapabilities);
             var result = await workflowHost.RunAsync(workflow, tasks, ct).ConfigureAwait(false);
 
-            var aggregate = result.TaskOutcomes.Single(outcome => outcome.TaskId == AggregateTaskId);
-            if (aggregate.Success)
+            var (output, reviewCompleted) = FormatAggregateOutput(result);
+            if (reviewCompleted)
             {
                 // 非流式命令路径没有 QueryStreamService.CommitPending，评审完整跑完即落缓存。
                 reviewCacheService.CommitPending();
-                return CommandResult.Text(aggregate.Output!.Trim());
+            }
+            else
+            {
+                reviewCacheService.DiscardPending();
             }
 
-            reviewCacheService.DiscardPending();
-            return CommandResult.Text(
-                $"{result.FinalOutput}\n\n(Aggregation task failed: {aggregate.Error}; raw perspective sections shown above.)");
+            return CommandResult.Text(output);
         }
         catch (InvalidOperationException ex)
         {
             reviewCacheService.DiscardPending();
             return CommandResult.Error($"Parallel review failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 把 DAG 结果格式化为最终报告：聚合成功取聚合输出；聚合失败或未产出终态
+    /// （整体超时被兜底为 Failed 时聚合 outcome 缺失）降级输出各视角原始分段，不静默丢报告。
+    /// 返回值第二项表示评审是否完整完成（决定增量缓存提交还是丢弃）。
+    /// </summary>
+    internal static (string Output, bool ReviewCompleted) FormatAggregateOutput(AgentWorkflowResult result)
+    {
+        var summary = BuildExecutionSummary(result);
+        var aggregate = result.TaskOutcomes.SingleOrDefault(outcome => outcome.TaskId == AggregateTaskId);
+        if (aggregate is { Success: true })
+            return ($"{aggregate.Output!.Trim()}\n\n{summary}", true);
+
+        var reason = aggregate is null
+            ? "aggregation did not produce a terminal outcome (workflow timeout or interrupted)"
+            : $"aggregation failed: {aggregate.Error}";
+        return (
+            $"{result.FinalOutput}\n\n(Aggregation unavailable — {reason}; raw perspective sections shown above.)\n\n{summary}",
+            false);
+    }
+
+    /// <summary>每个 DAG 任务的执行摘要行（状态 / 耗时 / 轮数 / token），追加在报告尾部让并行执行可见。</summary>
+    internal static string BuildExecutionSummary(AgentWorkflowResult result)
+    {
+        static string FormatTokens(long value) => value switch
+        {
+            >= 1_000_000 => $"{value / 1_000_000.0:F1}M",
+            >= 1_000 => $"{value / 1_000.0:F1}k",
+            _ => value.ToString(CultureInfo.InvariantCulture),
+        };
+
+        var lines = result.TaskOutcomes.Select(outcome =>
+        {
+            var status = outcome.Success ? "ok" : $"FAILED — {outcome.Error}";
+            return string.Create(CultureInfo.InvariantCulture,
+                $"- {outcome.TaskId}: {status} · {outcome.DurationMs / 1000.0:F1}s · {outcome.TurnsCompleted} turns"
+                + $" · {FormatTokens(outcome.InputTokens)} in / {FormatTokens(outcome.OutputTokens)} out");
+        });
+        return string.Join("\n", lines);
     }
 
     /// <summary>渲染三视角 prompt；任一模板缺失返回 null（调用方显式报错，不静默降级）。</summary>
@@ -307,15 +362,19 @@ public sealed class ReviewCommand(
             ["editInstruction"] = ReadOnlyEditInstruction,
         };
 
-        var rendered = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (_, promptName) in ParallelPerspectives)
+        var rendered = await Task.WhenAll(ParallelPerspectives.Select(async perspective =>
+            (perspective.PromptName,
+             Prompt: await LoadPromptAsync(promptManager, perspective.PromptName, perspectiveVariables, ct)
+                 .ConfigureAwait(false)))).ConfigureAwait(false);
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (promptName, prompt) in rendered)
         {
-            var prompt = await LoadPromptAsync(promptManager, promptName, perspectiveVariables, ct).ConfigureAwait(false);
             if (prompt is null)
                 return null;
-            rendered[promptName] = prompt;
+            result[promptName] = prompt;
         }
-        return rendered;
+        return result;
     }
 
     /// <summary>
@@ -353,6 +412,7 @@ public sealed class ReviewCommand(
     /// <summary>
     /// Parse changed files from the diff and fetch git blame --porcelain for each.
     /// Truncates to 50 blame entries per file to keep the prompt manageable.
+    /// Files are fetched concurrently (capped at 5) and assembled in diff order.
     /// </summary>
     private async Task<string?> TryGatherBlameContextAsync(
         string diff, IGitHelper gitHelper, CancellationToken ct)
@@ -362,13 +422,16 @@ public sealed class ReviewCommand(
             var changedFiles = ParseChangedFilesFromDiff(diff);
             if (changedFiles.Count == 0) return null;
 
-            var sb = new StringBuilder();
             // Cap at 5 files to avoid bloating the prompt
-            foreach (var file in changedFiles.Take(5))
+            var blameResults = await Task.WhenAll(changedFiles.Take(5)
+                .Where(File.Exists)
+                .Select(async file => (File: file, Result: await gitHelper.RunAsync(
+                    ["blame", "--porcelain", file], ct).ConfigureAwait(false))))
+                .ConfigureAwait(false);
+
+            var sb = new StringBuilder();
+            foreach (var (file, result) in blameResults)
             {
-                if (!File.Exists(file)) continue;
-                var result = await gitHelper.RunAsync(
-                    ["blame", "--porcelain", file], ct).ConfigureAwait(false);
                 if (result is null || string.IsNullOrWhiteSpace(result.Stdout)) continue;
 
                 var entries = GitBlameParser.Parse(result.Stdout, file);
@@ -408,27 +471,50 @@ public sealed class ReviewCommand(
         return files;
     }
 
-    private async Task<string?> TryReadAgentsMdAsync(string? repoRoot, CancellationToken ct)
+    /// <summary>
+    /// 沿变更文件的祖先目录分层收集 AGENTS.md（仓库根 + 变更文件最近的上层目录），
+    /// 让 src/AGENTS.md 这类子目录规范真正进入审查依据。每份截断到
+    /// <see cref="MaxAgentsMdChars"/>，最多取 <see cref="MaxAgentsMdFiles"/> 份（浅层在前）。
+    /// </summary>
+    private async Task<string?> TryReadAgentsMdAsync(
+        string? repoRoot, IReadOnlyList<string> changedFiles, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(repoRoot)) return null;
+        if (string.IsNullOrWhiteSpace(repoRoot) || changedFiles.Count == 0) return null;
         try
         {
-            var candidates = new[]
+            var rootPath = Path.GetFullPath(repoRoot);
+            var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in changedFiles)
             {
-                Path.Combine(repoRoot, "AGENTS.md"),
-                Path.Combine(repoRoot, ".github", "AGENTS.md"),
-            };
-            foreach (var path in candidates)
-            {
-                if (File.Exists(path))
+                var dir = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(rootPath, file)));
+                while (dir is not null
+                    && dir.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)
+                    && dirs.Add(dir))
                 {
-                    var content = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
-                    // Extract review-related sections only to avoid bloating the prompt
-                    var lines = content.Split('\n');
-                    var reviewSection = ExtractSection(lines, ["review", "code quality", "standards", "rules"]);
-                    return reviewSection ?? content[..Math.Min(content.Length, 800)];
+                    dir = Path.GetDirectoryName(dir);
                 }
             }
+
+            // 取最深 N 个目录（最贴近变更的规则优先入选），按浅→深输出（通用 → 具体）
+            var selected = dirs
+                .OrderByDescending(d => d.Length)
+                .Take(MaxAgentsMdFiles)
+                .OrderBy(d => d.Length);
+
+            var sections = new List<string>();
+            foreach (var dir in selected)
+            {
+                var path = Path.Combine(dir, "AGENTS.md");
+                if (!File.Exists(path)) continue;
+                var content = (await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)).Trim();
+                if (content.Length == 0) continue;
+                if (content.Length > MaxAgentsMdChars)
+                    content = content[..MaxAgentsMdChars] + "\n…(truncated)";
+                var relative = Path.GetRelativePath(rootPath, path).Replace('\\', '/');
+                sections.Add($"### {relative}\n{content}");
+            }
+
+            return sections.Count > 0 ? string.Join("\n\n", sections) : null;
         }
         catch (Exception ex)
         {
@@ -444,27 +530,28 @@ public sealed class ReviewCommand(
     /// Query LspDiagnosticRegistry for diagnostics on changed files.
     /// Only returns Error/Warning severity — skips Information/Hint to avoid noise.
     /// Capped at 200 diagnostics max to avoid prompt bloat.
+    /// Matching is exact on normalized absolute paths (diagnostic FilePath comes from
+    /// file:// URIs), replacing the old bidirectional-EndsWith heuristic that could
+    /// cross-match files sharing a basename.
     /// </summary>
-    private string? TryGatherLspDiagnostics(string diff)
+    private string? TryGatherLspDiagnostics(IReadOnlyList<string> changedFiles, string? repoRoot)
     {
         try
         {
-            var changedFiles = ParseChangedFilesFromDiff(diff);
             if (changedFiles.Count == 0) return null;
 
             var allDiagnostics = lspRegistry.GetAllDiagnostics();
             if (allDiagnostics.Count == 0) return null;
 
+            var changedSet = changedFiles
+                .Select(cf => repoRoot is null ? cf : Path.Combine(repoRoot, cf))
+                .Select(NormalizePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             // Match diagnostics to changed files, filter to Error/Warning only
             var relevant = allDiagnostics
                 .Where(d => d.Severity is LspDiagnosticSeverity.Error or LspDiagnosticSeverity.Warning)
-                .Where(d =>
-                {
-                    var filePath = d.FilePath;
-                    return changedFiles.Any(cf =>
-                        filePath.EndsWith(cf, StringComparison.OrdinalIgnoreCase) ||
-                        cf.EndsWith(Path.GetFileName(filePath), StringComparison.OrdinalIgnoreCase));
-                })
+                .Where(d => changedSet.Contains(NormalizePath(d.FilePath)))
                 .Take(200)
                 .ToList();
 
@@ -499,23 +586,72 @@ public sealed class ReviewCommand(
         }
     }
 
-    private static string? ExtractSection(string[] lines, string[] keywords)
+    private static string NormalizePath(string path) =>
+        Path.GetFullPath(path).Replace('\\', '/');
+
+    /// <summary>
+    /// 按整文件截断注入 prompt 的 diff：预算内能装下多少整文件就装多少；
+    /// 单文件即超限时截头保留第一个文件；尾部附省略文件清单与缩小范围提示。
+    /// 预算内返回原文。
+    /// </summary>
+    internal static string CapDiffForPrompt(string diff)
     {
-        var result = new StringBuilder();
-        var inSection = false;
-        foreach (var line in lines)
+        if (diff.Length <= MaxDiffPromptChars) return diff;
+
+        var files = SplitDiffByFile(diff);
+        var builder = new StringBuilder();
+        var budget = MaxDiffPromptChars;
+        var included = 0;
+        foreach (var (_, chunk) in files)
         {
-            if (line.StartsWith('#'))
-            {
-                inSection = keywords.Any(k => line.Contains(k, StringComparison.OrdinalIgnoreCase));
-                if (inSection) result.AppendLine(line);
-            }
-            else if (inSection)
-            {
-                result.AppendLine(line);
-            }
+            if (chunk.Length > budget) break;
+            builder.Append(chunk);
+            budget -= chunk.Length;
+            included++;
         }
-        return result.Length > 0 ? result.ToString().Trim() : null;
+
+        if (included == 0 && files.Count > 0)
+        {
+            // 单文件即超限：保留其截断头部，保证评审仍有实质内容
+            builder.Append(files[0].Chunk.AsSpan(0, Math.Min(files[0].Chunk.Length, MaxDiffPromptChars)));
+            included = 1;
+        }
+
+        builder.AppendLine();
+        builder.AppendLine(CultureInfo.InvariantCulture,
+            $"[diff truncated: showing {included} of {files.Count} changed files]");
+        var omitted = files.Skip(included).Select(f => f.FileName).ToList();
+        foreach (var name in omitted.Take(20))
+            builder.AppendLine(CultureInfo.InvariantCulture, $"  - {name}");
+        if (omitted.Count > 20)
+            builder.AppendLine(CultureInfo.InvariantCulture, $"  - … ({omitted.Count - 20} more omitted)");
+        builder.AppendLine("[Narrow the scope: /review --staged | --base <ref> | <file-path>]");
+        return builder.ToString();
+    }
+
+    /// <summary>以 "diff --git " 行为界把 diff 切成 (文件名, 块) 序列。</summary>
+    internal static IReadOnlyList<(string FileName, string Chunk)> SplitDiffByFile(string diff)
+    {
+        var chunks = new List<(string FileName, string Chunk)>();
+        var start = diff.IndexOf("diff --git ", StringComparison.Ordinal);
+        while (start >= 0)
+        {
+            var next = diff.IndexOf("diff --git ", start + 1, StringComparison.Ordinal);
+            var chunk = next < 0 ? diff[start..] : diff[start..next];
+            chunks.Add((ExtractDiffFileName(chunk), chunk));
+            start = next;
+        }
+        return chunks;
+    }
+
+    /// <summary>从 "diff --git a/X b/Y" 头行取 Y（兼容含空格路径）。</summary>
+    private static string ExtractDiffFileName(string chunk)
+    {
+        const string marker = " b/";
+        var firstLineEnd = chunk.IndexOf('\n');
+        var firstLine = firstLineEnd < 0 ? chunk : chunk[..firstLineEnd];
+        var idx = firstLine.IndexOf(marker, StringComparison.Ordinal);
+        return idx < 0 ? firstLine : firstLine[(idx + marker.Length)..].Trim();
     }
 }
 

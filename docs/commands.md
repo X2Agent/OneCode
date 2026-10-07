@@ -1048,7 +1048,8 @@ AI 代码审查，支持严重级别、聚焦领域与结构化报告。
 
 **默认（无 `--focus`）三视角并行审查**：security / performance / style 三个只读子代理经共享 MAF DAG
 （与 `ParallelAgents` 同一底座）并行执行，聚合任务等三视角完成后汇总去重为一份报告（Functional Issues /
-Design Suggestions，保留文件+行号证据）。任一视角失败时降级输出各视角原始分段。
+Design Suggestions，保留文件+行号证据）。报告尾部附各任务执行摘要（状态 / 耗时 / 轮数 / token）。
+聚合任务失败或未产出终态（整体超时）时降级输出各视角原始分段，不丢报告。
 全部任务只读——工具面收敛到 ReadOnlyAgentTools（无 Bash/Edit/Write）。
 
 **`--focus` 领域说明**（单视角流式审查，走主 agent 查询管线）：
@@ -1066,9 +1067,10 @@ Design Suggestions，保留文件+行号证据）。任一视角失败时降级�
 | 机制 | 行为 |
 |---|---|
 | 增量 review 缓存 | 对比最近 5 个 commit，已 review 过的在上下文中标注；缓存仅在 prompt 流成功完成后落盘（取消 / 失败不记录） |
-| LSP 诊断 | 变更文件的 Error / Warning 级诊断注入 prompt（上限 200 条，每文件 20 条） |
-| 项目规则 | 提取仓库根（或 `.github/`）`AGENTS.md` 中 review / 代码质量 / 规范相关章节 |
-| `--blame` 上限 | 最多 5 个文件、每文件 50 行 blame 条目，避免 prompt 膨胀 |
+| LSP 诊断 | 变更文件的 Error / Warning 级诊断注入 prompt（按规范化绝对路径精确匹配，上限 200 条，每文件 20 条） |
+| 项目规则 | 沿变更文件的祖先目录分层收集 `AGENTS.md`（仓库根 + 最近的子目录规范如 `src/AGENTS.md`，最多 3 份、每份截断 2KB） |
+| `--blame` 上限 | 最多 5 个文件、每文件 50 行 blame 条目，文件并发获取 |
+| diff 体量上限 | diff 超过 50k 字符时按整文件截断，附省略文件清单与缩小范围提示 |
 
 > ProgressMessage：`reviewing code`。
 > 所有 prompt 均可通过 `.onecode/prompts/system/` 覆盖。

@@ -181,7 +181,8 @@ public sealed class HarnessInstructionsWiringTests
                 new CompactionStrategyFactory(
                     client,
                     modelManager,
-                    new CompactPromptBuilder(promptManager))),
+                    new CompactPromptBuilder(promptManager)),
+                new SessionIdHolder()),
             new PromptComposer(promptManager));
 
         var result = await runner.RunAsync(
@@ -232,7 +233,8 @@ public sealed class HarnessInstructionsWiringTests
                 new CompactionStrategyFactory(
                     client,
                     modelManager,
-                    new CompactPromptBuilder(promptManager))),
+                    new CompactPromptBuilder(promptManager)),
+                new SessionIdHolder()),
             new PromptComposer(promptManager));
 
         var result = await runner.RunAsync(

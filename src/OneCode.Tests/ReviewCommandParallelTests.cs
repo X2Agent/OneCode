@@ -119,8 +119,14 @@ public sealed class ReviewCommandParallelTests
 
         var result = await sut.ExecuteAsync([], ct);
 
-        result.Should().BeOfType<CommandResult.TextResult>()
-            .Which.Value.Should().Be("AGGREGATED-REPORT");
+        var report = result.Should().BeOfType<CommandResult.TextResult>().Which.Value;
+        report.Should().StartWith("AGGREGATED-REPORT");
+
+        // 报告尾部附各任务执行摘要（状态 / 耗时 / 轮数 / token）
+        report.Should().Contain("- review-security: ok");
+        report.Should().Contain("- review-performance: ok");
+        report.Should().Contain("- review-style: ok");
+        report.Should().Contain("- review-aggregate: ok");
 
         // 三个视角各自独立执行（prompt 隔离）
         perspectivePrompts.Should().HaveCount(3);
@@ -159,5 +165,121 @@ public sealed class ReviewCommandParallelTests
         result.Should().BeOfType<CommandResult.ErrorResult>()
             .Which.Message.Should().Contain("system/review-aggregate");
         await runner.DidNotReceive().RunAsync(Arg.Any<AgentRunRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AggregateFails_DegradesToRawSectionsWithoutLosingReport()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var gitHelper = Substitute.For<IGitHelper>();
+        gitHelper.RunAsync(Arg.Any<string[]>(), ct)
+            .Returns(new GitCommandResult(true, "+ Added line", ""));
+        gitHelper.ReadAsync(Arg.Any<string[]>(), ct)
+            .Returns("main", "log", "hash1");
+
+        var pm = new PromptManager();
+        foreach (var (_, name) in ReviewCommand.ParallelPerspectives)
+            pm.RegisterTemplate(new PromptTemplate(name, $"PROMPT:{name}"));
+        pm.RegisterTemplate(new PromptTemplate(ReviewCommand.AggregatePromptName, "AGGREGATE"));
+
+        var runner = Substitute.For<IAgentRunner>();
+        runner.RunAsync(Arg.Any<AgentRunRequest>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var request = callInfo.Arg<AgentRunRequest>();
+                if (request.Description == "aggregate and dedupe review findings")
+                    throw new InvalidOperationException("model overloaded");
+                return Task.FromResult(new AgentRunResult(
+                    request.Agent, SessionId.NewId(), $"[{request.Description}] finding", 1, false));
+            });
+
+        var sut = new ReviewCommand(
+            gitHelper, pm, new LspDiagnosticRegistry(),
+            new ReviewCacheService(NullLogger<ReviewCacheService>.Instance),
+            new AgentTaskWorkflowCompiler(runner, NullLogger<AgentTaskWorkflowCompiler>.Instance),
+            new AgentTaskWorkflowHost(NullLogger<AgentTaskWorkflowHost>.Instance),
+            cacheSafeParams: null);
+
+        var result = await sut.ExecuteAsync([], ct);
+
+        // 聚合失败不丢报告：降级输出各视角原始分段 + 失败原因，而不是报错或静默
+        var report = result.Should().BeOfType<CommandResult.TextResult>().Which.Value;
+        report.Should().Contain("[security perspective review] finding");
+        report.Should().Contain("[style perspective review] finding");
+        report.Should().Contain("(Aggregation unavailable — aggregation failed: model overloaded");
+    }
+
+    [Fact]
+    public void FormatAggregateOutput_AggregateOutcomeMissing_DegradesWithTimeoutHint()
+    {
+        // 整体超时被兜底为 Failed 时聚合 outcome 可能缺失——不得抛
+        // "Sequence contains no matching element"，必须降级到原始分段。
+        var perspectives = ReviewCommand.ParallelPerspectives.Select(p => new AgentTaskOutcome(
+            $"review-{p.Key}", $"{p.Key} perspective review", AgentTaskOutcomeStatus.Succeeded,
+            $"[{p.Key}] raw findings", null, 2, false, 1_000)).ToList();
+        var result = new AgentWorkflowResult(perspectives, "RAW SECTIONS", 4_000, 6);
+
+        var (output, reviewCompleted) = ReviewCommand.FormatAggregateOutput(result);
+
+        reviewCompleted.Should().BeFalse();
+        output.Should().Contain("RAW SECTIONS");
+        output.Should().Contain("(Aggregation unavailable — aggregation did not produce a terminal outcome");
+    }
+
+    [Fact]
+    public void FormatAggregateOutput_Success_CompletesReview()
+    {
+        var perspectives = ReviewCommand.ParallelPerspectives.Select(p => new AgentTaskOutcome(
+            $"review-{p.Key}", $"{p.Key} perspective review", AgentTaskOutcomeStatus.Succeeded,
+            "raw", null, 1, false, 500)).ToList();
+        perspectives.Add(new AgentTaskOutcome(
+            ReviewCommand.AggregateTaskId, "aggregate", AgentTaskOutcomeStatus.Succeeded,
+            "FINAL REPORT", null, 1, false, 500, InputTokens: 2_500, OutputTokens: 300));
+        var result = new AgentWorkflowResult(perspectives, "FINAL REPORT", 2_000, 4);
+
+        var (output, reviewCompleted) = ReviewCommand.FormatAggregateOutput(result);
+
+        reviewCompleted.Should().BeTrue();
+        output.Should().StartWith("FINAL REPORT");
+        output.Should().Contain("- review-aggregate: ok");
+        output.Should().Contain("2.5k in / 300 out");
+    }
+
+    [Fact]
+    public void CapDiffForPrompt_UnderLimit_PassesThrough()
+    {
+        var diff = "+ Added line";
+        ReviewCommand.CapDiffForPrompt(diff).Should().BeSameAs(diff);
+    }
+
+    [Fact]
+    public void CapDiffForPrompt_OverLimit_KeepsWholeFilesAndListsOmitted()
+    {
+        var chunk = string.Join('\n', Enumerable.Repeat("+ line", 700)) + "\n";
+        var diff = string.Join("", Enumerable.Range(1, 40).Select(i =>
+            $"diff --git a/file{i}.cs b/file{i}.cs\nindex 1..2\n--- a/file{i}.cs\n+++ b/file{i}.cs\n{chunk}"));
+        diff.Length.Should().BeGreaterThan(ReviewCommand.MaxDiffPromptChars);
+
+        var capped = ReviewCommand.CapDiffForPrompt(diff);
+
+        capped.Length.Should().BeLessThan(diff.Length);
+        capped.Should().Contain("+++ b/file1.cs");   // 预算内整文件保留
+        capped.Should().Contain("- file11.cs");      // 省略清单（file11 起装不下）
+        capped.Should().Contain("[diff truncated: showing ");
+        capped.Should().Contain("[Narrow the scope:");
+    }
+
+    [Fact]
+    public void CapDiffForPrompt_SingleFileOverLimit_KeepsTruncatedHead()
+    {
+        var diff = "diff --git a/huge.cs b/huge.cs\n+++ b/huge.cs\n"
+            + string.Join('\n', Enumerable.Repeat("+ line", ReviewCommand.MaxDiffPromptChars));
+
+        var capped = ReviewCommand.CapDiffForPrompt(diff);
+
+        capped.Should().StartWith("diff --git a/huge.cs b/huge.cs");
+        capped.Length.Should().BeLessThan(diff.Length);
+        capped.Should().Contain("[diff truncated: showing 1 of 1 changed files]");
+        capped.Should().Contain("[Narrow the scope:");
     }
 }

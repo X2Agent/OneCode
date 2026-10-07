@@ -68,8 +68,38 @@ public sealed class ForkedAgentRunnerTests
                 new CompactionStrategyFactory(
                     null!,
                     Substitute.For<IModelManager>(),
-                    new OneCode.App.Services.Compact.CompactPromptBuilder(new PromptManager()))),
+                    new OneCode.App.Services.Compact.CompactPromptBuilder(new PromptManager())),
+                new SessionIdHolder()),
             promptComposer: new PromptComposer(promptManager));
+    }
+
+    [Fact]
+    public void BuildOptions_PropagatesConversationIdToPipelineOptions()
+    {
+        // fork 管道的 usage 归属：ConversationId 经 SubAgentPipelineFactory → AgentPipelineOptions
+        // 直达 UsageTrackingRunMiddleware（会话级 /status 统计的入账前提）；
+        // 上下文提供器不消费该字段（子代理转录保持 fork 本地）。
+        var configManager = TestConfigManager.Create();
+        var modeProvider = new PermissionModeProvider(configManager);
+        var factory = new SubAgentPipelineFactory(
+            modeProvider,
+            Substitute.For<IHookExecutionService>(),
+            Substitute.For<IVerificationProvider>(),
+            Substitute.For<IPermissionChecker>(),
+            Substitute.For<IAppStateAccessor>(),
+            new TokenLedger(),
+            configManager);
+
+        var sessionId = SessionId.NewId();
+        var options = factory.BuildOptions(new SubAgentPipelineRequest
+        {
+            Profile = PipelineProfile.Worker,
+            WorkingDirectory = Directory.GetCurrentDirectory(),
+            MaxToolCalls = 10,
+            ConversationId = sessionId,
+        });
+
+        options.ConversationId.Should().Be(sessionId);
     }
 
     [Fact]
