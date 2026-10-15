@@ -1,4 +1,3 @@
-using OneCode.App.Tools;
 using OneCode.Core.Build;
 using OneCode.Core.Tasks;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
@@ -33,7 +32,6 @@ public sealed partial class BuildRunCoordinator
     // （快照为唯一定义源，BuildRun.Plan 为派生缓存）。
     internal static bool PlansMatch(BuildPlan persisted, BuildPlan prescribed)
         => string.Equals(persisted.Summary, prescribed.Summary, StringComparison.Ordinal)
-            && persisted.RequireExplicitTaskCompletion == prescribed.RequireExplicitTaskCompletion
             && persisted.Tasks.Select(TaskIdentity)
                 .SequenceEqual(prescribed.Tasks.Select(TaskIdentity));
 
@@ -79,30 +77,120 @@ public sealed partial class BuildRunCoordinator
             now);
     }
 
-    private static void ValidateChangedFileAttribution(BuildRun run)
+    private BuildRun ValidateChangedFileAttribution(BuildRun run)
     {
         var tasks = run.Plan?.Tasks
             ?? throw new InvalidOperationException("BuildRun has no plan for file attribution.");
-        if (tasks.Count <= 1)
-            return;
 
-        foreach (var changedFile in run.ChangedFiles)
+        // 剔除磁盘上已不存在的改动文件：临时文件（验证脚本等）在 run 内被 shell 清理是
+        // 常规工作流，事务快照不感知删除。残留 key 会让归属判定把已清理的临时文件当成
+        // 无归属改动（历史事故：_verify.ps1 删除后仍留在 ChangedFiles，整 run 被判失败，
+        // dispose 回滚又连带删掉了正式产物 HTML）。
+        var existingFiles = run.ChangedFiles.Where(ChangedFileExists).ToArray();
+        if (existingFiles.Length != run.ChangedFiles.Count)
         {
-            var matches = tasks.Count(task => task.ExpectedFiles.Any(expected =>
-                PathsMatch(expected, changedFile)));
-            if (matches != 1)
-            {
-                throw new InvalidOperationException(
-                    matches == 0
-                        ? $"Changed file '{changedFile}' is not attributed to any BuildPlan task."
-                        : $"Changed file '{changedFile}' is ambiguously attributed to {matches} BuildPlan tasks.");
-            }
+            var removed = run.ChangedFiles.Except(existingFiles, StringComparer.OrdinalIgnoreCase).ToArray();
+            logger.LogWarning(
+                "BuildRun {RunId}: dropped {Count} deleted changed files from attribution: {Files}",
+                run.Id, removed.Length, string.Join(", ", removed));
+            run = run with { ChangedFiles = existingFiles };
         }
+
+        if (tasks.Count <= 1)
+            return run;
+
+        // 无归属文件降级为警告证据，不再判失败：可能是模型顺手产生的辅助文件，构建成败
+        // 由任务完成与验证证据决定；警告进最终验证证据（收尾保存时落盘），可审计可追踪。
+        var unattributed = existingFiles
+            .Where(changedFile => tasks.All(task => !task.ExpectedFiles.Any(expected =>
+                PathsMatch(expected, changedFile))))
+            .ToArray();
+        if (unattributed.Length > 0)
+        {
+            logger.LogWarning(
+                "BuildRun {RunId}: {Count} changed files are not attributed to any BuildPlan task: {Files}",
+                run.Id, unattributed.Length, string.Join(", ", unattributed));
+            var warnings = unattributed
+                .Select(file => $"Unattributed changed file: {file}")
+                .ToArray();
+            var lastValidation = run.Validations[^1];
+            run = run with
+            {
+                Validations =
+                [
+                    // IReadOnlyList 不支持 Range 切片，用 SkipLast(1) 取除末项外的全部验证记录
+                    .. run.Validations.SkipLast(1),
+                    lastValidation with { Evidence = [.. lastValidation.Evidence, .. warnings] },
+                ],
+            };
+        }
+
+        return run;
+    }
+
+    /// <summary>改动文件是否仍在磁盘上。相对路径按当前工作目录解析（与写入工具同一基准）。</summary>
+    private static bool ChangedFileExists(string file) => File.Exists(file);
+
+    /// <summary>
+    /// 交付物是否已在磁盘落地。相对路径锚定 run 工作目录解析（与写入工具同一基准），
+    /// 不依赖进程 CWD——受控 attempt 的宿主进程工作目录与 run 工作目录不必然一致。
+    /// </summary>
+    private static bool ExpectedFileExists(BuildRun run, string expected)
+        => run.WorkingDirectory is { } workingDirectory && !Path.IsPathRooted(expected)
+            ? File.Exists(Path.Combine(workingDirectory, expected))
+            : File.Exists(expected);
+
+    /// <summary>
+    /// 校验计划声明的交付物落盘状态：
+    /// - 当计划声明了 <c>ExpectedFiles</c>，但**全部**预期交付物均未在磁盘落地且整个运行期间没有任何文件改动
+    ///   （<c>ChangedFiles.Count == 0</c>）时，判定为「零交付物」（例如模型仅输出反问或口头总结即停机），
+    ///   抛出 <see cref="InvalidOperationException"/> 由外层转 <see cref="BuildRunState.Blocked"/> 阻断假阳性完成；
+    /// - 当已有文件改动或部分交付物已落盘（模型可能以不同文件名落盘）时，缺失项仅记为可审计警告证据。
+    /// </summary>
+    private BuildRun RecordMissingDeliverableWarnings(BuildRun run)
+    {
+        var expectedFiles = run.Plan!.Tasks
+            .SelectMany(task => task.ExpectedFiles)
+            .Where(expected => !string.IsNullOrWhiteSpace(expected))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (expectedFiles.Length == 0)
+            return run;
+
+        var missingFiles = expectedFiles
+            .Where(expected => !ExpectedFileExists(run, expected))
+            .ToArray();
+        if (missingFiles.Length == 0)
+            return run;
+
+        if (missingFiles.Length == expectedFiles.Length && run.ChangedFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Planned deliverables were not produced and no files were modified: {string.Join(", ", missingFiles)}");
+        }
+
+        logger.LogWarning(
+            "BuildRun {RunId}: planned deliverables not found on disk: {Files}",
+            run.Id, string.Join(", ", missingFiles));
+        var lastValidation = run.Validations[^1];
+        return run with
+        {
+            Validations =
+            [
+                .. run.Validations.SkipLast(1),
+                lastValidation with
+                {
+                    Evidence = [.. lastValidation.Evidence, .. missingFiles.Select(file => $"Planned deliverable not found: {file}")],
+                },
+            ],
+        };
     }
 
     private BuildRun MarkExecutionEvidencePassed(BuildRun run)
     {
         var plan = run.Plan ?? throw new InvalidOperationException("BuildRun has no plan to complete.");
+        run = RecordMissingDeliverableWarnings(run);
+
         var validationEvidence = run.Validations[^1].Evidence.Select((evidence, index) =>
             new BuildTaskEvidence(
                 BuildEvidenceKind.Validation,
@@ -113,13 +201,10 @@ public sealed partial class BuildRunCoordinator
         var completedTasks = plan.Tasks.Select(planTask =>
         {
             var taskItem = taskLinker.GetLinkedTask(run, planTask);
-            if (plan.RequireExplicitTaskCompletion && taskItem.Status != TaskStatus.Completed)
+            if (taskItem.Status != TaskStatus.Completed)
             {
-                throw new InvalidOperationException(
-                    $"BuildPlan task '{planTask.Id}' has not been explicitly completed by its execution protocol.");
-            }
-            if (!plan.RequireExplicitTaskCompletion && taskItem.Status != TaskStatus.Completed)
-            {
+                // 补账：守卫通过后，剩余未上报任务要么交付物已落地（显式协议）、要么协议
+                // 未要求显式上报——统一由代码推进持久任务完成，不依赖模型记账。
                 taskLinker.CompleteLinkedTask(run, planTask);
                 taskItem = taskLinker.GetLinkedTask(run, planTask);
             }
@@ -177,12 +262,13 @@ public sealed partial class BuildRunCoordinator
                         ?? taskEvidence.FirstOrDefault(evidence =>
                             evidence.Kind == BuildEvidenceKind.FileChange)
                         ?? taskEvidence.FirstOrDefault(evidence =>
-                            evidence.Kind == BuildEvidenceKind.ToolCall);
-                    if (mapped is null)
-                    {
-                        throw new InvalidOperationException(
-                            $"Acceptance criterion '{item.Id}' has no task-specific evidence for BuildPlan task '{taskId}'.");
-                    }
+                            evidence.Kind == BuildEvidenceKind.ToolCall)
+                        // 纯调研/无落盘变更的任务没有专属证据：退到最终验证证据，
+                        // 再退到补账产生的任务完成证据（恒存在）。验收不得因缺少口头记账而 Blocked。
+                        ?? taskEvidence.FirstOrDefault(evidence =>
+                            evidence.Kind == BuildEvidenceKind.Validation)
+                        ?? taskEvidence.First(evidence =>
+                            evidence.Kind == BuildEvidenceKind.TaskCompletion);
 
                     return item with
                     {
@@ -229,42 +315,8 @@ public sealed partial class BuildRunCoordinator
     private static bool ToolCallBelongsToTask(
         OneCode.Core.Tools.CompletedToolCallRecord call,
         BuildPlanTask task)
-    {
-        if (string.Equals(call.ToolName, PlanToolNames.UpdateStep, StringComparison.OrdinalIgnoreCase)
-            && TryReadStringArgument(call.ArgumentsJson, "stepId", out var stepId))
-        {
-            return string.Equals(stepId, task.Id, StringComparison.Ordinal);
-        }
-
-        return task.ExpectedFiles.Any(expected =>
+        => task.ExpectedFiles.Any(expected =>
             call.ArgumentsJson.Contains(expected, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool TryReadStringArgument(
-        string argumentsJson,
-        string propertyName,
-        out string value)
-    {
-        value = string.Empty;
-        try
-        {
-            using var document = JsonDocument.Parse(argumentsJson);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(propertyName, out var property)
-                && property.ValueKind == JsonValueKind.String
-                && property.GetString() is { } parsed)
-            {
-                value = parsed;
-                return true;
-            }
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-
-        return false;
-    }
 
     private static bool PathsMatch(string expected, string changed)
         => string.Equals(

@@ -31,6 +31,35 @@ public sealed class DuckDuckGoSearchProviderTests
         hits[0].Snippet.Should().Be("A snippet about the page.");
     }
 
+    /// <summary>
+    /// 真实 DDG HTML 中 <c>a.result__a</c> 嵌套在 <c>h2.result__title</c> 内，
+    /// 而 <c>a.result__snippet</c> 位于外层 <c>.result__body</c> 下（非 <c>a.result__a</c> 的直接兄弟节点）。
+    /// </summary>
+    [Fact]
+    public void ParseResults_NestedResultTitleDomStructure_ExtractsSnippetFromResultContainer()
+    {
+        const string html = """
+            <html><body>
+            <div class="result results_links results_links_deep web-result">
+              <div class="links_main links_deep result__body">
+                <h2 class="result__title">
+                  <a rel="nofollow" class="result__a" href="https://example.com/news-1">October 2026 Tech News</a>
+                </h2>
+                <div class="result__extras"><span class="result__timestamp">2026-10-14</span></div>
+                <a class="result__snippet" href="https://example.com/news-1">Breaking news from mid-October 2026.</a>
+              </div>
+            </div>
+            </body></html>
+            """;
+
+        var hits = DuckDuckGoSearchProvider.ParseResults(html, maxResults: 8);
+
+        hits.Should().ContainSingle();
+        hits[0].Title.Should().Be("October 2026 Tech News");
+        hits[0].Url.Should().Be("https://example.com/news-1");
+        hits[0].Snippet.Should().Be("Breaking news from mid-October 2026.");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("<html><body>No results here</body></html>")]
@@ -79,6 +108,8 @@ public sealed class DuckDuckGoSearchProviderTests
 
     [Theory]
     [InlineData("https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage", "https://example.com/page")]
+    [InlineData("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fprotocol-relative", "https://example.com/protocol-relative")]
+    [InlineData("/l/?uddg=https%3A%2F%2Fexample.com%2Froot-relative", "https://example.com/root-relative")]
     [InlineData("https://github.com/repo", "https://github.com/repo")]
     [InlineData("https://example.com/page", "https://example.com/page")]
     [InlineData("https://duckduckgo.com/?q=test", "https://duckduckgo.com/?q=test")]

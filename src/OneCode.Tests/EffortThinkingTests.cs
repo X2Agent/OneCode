@@ -43,18 +43,4 @@ public sealed class EffortThinkingTests
 
         opus.Should().BeGreaterThan(sonnet);
     }
-
-    [Theory]
-    [InlineData(ThinkingMode.Disabled, EffortLevel.Low, false)]
-    [InlineData(ThinkingMode.Disabled, EffortLevel.Max, false)]
-    [InlineData(ThinkingMode.Enabled, EffortLevel.Low, true)]
-    [InlineData(ThinkingMode.Enabled, EffortLevel.Max, true)]
-    [InlineData(ThinkingMode.Adaptive, EffortLevel.Low, false)]
-    [InlineData(ThinkingMode.Adaptive, EffortLevel.Medium, true)]
-    [InlineData(ThinkingMode.Adaptive, EffortLevel.High, true)]
-    [InlineData(ThinkingMode.Adaptive, EffortLevel.Max, true)]
-    public void ShouldEnableThinking_ReturnsExpected(ThinkingMode mode, EffortLevel effort, bool expected)
-    {
-        EffortThinking.ShouldEnableThinking(mode, effort).Should().Be(expected);
-    }
 }

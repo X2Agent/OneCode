@@ -77,12 +77,16 @@ public sealed class TranscriptHistoryOrphanToolTests
         return reader;
     }
 
-    /// <summary>模拟 TodoProjectionService 的用户消息注入。</summary>
-    private sealed class TodoInjectingProvider : AIContextProvider
+    /// <summary>模拟模式指令 / 计划交接上下文的 AIContextProvider 注入。</summary>
+    private sealed class ModeContextInjectingProvider : AIContextProvider
     {
+        private const string Marker = "[MODE_CONTEXT_MARKER]";
+
+        public static string InjectedText => Marker;
+
         protected override ValueTask<AIContext> ProvideAIContextAsync(
             AIContextProvider.InvokingContext context, CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AIContext { Messages = [new ChatMessage(ChatRole.User, "### Current todo list\n- none yet")] });
+            => ValueTask.FromResult(new AIContext { Messages = [new ChatMessage(ChatRole.User, Marker)] });
     }
 
     [Fact]
@@ -94,7 +98,7 @@ public sealed class TranscriptHistoryOrphanToolTests
         var options = new HarnessAgentOptions
         {
             ChatHistoryProvider = provider,
-            AIContextProviders = [new TodoInjectingProvider()],
+            AIContextProviders = [new ModeContextInjectingProvider()],
             ChatOptions = new ChatOptions
             {
                 Instructions = "PLAN_PROMPT",
@@ -225,6 +229,91 @@ public sealed class TranscriptHistoryOrphanToolTests
         userTexts.Count(text => text == FirstPrompt).Should().Be(1,
             $"上一轮用户消息只出现一次。\n实际序列：\n{dump}");
         firstOfSecondTurn[^1].Role.Should().Be(ChatRole.User, "本轮输入位于请求末尾");
+    }
+
+    /// <summary>
+    /// 三轮以上连续工具调用 + CompactionStrategy + AIContextProvider 守护：
+    /// 第 3 次模型调用仍必须完整保留首轮 User 原始提问、第 1 轮与第 2 轮的全部 assistant(tool_calls)/tool 消息对，
+    /// 且每轮动态注入的 AIContextProvider 消息不得被回写入账累积。
+    /// （防回归：若把 storeInputRequestMessageFilter 误传给 provideOutputMessageFilter 或返回未克隆的 state.Messages 引用，
+    /// 基类 InvokingCoreAsync 原地盖上 ChatHistory 标记后，第 3 次调用起会把首轮 User 与早期轮次历史全部滤除。）
+    /// </summary>
+    [Fact]
+    public async Task ThirdModelCall_WithCompactionAndContextProviders_PreservesUserPromptAndFullToolHistoryWithoutContextAccumulation()
+    {
+        var calls = 0;
+        List<IReadOnlyList<ChatMessage>> requests = [];
+        var client = Substitute.For<IChatClient>();
+        client.GetResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var snapshot = callInfo.ArgAt<IEnumerable<ChatMessage>>(0).Select(m => m.Clone()).ToList();
+                requests.Add(snapshot);
+                calls++;
+                AIContent[] content = calls switch
+                {
+                    1 => [new FunctionCallContent("call-1", "WebSearch", new Dictionary<string, object?> { ["query"] = "q1" })],
+                    2 => [new FunctionCallContent("call-2", "WebSearch", new Dictionary<string, object?> { ["query"] = "q2" })],
+                    _ => [new TextContent("all done")],
+                };
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, content.ToList())));
+            });
+
+        var provider = new TranscriptChatHistoryProvider(CreateTranscriptReader(), SessionId.NewId());
+        var options = new HarnessAgentOptions
+        {
+            ChatHistoryProvider = provider,
+            AIContextProviders = [new ModeContextInjectingProvider()],
+            CompactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(client, 128_000, 4_096),
+            ChatOptions = new ChatOptions
+            {
+                Instructions = "PLAN_PROMPT",
+                Tools = [AIFunctionFactory.Create((string query) => $"{{\"query\":\"{query}\"}}", name: "WebSearch")],
+                ToolMode = ChatToolMode.Auto,
+            },
+        };
+        OneCodeHarnessDefaults.ApplyProductOptOuts(options);
+
+        var agent = new HarnessAgent(client, options);
+        var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+        await agent.RunAsync(FirstPrompt, session, cancellationToken: TestContext.Current.CancellationToken);
+
+        requests.Should().HaveCount(3, "两次工具调用后应进入第三次模型请求");
+        requests[0].Count(m => m.Role == ChatRole.User && m.Text == ModeContextInjectingProvider.InjectedText)
+            .Should().Be(1, "首轮请求应包含当次 AIContextProvider 注入的上下文消息");
+
+        var third = requests[2];
+        var dump = DumpRequests(third);
+
+        third.Count(m => m.Role == ChatRole.User && m.Text == FirstPrompt)
+            .Should().Be(1, $"第 3 次模型请求仍必须保留首轮用户提问且不重复。\n实际序列：\n{dump}");
+
+        var assistantCallIds = third
+            .Where(m => m.Role == ChatRole.Assistant)
+            .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+            .Select(c => c.CallId)
+            .ToList();
+        assistantCallIds.Should().Equal(["call-1", "call-2"],
+            $"第 3 次模型请求必须按序保留前两轮的全部 assistant(tool_calls)。\n实际序列：\n{dump}");
+
+        var toolResultIds = third
+            .Where(m => m.Role == ChatRole.Tool)
+            .SelectMany(m => m.Contents.OfType<FunctionResultContent>())
+            .Select(r => r.CallId)
+            .ToList();
+        toolResultIds.Should().Equal(["call-1", "call-2"],
+            $"第 3 次模型请求必须按序保留前两轮的全部 tool 结果。\n实际序列：\n{dump}");
+
+        third.Count(m => m.Role == ChatRole.User && m.Text == ModeContextInjectingProvider.InjectedText)
+            .Should().Be(1, $"同回合工具循环期间（Call 3）AIContextProvider 注入的上下文仍须保持可见且仅有一份。\n实际序列：\n{dump}");
+
+        await agent.RunAsync("第二轮问题", session, cancellationToken: TestContext.Current.CancellationToken);
+        var secondTurnFirstRequest = requests[3];
+        secondTurnFirstRequest.Count(m => m.Role == ChatRole.User && m.Text == FirstPrompt)
+            .Should().Be(1, "第二轮对话仍应完整保留首轮用户提问");
     }
 
     private static string DumpRequests(IReadOnlyList<ChatMessage> messages)

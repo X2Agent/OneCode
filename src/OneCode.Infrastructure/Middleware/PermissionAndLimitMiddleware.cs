@@ -12,6 +12,7 @@ namespace OneCode.Infrastructure.Middleware;
 /// 职责：
 /// <list type="bullet">
 ///   <item>工具调用计数 + MaxToolCalls 上限（超限时返回当前调用错误结果）</item>
+///   <item>run 封条（<see cref="AgentPipelineOptions.IsRunSealed"/>）：封口后拒绝一切工具调用</item>
 ///   <item>IsToolAllowed 白名单过滤</item>
 ///   <item>权限检查（Allow/Deny/Ask 路由）</item>
 ///   <item>审批路由：Ask → MAF 审批协议（标记工具产生审批请求，绝不静默执行；无通道或缺标记时 fail-safe 拒绝）</item>
@@ -26,7 +27,10 @@ public static class PermissionAndLimitMiddleware
     public static Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
             CancellationToken, ValueTask<object?>>
-        Create(AgentPipelineOptions options, AgentPipelineMetrics metrics, ILogger? logger = null)
+        Create(
+            AgentPipelineOptions options,
+            AgentPipelineMetrics metrics,
+            ILogger? logger = null)
     {
         // 预分配空集合，避免每次工具调用重复分配（options 字段为 null 时使用）
         var rulesBySource = options.RulesBySource ?? new Dictionary<string, PermissionRuleGroup>();
@@ -35,6 +39,11 @@ public static class PermissionAndLimitMiddleware
 
         return async (_, ctx, next, ct) =>
         {
+            // 封条先于一切：run 已封口（如计划已提交）时拒绝所有后续工具调用，
+            // 连权限询问也不再发起——模型只剩纯文本收尾这一条路。
+            if (options.IsRunSealed?.Invoke() == true)
+                return ToolResult.Error(options.RunSealedMessage);
+
             // 白名单拒绝只失败当前调用。批次中的每个 call 都必须生成对应 result；
             // 是否停止下一轮模型请求由编排层在完整批次排空后决定。
             // 白名单拒绝不计入 MaxToolCalls（计数仅针对实际尝试执行的调用）。

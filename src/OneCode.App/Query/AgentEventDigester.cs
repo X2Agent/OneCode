@@ -27,12 +27,22 @@ internal static class AgentEventDigester
             if (TryGetArgument(fcc.Arguments, "command", out var cmd)) return Truncate(cmd, 80);
             if (TryGetArgument(fcc.Arguments, "pattern", out var pat)) return Truncate(pat, 80);
             if (TryGetArgument(fcc.Arguments, "query", out var q)) return Truncate(q, 80);
+            // AskUserQuestion：向导题传 title；单题无 title 时落到通用 JSON 摘要。
             if (string.Equals(fcc.Name, "AskUserQuestion", StringComparison.OrdinalIgnoreCase)
-                && TryGetArgument(fcc.Arguments, "question", out var question))
-                return Truncate(question, 80);
-            if (string.Equals(fcc.Name, "AskUserQuestions", StringComparison.OrdinalIgnoreCase)
                 && TryGetArgument(fcc.Arguments, "title", out var title))
                 return Truncate(title, 80);
+
+            // Agent 派工：只保留 agent + description（不带 prompt）。通用 JSON 截断会把
+            // agent 字段挤出 100 字符窗口，导致折叠行退化为原始 JSON、子代理实时进度行
+            // 永远注册不上（注册键即此处的 agent 值）。
+            if (string.Equals(fcc.Name, "Agent", StringComparison.OrdinalIgnoreCase)
+                && TryGetArgument(fcc.Arguments, "agent", out var agentName))
+            {
+                TryGetArgument(fcc.Arguments, "description", out var agentDescription);
+                return Truncate(System.Text.Json.JsonSerializer.Serialize(
+                    new { agent = agentName, description = agentDescription },
+                    CompactRelaxedOptions), 100);
+            }
 
             var json = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, new System.Text.Json.JsonSerializerOptions
             {
@@ -112,7 +122,12 @@ internal static class AgentEventDigester
             if (result is Exception ex)
                 return (true, ex.Message);
             if (result is string s)
-                return (false, s);
+            {
+                var unwrapped = Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(s, out var strIsError, out var innerStr)
+                    ? innerStr
+                    : s;
+                return (strIsError, unwrapped);
+            }
             if (result is Core.Tools.ToolResult tr)
             {
                 var text = Core.Tools.ToolResultSerializer.Serialize(tr);
@@ -126,10 +141,10 @@ internal static class AgentEventDigester
             // TUI 展示与持久化要的是工具原始输出。旧实现直接对信封整体做 500 字符截断，
             // 半截 JSON 非法，NormalizeForDisplay 解析失败只能原样吐单行转义文本。
             var json = System.Text.Json.JsonSerializer.Serialize(result, CompactRelaxedOptions);
-            if (Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(json, out var inner))
-                return (false, inner);
+            if (Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(json, out var envIsError, out var inner))
+                return (envIsError, inner);
 
-            return (false, json.Length > 500 ? TruncateJson(json, 500) : json);
+            return (envIsError, json.Length > 500 ? TruncateJson(json, 500) : json);
         }
         catch (Exception ex)
         {

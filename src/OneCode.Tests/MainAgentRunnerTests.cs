@@ -11,6 +11,7 @@ using OneCode.Core.Build;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
+using OneCode.Core.Tokens;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Api;
@@ -96,6 +97,100 @@ public sealed class MainAgentRunnerTests : IDisposable
         // 回归守护：旧实现按 != Passed 判定，验证 Skipped（如生成的 HTML 报告
         // 无匹配验证 profile）会被当失败处理，静默删除已写入的文件。
         MainAgentRunner.ShouldRollBackForValidation(status).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(false, 0, 0, "length", true)]   // 图二事故形态：推理耗尽输出预算，零产出 + Length
+    [InlineData(true, 0, 0, "length", false)]   // 已重试过 —— 只重试一次
+    [InlineData(false, 0, 3, "length", false)]  // 有工具调用 = 有副作用，绝不重放
+    [InlineData(false, 2, 0, "length", false)]  // 已有正文轮次，非零输出
+    [InlineData(false, 0, 0, "stop", false)]    // 正常收尾的零输出不是上限问题
+    [InlineData(false, 0, 0, null, false)]      // 无 finishReason（异常中断）不重试
+    public void ShouldRetryZeroOutputLength_OnlySideEffectFreeLengthRuns(
+        bool alreadyRetried, int turnCount, int toolCallCount, string? finishReason, bool expected)
+    {
+        // ChatFinishReason 是字符串支持的 struct，无法作为 InlineData 常量——按规范串构造。
+        MainAgentRunner.ShouldRetryZeroOutputLength(
+                alreadyRetried, turnCount, toolCallCount,
+                finishReason is null ? null : new ChatFinishReason(finishReason))
+            .Should().Be(expected, "retry must apply exactly once to zero-output runs capped by Length, never to runs with side effects");
+    }
+
+    [Fact]
+    public async Task HandleToolApprovalAsync_MissingApprovalBroker_FailsClosedWithDenialResponse()
+    {
+        // 受控 Build（SuppressToolApproval）run 没有审批通道，但 execute_code 等框架层
+        // 恒带 AlwaysRequire 审批边界的工具仍会漏出审批请求。此前 broker 为 null 直接
+        // NRE，整个 run 失败并回滚事务内全部文件改动；现在必须 fail-closed 拒绝本次调用。
+        var request = new ToolApprovalRequestContent(
+            "ficc_chatcmpl-tool-test-1",
+            new FunctionCallContent("chatcmpl-tool-test-1", "execute_code", null));
+
+        var response = await _runner.HandleToolApprovalAsync(
+            request, broker: null, TestContext.Current.CancellationToken);
+
+        var denial = response.Should().BeOfType<ToolApprovalResponseContent>().Subject;
+        denial.Approved.Should().BeFalse("missing approval channel must deny the call, not crash the run");
+        denial.Reason.Should().Contain("no approval channel");
+    }
+
+    [Fact]
+    public void BuildChatOptions_NoReasoningBudget_EscalatesMaxOutputTokensPastReasoningDrain()
+    {
+        // 受控 Build 无推理预算时若沿用 4K 级默认上限，推理模型的隐性 reasoning 会
+        // 吃光全部输出预算、触发零输出重试空转（受控 Build 首轮空转 65 秒的事故形态）。
+        var options = new MainAgentRunOptions { ModelId = "gpt-5" };
+
+        var chatOptions = MainAgentRunner.BuildChatOptions(options);
+
+        chatOptions.MaxOutputTokens.Should().Be(65_536);
+        chatOptions.Reasoning.Should().BeNull("未开启思考时不显式下发 Reasoning");
+    }
+
+    [Fact]
+    public void BuildChatOptions_ExplicitMaxOutputTokens_WinsOverEscalation()
+    {
+        var options = new MainAgentRunOptions { ModelId = "gpt-5", MaxOutputTokens = 2_048 };
+
+        var chatOptions = MainAgentRunner.BuildChatOptions(options);
+
+        chatOptions.MaxOutputTokens.Should().Be(2_048, "显式配置的输出上限优先于自动升级");
+    }
+
+    [Fact]
+    public void BuildMainOptions_ExplicitBudgetBaseline_OverridesLedgerSnapshot()
+    {
+        // 零输出重试防逃逸：首轮 attempt 烧掉的 token 是真实消耗，重试必须沿用首轮基线；
+        // 若就地重快照 ledger，这部分消耗将逃出 BUILD 预算窗口。
+        var ledger = new TokenLedger();
+        var assembly = new AgentPipelineAssembly(
+            workingDirectoryAccessor: Substitute.For<IWorkingDirectoryAccessor>(),
+            hookExecutionService: Substitute.For<IHookExecutionService>(),
+            verificationProvider: Substitute.For<IVerificationProvider>(),
+            modeProvider: _modeProvider,
+            permissionChecker: Substitute.For<IPermissionChecker>(),
+            tokenLedger: ledger);
+        var options = new MainAgentRunOptions { ModelId = "m", WorkingMode = WorkingMode.Build };
+        using var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
+
+        // 首轮构建：null 基线 = 就地快照 ledger（billable = 1000 input + 200 output）。
+        ledger.RecordUsage(new UsageRecord("m", InputTokens: 1_000, OutputTokens: 200, CacheReadTokens: 0, CacheWriteTokens: 0));
+        var first = assembly.BuildMainOptions(options, transaction, @"C:\repo", "m", providerId: null);
+        first.BudgetBaselineTokens.Should().Be(1_200, "null 基线就地快照当前 ledger");
+
+        // 首轮零输出 attempt 的消耗入账（生产路径经 UsageTracking 中间件）。
+        ledger.RecordUsage(new UsageRecord("m", InputTokens: 500, OutputTokens: 50, CacheReadTokens: 0, CacheWriteTokens: 0));
+        ledger.GetTotalTokens().Should().Be(1_750);
+
+        // 重试：显式传首轮基线，不被新快照吞掉。
+        var retried = assembly.BuildMainOptions(
+            options, transaction, @"C:\repo", "m", providerId: null, budgetBaselineTokens: first.BudgetBaselineTokens);
+        retried.BudgetBaselineTokens.Should().Be(1_200,
+            "重试必须沿用首轮基线，让首轮零输出 attempt 的消耗留在预算窗口内");
+
+        // 反面：null 基线会重快照到新值——正是重试路径必须避免的行为。
+        var resnapshotted = assembly.BuildMainOptions(options, transaction, @"C:\repo", "m", providerId: null);
+        resnapshotted.BudgetBaselineTokens.Should().Be(1_750);
     }
 
     // Helper: build a FunctionCallContent with a given tool name and (optional) args.

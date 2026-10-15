@@ -71,13 +71,15 @@ public sealed class FormattedLine
 /// <paramref name="Group"/> 非空时该行是"同类工具组行"（同轮相邻同类调用的合并形态）：
 /// 折叠行显示 <c>名称 ×N</c>，展开由 <see cref="MessageRenderer.BuildToolDetailLines"/>
 /// 按 Group 逐条列出搜索词/结果摘要/时长。
+/// <paramref name="LiveProgress"/> 非空时该行是运行中的子代理 fork 行，展开附带实时统计。
 /// </remarks>
 public sealed record ToolLineTag(
     string Name,
     string? Args,
     string? Result,
     bool IsExpanded,
-    IReadOnlyList<ToolGroupEntry>? Group = null);
+    IReadOnlyList<ToolGroupEntry>? Group = null,
+    TuiSubagentProgress? LiveProgress = null);
 
 /// <summary>工具组行内单条调用的展示数据（组展开时逐条列出）。</summary>
 public sealed record ToolGroupEntry(string? Args, string? Result, string Duration, bool IsError);

@@ -1,6 +1,4 @@
-using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Context;
-
 using OneCode.App.Services.Skills;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Streaming;
@@ -17,5 +15,4 @@ public sealed record TuiOverlayDependencies(
     IPlanAgentRunDispatcher PlanRunDispatcher,
     PlanExecutionRecoveryService PlanExecutionRecovery,
     SkillFilesWatcher SkillFilesWatcher,
-    BuildModeAttachmentProvider BuildModeAttachmentProvider,
     PlanExecutionContextProvider PlanExecutionContextProvider);

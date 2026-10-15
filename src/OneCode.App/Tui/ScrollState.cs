@@ -98,6 +98,21 @@ internal sealed class ScrollState(
         _onNeedsDraw?.Invoke();
     }
 
+    /// <summary>
+    /// 滚动条拖动：把偏移直接钳制到位。拖到中间脱离贴底（保留阅读位置），
+    /// 拖到底恢复跟随——与 PageDown 的语义一致。
+    /// </summary>
+    public void ScrollToOffset(int offset)
+    {
+        var visibleLines = Math.Max(1, _getViewportHeight());
+        var maxOffset = Math.Max(0, _getLineCount() - visibleLines);
+        _scrollOffset = Math.Clamp(offset, 0, maxOffset);
+        _autoScroll = _scrollOffset >= maxOffset;
+        _needsScrollToBottom = false;
+        _onScrolled?.Invoke(_scrollOffset);
+        _onNeedsDraw?.Invoke();
+    }
+
     /// <summary>End 键：启用自动滚动并滚动到底部。</summary>
     public void ScrollToEnd()
     {

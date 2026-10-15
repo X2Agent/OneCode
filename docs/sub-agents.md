@@ -13,7 +13,7 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 
 | 工具 | 作用 | 关键参数 | 注册形态 |
 |---|---|---|---|
-| `Agent` | 起一个子代理跑委派任务，返回其最终输出 | `prompt`（自包含）、`agent`（`general-purpose`/`Explore`/`Plan` 或自定义名，见 §5）、`description`、`runInBackground` | `ToolRisk.Safe`、`Contextual`（keywords: agent/sub-agent/delegate）、`PlanAllowed` |
+| `Agent` | 起一个子代理跑委派任务，返回其最终输出 | `prompt`（自包含）、`agent`（`general-purpose`/`Explore`/`Plan` 或自定义名，见 §5）、`description`、`runInBackground`、`maxTurns`（可选，只能收窄配置上限，见 §6） | `ToolRisk.Safe`、`Contextual`（keywords: agent/sub-agent/delegate）、`PlanAllowed` |
 | `ParallelAgents` | 把一组任务编译成 DAG 并行/带依赖执行 | `tasks[]`（`id`/`prompt`/`agent`/`description`/`dependsOn`/`executionAccess`）、`injectUpstreamResults`（默认 true） | `ToolRisk.Safe`、`Contextual`、`PlanAllowed` |
 | `Task` | 宿主后台任务的检查/控制（**不是派工工具**） | `action`（`get`/`list`/`stop`/`output`）、`taskId`、`maxLines` | `ToolRisk.Safe`、`Contextual`、`PlanAllowed` |
 
@@ -49,8 +49,8 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 | Todo（自持清单） | ✅ | ✅ | ❌ |
 | CodeAct 沙箱 / 编辑后验证 | ✅ | ✅ | ❌ |
 
-只读白名单（Explore/Plan）：`Read`、`Grep`、`Glob`、`LS`、`WebFetch`、`WebSearch`、`ToolSearch`、
-`FindReferences`、`SymbolSearch`——全为 `ToolRisk.ReadOnly`，按 `ToolPolicyDefaults.ForRisk`
+只读白名单（Explore/Plan）：`Read`、`Grep`、`Glob`、`LS`、`Git`、`WebFetch`、`WebSearch`、`ToolSearch`、
+`Lsp`——全为 `ToolRisk.ReadOnly`，按 `ToolPolicyDefaults.ForRisk`
 永不进审批协议，这是「子代理免交互审批」自洽的根源。
 
 **能力边界传播**：`AgentTool` 把 `ToolActivationContext.CurrentCapabilities`（当前模式的能力集）
@@ -109,7 +109,8 @@ AgentTool.RunAgentAsync
 - **定义文件**：`{cwd}/.onecode/agents/*.md`（项目级）与 `~/.onecode/agents/*.md`（用户级），
   项目级覆盖同名用户级（与 skills 的用户级→项目级覆盖语义一致）。
 - **frontmatter 字段**：`name`（缺省取文件名）/ `description`（必填，注入 Agent 工具 description 保证可发现性）/
-  `allowed_tools`（可选，与父级能力取交集——只减不增）；正文 = instructions。
+  `allowed_tools`（可选，与父级能力取交集——只减不增）/ `max_turns`（可选，轮数上限，见 §6）；
+  正文 = instructions。
   `allowed_tools` 中的未知工具名在派工时显式拒绝（拼写错误可自诊断）；交集为空（全部拼错或与父级
   能力完全不相交）时 fork 拒绝启动而非静默零工具运行（`ForkedAgentRunner.RejectEmptyAllowedToolSet`）。
 - **解析严格**：未知 frontmatter 字段、缺失 description、坏 YAML 显式报错（带文件路径 + 行号），
@@ -121,12 +122,51 @@ AgentTool.RunAgentAsync
   子代理不可再派工（`ForkedAgentRunner.FilterChildTools` + `ToolCapabilitySet.SubAgentDispatchTools`）。
 
 Goal 模式的子目标执行不经 `ForkedAgentRunner`：子目标经 `GoalSubGoalExecutor` 构造 `MainAgentRunOptions`——
-`system/goal-subgoal` 提示词、按 `RequiredTools` 白名单裁剪工具（**fail-closed**：无匹配即抛错，
+`system/harness` 底座 + `ModeInstructionProvider` 注入的 `system/goal` 提示词、按 `RequiredTools` 白名单裁剪工具（**fail-closed**：无匹配即抛错，
 不回退全量）、共享事务、`MaxTurnsPerSubGoal`；进度经 `GoalContextProvider` 注入后续子目标上下文。
 
 ---
 
-## 6. 与 MAF BackgroundAgents 的能力映射（速查）
+## 6. 轮数与墙钟预算（分层可配 + 优雅收尾）
+
+简单调研跑满 50 轮是真实事故的形态。子代理预算按以下优先级解析（`ForkedAgentRunner` 是唯一解析点）：
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 | `Agent` 工具的 `maxTurns` 参数 | **只能收窄**下述各层给出的上限，不能抬高 |
+| 2 | 自定义代理 frontmatter `max_turns` | `.onecode/agents/*.md`，`AgentDefinition.MaxTurns` |
+| 3 | settings `agents.defaults.maxTurns` | `0` = 未配置（自动），可在 `/config` 修改 |
+| 4 | profile 内置默认 | Explore / Plan 15，general-purpose / 自定义 50 |
+
+- **轮数口径**：只按模型往返计数（`MaximumIterationsPerRequest` = 上限 + 1，末轮保留给收尾）；
+  同一轮里的并行工具调用不重复计数。工具调用另有安全上限（轮数的 4 倍），只拦失控循环不参与正常判定。
+- **80% 收尾提醒**：模型调用达到轮数上限的 80%（`TurnBudgetNudgeChatClient`，仅子代理管道装配）时，
+  请求末尾注入一次"开始收尾总结"提醒——失控研究循环的根因是模型对预算零可见性，软提醒先于硬上限
+  收敛多数循环；提醒只注入一次，确实不理会时由轮数上限兜底。
+- **墙钟超时**：`agents.defaults.timeoutMinutes`（默认 10 分钟，≤0 不限制），到时与轮预算同路径收尾。
+- **优雅收尾**：模型往返用掉预留的收尾迭代（或工具安全上限触发）即视为预算耗尽；若最后一次迭代没有文本，
+  再补一次禁用工具的收尾调用，让子代理总结已完成工作与剩余事项；结果信封标记 `[PARTIAL]`
+  （`maxTurnsReached=true`）。`[PARTIAL]` 只陈述事实，父代理应直接使用已有发现，不要重复派发同一任务。
+  token 消耗继续计入父会话的 `MaxBudgetTokens`。
+- **Explore 停止条件**：Explore 角色指令自带"先广后窄检索、覆盖率足够即总结、连续无新信息即收尾、
+  WebFetch 只核实关键事实"约束，预算上限是兜底而非唯一防线。
+- **Plan 与 Build 的调研边界**：所有只读探索（代码库定位与按需外部查询）在 PLAN 模式完成，并将确认的文件路径、
+  符号签名、架构决定与已核实的外部事实/引用直接写入计划正文；同会话 BUILD 执行轮直接继承规划期对话与工具结果，
+  跨上下文压缩与崩溃恢复则通过冻结的审批快照（计划正文 + 用户原话 + 澄清答案）保持上下文完整。计划步骤（`steps`）
+  只定义具体的代码/文件变更与验证动作，不把只读检索拆为 BUILD 步骤。Explore 子代理仅用于跨模块代码库探索，
+  不委托联网采集。
+
+### 子代理实时进度（TUI）
+
+`Agent` 工具运行期间，转录流上的工具行登记为实时进度行：头行 `Agent · [代理名] · 描述`
+（ToolStart 摘要通道把参数收窄为 agent + description 紧凑 JSON，不含 prompt），其下活动行原位刷新
+`运行中 · turn N · N 次工具调用 · 当前工具… · 已耗时 Xs`（`ForkedAgentRunner` 经 `SubagentProgressUpdate`
+旁路上报，受控 Build attempt 内同样重建该旁路）。展开运行中的行可见任务目标 + 同一份实时统计
+（进度快照随头行 tag 更新）；子代理完成/失败时活动行摘除，折叠行按结果重写、展开回到 Args/Result 形态。
+
+---
+
+## 7. 与 MAF BackgroundAgents 的能力映射（速查）
 
 | OneCode | BackgroundAgentsProvider | 结论 |
 |---|---|---|
@@ -143,7 +183,7 @@ Goal 模式的子目标执行不经 `ForkedAgentRunner`：子目标经 `GoalSubG
 
 ---
 
-## 7. 改这块代码时的检查单
+## 8. 改这块代码时的检查单
 
 - [ ] 新派工形态先过 `PipelineProfileBehavior`（能力矩阵单一真相源），不要在调用点散落 if-profile。
 - [ ] 子代理工具集必须经 `ToolCapabilitySet` 交集压下，不得旁路目录直塞 `ChatOptions.Tools`。

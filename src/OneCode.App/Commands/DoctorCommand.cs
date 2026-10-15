@@ -21,6 +21,7 @@ namespace OneCode.App.Commands;
 ///   • MCP server connectivity (configured vs connected, tool count per server)
 ///   • LSP server state (running vs initialised, per server)
 ///   • Git availability (needed by /commit, /review, worktree-based skills)
+///   • CodeAct sandbox runtime (WHP/KVM — execute_code silently degrades when unavailable)
 ///
 /// Deliberately NOT checked (low signal):
 ///   • Config dir existence — auto-created on first run; if missing the app wouldn't start
@@ -30,7 +31,8 @@ public sealed class DoctorCommand(
     IConfigManager configManager,
     IGitHelper gitHelper,
     IMcpConnectionManager mcpConnectionManager,
-    ILspServerManager lspServerManager) : Command
+    ILspServerManager lspServerManager,
+    OneCode.Infrastructure.Agent.IHyperlightRuntimeProbe hyperlightRuntimeProbe) : Command
 {
     public override string Name => "doctor";
     public override string Description => "Diagnose environment, config, MCP & LSP health";
@@ -95,6 +97,13 @@ public sealed class DoctorCommand(
         // 5. Git
         var gitVersion = await gitHelper.GetVersionAsync(ct).ConfigureAwait(false);
         sb.AppendLine(CultureInfo.InvariantCulture, $"  {(gitVersion is not null ? "✓" : "✗")} Git: {gitVersion ?? "(not found — needed by /commit, /review, /batch)"}");
+
+        // 6. CodeAct 沙箱运行时（execute_code 依赖；不可用时静默降级，此处暴露给用户）
+        var hyperlightOk = hyperlightRuntimeProbe.IsAvailable();
+        var sandboxLine = hyperlightOk
+            ? "  ✓ CodeAct sandbox: WHP/KVM available (execute_code enabled)"
+            : "  ✗ CodeAct sandbox: WHP/KVM unavailable — execute_code disabled (enable BIOS VT-x + 'dism /online /enable-feature /featurename:HypervisorPlatform /All')";
+        sb.AppendLine(sandboxLine);
 
         return CommandResult.Text(sb.ToString().TrimEnd());
     }

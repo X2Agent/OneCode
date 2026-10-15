@@ -1,3 +1,5 @@
+using OneCode.App.Query;
+
 namespace OneCode.App.Tui;
 
 /// <summary>
@@ -114,11 +116,29 @@ public sealed partial class ChatTranscriptView
             _stream.IsStreaming, name, toolId, agentName);
         if (!_stream.IsStreaming) return;
 
+        // 进入工具执行阶段时立即将展开的思考块折叠为单行耗时摘要，
+        // 避免长思考块在工具执行期间持续占据视口高度。
+        if (_stream.HasThinking)
+            FinalizeThinkingMarker();
+
         var lineIndex = _stream.StatusLines.Count;
         // 使用 ToolResultSummarizer 格式化目标显示
         var formattedTarget = ToolResultSummarizer.FormatTarget(name, toolInput);
-        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(name, formattedTarget, null, agentName: agentName, maxWidth: ContentWidth));
+        var isAgentTool = ToolResultSummarizer.NormalizeName(name) == "agent";
+        // 展开显示目标文案（Agent 输入已收窄为 "代理名 · 描述"）；
+        // 运行中的实时统计由 UpdateSubagentProgress 经 tag.LiveProgress 接管，
+        // 完成后的 Args/Result 详情由 AddToolDone 替换整行接管。
+        _stream.StatusLines.Add(MessageFlowRenderer.MakeToolLine(
+            name, formattedTarget, null, agentName: agentName, maxWidth: ContentWidth));
         _stream.ToolTracker.RegisterStart(toolId, lineIndex);
+        // Agent 工具（子代理 fork）登记进度行：SubagentProgress 到达时原位更新头行 + 活动行。
+        // toolInput 是 ToolStart 通道的摘要（Agent 已收窄为 agent + description 紧凑 JSON），
+        // 容错提取保证截断场景仍能取到代理名。
+        if (isAgentTool
+            && ToolResultSummarizer.ExtractAgentNameTolerant(toolInput) is { Length: > 0 } forkAgent)
+        {
+            _stream.ToolTracker.RegisterSubagentLine(forkAgent, lineIndex, formattedTarget ?? "");
+        }
         _app.Invoke(() => ActivityChanged?.Invoke(
             string.IsNullOrWhiteSpace(agentName) ? $"执行 {name}" : $"[{agentName}] 执行 {name}"));
         RebuildStreamingPreview();
@@ -129,6 +149,16 @@ public sealed partial class ChatTranscriptView
         _logger.LogDebug(
             "[AddToolDone] streaming={Streaming}, name={Name}, toolId={ToolId}, err={Error}, agent={Agent}",
             _stream.IsStreaming, name, toolId, isError, agentName);
+        // Agent 工具完成即注销进度行（注册先于 streaming 判断，非流式回放同样要清理）。
+        // 与 AddToolStart 共用容错提取，保证注册/注销的代理名取法一致。
+        if (ToolResultSummarizer.NormalizeName(name) == "agent"
+            && ToolResultSummarizer.ExtractAgentNameTolerant(toolInput) is { Length: > 0 } doneAgent)
+        {
+            // 先摘实时活动行再注销，避免残留一行孤儿进度。
+            if (_stream.ToolTracker.TryGetSubagentLine(doneAgent, out var doneState))
+                RemoveSubagentActivityLine(doneState);
+            _stream.ToolTracker.RemoveSubagentLine(doneAgent);
+        }
         if (_stream.IsStreaming)
         {
             // 按 ToolId 精确匹配
@@ -181,8 +211,8 @@ public sealed partial class ChatTranscriptView
                     name, isError, toolInput, null, result, agentName: agentName, maxWidth: ContentWidth));
             }
 
-            if (isError && !string.IsNullOrWhiteSpace(result))
-                AddNoticeLines(result, TuiPalette.Error);
+            // 错误摘要已内联在工具完成行（及 ×N 失败聚合行）中，展开工具行即可查看完整错误详情，
+            // 不再向 StatusLines 追加多行 Notice，防止连续工具失败时产生数十行孤儿错误刷屏。
 
             // 工具完成即脱离"执行 X"——activity 回到通用进行中，等下一个工具/首 token 覆盖。
             // 旧实现在此不发事件：若 run 在工具后停滞/卡死，状态栏永久停留"执行 X"。
@@ -296,12 +326,88 @@ public sealed partial class ChatTranscriptView
         RebuildStreamingPreview();
     }
 
+    /// <summary>
+    /// 子代理实时进度：原位重渲活跃 fork 的 Agent 工具行为 live 文案
+    /// （如 "Explore · turn 2 · 5 tool calls · WebSearch…"）。无活跃行（非流式、
+    /// 已完成或受控 Build attempt 降级路径）时静默忽略。
+    /// </summary>
+    public void UpdateSubagentProgress(TuiSubagentProgress progress)
+    {
+        if (!_stream.IsStreaming) return;
+        if (!_stream.ToolTracker.TryGetSubagentLine(progress.AgentName, out var state)
+            || state.LineIndex >= _stream.StatusLines.Count)
+            return;
+
+        // 头行保持 "Agent · [agentName] · Explore · 描述"（描述登记时固化）；其下插入/原位
+        // 刷新实时活动行。进度快照写入头行 tag，展开运行中的行可见实时统计。
+        // 完成/失败只清活动行——折叠行由 AddToolDone 按结果重写。
+        state.LatestProgress = progress;
+        _stream.StatusLines[state.LineIndex] = MessageFlowRenderer.MakeToolLine(
+            "Agent", state.HeaderTarget, null, agentName: progress.AgentName,
+            maxWidth: ContentWidth, liveProgress: progress);
+
+        if (progress.Phase is SubagentProgressPhase.Completed or SubagentProgressPhase.Failed)
+        {
+            RemoveSubagentActivityLine(state);
+            RebuildStreamingPreview();
+            return;
+        }
+
+        var activity = MessageRenderer.FormatSubagentProgress(progress);
+        if (state.ActivityLineIndex < 0)
+        {
+            var insertAt = state.LineIndex + 1;
+            _stream.StatusLines.Insert(insertAt, BuildSubagentActivityLine(activity));
+            // 先整体平移（本 state 的 ActivityLineIndex 仍是 -1，不会被重复平移），再登记新行。
+            ShiftStreamBlockIndexesFrom(insertAt, 1);
+            state.ActivityLineIndex = insertAt;
+        }
+        else if (state.ActivityLineIndex < _stream.StatusLines.Count)
+        {
+            _stream.StatusLines[state.ActivityLineIndex] = BuildSubagentActivityLine(activity);
+        }
+        RebuildStreamingPreview();
+    }
+
+    /// <summary>移除子代理实时活动行（完成/失败时调用）；行不存在时为 no-op。</summary>
+    private void RemoveSubagentActivityLine(StreamingToolTracker.SubagentLineState state)
+    {
+        if (state.ActivityLineIndex < 0) return;
+        if (state.ActivityLineIndex < _stream.StatusLines.Count)
+        {
+            _stream.StatusLines.RemoveAt(state.ActivityLineIndex);
+            ShiftStreamBlockIndexesFrom(state.ActivityLineIndex, -1);
+        }
+        state.ActivityLineIndex = -1;
+    }
+
+    private FormattedLine BuildSubagentActivityLine(string text) =>
+        FormattedLine.FromSegments(
+        [
+            new LineSegment($"{ConversationRenderer.Indent}  ", TuiPalette.BgPrimary),
+            new LineSegment(text, TuiPalette.FgMuted),
+        ]);
+
+    /// <summary>状态行插入/删除后平移流内所有行索引登记（块状态行、思考行、工具行、子代理行）。</summary>
+    private void ShiftStreamBlockIndexesFrom(int fromIndex, int delta)
+    {
+        if (delta == 0) return;
+        if (_stream.BuildRunStatusLineIndex >= fromIndex) _stream.BuildRunStatusLineIndex += delta;
+        if (_stream.ModeProgressLineIndex >= fromIndex) _stream.ModeProgressLineIndex += delta;
+        if (_stream.ThinkingSummaryLineIndex >= fromIndex) _stream.ThinkingSummaryLineIndex += delta;
+        _stream.ToolTracker.ShiftLineIndicesFrom(fromIndex, delta);
+    }
+
     public void AddBuildDeliveryCard(OneCode.Core.Build.BuildRunResult result)
     {
+        // BuildRunCompletedEvent 在流收尾阶段先于 TuiWorkflowRunEnded 到达；
+        // 若塞入 _stream.StatusLines，不仅会被 BuildCommittedStreamLines 逐行插入空行，
+        // 还会排在末轮助手回复的正文上方。先结束当前流提交末轮正文，再将交付卡作为独立块追加在末尾。
         if (_stream.IsStreaming)
-            AddFormattedLines(ChatBlockRenderers.RenderBuildDeliveryCard(result, ContentWidth));
-        else
-            AppendCommittedBlock(width => ChatBlockRenderers.RenderBuildDeliveryCard(result, width));
+            EndStreaming();
+        AppendCommittedBlock(
+            width => ChatBlockRenderers.RenderBuildDeliveryCard(result, width),
+            withSpacing: false);
     }
 
     public void UpdateModeProgress(TuiModeProgress progress)

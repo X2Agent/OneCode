@@ -37,6 +37,10 @@ public static class Constants
         public const string GoalMaxWallClockHours = "goal.maxWallClockHours";
         /// <summary>Loop（/loop 运行时循环）：单次循环调用 inner agent 的硬上限。</summary>
         public const string LoopMaxIterations = "loop.maxIterations";
+        /// <summary>子代理：默认轮数上限（≤0 = 按 profile 内置默认值）。</summary>
+        public const string AgentsDefaultMaxTurns = "agents.defaults.maxTurns";
+        /// <summary>子代理：默认墙钟超时分钟数（≤0 = 不限制）。</summary>
+        public const string AgentsDefaultTimeoutMinutes = "agents.defaults.timeoutMinutes";
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";
@@ -73,6 +77,13 @@ public static class Constants
         public const double GoalMaxWallClockHoursDefault = 2.0;
         /// <summary>/loop 单次循环调用 inner agent 次数默认值（<c>loop.maxIterations</c>）。</summary>
         public const int LoopMaxIterationsDefault = 3;
+        /// <summary>只读调研子代理（Explore/Plan）默认轮数上限——每轮可并行多调用，
+        /// 15 轮足以覆盖典型调研；更高预算由 frontmatter / settings 显式上调。</summary>
+        public const int SubAgentMaxTurnsReadOnlyDefault = 15;
+        /// <summary>通用子代理（general-purpose/自定义）默认轮数上限。</summary>
+        public const int SubAgentMaxTurnsDefault = 50;
+        /// <summary>子代理墙钟超时默认分钟数（<c>agents.defaults.timeoutMinutes</c>）。</summary>
+        public const int SubAgentTimeoutMinutesDefault = 10;
     }
 
     public static class PermissionModes
@@ -83,7 +94,6 @@ public static class Constants
 
     public static class MessageTypes
     {
-        public const string User = "user";
         public const string Assistant = "assistant";
     }
 }

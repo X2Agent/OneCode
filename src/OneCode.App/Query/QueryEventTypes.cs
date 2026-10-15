@@ -83,6 +83,55 @@ public sealed record TurnCompletedEvent(int TurnNumber, bool HadToolCalls) : Que
 /// <summary>API/网络错误 — 不中断对话循环，可由 TUI 显示后继续等待用户输入。</summary>
 public sealed record ErrorEvent(string Message, bool Recoverable = true) : QueryEvent;
 
+/// <summary>面向用户的系统级提示（非助手输出、非错误）——如 Plan 纠偏轮自动追加的说明。</summary>
+public sealed record NoticeEvent(string Message) : QueryEvent;
+
+/// <summary>
+/// 预算预警（全模式通用）：可计费消耗（超出基线）跨越 70%（Early/黄）或 90%（Late/橙）
+/// 阈值时由 BudgetGuard 经事件流发布，TUI 渲染预警横幅。按级别去重递升，不重复刷屏。
+/// </summary>
+public sealed record BudgetWarningEvent(
+    OneCode.Core.Goals.GoalBudgetWarningLevel Level,
+    long UsedTokens,
+    long LimitTokens) : QueryEvent;
+
+/// <summary>子代理 fork 的生命周期阶段。</summary>
+public enum SubagentProgressPhase
+{
+    /// <summary>fork 已受理并开始执行。</summary>
+    Started,
+    /// <summary>执行中（工具调用计数推进）。</summary>
+    Running,
+    /// <summary>正常完成。</summary>
+    Completed,
+    /// <summary>失败/取消收尾。</summary>
+    Failed,
+}
+
+/// <summary>
+/// 子代理进度旁路信封——由 ForkedAgentRunner 写入父 run 的原始事件
+/// 通道（不经 MAF AgentResponseUpdate），StreamingSession.Digest 投影为
+/// <see cref="SubagentProgressEvent"/>。
+/// </summary>
+public sealed record SubagentProgressUpdate(
+    string ForkId,
+    string AgentName,
+    SubagentProgressPhase Phase,
+    int ToolCallCount = 0,
+    int TurnCount = 0,
+    string? CurrentToolName = null,
+    long ElapsedMs = 0);
+
+/// <summary>子代理实时进度（fork 工具行 live 文案与状态栏 agents 徽标的数据源）。</summary>
+public sealed record SubagentProgressEvent(
+    string ForkId,
+    string AgentName,
+    SubagentProgressPhase Phase,
+    int ToolCallCount = 0,
+    int TurnCount = 0,
+    string? CurrentToolName = null,
+    long ElapsedMs = 0) : QueryEvent;
+
 /// <summary>
 /// 事件驱动审批：将 MAF ToolApprovalRequestContent 转为流式事件，
 /// 由 TUI 自主渲染审批组件。

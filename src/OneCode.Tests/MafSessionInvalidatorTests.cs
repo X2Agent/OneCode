@@ -119,12 +119,14 @@ public sealed class MafSessionInvalidatorTests
     }
 
     /// <summary>
-    /// 框架写入的本地历史哨兵必须随历史一起剔除，否则 compact 之后的会话永久失去 in-pipeline 压缩。
+    /// 框架写入的本地历史哨兵必须随历史一起剔除：它是旧历史的运行时簿记戳，结构性历史变更后不应残留。
     /// </summary>
     /// <remarks>
-    /// <c>CompactionProvider</c> 把「<c>ConversationId</c> 非空」解读为「历史由远端服务托管」并整个跳过压缩
-    /// （框架行为由 <c>HarnessCompactionActivationTests</c> 锁定）。哨兵序列化在会话根上、不在 <c>stateBag</c> 里，
-    /// 因此只剪 <c>stateBag</c> 的失效方式会把它留下——刚剪掉的压缩索引就再也无法被重建。
+    /// 哨兵使 <c>FunctionInvokingChatClient</c> 把会话按服务托管语义处理（迭代之间清掉累积历史）；
+    /// 剔除后由 per-service-call 装饰器在恢复后的第一次服务调用重新打戳，恢复会话与新建会话行为对齐。
+    /// （MAF 1.24 起 <c>CompactionProvider</c> 不再因哨兵跳过压缩；框架行为由
+    /// <c>HarnessCompactionActivationTests</c> 锁定。）哨兵序列化在会话根上、不在 <c>stateBag</c> 里，
+    /// 因此只剪 <c>stateBag</c> 的失效方式会把它留下。
     /// </remarks>
     [Fact]
     public void Invalidate_DropsLocalHistorySentinelConversationId()
@@ -139,7 +141,7 @@ public sealed class MafSessionInvalidatorTests
         MafSessionInvalidator.Invalidate(conversation, "compact.full");
 
         HasRootProperty(conversation, "conversationId").Should().BeFalse(
-            "the local-history sentinel permanently disables CompactionProvider");
+            "the sentinel is a stale runtime stamp of the pre-change history and must not survive a structural change");
         ReadStateBag(conversation).Should().ContainKey("TodoProvider",
             "removing the sentinel must not turn the targeted invalidation into a full removal");
     }

@@ -23,6 +23,9 @@ internal sealed class StreamingSession(
     Action<string>? autoActivateTool = null)
 {
     private readonly StringBuilder _textBuilder = new();
+    private readonly StringBuilder _lastTurnTextBuilder = new();
+    // Cumulative reasoning accumulator for replay/cumulative-update collapsing (see DedupReasoning).
+    private readonly StringBuilder _reasoningBuilder = new();
     private readonly Dictionary<string, string> _toolNamesByCallId = new(StringComparer.Ordinal);
     // CallId → 完整参数 JSON：ToolDoneEvent 需要它恢复 target（搜索词/路径/命令），
     // 否则完成行只剩结果摘要，同类调用无法区分。
@@ -33,10 +36,16 @@ internal sealed class StreamingSession(
     private readonly HashSet<string> _emittedToolCallIds = new(StringComparer.Ordinal);
 
     private int _turnCount;
-    private int _totalInputTokens;
-    private int _totalOutputTokens;
-    private int _totalCacheReadTokens;
-    private int _totalCacheWriteTokens;
+    private int _committedInputTokens;
+    private int _committedOutputTokens;
+    private int _committedCacheReadTokens;
+    private int _committedCacheWriteTokens;
+    private int _currentTurnInputTokens;
+    private int _currentTurnOutputTokens;
+    private int _currentTurnCacheReadTokens;
+    private int _currentTurnCacheWriteTokens;
+    private string? _currentUsageResponseId;
+    private bool _usageTurnBoundaryPending;
     private bool _turnStarted;
     private bool _pendingTurnBoundary; // true after seeing tool results — next text starts a new turn
 
@@ -53,15 +62,21 @@ internal sealed class StreamingSession(
         includeNextPrompt ? new NextPromptTagStreamParser() : null;
     public int TurnCount => _turnCount;
 
-    public int TotalInputTokens => _totalInputTokens;
+    public int TotalInputTokens => _committedInputTokens + _currentTurnInputTokens;
+
+    /// <summary>最新一轮模型调用的输入 Token 水位（用于估算当前上下文窗口占用率）。</summary>
+    public int LastTurnInputTokens => _currentTurnInputTokens > 0 ? _currentTurnInputTokens : TotalInputTokens;
 
     public string FinalText => _textBuilder.ToString();
 
+    /// <summary>最后一轮助手回复的纯文本（不含前序工具轮的中间旁白）。</summary>
+    public string LastTurnText => _lastTurnTextBuilder.ToString();
+
     public TokenUsage FinalUsage => new(
-        _totalInputTokens,
-        _totalOutputTokens,
-        CacheReadTokens: _totalCacheReadTokens,
-        CacheWriteTokens: _totalCacheWriteTokens);
+        _committedInputTokens + _currentTurnInputTokens,
+        _committedOutputTokens + _currentTurnOutputTokens,
+        CacheReadTokens: _committedCacheReadTokens + _currentTurnCacheReadTokens,
+        CacheWriteTokens: _committedCacheWriteTokens + _currentTurnCacheWriteTokens);
 
     /// <summary>
     /// Maps one raw channel event (approval passthrough, BuildRun state, or MAF
@@ -77,6 +92,13 @@ internal sealed class StreamingSession(
             yield break;
         }
 
+        // 预算预警横幅（BudgetGuard 经 MainAgentRunner 写入）：直接透传给 TUI 消费
+        if (evt is BudgetWarningEvent budgetWarning)
+        {
+            yield return budgetWarning;
+            yield break;
+        }
+
         // 受控 Build attempt 以 OrchestrationEvent 信封发射持久化状态
         // 投影；流内契约仍为 BuildRunStateEvent（QueryEvent），此处为运行时事件 → 流内事件
         // 的唯一投影点（原 durableStateObserver → BuildRunStateEvent 直产通道退役）。
@@ -86,16 +108,43 @@ internal sealed class StreamingSession(
             yield break;
         }
 
+        // 子代理进度旁路：fork 经 AsyncLocal 写入器上报的实时进度，投影为流内事件。
+        if (evt is SubagentProgressUpdate progress)
+        {
+            yield return new SubagentProgressEvent(
+                progress.ForkId, progress.AgentName, progress.Phase,
+                progress.ToolCallCount, progress.TurnCount,
+                progress.CurrentToolName, progress.ElapsedMs);
+            yield break;
+        }
+
         if (evt is not AgentResponseUpdate update)
             yield break;
 
         if (AgentEventDigester.TryExtractUsage(update, out var usage))
         {
-            _totalInputTokens = usage.InputTokens;
-            _totalOutputTokens = usage.OutputTokens;
-            _totalCacheReadTokens = usage.CacheReadTokens;
-            _totalCacheWriteTokens = usage.CacheWriteTokens;
-            yield return new UsageUpdateEvent(usage);
+            var isNewResponseId = !string.IsNullOrEmpty(update.ResponseId)
+                && !string.IsNullOrEmpty(_currentUsageResponseId)
+                && !string.Equals(update.ResponseId, _currentUsageResponseId, StringComparison.Ordinal);
+
+            if ((_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0)
+                && (_usageTurnBoundaryPending || isNewResponseId))
+            {
+                _committedInputTokens += _currentTurnInputTokens;
+                _committedOutputTokens += _currentTurnOutputTokens;
+                _committedCacheReadTokens += _currentTurnCacheReadTokens;
+                _committedCacheWriteTokens += _currentTurnCacheWriteTokens;
+                _usageTurnBoundaryPending = false;
+            }
+
+            _currentTurnInputTokens = usage.InputTokens;
+            _currentTurnOutputTokens = usage.OutputTokens;
+            _currentTurnCacheReadTokens = usage.CacheReadTokens;
+            _currentTurnCacheWriteTokens = usage.CacheWriteTokens;
+            if (!string.IsNullOrEmpty(update.ResponseId))
+                _currentUsageResponseId = update.ResponseId;
+
+            yield return new UsageUpdateEvent(FinalUsage);
         }
 
         // 检测工具调用、工具结果、推理内容，发射对应事件
@@ -153,10 +202,17 @@ internal sealed class StreamingSession(
                         resultText,
                         doneToolInput);
                     _pendingTurnBoundary = true;
+                    if (_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0)
+                        _usageTurnBoundaryPending = true;
                 }
                 else if (c is TextReasoningContent trc && !string.IsNullOrEmpty(trc.Text))
                 {
-                    yield return new ThinkingDeltaEvent(trc.Text);
+                    // Reasoning needs the same replay protection as the tool events above:
+                    // providers may resend reasoning cumulatively ("so far" per update) and
+                    // MAF may replay it across turn-boundary updates. Collapsing to true
+                    // increments keeps the TUI's append-only ThinkingBuffer free of duplicates.
+                    foreach (var delta in DedupReasoning(trc.Text))
+                        yield return new ThinkingDeltaEvent(delta);
                 }
             }
         }
@@ -174,17 +230,33 @@ internal sealed class StreamingSession(
                 ? [(Text: update.Text, Suggestion: (string?)null)]
                 : NextPromptParser.Process(update.Text);
 
-            foreach (var (text, suggestion) in segments)
+            foreach (var (rawText, suggestion) in segments)
             {
+                var text = rawText;
                 if (!string.IsNullOrEmpty(text))
                 {
-                    _textBuilder.Append(text);
                     if (!_turnStarted)
                     {
+                        // 部分推理模型在 TextReasoningContent 之后的首段正文前吐出数十个前导空格/换行；
+                        // 在轮次起点统一剥离，全空白段不开启新轮次（下一段继续按起点处理）。
+                        text = text.TrimStart(' ', '\t', '\r', '\n');
+                        if (text.Length == 0)
+                        {
+                            if (!string.IsNullOrEmpty(suggestion))
+                                yield return new SuggestionsEvent([suggestion]);
+                            continue;
+                        }
+
                         _turnCount++;
                         _turnStarted = true;
+                        _lastTurnTextBuilder.Clear();
+                        if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
+                            _textBuilder.Append("\n\n");
                         yield return new TurnStartedEvent(_turnCount);
                     }
+
+                    _textBuilder.Append(text);
+                    _lastTurnTextBuilder.Append(text);
                     yield return new TextDeltaEvent(text);
                 }
 
@@ -203,14 +275,95 @@ internal sealed class StreamingSession(
         if (NextPromptParser?.Flush() is not { Length: > 0 } remainingText)
             yield break;
 
-        _textBuilder.Append(remainingText);
+        var text = remainingText;
         if (!_turnStarted)
         {
+            text = text.TrimStart(' ', '\t', '\r', '\n');
+            if (text.Length == 0)
+                yield break;
+
             _turnCount++;
             _turnStarted = true;
+            _lastTurnTextBuilder.Clear();
+            if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
+                _textBuilder.Append("\n\n");
             yield return new TurnStartedEvent(_turnCount);
         }
-        yield return new TextDeltaEvent(remainingText);
+
+        _textBuilder.Append(text);
+        _lastTurnTextBuilder.Append(text);
+        yield return new TextDeltaEvent(text);
+    }
+
+    /// <summary>
+    /// Collapses cumulative/replayed reasoning into true increments. Replay forms seen in
+    /// the wild: exact resend of everything streamed so far, resend of an older prefix,
+    /// or a previously-streamed prefix extended by new text (cumulative "so far" updates).
+    /// Only the unseen suffix is emitted; genuine disjoint deltas fall through unchanged.
+    /// The accumulator is per-run (never reset at turn boundaries): a boundary reset would
+    /// re-emit reasoning that MAF replays right after a tool result — the exact duplication
+    /// this guard exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// 前缀比较全程经 <see cref="StringBuilder.GetChunks"/> 逐段进行，不物化聚合串：
+    /// 每个增量一次全量 <c>ToString</c> 会让长 reasoning 的去重退化为 O(n²) 分配与拷贝。
+    /// </remarks>
+    private IEnumerable<string> DedupReasoning(string text)
+    {
+        if (text.Length == 0)
+            yield break; // 空增量：既无新内容，也不构成任何重放形态
+        if (_reasoningBuilder.Length == 0)
+        {
+            _reasoningBuilder.Append(text);
+            yield return text;
+            yield break;
+        }
+        if (AggregateStartsWith(text))
+            yield break; // 完全重放或旧前缀重放——无新内容
+        if (TextStartsWithAggregate(text))
+        {
+            // Cumulative update (or replay + extension): emit only the new suffix.
+            var increment = text[_reasoningBuilder.Length..];
+            _reasoningBuilder.Append(increment);
+            yield return increment;
+            yield break;
+        }
+        // Unrelated segment: a genuine disjoint delta or a new turn's reasoning.
+        _reasoningBuilder.Append(text);
+        yield return text;
+    }
+
+    /// <summary>聚合内容是否以 <paramref name="text"/> 为前缀（含完全相等）。</summary>
+    private bool AggregateStartsWith(string text)
+    {
+        if (text.Length > _reasoningBuilder.Length)
+            return false;
+        var pos = 0;
+        foreach (var chunk in _reasoningBuilder.GetChunks())
+        {
+            var take = Math.Min(chunk.Span.Length, text.Length - pos);
+            if (!chunk.Span[..take].SequenceEqual(text.AsSpan(pos, take)))
+                return false;
+            pos += take;
+            if (pos == text.Length)
+                return true;
+        }
+        return pos == text.Length;
+    }
+
+    /// <summary><paramref name="text"/> 是否以聚合内容为前缀（累积更新形态，text 比聚合长）。</summary>
+    private bool TextStartsWithAggregate(string text)
+    {
+        if (text.Length < _reasoningBuilder.Length)
+            return false;
+        var pos = 0;
+        foreach (var chunk in _reasoningBuilder.GetChunks())
+        {
+            if (!chunk.Span.SequenceEqual(text.AsSpan(pos, chunk.Span.Length)))
+                return false;
+            pos += chunk.Span.Length;
+        }
+        return true;
     }
 
     /// <summary>Returns the turn-completion event if any turn was started during the run.</summary>

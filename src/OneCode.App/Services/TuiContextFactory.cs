@@ -19,7 +19,8 @@ public sealed class TuiContextFactory(
     OneCode.Core.Lsp.ILspServerManager lspServerManager,
     Services.Lsp.LspDiagnosticRegistry lspDiagnosticRegistry,
     IClipboardService clipboard,
-    OneCode.Core.Commands.IGitHelper gitHelper)
+    OneCode.Core.Commands.IGitHelper gitHelper,
+    Session.SessionCandidateProvider sessionCandidateProvider)
 {
     public TuiContext Create(
         InteractiveSession session,
@@ -90,6 +91,7 @@ public sealed class TuiContextFactory(
                     .Select(um => um.Content)
                     .ToList();
             },
+            GetSessionCandidates: sessionCandidateProvider.GetCandidates,
             GitHelper: gitHelper);
 
         var diagnostics = new TuiDiagnosticServices(
@@ -126,7 +128,6 @@ public sealed class TuiContextFactory(
             Version: ProductInfo.Default.Version,
             ExternalCancellation: ct,
             SlashCommands: session.SlashCommands,
-            SshHost: session.SshHost,
             InitialPrompt: initialPrompt);
 
         return new TuiContext(query, sessionServices, diagnostics, runtime, options);

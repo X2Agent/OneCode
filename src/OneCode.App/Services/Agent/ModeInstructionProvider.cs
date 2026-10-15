@@ -16,12 +16,6 @@ namespace OneCode.App.Services.Agent;
 /// OneCode 的模式由宿主驱动（TUI 切换 WorkingMode/PermissionMode → 重建 agent），
 /// LLM 驱动的 mode_set 切换不回写宿主状态，会造成指令与权限双轨不一致。
 /// </para>
-///
-/// <para>
-/// Turn 2+ 的模式相关增量提醒由 <see cref="ModeAwareAttachmentProviderBase"/>
-/// 子类（Plan/BuildModeAttachmentProvider）的 sparse/full 交替负责，
-/// 与本 Provider 的每轮完整指令注入互补。
-/// </para>
 /// </summary>
 public sealed class ModeInstructionProvider(string instructions) : ReadOnlyAIContextProviderBase
 {

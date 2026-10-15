@@ -9,7 +9,7 @@ namespace OneCode.Tests;
 /// <summary>
 /// 硬编码迁移 Resolver 后的行为守护（keyboard-first Phase 2）：
 /// - eager-fire：tab 自身绑定 autocomplete:accept 时立即触发；
-///   模式直达已改绑 alt+1..4，tab 不再是和弦前缀；纯前缀和弦（ctrl+x）不受影响；
+///   tab 不再是和弦前缀；纯前缀和弦（ctrl+x）不受影响；
 /// - DiffView / InlineSelector 经 ContextDiff/ContextSelector 分发，
 ///   默认行为与迁移前一致，用户重映射可生效。
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class KeybindingMigrationTests
         tabResult.Result.Should().Be(KeyResolveResult.Match);
         tabResult.Action.Should().Be(KeybindingDefaults.ActionAutocompleteAccept);
 
-        // 模式直达已改绑 alt+1..4：随后的裸数字不再是和弦尾键
+        // 裸数字无绑定，不是和弦尾键
         var digit = resolver.Resolve(CharKey("1"), contexts);
         digit.Result.Should().Be(KeyResolveResult.None);
     }

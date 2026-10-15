@@ -1,3 +1,4 @@
+
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Commands;
@@ -12,15 +13,13 @@ using OneCode.Core.Domain;
 using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
 using OneCode.Tests.TestSupport;
-
 namespace OneCode.Tests;
 
-public sealed class PlanWorkflowApplicationServiceTests : IDisposable
+public sealed partial class PlanWorkflowApplicationServiceTests : IDisposable
 {
     private readonly string _root = Path.Combine(
         Path.GetTempPath(),
         "OneCodePlanWorkflowTests-" + Guid.NewGuid().ToString("N"));
-
     [Fact]
     public async Task SubmitAsync_NewWorkflow_PersistsFinalizingStateAndRevision()
     {
@@ -39,6 +38,53 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
 
         var restored = await sut.GetAsync(sessionId, TestContext.Current.CancellationToken);
         restored.Should().BeEquivalentTo(result.Workflow);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_SameContentWhileFinalizing_ReturnsExistingRevisionWithoutWriting()
+    {
+        var sut = CreateSut();
+        var sessionId = SessionId.NewId();
+        var first = await sut.SubmitAsync(
+            CreateSubmitCommand(sessionId, "plan-run-1"),
+            TestContext.Current.CancellationToken);
+
+        // 模型提交成功后重放同一份计划：不同的命令 ID，期望版本取当前版本（与真实工具一致）。
+        var replay = await sut.SubmitAsync(
+            CreateSubmitCommand(sessionId, "plan-run-1") with
+            {
+                CommandId = "submit-replayed",
+                ExpectedWorkflowVersion = first.Workflow.Version,
+            },
+            TestContext.Current.CancellationToken);
+
+        replay.Revision.Revision.Should().Be(first.Revision.Revision);
+        replay.Revision.ContentHash.Should().Be(first.Revision.ContentHash);
+        replay.Workflow.Version.Should().Be(first.Workflow.Version, "重放不得产生新的工作流版本");
+        var aggregate = await new PlanAggregateStore(_root).LoadAsync(sessionId, TestContext.Current.CancellationToken);
+        aggregate!.Revisions.Should().ContainSingle("重放不得追加 revision");
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ChangedContentWhileFinalizing_IsRejectedAsInvalidState()
+    {
+        var sut = CreateSut();
+        var sessionId = SessionId.NewId();
+        var first = await sut.SubmitAsync(
+            CreateSubmitCommand(sessionId, "plan-run-1"),
+            TestContext.Current.CancellationToken);
+
+        var act = () => sut.SubmitAsync(
+            CreateSubmitCommand(sessionId, "plan-run-1") with
+            {
+                CommandId = "submit-changed",
+                ExpectedWorkflowVersion = first.Workflow.Version,
+                Markdown = "# A different plan\n\n## Context\nChanged scope.",
+            },
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<PlanTransitionException>(
+            "内容变化说明计划确实改了，需要新的规划轮次，不能当作重放吞掉");
     }
 
     [Fact]
@@ -95,8 +141,6 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
 
         approved.Workflow.State.Should().Be(PlanWorkflowState.StartingExecution);
         approved.Workflow.ApprovedSnapshot.Should().NotBeNull();
-        approved.Workflow.StepExecutions.Should().ContainSingle()
-            .Which.Status.Should().Be(PlanStepExecutionStatus.Pending);
 
         await sut.HandleRunEventAsync(
             new BuildRunStartedEvent(
@@ -292,919 +336,38 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             TestContext.Current.CancellationToken);
 
         cancelled.Workflow.State.Should().Be(PlanWorkflowState.Cancelled);
-        cancelled.Workflow.StepExecutions.Should().OnlyContain(step =>
-            step.Status == PlanStepExecutionStatus.Cancelled);
         cancelled.Workflow.NextRetryAt.Should().BeNull();
     }
 
     [Fact]
-    public async Task Store_LoadRecoverableExecutionAsync_ReturnsAllNonTerminalExecutionWorkflows()
+    public async Task ApproveAsync_FreezesOriginalRequestAndClarificationsIntoSnapshot()
     {
         var sut = CreateSut();
-        var startingSession = SessionId.NewId();
-        var startingSubmit = await sut.SubmitAsync(
-            CreateSubmitCommand(startingSession, "plan-run-starting"),
+        var sessionId = SessionId.NewId();
+        var submitted = await sut.SubmitAsync(
+            CreateSubmitCommand(sessionId, "plan-run-1"),
             TestContext.Current.CancellationToken);
-        await sut.HandleRunEventAsync(new PlanRunCompletedEvent(
-            startingSession,
-            startingSubmit.Workflow.Id,
-            "plan-run-starting",
-            ProtocolValid: true,
-            DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
-        var awaiting = (await sut.GetAsync(startingSession, TestContext.Current.CancellationToken))!;
-        var starting = await sut.ApproveAsync(new ApprovePlanCommand(
-            "approve-starting",
-            startingSession,
-            awaiting.Id,
-            awaiting.SubmittedRevision!.Value,
-            awaiting.Version,
-            "user"), TestContext.Current.CancellationToken);
+        await sut.HandleRunEventAsync(
+            new PlanRunCompletedEvent(sessionId, submitted.Workflow.Id, "plan-run-1", ProtocolValid: true, DateTimeOffset.UtcNow),
+            TestContext.Current.CancellationToken);
+        var awaiting = (await sut.GetAsync(sessionId, TestContext.Current.CancellationToken))!;
 
-        var executingSession = SessionId.NewId();
-        var executing = CreateExecutingWorkflow(executingSession, PlanWorkflowState.Executing);
-        var verifyingSession = SessionId.NewId();
-        var verifying = CreateExecutingWorkflow(verifyingSession, PlanWorkflowState.Verifying);
-        var store = new PlanAggregateStore(_root);
-        await store.SaveAsync(
-            new PlanAggregate(executing, [CreateRevision(executing)]),
-            expectedVersion: -1,
-            TestContext.Current.CancellationToken);
-        await store.SaveAsync(
-            new PlanAggregate(verifying, [CreateRevision(verifying)]),
-            expectedVersion: -1,
+        var approved = await sut.ApproveAsync(
+            new ApprovePlanCommand(
+                "approve-1",
+                sessionId,
+                awaiting.Id,
+                awaiting.SubmittedRevision!.Value,
+                awaiting.Version,
+                "user",
+                OriginalRequest: "must run offline",
+                Clarifications: ["Q&A: storage? -> sqlite"]),
             TestContext.Current.CancellationToken);
 
-        var finalizingSession = SessionId.NewId();
-        await sut.SubmitAsync(
-            CreateSubmitCommand(finalizingSession, "plan-run-finalizing"),
-            TestContext.Current.CancellationToken);
-
-        var recoverable = await store.LoadRecoverableExecutionAsync(TestContext.Current.CancellationToken);
-
-        recoverable.Should().HaveCount(3);
-        recoverable.Should().ContainEquivalentOf(starting.Workflow);
-        recoverable.Should().ContainEquivalentOf(executing);
-        recoverable.Should().ContainEquivalentOf(verifying);
-    }
-
-    [Fact]
-    public async Task Store_LoadRecoverableExecutionAsync_SkipsCorruptWorkflowAndReturnsValidOnes()
-    {
-        var valid = CreateExecutingWorkflow(SessionId.NewId(), PlanWorkflowState.Executing);
-        var store = new PlanAggregateStore(_root);
-        await store.SaveAsync(new PlanAggregate(valid, [CreateRevision(valid)]), expectedVersion: -1, TestContext.Current.CancellationToken);
-        var corruptPath = Path.Combine(
-            _root,
-            SessionId.NewId().ToString(),
-            PlanWorkflowId.NewId().ToString(),
-            "aggregate.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(corruptPath)!);
-        await File.WriteAllTextAsync(corruptPath, "{ corrupt", TestContext.Current.CancellationToken);
-
-        var recoverable = await store.LoadRecoverableExecutionAsync(TestContext.Current.CancellationToken);
-
-        recoverable.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(valid);
-    }
-
-    [Fact]
-    public async Task RecoveryService_ScanDueAsync_DispatchesOnlyDueLoadedWorkflows()
-    {
-        var dueSessionId = SessionId.NewId();
-        var futureSessionId = SessionId.NewId();
-        var unloadedSessionId = SessionId.NewId();
-        var now = DateTimeOffset.UtcNow;
-        var due = CreateStartingWorkflow(dueSessionId, now.AddSeconds(-1));
-        var future = CreateStartingWorkflow(futureSessionId, now.AddMinutes(1));
-        var unloaded = CreateStartingWorkflow(unloadedSessionId, now.AddSeconds(-1));
-        var store = Substitute.For<IPlanAggregateStore>();
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>())
-            .Returns([due, future, unloaded]);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(dueSessionId).Returns(CreateConversation(dueSessionId));
-        sessionManager.GetConversation(futureSessionId).Returns(CreateConversation(futureSessionId));
-        sessionManager.GetConversation(unloadedSessionId).Returns((Conversation?)null);
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        await sut.ScanDueAsync(session, now, TestContext.Current.CancellationToken);
-
-        await dispatcher.Received(1).StartBuildAsync(
-            session,
-            due,
-            TestContext.Current.CancellationToken);
-        await dispatcher.DidNotReceive().StartBuildAsync(
-            session,
-            future,
-            Arg.Any<CancellationToken>());
-        await dispatcher.DidNotReceive().StartBuildAsync(
-            session,
-            unloaded,
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task RecoveryService_ExecutingWorkflow_ResumesMatchingNonTerminalBuildRun()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Executing);
-        var buildRun = CreateMatchingBuildRun(workflow, BuildRunState.Implementing);
-        var store = Substitute.For<IPlanAggregateStore>();
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        buildRunStore.LoadAsync(sessionId, Arg.Any<CancellationToken>()).Returns(buildRun);
-        var bound = workflow with { BuildRunId = buildRun.Id.ToString(), Version = workflow.Version + 1 };
-        workflowService.BindBuildRunAsync(
-                Arg.Any<BindPlanBuildRunCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(bound));
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        await sut.ScanDueAsync(session, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).BindBuildRunAsync(
-            Arg.Is<BindPlanBuildRunCommand>(command => command.BuildRunId == buildRun.Id.ToString()),
-            TestContext.Current.CancellationToken);
-        await dispatcher.Received(1).ResumeBuildAsync(
-            session,
-            bound,
-            TestContext.Current.CancellationToken);
-        await workflowService.DidNotReceive().FailExecutionRecoveryAsync(
-            Arg.Any<FailPlanExecutionRecoveryCommand>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task RecoveryService_CompletedBuildRunWithoutPlanVerification_FailsClosed()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Verifying);
-        var buildRun = CreateMatchingBuildRun(workflow, BuildRunState.Completed);
-        workflow = workflow with { BuildRunId = buildRun.Id.ToString() };
-        var store = Substitute.For<IPlanAggregateStore>();
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        buildRunStore.LoadByIdAsync(buildRun.Id, Arg.Any<CancellationToken>()).Returns(buildRun);
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        await sut.ScanDueAsync(session, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).FailExecutionRecoveryAsync(
-            Arg.Is<FailPlanExecutionRecoveryCommand>(command =>
-                command.ErrorCode == "PlanVerificationProtocolMissing"
-                && command.ExpectedWorkflowVersion == workflow.Version),
-            TestContext.Current.CancellationToken);
-        await dispatcher.DidNotReceive().ResumeBuildAsync(
-            Arg.Any<InteractiveSession>(),
-            Arg.Any<PlanWorkflow>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task BindBuildRunAsync_BindsOnceAndRejectsDifferentRun()
-    {
-        var sessionId = SessionId.NewId();
-        var sut = CreateSut();
-        var executing = await CreatePersistedExecutingWorkflowAsync(sut, sessionId);
-        var firstRunId = BuildRunId.New().ToString();
-        var command = new BindPlanBuildRunCommand(
-            $"bind-{firstRunId}",
-            sessionId,
-            executing.Id,
-            executing.ActiveRunId!,
-            firstRunId);
-
-        var first = await sut.BindBuildRunAsync(command, TestContext.Current.CancellationToken);
-        var replay = await sut.BindBuildRunAsync(command, TestContext.Current.CancellationToken);
-        var conflicting = () => sut.BindBuildRunAsync(new BindPlanBuildRunCommand(
-            "bind-conflict",
-            sessionId,
-            executing.Id,
-            executing.ActiveRunId!,
-            BuildRunId.New().ToString()), TestContext.Current.CancellationToken);
-
-        first.Workflow.BuildRunId.Should().Be(firstRunId);
-        replay.IsDuplicateCommand.Should().BeTrue();
-        await conflicting.Should().ThrowAsync<PlanTransitionException>();
-    }
-
-    [Fact]
-    public async Task BindBuildRunAsync_SameRunAfterCompletion_IsIdempotent()
-    {
-        // 成功收尾的固定时序：plan workflow 先经验证完成（Completed、ActiveRunId 清空），
-        // BuildRun 的 Verifying 投影事件随后到达触发第二次绑定——同 run 重绑必须幂等
-        // 成功，不得被状态守卫误判为失败（否则批准执行全链报 "cannot bind" 错误）。
-        var sessionId = SessionId.NewId();
-        var store = new PlanAggregateStore(Path.Combine(_root, Guid.NewGuid().ToString("N")));
-        var sut = new PlanWorkflowApplicationService(store);
-        var executing = await CreatePersistedExecutingWorkflowAsync(sut, sessionId);
-        var buildRunId = BuildRunId.New().ToString();
-        var first = await sut.BindBuildRunAsync(new BindPlanBuildRunCommand(
-            $"bind-{buildRunId}",
-            sessionId,
-            executing.Id,
-            executing.ActiveRunId!,
-            buildRunId), TestContext.Current.CancellationToken);
-        first.Workflow.BuildRunId.Should().Be(buildRunId);
-
-        // 模拟验证完成：Completed、ActiveRunId 清空（单槽幂等标记也已被其他命令覆盖）。
-        var current = (await store.LoadAsync(sessionId, TestContext.Current.CancellationToken))!;
-        var completed = current.Workflow with
-        {
-            State = PlanWorkflowState.Completed,
-            ActiveRunId = null,
-            Version = current.Workflow.Version + 1,
-            LastProcessedCommandId = "complete-plan-verification-later-command",
-        };
-        await store.SaveAsync(current with { Workflow = completed }, current.Workflow.Version, TestContext.Current.CancellationToken);
-
-        var rebound = await sut.BindBuildRunAsync(new BindPlanBuildRunCommand(
-            "bind-after-completion",
-            sessionId,
-            executing.Id,
-            "build-durable",
-            buildRunId), TestContext.Current.CancellationToken);
-
-        rebound.IsDuplicateCommand.Should().BeTrue();
-        rebound.Workflow.BuildRunId.Should().Be(buildRunId);
-    }
-
-    [Fact]
-    public async Task FailExecutionRecoveryAsync_ReplayedCommand_IsIdempotent()
-    {
-        var sessionId = SessionId.NewId();
-        var sut = CreateSut();
-        var executing = await CreatePersistedExecutingWorkflowAsync(sut, sessionId);
-        var command = new FailPlanExecutionRecoveryCommand(
-            $"recover-fail-{executing.Id}-{executing.Version}",
-            sessionId,
-            executing.Id,
-            executing.Version,
-            "BuildRunFailed",
-            "persisted run failed",
-            DateTimeOffset.UtcNow);
-
-        var first = await sut.FailExecutionRecoveryAsync(
-            command,
-            TestContext.Current.CancellationToken);
-        var replay = await sut.FailExecutionRecoveryAsync(
-            command,
-            TestContext.Current.CancellationToken);
-
-        first.Workflow.State.Should().Be(PlanWorkflowState.Failed);
-        first.Workflow.LastErrorCode.Should().Be("BuildRunFailed");
-        replay.IsDuplicateCommand.Should().BeTrue();
-        replay.Workflow.Version.Should().Be(first.Workflow.Version);
-    }
-
-    [Fact]
-    public async Task RecoveryService_CancelledBuildRun_CancelsPlanWorkflow()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Executing);
-        var buildRun = CreateMatchingBuildRun(workflow, BuildRunState.Cancelled) with
-        {
-            FailureSummary = "cancelled during shutdown",
-        };
-        workflow = workflow with { BuildRunId = buildRun.Id.ToString() };
-        var store = Substitute.For<IPlanAggregateStore>();
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>()).Returns([workflow]);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        buildRunStore.LoadByIdAsync(buildRun.Id, Arg.Any<CancellationToken>()).Returns(buildRun);
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        await sut.ScanDueAsync(session, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).CancelAsync(
-            Arg.Is<CancelPlanCommand>(command =>
-                command.SessionId == sessionId
-                && command.PlanId == workflow.Id
-                && command.ExpectedWorkflowVersion == workflow.Version
-                && command.Reason == "cancelled during shutdown"),
-            TestContext.Current.CancellationToken);
-    }
-
-    [Fact]
-    public async Task RecoveryService_MismatchedPlan_FailsWorkflowAndContinuesScanning()
-    {
-        var firstSession = SessionId.NewId();
-        var secondSession = SessionId.NewId();
-        var mismatched = CreateExecutingWorkflow(firstSession, PlanWorkflowState.Executing);
-        var recoverable = CreateExecutingWorkflow(secondSession, PlanWorkflowState.Executing);
-        var store = Substitute.For<IPlanAggregateStore>();
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>())
-            .Returns([mismatched, recoverable]);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(callInfo => callInfo.ArgAt<SessionId>(0) == firstSession ? mismatched : recoverable);
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        buildRunStore.LoadAsync(firstSession, Arg.Any<CancellationToken>())
-            .Returns(CreateMatchingBuildRun(mismatched, BuildRunState.Implementing) with
-            {
-                Plan = new BuildPlan("wrong", [], [], [], [], true),
-            });
-        var recoverableRun = CreateMatchingBuildRun(recoverable, BuildRunState.Implementing);
-        buildRunStore.LoadAsync(secondSession, Arg.Any<CancellationToken>())
-            .Returns(recoverableRun);
-        var boundRecoverable = recoverable with
-        {
-            BuildRunId = recoverableRun.Id.ToString(),
-            Version = recoverable.Version + 1,
-        };
-        workflowService.BindBuildRunAsync(
-                Arg.Is<BindPlanBuildRunCommand>(command => command.SessionId == secondSession),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(boundRecoverable));
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(firstSession).Returns(CreateConversation(firstSession));
-        sessionManager.GetConversation(secondSession).Returns(CreateConversation(secondSession));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        await sut.ScanDueAsync(session, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).FailExecutionRecoveryAsync(
-            Arg.Is<FailPlanExecutionRecoveryCommand>(command =>
-                command.SessionId == firstSession
-                && command.ErrorCode == "BuildRunPlanMismatch"),
-            TestContext.Current.CancellationToken);
-        await dispatcher.Received(1).ResumeBuildAsync(
-            session,
-            boundRecoverable,
-            TestContext.Current.CancellationToken);
-    }
-
-    [Fact]
-    public async Task RecoveryService_ScanDueAsync_SuppressesConcurrentScan()
-    {
-        var sessionId = SessionId.NewId();
-        var now = DateTimeOffset.UtcNow;
-        var workflow = CreateStartingWorkflow(sessionId, now.AddSeconds(-1));
-        var store = Substitute.For<IPlanAggregateStore>();
-        var releaseLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        store.LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>())
-            .Returns(async _ =>
-            {
-                await releaseLoad.Task;
-                return [workflow];
-            });
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        var buildRunStore = Substitute.For<IBuildRunStore>();
-        var dispatcher = Substitute.For<IPlanAgentRunDispatcher>();
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = new PlanExecutionRecoveryService(
-            store,
-            workflowService,
-            buildRunStore,
-            dispatcher,
-            NullLogger<PlanExecutionRecoveryService>.Instance);
-
-        var first = sut.ScanDueAsync(session, now, TestContext.Current.CancellationToken);
-        var second = sut.ScanDueAsync(session, now, TestContext.Current.CancellationToken);
-        releaseLoad.SetResult();
-        await Task.WhenAll(first, second);
-
-        await store.Received(1).LoadRecoverableExecutionAsync(Arg.Any<CancellationToken>());
-        await dispatcher.Received(1).StartBuildAsync(
-            session,
-            workflow,
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_FutureRetry_DoesNotRegisterOrStartBuildRun()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, DateTimeOffset.UtcNow.AddMinutes(1));
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
-        var runner = Substitute.For<IConversationRunner>();
-        var session = CreateInteractiveSession(Substitute.For<ISessionManager>(), runner);
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        await workflowService.DidNotReceive().RegisterStartAttemptAsync(
-            Arg.Any<RegisterPlanStartAttemptCommand>(),
-            Arg.Any<CancellationToken>());
-        await workflowService.DidNotReceive().HandleRunEventAsync(
-            Arg.Any<BuildRunStartedEvent>(),
-            Arg.Any<CancellationToken>());
-        runner.DidNotReceive().StreamWorkflowRunAsync(
-            Arg.Any<WorkflowRunRequest>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_StartBuild_EmitsStartAndBindsObservedBuildRun()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
-        var attempted = workflow with
-        {
-            StartAttempt = 1,
-            Version = workflow.Version + 1,
-            NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(1),
-        };
-        var executing = attempted with
-        {
-            State = PlanWorkflowState.Executing,
-            ActiveRunId = $"build-{workflow.ExecutionRequestId}",
-        };
-        var bound = executing with { BuildRunId = "br-observed", Version = executing.Version + 1 };
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
-            .Returns(workflow, executing, bound, bound);
-        workflowService.RegisterStartAttemptAsync(
-                Arg.Any<RegisterPlanStartAttemptCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(attempted));
-        workflowService.BindBuildRunAsync(
-                Arg.Any<BindPlanBuildRunCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(bound));
-        var runner = Substitute.For<IConversationRunner>();
-        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
-            .Returns(SingleQueryEvent(new BuildRunStateEvent(
-                new BuildRunId("br-observed"),
-                BuildRunState.Implementing,
-                1,
-                [])));
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager, runner);
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).HandleRunEventAsync(
-            Arg.Is<BuildRunStartedEvent>(evt => evt.RunId == $"build-{workflow.ExecutionRequestId}"),
-            TestContext.Current.CancellationToken);
-        await workflowService.Received(1).BindBuildRunAsync(
-            Arg.Is<BindPlanBuildRunCommand>(command =>
-                command.RunId == $"build-{workflow.ExecutionRequestId}"
-                && command.BuildRunId == "br-observed"),
-            TestContext.Current.CancellationToken);
-    }
-
-    /// <summary>
-    /// 回归防护：计划批准发生在会话中途，<c>/model</c> 切换后的 BuildRun 必须使用
-    /// 运行时模型（AppState 会话覆盖优先），而不是启动时写入会话的那份配置快照。
-    /// </summary>
-    [Fact]
-    public async Task Dispatcher_StartBuild_UsesRuntimeModelNotConfiguredStartupSnapshot()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
-        workflowService.RegisterStartAttemptAsync(
-                Arg.Any<RegisterPlanStartAttemptCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(workflow with
-            {
-                StartAttempt = 1,
-                Version = workflow.Version + 1,
-            }));
-        var runner = Substitute.For<IConversationRunner>();
-        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
-            .Returns(EmptyQueryEvents());
-        var session = CreateInteractiveSession(Substitute.For<ISessionManager>(), runner);
-        var appState = Substitute.For<IAppStateAccessor>();
-        appState.Current.Returns(new AppState { MainLoopModel = "switched-model" });
-        var sut = CreateDispatcher(workflowService, CreateModelManager("startup-model"), appState);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        runner.Received(1).StreamWorkflowRunAsync(
-            Arg.Is<WorkflowRunRequest>(request => request.ModelId == "switched-model"),
-            TestContext.Current.CancellationToken);
-    }
-
-    [Fact]
-    public async Task Dispatcher_ResumeBuild_DoesNotEmitSecondBuildRunStartedEvent()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Executing);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow, workflow);
-        var runner = Substitute.For<IConversationRunner>();
-        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
-            .Returns(EmptyQueryEvents());
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager, runner);
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.ResumeBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        await workflowService.DidNotReceive().RegisterStartAttemptAsync(
-            Arg.Any<RegisterPlanStartAttemptCommand>(),
-            Arg.Any<CancellationToken>());
-        await workflowService.DidNotReceive().HandleRunEventAsync(
-            Arg.Any<BuildRunStartedEvent>(),
-            Arg.Any<CancellationToken>());
-        runner.Received(1).StreamWorkflowRunAsync(
-            Arg.Any<WorkflowRunRequest>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_ConcurrentSameExecutionRequest_RegistersSingleStartAttempt()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
-        var attemptRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
-        workflowService.RegisterStartAttemptAsync(
-                Arg.Any<RegisterPlanStartAttemptCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(async _ =>
-            {
-                attemptRegistered.SetResult();
-                await releaseAttempt.Task;
-                return new PlanTransitionResult(workflow with
-                {
-                    StartAttempt = 1,
-                    Version = workflow.Version + 1,
-                    NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(1),
-                });
-            });
-        var runner = Substitute.For<IConversationRunner>();
-        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
-            .Returns(EmptyQueryEvents());
-        var session = CreateInteractiveSession(Substitute.For<ISessionManager>(), runner);
-        var sut = CreateDispatcher(workflowService);
-
-        var first = sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-        await attemptRegistered.Task;
-        var second = sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-        releaseAttempt.SetResult();
-        await Task.WhenAll(first, second);
-
-        await workflowService.Received(1).RegisterStartAttemptAsync(
-            Arg.Any<RegisterPlanStartAttemptCommand>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_ConcurrentRecovery_StreamsSingleBuildRun()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateExecutingWorkflow(sessionId, PlanWorkflowState.Executing);
-        var releaseRun = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
-            .Returns(workflow, workflow, workflow);
-        var runner = Substitute.For<IConversationRunner>();
-        runner.StreamWorkflowRunAsync(Arg.Any<WorkflowRunRequest>(), Arg.Any<CancellationToken>())
-            .Returns(_ => BlockingQueryEvents(runStarted, releaseRun));
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager, runner);
-        var sut = CreateDispatcher(workflowService);
-
-        var first = sut.ResumeBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-        await runStarted.Task;
-        var second = sut.ResumeBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-        releaseRun.SetResult();
-        await Task.WhenAll(first, second);
-
-        runner.Received(1).StreamWorkflowRunAsync(
-            Arg.Any<WorkflowRunRequest>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_PassesApprovedStepsAsPrescribedBuildPlan()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
-        var attempted = workflow with
-        {
-            StartAttempt = 1,
-            Version = workflow.Version + 1,
-            NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(1),
-        };
-        var executing = attempted with { State = PlanWorkflowState.Executing };
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
-            .Returns(workflow, executing, executing);
-        workflowService.RegisterStartAttemptAsync(
-                Arg.Any<RegisterPlanStartAttemptCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(attempted));
-        var runner = Substitute.For<IConversationRunner>();
-        WorkflowRunRequest? captured = null;
-        runner.StreamWorkflowRunAsync(
-                Arg.Do<WorkflowRunRequest>(request => captured = request),
-                Arg.Any<CancellationToken>())
-            .Returns(EmptyQueryEvents());
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.WorkingDirectory.Returns(_root);
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        var session = CreateInteractiveSession(sessionManager, runner);
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        captured.Should().NotBeNull();
-        captured!.PrescribedBuildPlan.Should().NotBeNull();
-        captured.PrescribedBuildPlan!.RequireExplicitTaskCompletion.Should().BeTrue();
-        captured.PrescribedBuildPlan.Tasks.Should().BeEquivalentTo(
-            workflow.ApprovedSnapshot!.Steps.Select(step => new BuildPlanTask(
-                step.Id,
-                step.Title,
-                step.Description,
-                step.DependsOn,
-                step.Files,
-                step.AcceptanceCriteria)));
-    }
-
-    [Fact]
-    public async Task Dispatcher_StartFailureBeforeBuildRun_PreservesStartingExecutionForRetry()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null);
-        var attempted = workflow with
-        {
-            StartAttempt = 1,
-            Version = workflow.Version + 1,
-            NextRetryAt = DateTimeOffset.UtcNow.AddSeconds(1),
-        };
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>())
-            .Returns(workflow, attempted);
-        workflowService.RegisterStartAttemptAsync(
-                Arg.Any<RegisterPlanStartAttemptCommand>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new PlanTransitionResult(attempted));
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
-        sessionManager.SaveAsync(Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new IOException("persistence unavailable"));
-        var session = CreateInteractiveSession(sessionManager);
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        attempted.State.Should().Be(PlanWorkflowState.StartingExecution);
-        attempted.NextRetryAt.Should().NotBeNull();
-        await workflowService.DidNotReceive().HandleRunEventAsync(
-            Arg.Any<BuildRunFailedEvent>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Dispatcher_FifthAttemptExhausted_TransitionsWorkflowToFailed()
-    {
-        var sessionId = SessionId.NewId();
-        var workflow = CreateStartingWorkflow(sessionId, nextRetryAt: null) with { StartAttempt = 5 };
-        var workflowService = Substitute.For<IPlanWorkflowApplicationService>();
-        workflowService.ClaimExecutionAsync(
-                Arg.Any<SessionId>(),
-                Arg.Any<PlanWorkflowId>(),
-                Arg.Any<long>(),
-                Arg.Any<CancellationToken>())
-            .Returns(workflow);
-        workflowService.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(workflow);
-        var session = CreateInteractiveSession(Substitute.For<ISessionManager>());
-        var sut = CreateDispatcher(workflowService);
-
-        await sut.StartBuildAsync(session, workflow, TestContext.Current.CancellationToken);
-
-        await workflowService.Received(1).HandleRunEventAsync(
-            Arg.Is<BuildRunFailedEvent>(evt => evt.ErrorCode == "StartRetryExhausted"),
-            TestContext.Current.CancellationToken);
-        await workflowService.DidNotReceive().RegisterStartAttemptAsync(
-            Arg.Any<RegisterPlanStartAttemptCommand>(),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task UpdateStepAsync_RejectsBlockedStepAndAllowsItAfterDependencyCompletes()
-    {
-        var sessionId = SessionId.NewId();
-        const string runId = "build-run-dag";
-        var now = DateTimeOffset.UtcNow;
-        var created = PlanWorkflow.Create(sessionId);
-        var workflow = created with
-        {
-            State = PlanWorkflowState.Executing,
-            Version = 1,
-            LatestRevision = 1,
-            SubmittedRevision = 1,
-            ApprovedRevision = 1,
-            ActiveRunId = runId,
-            ActiveRunKind = PlanRunKind.Build,
-            ApprovedSnapshot = new ApprovedPlanSnapshot
-            {
-                PlanId = created.Id,
-                SessionId = sessionId,
-                Revision = 1,
-                Title = "DAG",
-                Markdown = "# DAG",
-                Steps = [
-                    CreateStep("implementation", []),
-                    CreateStep("verification", ["implementation"]),
-                ],
-                ContentHash = "sha256-test",
-                ApprovedBy = "user",
-                ApprovedAt = now,
-            },
-            StepExecutions = [
-                new PlanStepExecution
-                {
-                    StepId = "implementation",
-                    Status = PlanStepExecutionStatus.InProgress,
-                    UpdatedAt = now,
-                },
-                new PlanStepExecution
-                {
-                    StepId = "verification",
-                    Status = PlanStepExecutionStatus.Pending,
-                    UpdatedAt = now,
-                },
-            ],
-            UpdatedAt = now,
-        };
-        var store = new PlanAggregateStore(_root);
-        await store.SaveAsync(new PlanAggregate(workflow, [CreateRevision(workflow)]), -1, TestContext.Current.CancellationToken);
-        var sut = new PlanWorkflowApplicationService(store);
-
-        var blocked = async () => await sut.UpdateStepAsync(new UpdatePlanStepCommand(
-            "verification-start-blocked",
-            sessionId,
-            workflow.Id,
-            runId,
-            "verification",
-            PlanStepExecutionStatus.InProgress,
-            null,
-            null), TestContext.Current.CancellationToken);
-
-        await blocked.Should().ThrowAsync<PlanTransitionException>()
-            .WithMessage("*blocked by incomplete dependencies: implementation*");
-
-        var implementation = await sut.UpdateStepAsync(new UpdatePlanStepCommand(
-            "implementation-completed",
-            sessionId,
-            workflow.Id,
-            runId,
-            "implementation",
-            PlanStepExecutionStatus.Completed,
-            "implementation evidence",
-            null), TestContext.Current.CancellationToken);
-        var verification = await sut.UpdateStepAsync(new UpdatePlanStepCommand(
-            "verification-started",
-            sessionId,
-            workflow.Id,
-            runId,
-            "verification",
-            PlanStepExecutionStatus.InProgress,
-            null,
-            null), TestContext.Current.CancellationToken);
-
-        implementation.Workflow.StepExecutions.Single(step => step.StepId == "implementation")
-            .Status.Should().Be(PlanStepExecutionStatus.Completed);
-        verification.Workflow.StepExecutions.Single(step => step.StepId == "verification")
-            .Status.Should().Be(PlanStepExecutionStatus.InProgress);
-    }
-
-    [Fact]
-    public void PlanStepValidator_RejectsDependencyCycle()
-    {
-        var steps = new[]
-        {
-            CreateStep("one", ["two"]),
-            CreateStep("two", ["one"]),
-        };
-
-        var act = () => PlanStepValidator.Validate(steps);
-
-        act.Should().Throw<PlanValidationException>()
-            .Which.Errors.Should().Contain(error => error.Contains("cycle", StringComparison.OrdinalIgnoreCase));
+        var reloaded = (await sut.GetAsync(sessionId, TestContext.Current.CancellationToken))!;
+        approved.Workflow.ApprovedSnapshot!.OriginalRequest.Should().Be("must run offline");
+        reloaded.ApprovedSnapshot!.OriginalRequest.Should().Be("must run offline", "冻结值必须经真实落盘往返保留");
+        reloaded.ApprovedSnapshot.Clarifications.Should().Equal("Q&A: storage? -> sqlite");
     }
 
     private PlanWorkflowApplicationService CreateSut()
@@ -1253,12 +416,6 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
                 ApprovedBy = "user",
                 ApprovedAt = now,
             },
-            StepExecutions = [new PlanStepExecution
-            {
-                StepId = "persist-workflow",
-                Status = PlanStepExecutionStatus.Pending,
-                UpdatedAt = now,
-            }],
             UpdatedAt = now,
         };
     }
@@ -1329,8 +486,7 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
                     step.AcceptanceCriteria)).ToArray(),
                 [],
                 [],
-                [],
-                RequireExplicitTaskCompletion: true),
+                []),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -1373,7 +529,6 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
             "system",
             sessionManager,
             new WorkingModeController(),
-            SshHost: null,
             SlashCommands: [],
             HarnessPrompt: "harness");
 
@@ -1429,3 +584,4 @@ public sealed class PlanWorkflowApplicationServiceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 }
+

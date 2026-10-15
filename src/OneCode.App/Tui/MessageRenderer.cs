@@ -1,3 +1,5 @@
+using OneCode.App.Query;
+
 namespace OneCode.App.Tui;
 
 // 渲染辅助逻辑：纯函数，无实例状态依赖。
@@ -41,7 +43,8 @@ internal static class MessageRenderer
 
     /// <summary>
     /// 构建工具调用展开后显示的完整详情行（Args + Result，按视口宽度自动换行）。
-    /// 折叠行负责保持会话紧凑；用户主动展开后不再二次截断内容。
+    /// 折叠行负责保持会话紧凑；用户主动展开后不换行重排，但结果正文有行数上限——
+    /// 完整内容已发送给模型，对话流里只做概览。
     /// 组行（<see cref="ToolLineTag.Group"/> 非空）展开为逐条摘要列表：
     /// 序号 + 搜索词/路径等目标 + 结果摘要 + 单条时长。
     /// </summary>
@@ -80,19 +83,13 @@ internal static class MessageRenderer
                     Tag: marker));
             }
 
-            if (lines.Count == 0)
-            {
-                lines.Add(new LineEntry(
-                    $"{detailIndent}(no details available)",
-                    TuiPalette.FgMuted,
-                    null,
-                    Tag: marker));
-            }
-
             return lines;
         }
 
-        if (!string.IsNullOrWhiteSpace(tag.Args))
+        // WebSearch/WebFetch 的展开详情头行已包含关键输入（query / prompt），
+        // Args JSON 原文对用户是噪声，不再重复输出。
+        if (!string.IsNullOrWhiteSpace(tag.Args)
+            && ToolResultSummarizer.NormalizeName(tag.Name) is not ("websearch" or "webfetch"))
         {
             var prefixLen = detailIndent.Length + "Args: ".Length;
             var argsMaxWidth = Math.Max(20, viewportWidth - prefixLen);
@@ -120,6 +117,16 @@ internal static class MessageRenderer
             }
         }
 
+        // 运行中的子代理 fork 行：展开附带实时统计（与活动行同一格式化源，内容一致）。
+        if (tag.LiveProgress is { } live)
+        {
+            lines.Add(new LineEntry(
+                $"{detailIndent}{FormatSubagentProgress(live)}",
+                TuiPalette.FgMuted,
+                null,
+                Tag: marker));
+        }
+
         if (!string.IsNullOrWhiteSpace(tag.Result))
         {
             foreach (var detail in ToolResultDetailFormatter.FormatDetail(tag.Name, tag.Result))
@@ -145,5 +152,31 @@ internal static class MessageRenderer
         }
 
         return lines;
+    }
+
+    /// <summary>
+    /// 格式化子代理实时进度统计（阶段 · 轮次/调用数/当前工具/耗时）。
+    /// 活动行与展开详情共用同一格式化源，保证两处文案一致。
+    /// </summary>
+    internal static string FormatSubagentProgress(TuiSubagentProgress progress)
+    {
+        var parts = new List<string>
+        {
+            progress.Phase switch
+            {
+                SubagentProgressPhase.Completed => "已完成",
+                SubagentProgressPhase.Failed => "失败",
+                _ => "运行中",
+            },
+        };
+        if (progress.TurnCount > 0)
+            parts.Add($"turn {progress.TurnCount}");
+        if (progress.ToolCallCount > 0)
+            parts.Add($"{progress.ToolCallCount} 次工具调用");
+        if (!string.IsNullOrEmpty(progress.CurrentToolName))
+            parts.Add($"{progress.CurrentToolName}…");
+        if (progress.ElapsedMs > 0)
+            parts.Add($"已耗时 {StreamingToolTracker.FormatElapsed(TimeSpan.FromMilliseconds(progress.ElapsedMs))}");
+        return string.Join(" · ", parts);
     }
 }

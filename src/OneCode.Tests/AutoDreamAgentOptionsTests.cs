@@ -59,4 +59,24 @@ public sealed class AutoDreamAgentOptionsTests
         options.DisableAgentSkillsProvider.Should().BeTrue();
         options.DisableWebSearch.Should().BeTrue();
     }
+
+    /// <summary>
+    /// AutoDream 整合代理必须挂载 <see cref="OneCode.App.Services.Memory.MemoryContextProvider"/>，
+    /// 使整合时能够看到既有 MEMORY.md 内容以执行冲突消解（复用 Key / supersedes / delete）。
+    /// </summary>
+    [Fact]
+    public void BuildConsolidationAgentOptions_WithMemoryService_MountsMemoryContextProvider()
+    {
+        var memoryService = NSubstitute.Substitute.For<OneCode.Core.Memory.IMemoryService>();
+
+        var options = AutoDreamService.BuildConsolidationAgentOptions(
+            "fast-model",
+            [],
+            maxOutputTokens: 4096,
+            maxToolCalls: 30,
+            memoryService: memoryService);
+
+        options.AIContextProviders.Should().ContainSingle()
+            .Which.Should().BeOfType<OneCode.App.Services.Memory.MemoryContextProvider>();
+    }
 }

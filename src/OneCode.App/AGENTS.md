@@ -12,7 +12,7 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | 子目录 | 职责 |
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
-| `Tools/` | AI 工具实现：Agent 调用的 31 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
+| `Tools/` | AI 工具实现：Agent 调用的 27 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
 | `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Hooks、Lsp、Mcp 等 |
 | `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
@@ -82,7 +82,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | 类型 | 位置 | 保留原因 |
 |------|------|---------|
 | `MainAgentRunner` / `ForkedAgentRunner` | `App.Services.Agent` | 业务编排器，依赖 13+ 个 App 服务（MemoryService、SessionManager、LspDiagnosticRegistry、PermissionModeProvider、SkillProviderFactory、ConversationShellExecutorManager 等），属于 Application 层"组合"职责，不属于 Infrastructure "外部系统适配"职责。下沉需提取 10+ 个 Core 接口，会让 Core 沦为接口垃圾场。 |
-| `DesignContextProvider` / `LspDiagnosticContextProvider` / `PlanModeAttachmentProvider` / `BuildModeAttachmentProvider` / `GoalContextProvider` / `ShellEnvironmentProvider` / `ModeInstructionProvider` | `App.Services.Context` 等 | MAF `AIContextProvider` 子类，但本质是"将 App 层业务状态注入 LLM 上下文"的胶水代码，依赖 App 层服务（GoalContextState、PermissionModeProvider、SessionManager 等）。下沉不会减少 App↔Infrastructure 的耦合面。 |
+| `DesignContextProvider` / `LspDiagnosticContextProvider` / `PlanExecutionContextProvider` / `GoalContextProvider` / `ModeInstructionProvider` | `App.Services.Context` 等 | MAF `AIContextProvider` 子类，但本质是"将 App 层业务状态注入 LLM 上下文"的胶水代码，依赖 App 层服务（GoalContextState、PermissionModeProvider、SessionManager 等）。下沉不会减少 App↔Infrastructure 的耦合面。注：`ShellEnvironmentProvider` 不在此列——它是 MAF 包（`Microsoft.Agents.AI.Tools.Shell`）提供的类型，`SharedContextProviderBuilder` 直接消费。 |
 
 **判断准则**：
 - **下沉到 Infrastructure**：纯 SDK 适配代码（无状态、仅依赖 Core 抽象）→ Infrastructure。例：`ChatClientFactory`、MAF 中间件。
@@ -241,7 +241,7 @@ public sealed class MyCommand : ICommand
 | 场景 | 策略 | 实现 |
 |------|------|------|
 | 用户可触发的命令路径（`/commit`、`/compact`、`/review`…） | 转为用户可见错误 | `Command.LoadPromptAsync` 返回 null → `CommandResult.Error("Prompt 'xxx' is not available...")` |
-| 系统内部关键路径（harness、mode overlay、goal-subgoal、compaction 管道） | fail-fast 抛异常 | `?? throw new InvalidOperationException("Prompt 'xxx' not found in any IPromptManager store.")` |
+| 系统内部关键路径（harness、mode overlay、goal-decomposer、compaction 管道） | fail-fast 抛异常 | `?? throw new InvalidOperationException("Prompt 'xxx' not found in any IPromptManager store.")` |
 
 ```csharp
 // 命令路径：基类 LoadPromptAsync 返回 null 时转错误
@@ -265,7 +265,7 @@ var harness = await promptManager.GetPromptAsync(HarnessPromptName, ct).Configur
 <EmbeddedResource Include="prompts\**\*.prompt" />
 ```
 
-**参考实现**：`CommitCommand`（错误呈现 + `--focus` 切换多套 prompt）、`MainAgentRunner` / `PlanModeService`（内部关键路径 fail-fast）、`CompactCommand` / `CompactPromptBuilder`（服务层抛出、命令层转用户错误）。
+**参考实现**：`CommitCommand`（错误呈现 + `--focus` 切换多套 prompt）、`MainAgentRunner` / `MainModeContextProviderBuilder`（内部关键路径 fail-fast）、`CompactCommand` / `CompactPromptBuilder`（服务层抛出、命令层转用户错误）。
 
 ### Prompt 分层与合成（harness / default / role / mode）
 

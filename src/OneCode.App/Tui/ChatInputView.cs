@@ -85,13 +85,6 @@ public sealed partial class ChatInputView : View
     public event Action? SidebarToggleRequested;
 
     /// <summary>
-    /// 直达指定工作模式（Alt+1/2/4，app:mode* 动作）。
-    /// 视图内部接线到 <see cref="WorkingModeController.Mode"/>，复用 ModeChanged
-    /// 徽章闪烁（AgentStatusBar 订阅），无需跨层订阅。
-    /// </summary>
-    internal event Action<WorkingMode>? ModeDirectRequested;
-
-    /// <summary>
     /// Raised when an image paste is rejected because the current model doesn't
     /// support multimodal input. The caller should show a visible error message.
     /// </summary>
@@ -150,7 +143,8 @@ public sealed partial class ChatInputView : View
         KeybindingResolver? keyResolver = null,
         KeybindingContextManager? keyContextManager = null,
         OneCode.Core.IO.IClipboardService? clipboard = null,
-        Func<IReadOnlyList<string>>? historyProvider = null)
+        Func<IReadOnlyList<string>>? historyProvider = null,
+        Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? sessionCandidatesProvider = null)
     {
         _app = app;
         _modeController = modeController;
@@ -161,7 +155,7 @@ public sealed partial class ChatInputView : View
         _keyContextManager = keyContextManager ?? new KeybindingContextManager();
         _clipboard = clipboard;
 
-        var typeaheadEngine = new TypeaheadCompletionEngine(commands, Environment.CurrentDirectory, toolNameProvider);
+        var typeaheadEngine = new TypeaheadCompletionEngine(commands, Environment.CurrentDirectory, toolNameProvider, sessionCandidatesProvider);
 
         _completion = new ChatCompletionController(commands, typeaheadEngine);
         // History source: current conversation's user prompts. Falls back to empty

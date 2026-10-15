@@ -1,4 +1,5 @@
 using OneCode.Core.Coordinator;
+using OneCode.Core.Goals;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 
@@ -26,7 +27,10 @@ internal static class PipelineSecurityContextBuilder
         string? providerId = null,
         EditTransaction? editTransaction = null,
         SessionId? conversationId = null,
-        long? maxBudgetTokens = null)
+        long? maxBudgetTokens = null,
+        long budgetBaselineTokens = 0,
+        Func<long, long, CancellationToken, Task<ApprovalDecision>>? onBudgetExceeded = null,
+        Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null)
         => new(
             WorkingDirectory: workingDirectory,
             PermissionMode: permissionMode,
@@ -43,5 +47,8 @@ internal static class PipelineSecurityContextBuilder
             PermissionChecker: permissionChecker,
             TokenLedger: tokenLedger,
             ConversationId: conversationId,
-            MaxBudgetTokens: maxBudgetTokens);
+            MaxBudgetTokens: maxBudgetTokens,
+            BudgetBaselineTokens: budgetBaselineTokens,
+            OnBudgetExceeded: onBudgetExceeded,
+            OnBudgetWarning: onBudgetWarning);
 }

@@ -39,7 +39,6 @@ public sealed class PromptComposer(IPromptManager promptManager)
     public async Task<string> RenderMainBodyAsync(
         string systemContext,
         string userContext,
-        string? memorySection,
         string? availableTools,
         CancellationToken ct = default)
     {
@@ -47,36 +46,22 @@ public sealed class PromptComposer(IPromptManager promptManager)
             ?? throw new InvalidOperationException(
                 $"Base prompt '{DefaultPromptName}' not found in any IPromptManager store.");
 
-        return RenderDefaultPrompt(template, systemContext, userContext, memorySection, availableTools);
+        return RenderDefaultPrompt(template, systemContext, userContext, availableTools);
     }
 
     /// <summary>
-    /// Renders a Worker / fork body (role overlay or harness body), with the memory recall
-    /// hint appended. Returned without the harness fragment.
+    /// Renders a Worker / fork body (role overlay or harness body). Returned without the harness fragment.
     /// </summary>
     public string RenderRoleBody(string roleBody)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(roleBody);
-        return AppendMemoryHint(roleBody);
+        return roleBody.TrimEnd();
     }
-
-    // 子代理（Explore、Plan fork 等）持有 search_memories 工具但没有主会话的
-    // {{memory_section}} 摘要索引——末尾显式引导一行，避免"有工具却不知道用"。
-    private const string MemoryRecallHint =
-        """
-        ## Memory
-
-        Persistent memories (project conventions, past decisions, lessons learned) are available via the `search_memories` tool. Recall them with a natural-language query when relevant to your task.
-        """;
-
-    private static string AppendMemoryHint(string roleBody) =>
-        $"{roleBody.TrimEnd()}\n\n{MemoryRecallHint}";
 
     private static string RenderDefaultPrompt(
         string template,
         string systemContext,
         string userContext,
-        string? memorySection,
         string? availableTools)
     {
         var sb = new StringBuilder(template);
@@ -86,7 +71,6 @@ public sealed class PromptComposer(IPromptManager promptManager)
         sb.Replace("{{user_context}}",
             string.IsNullOrWhiteSpace(userContext) || userContext == "(No additional user context)"
                 ? string.Empty : userContext);
-        sb.Replace("{{memory_section}}", memorySection ?? string.Empty);
 
         return sb.ToString().TrimEnd();
     }

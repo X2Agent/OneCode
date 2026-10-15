@@ -1,10 +1,12 @@
 namespace OneCode.App.Tui;
 
+using System.Text.RegularExpressions;
+
 /// <summary>
 /// 为工具调用结果生成人类可读的摘要。
 /// 类似于 Claude Code 助手的工具调用显示风格。
 /// </summary>
-public static class ToolResultSummarizer
+public static partial class ToolResultSummarizer
 {
     /// <summary>
     /// 为工具调用生成结果摘要。
@@ -27,6 +29,7 @@ public static class ToolResultSummarizer
             "grep" => SummarizeGrep(result, toolInput),
             "glob" => SummarizeGlob(result, toolInput),
             "task" => SummarizeTask(result, toolInput),
+            "agent" => SummarizeAgent(result),
             "webfetch" => SummarizeWebFetch(result, toolInput),
             "websearch" => SummarizeWebSearch(result, toolInput),
             "ls" => SummarizeLs(result),
@@ -132,26 +135,102 @@ public static class ToolResultSummarizer
         };
     }
 
+    private static string? SummarizeAgent(string result)
+    {
+        // AgentTool 成功信封 {agent, conversationId, result, turnsCompleted, maxTurnsReached, toolCalls}：
+        // 完成行显示 "Explore · 3 turns · 12 tool calls"；错误信封显示错误 title。
+        // 后台模式信封 {background:true, taskId, ...} 无 result 字段——显示 "launched"。
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(result);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return null;
+
+            if (root.TryGetProperty("background", out var bg) && bg.ValueKind == System.Text.Json.JsonValueKind.True)
+                return "launched in background";
+
+            if (root.TryGetProperty("error", out var error) && error.ValueKind == System.Text.Json.JsonValueKind.Object
+                && error.TryGetProperty("title", out var title))
+                return Truncate(title.GetString() ?? "failed", 60);
+
+            var agentName = root.TryGetProperty("agent", out var agent) ? agent.GetString() : null;
+            var turns = ExtractIntField(root, "turnsCompleted");
+            var toolCalls = ExtractIntField(root, "toolCalls");
+            if (agentName is null && turns is null)
+                return null;
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(agentName))
+                parts.Add(agentName);
+            if (turns is { } t)
+                parts.Add($"{t} turn" + (t == 1 ? "" : "s"));
+            if (toolCalls is { } c and > 0)
+                parts.Add($"{c} tool call" + (c == 1 ? "" : "s"));
+            return parts.Count > 0 ? string.Join(" · ", parts) : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     private static string? SummarizeWebFetch(string result, string? toolInput)
     {
-        // 尝试提取标题或 URL
-        if (!string.IsNullOrEmpty(toolInput) && toolInput.Contains("url", StringComparison.Ordinal))
+        // 成功信封 {bytes, code, codeText, result, durationMs}：折叠行显示状态码 + 大小，
+        // URL 已由折叠行目标列展示，不再重复。
+        // TryUnwrapEnvelope 对该信封不解包（无 Content 字段），content 即原始信封 JSON。
+        // 错误结果信封会被解成错误消息纯文本——取首行作为失败原因。
+        var content = OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(result, out var inner)
+            ? inner
+            : result;
+        try
         {
-            var url = ExtractUrlFromInput(toolInput);
-            if (!string.IsNullOrEmpty(url))
-                return Truncate(url, 50);
+            using var doc = System.Text.Json.JsonDocument.Parse(content);
+            var root = doc.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object
+                && root.TryGetProperty("code", out var code)
+                && code.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                var status = root.TryGetProperty("codeText", out var codeText)
+                    ? $"{code.GetInt32()} {codeText.GetString()}"
+                    : $"{code.GetInt32()}";
+                var size = root.TryGetProperty("bytes", out var bytes)
+                    ? $" · {FormatBytes(bytes.GetInt64())}"
+                    : "";
+                return $"{status}{size}";
+            }
         }
-        return "Fetched";
+        catch (System.Text.Json.JsonException)
+        {
+            // 非 JSON——按错误消息文本处理，取首行。
+        }
+
+        var firstLine = content.Replace("\r\n", "\n").Split('\n')[0];
+        return Truncate(firstLine, 60);
+    }
+
+    internal static string FormatBytes(long byteCount)
+    {
+        const long BytesPerKb = 1024;
+        const long BytesPerMb = BytesPerKb * 1024;
+        return byteCount switch
+        {
+            >= BytesPerMb => $"{byteCount / (double)BytesPerMb:0.#} MB",
+            >= BytesPerKb => $"{byteCount / (double)BytesPerKb:0.#} KB",
+            _ => $"{byteCount} B",
+        };
     }
 
     private static string? SummarizeWebSearch(string result, string? toolInput)
     {
         // 结果经信封解包后是 {provider, query, results:[...]}——按结构化数组计数，
         // 旧实现按原始文本行数计数，JSON 单行结果恒显示 "1 results"。
+        // 超阈值落盘后内联 results 只剩前几条，优先读 resultCount（完整条数）。
         var content = OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(result, out var inner)
             ? inner
             : result;
-        var count = ExtractArrayLength(content, "results");
+        var count = ExtractIntField(content, "resultCount") ?? ExtractArrayLength(content, "results");
         if (count is { } results)
             return $"{results} results";
 
@@ -192,6 +271,29 @@ public static class ToolResultSummarizer
         }
         return null;
     }
+
+    /// <summary>从 JSON 对象中提取整数字段；缺失或类型不符返回 null。</summary>
+    private static int? ExtractIntField(string json, string propertyName)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return ExtractIntField(doc.RootElement, propertyName);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // 非 JSON 文本——调用方回落到数组计数
+        }
+        return null;
+    }
+
+    private static int? ExtractIntField(System.Text.Json.JsonElement root, string propertyName)
+        => root.ValueKind == System.Text.Json.JsonValueKind.Object
+            && root.TryGetProperty(propertyName, out var prop)
+            && prop.ValueKind == System.Text.Json.JsonValueKind.Number
+            && prop.TryGetInt32(out var value)
+                ? value
+                : null;
 
     /// <summary>
     /// 格式化工具调用行的目标显示。
@@ -240,16 +342,29 @@ public static class ToolResultSummarizer
                 return Truncate(url, 60);
         }
 
-        // 用户提问工具 - 显示问题或向导标题，不显示整段 JSON 参数。
-        if (toolName.Equals("AskUserQuestion", StringComparison.OrdinalIgnoreCase))
+        // Agent 派工工具 - 显示 "代理名 · 任务描述"（如 "Explore · 调研近半月新闻"），
+        // 不显示整段 JSON 参数。输入有完整/截断两种 JSON 形状——截断 JSON 解析失败时
+        // 回退裸文本（ToolStart 摘要通道），与 websearch/webfetch 的双通道处理一致。
+        if (normalized == "agent")
         {
-            var question = ExtractFieldFromJson(toolInput, "question") ?? toolInput;
-            return Truncate(question, 60);
+            var agentName = ExtractFieldFromJson(toolInput, "agent") ?? ExtractAgentNameTolerant(toolInput);
+            var description = ExtractFieldFromJson(toolInput, "description");
+            if (!string.IsNullOrEmpty(agentName) && !string.IsNullOrEmpty(description))
+                return Truncate($"{agentName} · {description}", 60);
+            if (!string.IsNullOrEmpty(agentName))
+                return Truncate(agentName, 60);
+            if (!string.IsNullOrEmpty(description))
+                return Truncate(description, 60);
+            // 截断 JSON（ToolStart 通道 100 字符摘要）解析失败——原样截断显示，不返回 null。
+            return Truncate(toolInput, 60);
         }
 
-        if (toolName.Equals("AskUserQuestions", StringComparison.OrdinalIgnoreCase))
+        // 用户提问工具 - 显示向导标题或首个问题文本，不显示整段 JSON 参数。
+        if (toolName.Equals("AskUserQuestion", StringComparison.OrdinalIgnoreCase))
         {
-            var title = ExtractFieldFromJson(toolInput, "title") ?? toolInput;
+            var title = ExtractFieldFromJson(toolInput, "title")
+                ?? ExtractFirstQuestionText(toolInput)
+                ?? toolInput;
             return Truncate(title, 60);
         }
 
@@ -282,8 +397,36 @@ public static class ToolResultSummarizer
         return null;
     }
 
-    private static string? ExtractUrlFromInput(string input)
-        => ExtractFieldFromJson(input, "url");
+    /// <summary>
+    /// 从 AskUserQuestion 的 questions 数组里取第一个元素的 question 文本，
+    /// 用于单题（无 title）时给摘要一个可读目标。
+    /// </summary>
+    private static string? ExtractFirstQuestionText(string input)
+    {
+        if (string.IsNullOrEmpty(input) || input[0] != '{')
+            return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(input);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("questions", out var questions)
+                || questions.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return null;
+
+            foreach (var item in questions.EnumerateArray())
+            {
+                if (item.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && item.TryGetProperty("question", out var question)
+                    && question.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return question.GetString();
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not valid JSON — caller will fall back to raw input
+        }
+        return null;
+    }
 
     /// <summary>
     /// Extracts a string field from a JSON object using <c>JsonDocument.Parse</c>.
@@ -291,7 +434,7 @@ public static class ToolResultSummarizer
     /// manual string IndexOf-based parsing which breaks on escaped quotes or
     /// values containing the field name as a substring.
     /// </summary>
-    private static string? ExtractFieldFromJson(string input, string fieldName)
+    internal static string? ExtractFieldFromJson(string input, string fieldName)
     {
         if (string.IsNullOrEmpty(input) || input[0] != '{')
             return null;
@@ -313,6 +456,23 @@ public static class ToolResultSummarizer
     /// <summary>JSON 提取失败时的裸值回退：输入本身已是摘要文本（非 JSON）则原样返回。</summary>
     private static string? RawInputFallback(string input)
         => input.Contains('{') || input.Contains('[') ? null : input.Trim('"', ' ', '\n', '\r');
+
+    /// <summary>
+    /// 容错提取工具输入中的 agent 字段值（AddToolStart/AddToolDone 子代理进度行注册共用）。
+    /// ToolStart 摘要通道传入截断 100 字符的 JSON——JsonDocument 解析失败，需用正则
+    /// 直接匹配字段文本。仅在值完整（含闭合引号）时返回，避免截断值与进度事件里的
+    /// 完整代理名对不上导致进度行永远不被更新。
+    /// </summary>
+    [GeneratedRegex(@"""agent""\s*:\s*""([^""]+)""")]
+    private static partial Regex AgentFieldRegex();
+
+    internal static string? ExtractAgentNameTolerant(string? toolInput)
+    {
+        if (string.IsNullOrEmpty(toolInput))
+            return null;
+        var match = AgentFieldRegex().Match(toolInput);
+        return match.Success ? match.Groups[1].Value : null;
+    }
 
     private static string SimplifyPath(string path)
     {

@@ -21,9 +21,16 @@ public sealed class AgentSessionPersistence(
     private readonly ISessionConversationAccess _sessionManager = sessionManager;
     private readonly ISessionChatHistoryReader _chatHistoryReader = chatHistoryReader;
     private readonly ILogger<AgentSessionPersistence> _logger = logger;
+
     /// <summary>创建桥接会话转录的 <see cref="ChatHistoryProvider"/>：历史读经框架契约，写仍归事件溯源转录。</summary>
-    public ChatHistoryProvider CreateChatHistoryProvider(SessionId conversationId)
-        => new TranscriptChatHistoryProvider(_chatHistoryReader, conversationId);
+    /// <param name="conversationId">会话标识。</param>
+    /// <param name="historySeedBoundary">
+    /// 阶段播种边界（approved-plan 受控 run）：null = 全量转录播种（交互路径）。
+    /// </param>
+    public ChatHistoryProvider CreateChatHistoryProvider(
+        SessionId conversationId,
+        HistorySeedBoundary? historySeedBoundary = null)
+        => new TranscriptChatHistoryProvider(_chatHistoryReader, conversationId, historySeedBoundary);
 
     /// <summary>
     /// Restores an <see cref="AgentSession"/> from <see cref="Conversation.Metadata"/> when a prior run

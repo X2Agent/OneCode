@@ -26,7 +26,6 @@ public enum PlanWorkflowState
     AwaitingApproval,
     StartingExecution,
     Executing,
-    Verifying,
     Completed,
     Failed,
     Cancelled,
@@ -36,7 +35,6 @@ public enum PlanRunKind
 {
     Planning,
     Build,
-    Verification,
 }
 
 public enum PlanRevisionStatus
@@ -51,16 +49,6 @@ public enum PlanStepRisk
     Low,
     Medium,
     High,
-}
-
-public enum PlanStepExecutionStatus
-{
-    Pending,
-    InProgress,
-    Completed,
-    Failed,
-    Skipped,
-    Cancelled,
 }
 
 public enum PlanFeedbackKind
@@ -78,15 +66,6 @@ public sealed record PlanStepDefinition
     public required IReadOnlyList<string> AcceptanceCriteria { get; init; }
     public required IReadOnlyList<string> DependsOn { get; init; }
     public required PlanStepRisk Risk { get; init; }
-}
-
-public sealed record PlanStepExecution
-{
-    public required string StepId { get; init; }
-    public required PlanStepExecutionStatus Status { get; init; }
-    public string? Evidence { get; init; }
-    public string? Error { get; init; }
-    public required DateTimeOffset UpdatedAt { get; init; }
 }
 
 public sealed record PlanRevision
@@ -118,6 +97,16 @@ public sealed record ApprovedPlanSnapshot
     public required string Title { get; init; }
     public required string Markdown { get; init; }
     public required IReadOnlyList<PlanStepDefinition> Steps { get; init; }
+
+    /// <summary>
+    /// 规划阶段用户的原始诉求（审批时冻结）。计划正文只写「做什么」，
+    /// 将用户原话与硬约束冻结进快照可确保跨上下文压缩或进程恢复时不丢失。
+    /// </summary>
+    public string OriginalRequest { get; init; } = string.Empty;
+
+    /// <summary>规划阶段与用户的澄清问答与后续修订反馈（审批时冻结，已渲染为可读文本行）。</summary>
+    public IReadOnlyList<string> Clarifications { get; init; } = [];
+
     public required string ContentHash { get; init; }
     public required string ApprovedBy { get; init; }
     public required DateTimeOffset ApprovedAt { get; init; }
@@ -138,8 +127,7 @@ public sealed record ApprovedPlanSnapshot
             step.AcceptanceCriteria)).ToArray(),
         [],
         [],
-        [],
-        RequireExplicitTaskCompletion: true);
+        []);
 }
 
 public sealed record PlanFeedback(
@@ -170,9 +158,6 @@ public sealed record PlanWorkflow : IWorkflowRun, ICommandIdempotent
     public DateTimeOffset? NextRetryAt { get; init; }
     public ApprovedPlanSnapshot? ApprovedSnapshot { get; init; }
     public PlanFeedback? PendingFeedback { get; init; }
-    public IReadOnlyList<PlanStepExecution> StepExecutions { get; init; } = [];
-    public IReadOnlyList<string> VerificationEvidence { get; init; } = [];
-    public string? CompletionSummary { get; init; }
     /// <summary>最近一次成功处理的命令标识（命令幂等，内核能力）。</summary>
     public string? LastProcessedCommandId { get; init; }
     public int? LastProcessedRevision { get; init; }

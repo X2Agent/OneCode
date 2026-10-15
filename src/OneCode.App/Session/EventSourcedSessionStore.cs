@@ -32,7 +32,7 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
                 .Select(message => message.Id)
                 .ToHashSet(StringComparer.Ordinal);
             var replacementRequired = existing.Count > 0
-                && !MessagesMatch(existingMessages, conversation.Messages);
+                && !IsPrefixMatch(existingMessages, conversation.Messages);
 
             List<SessionEvent> events = [];
 
@@ -193,20 +193,48 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
         _ => null,
     };
 
-    private static bool MessagesMatch(
+    /// <summary>
+    /// 判断已持久化的消息序列是否为当前对话消息列表的前缀。
+    /// 正常追加新消息时返回 <c>true</c>（仅追加增量事件）；
+    /// 仅当消息被截断、顺序改变或既有消息内容被改写（如 /compact、/rewind）时返回 <c>false</c>（发射 <see cref="MessagesReplacedEvent"/>）。
+    /// </summary>
+    private static bool IsPrefixMatch(
         IReadOnlyList<Message> existing,
         IReadOnlyList<Message> current)
     {
-        if (existing.Count != current.Count)
+        if (existing.Count > current.Count)
             return false;
 
-        for (var index = 0; index < current.Count; index++)
+        for (var index = 0; index < existing.Count; index++)
         {
-            if (!existing[index].Equals(current[index]))
+            if (!SingleMessageMatches(existing[index], current[index]))
                 return false;
         }
 
         return true;
+    }
+
+    private static bool SingleMessageMatches(Message left, Message right)
+    {
+        if (!string.Equals(left.Id, right.Id, StringComparison.Ordinal) || left.Role != right.Role)
+            return false;
+
+        return (left, right) switch
+        {
+            (UserMessage lUser, UserMessage rUser) =>
+                string.Equals(lUser.Content, rUser.Content, StringComparison.Ordinal)
+                && lUser.IsMeta == rUser.IsMeta,
+            (SystemMessage lSys, SystemMessage rSys) =>
+                string.Equals(lSys.Content, rSys.Content, StringComparison.Ordinal),
+            (ToolResultMessage lTool, ToolResultMessage rTool) =>
+                string.Equals(lTool.ToolUseId, rTool.ToolUseId, StringComparison.Ordinal)
+                && string.Equals(lTool.ToolName, rTool.ToolName, StringComparison.Ordinal)
+                && string.Equals(lTool.Content, rTool.Content, StringComparison.Ordinal)
+                && lTool.IsError == rTool.IsError,
+            (AssistantMessage lAsst, AssistantMessage rAsst) =>
+                lAsst.Content.SequenceEqual(rAsst.Content),
+            _ => left.Equals(right),
+        };
     }
 
     private static bool SnapshotsMatch(SessionStartedEvent snapshot, Conversation conversation)

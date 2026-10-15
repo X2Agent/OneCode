@@ -18,8 +18,11 @@ public sealed class BuildStateTransitionService
             [BuildRunState.Planning] = Set(BuildRunState.Planned, BuildRunState.Blocked, BuildRunState.Cancelled),
             [BuildRunState.Planned] = Set(BuildRunState.Implementing, BuildRunState.Blocked, BuildRunState.Cancelled),
             [BuildRunState.Implementing] = Set(BuildRunState.Verifying, BuildRunState.Recovering, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled, BuildRunState.LimitReached, BuildRunState.BudgetExceeded),
-            [BuildRunState.Verifying] = Set(BuildRunState.Accepting, BuildRunState.Recovering, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled),
-            [BuildRunState.Recovering] = Set(BuildRunState.Implementing, BuildRunState.Verifying, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled),
+            // Verifying/Recovering 同样要能转入 LimitReached/BudgetExceeded：CompleteAsync 先把
+            // 状态推进到 Verifying，之后才检查 result.TerminalReason——预算/轮次耗尽永远是从
+            // Verifying 发出的；恢复路径中途耗尽同理。缺边会导致 InvalidOperationException。
+            [BuildRunState.Verifying] = Set(BuildRunState.Accepting, BuildRunState.Recovering, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled, BuildRunState.LimitReached, BuildRunState.BudgetExceeded),
+            [BuildRunState.Recovering] = Set(BuildRunState.Implementing, BuildRunState.Verifying, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled, BuildRunState.LimitReached, BuildRunState.BudgetExceeded),
             [BuildRunState.Accepting] = Set(BuildRunState.Completed, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled),
         };
 

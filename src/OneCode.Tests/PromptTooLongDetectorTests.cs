@@ -9,7 +9,7 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class PromptTooLongDetectorTests
 {
-    // IsPromptTooLong(HttpRequestException)
+    // IsPromptTooLong(Exception)：413 状态码维度
 
     [Fact]
     public void IsPromptTooLong_HttpRequestException_413Status_ReturnsTrue()
@@ -51,7 +51,7 @@ public sealed class PromptTooLongDetectorTests
         PromptTooLongDetector.IsPromptTooLong(ex).Should().BeFalse();
     }
 
-    // IsPromptTooLong(Exception)
+    // IsPromptTooLong(Exception)：消息关键词维度
 
     [Fact]
     public void IsPromptTooLong_Exception_MessageContainsKeyword_ReturnsTrue()

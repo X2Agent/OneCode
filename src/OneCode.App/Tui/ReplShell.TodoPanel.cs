@@ -1,15 +1,19 @@
+using OneCode.App.Services.Agent;
 using OneCode.Core.Coordinator;
 
 namespace OneCode.App.Tui;
 
 /// <summary>
 /// 待办横条（<see cref="TodoStripView"/>）的宿主逻辑：快照进入、显示/隐藏与
-/// 内容区高度让位。与 Plan 侧边栏（右停靠、Ctrl+G 切换）相互独立——
-/// 横条是全宽底部状态带，不参与侧边栏互斥。
+/// 内容区高度让位。与 Plan 侧边栏（右停靠、Ctrl+G 切换）的关系只有一处：
+/// 计划执行中且侧边栏可见时，横条不再重复显示计划预置的步骤待办。
 /// </summary>
 public sealed partial class ReplShell
 {
     private readonly TodoStripView _todoStrip;
+
+    /// <summary>最近一次收到的完整快照；侧边栏可见性变化时据此重算横条内容。</summary>
+    private IReadOnlyList<TodoListItem> _todoItems = [];
 
     /// <summary>
     /// 用权威快照更新横条。空列表隐藏横条并归还对话区高度；
@@ -17,15 +21,46 @@ public sealed partial class ReplShell
     /// </summary>
     public void ShowTodoPanel(IReadOnlyList<TodoListItem> items)
     {
-        _todoStrip.Update(items);
-        ApplyTodoStripLayout();
+        _todoItems = items;
+        RefreshTodoStrip();
     }
 
     /// <summary>清空待办横条并隐藏（会话切换/关闭时调用）。</summary>
     public void ClearTodoPanel()
     {
-        _todoStrip.Update([]);
+        _todoItems = [];
+        RefreshTodoStrip();
+    }
+
+    /// <summary>
+    /// 按当前侧边栏状态重算横条内容。计划侧边栏可见且持有步骤列表时（无论是执行中还是执行结束后的展示态），
+    /// 侧边栏已完整呈现步骤进度，横条不再重复列出计划预置的步骤待办；侧边栏隐藏时横条是唯一进度面，保持完整。
+    /// </summary>
+    private void RefreshTodoStrip()
+    {
+        if (_activePlan is { Phase: PlanCardPhase.Completed } && _planSidebar.Visible)
+        {
+            _todoStrip.Update([]);
+            ApplyTodoStripLayout();
+            return;
+        }
+
+        _todoStrip.Update(PlanSidebarShowsStepProgress(out var stepTitles)
+            ? _todoItems.Where(todo => !PlanTodoSeeder.IsSeededFor(todo.Title, stepTitles)).ToList()
+            : _todoItems);
         ApplyTodoStripLayout();
+    }
+
+    private bool PlanSidebarShowsStepProgress(out IReadOnlyCollection<string> stepTitles)
+    {
+        if (_activePlan is { Steps.Count: > 0 } plan && _planSidebar.Visible)
+        {
+            stepTitles = plan.Steps.Select(step => step.Label).ToHashSet(StringComparer.Ordinal);
+            return true;
+        }
+
+        stepTitles = [];
+        return false;
     }
 
     private void ApplyTodoStripLayout()

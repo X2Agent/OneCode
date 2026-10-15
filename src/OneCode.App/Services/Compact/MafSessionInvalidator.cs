@@ -18,9 +18,10 @@ namespace OneCode.App.Services.Compact;
 /// 由 provider 在下次调用时按新历史重建。
 /// </para>
 /// <para>
-/// 失效范围不止 <c>stateBag</c>：会话**根**上的本地历史哨兵
-/// <c>_agent_local_chat_history</c> 也必须剔除，否则 <c>CompactionProvider</c> 会把它当作
-/// 「服务端托管历史」而永久跳过压缩——被剪掉的压缩索引也就永远不会重建（详见该类内该常量的说明）。
+/// 失效范围不止 <c>stateBag</c>：会话**根**上的本地历史哨兵 <c>_agent_local_chat_history</c> 一并剔除。
+/// 哨兵是为旧历史写入的运行时簿记戳（让 <c>FunctionInvokingChatClient</c> 按服务托管语义清空迭代间累积历史），
+/// 结构性历史变更后丢弃，由 per-service-call 装饰器在恢复后的第一次服务调用重新打戳。
+/// 详见 <see cref="LocalHistorySentinel"/> 的说明。
 /// </para>
 /// </remarks>
 public static class MafSessionInvalidator
@@ -77,12 +78,13 @@ public static class MafSessionInvalidator
     /// <c>HarnessAgent</c> 强制 per-service-call 历史持久化，该装饰器在第一次服务调用后把哨兵写入
     /// <c>ChatClientAgentSession.ConversationId</c>（序列化在会话**根**上，不在 <c>stateBag</c> 里）。
     /// </para>
-    /// <para>
-    /// <b>为什么失效时必须一并丢弃</b>：<c>CompactionProvider</c> 把「<c>ConversationId</c> 非空」解读为
-    /// 「历史由远端服务托管」并整个跳过压缩。保留哨兵会让 compact 之后的会话**永久**失去自动压缩——
-    /// 上面刚剪掉的压缩索引也就永远不会被 provider 按新历史重建，与本类「定向失效后由 provider 重建」的
-    /// 意图直接矛盾。<c>ConversationId</c> 的 setter 是 internal 且拒绝空值，产品侧只能从持久化快照里剔除。
-    /// </para>
+/// <para>
+/// <b>为什么失效时一并丢弃</b>：哨兵由旧历史的服务调用写入，属于随历史一起失效的运行时簿记状态；
+/// 结构性变更后丢弃，per-service-call 装饰器会在恢复后的第一次服务调用重新打戳，恢复会话与新建会话
+/// 行为对齐。MAF 1.24 起 <c>CompactionProvider</c> 已不因哨兵跳过压缩——升级前「保留哨兵会让 compact
+/// 后的会话永久失去自动压缩」是剔除的原始动机，现已解除。<c>ConversationId</c> 的 setter 是 internal
+/// 且拒绝空值，产品侧只能从持久化快照里剔除。
+/// </para>
     /// <para>
     /// 行为由 <c>HarnessCompactionActivationTests</c> 守卫（含「去掉装饰器后每次服务调用都压缩」的反证）。
     /// </para>
@@ -188,7 +190,7 @@ public static class MafSessionInvalidator
         var prunedSession = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (var property in sessionElement.EnumerateObject())
         {
-            // 哨兵必须一并剔除，否则压缩在 compact 之后永久失效（见 LocalHistorySentinel 的说明）。
+            // 哨兵是旧历史的运行时簿记戳，随结构性历史变更一并剔除（见 LocalHistorySentinel 的说明）。
             // 只剔除哨兵本身：真·远端 ConversationId 代表服务端托管的历史，丢弃它会切断续跑。
             if (property.Name == ConversationIdPropertyName
                 && property.Value.ValueKind == JsonValueKind.String

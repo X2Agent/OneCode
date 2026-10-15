@@ -6,4 +6,5 @@ internal sealed record ConsolidationChange(
     string Scope,
     string Key,
     string? Value,
-    int? TtlHours);
+    int? TtlHours,
+    IReadOnlyList<string>? Supersedes = null);

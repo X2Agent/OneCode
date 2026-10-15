@@ -1,108 +1,120 @@
-using System.Text.Json;
 using OneCode.App.Tui;
 
 namespace OneCode.Tests;
 
 /// <summary>
-/// 工具结果展开详情格式化守护：
-/// 1. 双重编码信封（ToolResult 序列化 + MAF camelCase 包装）必须解包到工具原始输出；
-/// 2. WebSearch 结构化结果渲染为"标题 / URL / 摘要"列表而非原始 JSON；
-/// 3. 上游截断产生的非法 JSON 与纯文本结果不抛异常，回退可读展示。
+/// 工具结果展开详情的按工具格式化：WebFetch 专用（头行 = 状态 · 大小 · prompt，
+/// 正文预览有行数上限），其余工具走通用上限路径。
 /// </summary>
 public sealed class ToolResultDetailFormatterTests
 {
+    private static string WebFetchEnvelope(string result, long bytes = 26513, int code = 200, string codeText = "OK")
+        => System.Text.Json.JsonSerializer.Serialize(new
+        {
+            bytes,
+            code,
+            codeText,
+            result,
+            durationMs = 123,
+        });
+
     [Fact]
-    public void FormatDetail_WebSearchEnvelope_RendersResultList()
+    public void FormatDetail_WebFetchEnvelope_HeaderShowsStatusSizeAndPrompt()
     {
-        var inner = """
-            {"provider":"tavily","query":"孙割 新闻","results":[
-            {"title":"标题A","url":"https://a.example/x","snippet":"摘要A"},
-            {"title":"标题B","url":"https://b.example/y","snippet":"摘要B"}],"durationSeconds":2.5}
-            """;
-        var raw = JsonSerializer.Serialize(new { Content = inner, IsError = false, Severity = "info" });
+        // 正文首行形如 "Content from URL (prompt: 总结此页):"，prompt 提取进头行，
+        // 正文跳过该行——否则 prompt 与正文重复出现两遍。
+        var result = "Content from URL (prompt: 总结此页):\n正文第一行\n正文第二行\n";
 
-        var lines = ToolResultDetailFormatter.FormatDetail("WebSearch", raw);
-        var combined = string.Join("", lines.Select(line => line.Text));
+        var lines = ToolResultDetailFormatter.FormatDetail("WebFetch", WebFetchEnvelope(result));
 
-        lines[0].Text.Should().Be("搜索: 孙割 新闻 · tavily · 2 条");
-        combined.Should().Contain("1. 标题A");
-        combined.Should().Contain("2. 标题B");
-        combined.Should().Contain("https://a.example/x");
-        combined.Should().Contain("摘要A");
-        combined.Should().NotContain("\\u", "信封解包后中文必须以原文展示");
-        lines.Should().Contain(line => line.Text.Contains("https://a.example/x") && line.Fg == TuiPalette.Accent);
-        lines.Should().Contain(line => line.Text.Contains("摘要A") && line.Fg == TuiPalette.FgSecondary);
+        lines[0].Text.Should().Contain("200 OK").And.Contain("25.9 KB").And.Contain("总结此页");
+        lines.Should().NotContain(line => line.Text.StartsWith("Content from URL"),
+            "prompt 首行已并入头行，不得重复出现");
+        lines.Select(line => line.Text).Should().Contain("正文第一行").And.Contain("正文第二行");
     }
 
     [Fact]
-    public void FormatDetail_TruncatedInvalidJson_FallsBackToRawText()
+    public void FormatDetail_WebFetchEnvelope_LongBody_TruncatesWithRemainingLineCount()
     {
-        // 复现 2026-09 事故形态：上游把 camelCase 信封截断（500 字符 + "..."），
-        // JSON 非法——格式化不得抛异常，回退原始文本逐行展示。
-        var raw = """{"content":"{\"provider\":\"tavily\",\"query\":\"孙割 新闻\",\"results\":[{\"title\":\"标题A""";
+        // 完整正文已发送给模型，对话流里只做概览：正文超过 30 行折叠为剩余行数提示。
+        var body = string.Join("\n", Enumerable.Range(1, 50).Select(i => $"line-{i}"));
+        var result = $"Content from URL (prompt: p):\n{body}\n";
 
-        var lines = ToolResultDetailFormatter.FormatDetail("WebSearch", raw);
-        var combined = string.Join("", lines.Select(line => line.Text));
+        var lines = ToolResultDetailFormatter.FormatDetail("WebFetch", WebFetchEnvelope(result));
 
-        lines.Should().NotBeEmpty();
-        combined.Should().Contain("tavily");
-        combined.Should().Contain("标题A");
+        // 头行 + 30 行预览 + 1 行剩余提示
+        lines.Should().HaveCount(32);
+        lines[^1].Text.Should().Be("… 还有 20 行（完整内容已发送给模型）");
+        lines.Select(line => line.Text).Should().Contain("line-30");
+        lines.Select(line => line.Text).Should().NotContain("line-31");
     }
 
     [Fact]
-    public void FormatDetail_WebSearchMultilineJunkSnippet_CollapsesToSingleLine()
+    public void FormatDetail_WebFetchEnvelope_EmptyBody_ShowsPlaceholder()
     {
-        // Tavily 的 snippet 常夹带站点页脚样板（如 Reuters 的 Cookies/Privacy 页脚）与
-        // 真实换行——必须折叠为单行再截断，不能在对话里多行铺开。
-        var inner = """
-            {"provider":"tavily","query":"q","results":[
-            {"title":"标题A","url":"https://a.example/x","snippet":"正文第一行\nCookies, opens new tab\nTerms & Conditions\nPrivacy, opens new tab\nCopyright, opens new tab"}]}
-            """;
-        var raw = JsonSerializer.Serialize(new { Content = inner, IsError = false });
+        var result = "Content from URL (prompt: p):\n";
 
-        var lines = ToolResultDetailFormatter.FormatDetail("WebSearch", raw);
+        var lines = ToolResultDetailFormatter.FormatDetail("WebFetch", WebFetchEnvelope(result));
 
-        lines.Count(line => line.Text.Contains("Cookies")).Should().Be(1);
-        lines.Count(line => line.Text.Contains("Terms & Conditions")).Should().Be(1);
-        lines.Should().OnlyContain(line => !line.Text.EndsWith("\n") && !line.Text.EndsWith("\r"));
+        lines.Should().Contain(line => line.Text == "(空正文)");
     }
 
     [Fact]
-    public void FormatDetail_PlainTextResult_Unchanged()
+    public void FormatDetail_WebFetchPlainTextError_FallsBackToGeneric()
     {
-        var raw = """{"Content":"Total: 12 entries\n2025-01-01 12:00 a.txt","IsError":false,"Severity":"info"}""";
+        // 错误结果不是成功信封 JSON——回退通用展示，把错误消息铺出来。
+        var lines = ToolResultDetailFormatter.FormatDetail("WebFetch", "403 Forbidden: blocked");
 
-        var lines = ToolResultDetailFormatter.FormatDetail("LS", raw);
-
-        lines[0].Text.Should().Be("Total: 12 entries");
-        lines.Should().Contain(line => line.Text.Contains("a.txt"));
+        lines.Should().Contain(line => line.Text.Contains("403 Forbidden"));
     }
 
     [Fact]
-    public void FormatDetail_EmptyResult_ShowsPlaceholder()
+    public void FormatDetail_Generic_LongOutput_TruncatesAtSixtyLinesWithHint()
     {
-        var lines = ToolResultDetailFormatter.FormatDetail("Bash", "  ");
+        var content = string.Join("\n", Enumerable.Range(1, 100).Select(i => $"row-{i}"));
 
-        lines.Should().ContainSingle().Which.Text.Should().Be("(空结果)");
+        var lines = ToolResultDetailFormatter.FormatDetail("CustomTool", content);
+
+        // 60 行预览 + 1 行剩余提示
+        lines.Should().HaveCount(61);
+        lines[^1].Text.Should().Contain("还有更多行（完整结果已发送给模型）");
+        lines.Select(line => line.Text).Should().Contain("row-60");
+        lines.Select(line => line.Text).Should().NotContain("row-61");
     }
 
     [Fact]
-    public void FormatDetail_WebSearchHtmlFooterSnippet_StripsTags()
+    public void FormatDetail_AgentEnvelope_ShowsMetaHeaderThenResultText()
     {
-        // 历史转录的旧结果夹带站点页脚原始 HTML（<footer>/<p style=...>）——
-        // 回放渲染前必须剥离标签，不得把标签噪音铺进对话。
-        var inner = """
-            {"provider":"tavily","query":"q","results":[
-            {"title":"页脚","url":"https://a.example/x","snippet":"正文 <b>要点</b> 继续\n<footer><p style=\"margin-top:10px\">生成时间：2026-10-02</p></footer>"}]}
-            """;
-        var raw = JsonSerializer.Serialize(new { Content = inner, IsError = false });
+        // AgentTool 成功信封：详情展开 = 元信息头行（turns · tool calls）+ result 正文（非原始 JSON）。
+        const string raw = """{"agent":"Explore","conversationId":"abc","result":"line one\nline two","turnsCompleted":3,"maxTurnsReached":false,"toolCalls":12}""";
 
-        var lines = ToolResultDetailFormatter.FormatDetail("WebSearch", raw);
+        var lines = ToolResultDetailFormatter.FormatDetail("Agent", raw);
 
-        var snippetLine = lines.Single(line => line.Text.Contains("正文"));
-        snippetLine.Text.Should().NotContain("<b>");
-        snippetLine.Text.Should().NotContain("<footer>");
-        snippetLine.Text.Should().Contain("生成时间：2026-10-02", "标签剥掉但内容保留");
-        lines.Should().NotContain(line => line.Text.Contains("<"));
+        lines[0].Text.Should().Be("3 turns · 12 tool calls");
+        lines.Select(line => line.Text).Should().Contain("line one");
+        lines.Select(line => line.Text).Should().Contain("line two");
+        lines.Select(line => line.Text).Should().NotContain(raw, "原始 JSON 不得直接铺给用户");
+    }
+
+    [Fact]
+    public void FormatDetail_AgentEnvelope_MaxTurnsReached_IsFlaggedInHeader()
+    {
+        const string raw = """{"agent":"Explore","conversationId":"abc","result":"partial","turnsCompleted":50,"maxTurnsReached":true,"toolCalls":49}""";
+
+        var lines = ToolResultDetailFormatter.FormatDetail("Agent", raw);
+
+        lines[0].Text.Should().Contain("50 turns");
+        lines[0].Text.Should().Contain("达到上限");
+    }
+
+    [Fact]
+    public void FormatDetail_AgentBackgroundEnvelope_FallsBackToGeneric()
+    {
+        // 后台模式信封无 result 文本——回退通用展示（不渲染发言/正文块）。
+        const string raw = """{"background":true,"taskId":"t-1","agent":"Explore","status":"started"}""";
+
+        var lines = ToolResultDetailFormatter.FormatDetail("Agent", raw);
+
+        lines.Should().Contain(line => line.Text.Contains("background"), "generic 视图应显示原始信封内容");
     }
 }

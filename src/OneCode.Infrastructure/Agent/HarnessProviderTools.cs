@@ -43,6 +43,15 @@ public static class HarnessProviderTools
             "todos_get_all",
         };
 
+    /// <summary>会改变待办清单状态的工具（只读的 get_* 不在内），用于判定「待办有无进展」。</summary>
+    public static readonly IReadOnlySet<string> TodoMutationToolNames =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "todos_add",
+            "todos_complete",
+            "todos_remove",
+        };
+
     /// <summary>Harness 会话工作记忆工具名（取自 MAF 公开常量）。</summary>
     public static readonly IReadOnlySet<string> FileMemoryToolNames =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -99,6 +108,10 @@ public static class HarnessProviderTools
             ApprovalMode = ToolPolicyDefaults.ForRisk(ToolRisk.Safe),
             IsVisible = false,
             LoadPolicy = ToolLoadPolicy.Deferred,
+            // 这些工具只读写 agent 自己的会话状态（待办清单、agent-file-memory），
+            // 不触碰用户工作区文件，Plan 模式白名单必须放行——否则模型能看到工具、
+            // 审批也通过，最后却被 Plan 白名单拒掉。
+            Category = ToolCategory.PlanAllowed,
         });
 
     private static IReadOnlySet<string> MergeAll()

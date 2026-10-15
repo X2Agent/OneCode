@@ -2,10 +2,12 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using NSubstitute;
+using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Loop;
 using OneCode.App.Tui;
 using OneCode.Core.Exec;
+using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;
@@ -155,12 +157,21 @@ public sealed class IterativeLoopServiceTests
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(Path.GetTempPath());
 
-        var service = new IterativeLoopService(runner, CreateShellExecutor(0), null, catalog, wd);
+        var service = new IterativeLoopService(runner, CreateShellExecutor(0), null, catalog, wd, CreatePromptManager());
         await DrainAsync(service, new LoopRunRequest("修复构建", "exit 0", 2));
 
         await runner.Received(1).BuildAsAIAgentAsync(
-            Arg.Is<MainAgentRunOptions>(options => options.ConversationId == null),
+            Arg.Is<MainAgentRunOptions>(options =>
+                options.ConversationId == null
+                && options.HarnessInstructions == "HARNESS_FRAGMENT_SENTINEL"),
             Arg.Any<CancellationToken>());
+    }
+
+    private static PromptManager CreatePromptManager()
+    {
+        var pm = new PromptManager();
+        pm.RegisterTemplate(new PromptTemplate(PromptComposer.HarnessPromptName, "HARNESS_FRAGMENT_SENTINEL"));
+        return pm;
     }
 
     private static List<string> ProgressMessages(List<TuiEvent> events)
@@ -202,7 +213,8 @@ public sealed class IterativeLoopServiceTests
             shellExecutor ?? CreateShellExecutor(0),
             verificationProvider,
             catalog,
-            wd);
+            wd,
+            CreatePromptManager());
     }
 
     /// <summary>按调用序号返回脚本化退出码的 shell 执行器；耗尽后固定返回 0。</summary>

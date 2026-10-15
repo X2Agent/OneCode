@@ -23,7 +23,7 @@ You are performing a **security-only** review. Ignore style, performance, and ge
 - **Secrets in logs/telemetry** — sensitive data written to logs, error messages, or metrics
 - **Insecure dependencies** — known-vulnerable library versions visible in the diff
 
-For each finding, determine exploitability from the diff context alone — do not speculate about runtime conditions you cannot verify.
+If a diff hunk is truncated or lacks caller/callee context to determine whether an input is already validated or sanitized, use `Read`, `Grep`, or `Lsp` to inspect the surrounding code before reporting — never speculate or report unverified false positives.
 
 {{severityScope}}
 

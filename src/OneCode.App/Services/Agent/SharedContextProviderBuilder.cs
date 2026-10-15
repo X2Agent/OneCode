@@ -71,9 +71,9 @@ public sealed class SharedContextProviderBuilder(
             // re-discovery on every turn.
             [AgentCapability.Skills] = (b, _, _) => b._skillProviderFactory.Create(),
 
-            [AgentCapability.MemorySearch] = (b, _, _) => MemorySearchProviderFactory.Create(
+            [AgentCapability.MemorySearch] = (b, _, _) => new MemoryContextProvider(
                 b._memory.MemoryService,
-                b._loggerFactory),
+                b._loggerFactory.CreateLogger<MemoryContextProvider>()),
 
             [AgentCapability.DesignContext] = (b, o, cwd) => new DesignContextProvider(
                 b._memory.SessionManager,
@@ -92,6 +92,14 @@ public sealed class SharedContextProviderBuilder(
                     ? new ShellEnvironmentProvider(shellExecutor)
                     : null,
 
-            [AgentCapability.CodeAct] = (b, _, cwd) => b._runtime.CodeActService.TryCreateProvider(cwd),
+            [AgentCapability.CodeAct] = (b, o, cwd) =>
+                // Plan 模式在装配期剔除 execute_code：返回 null 让 provider 整个跳过，
+                // 工具不进模型工具列表——比"权限层事后拒绝调用"少一整段审批往返。
+                // 无审批通道的 run（受控 Build：SuppressToolApproval）同样剔除——execute_code
+                // 在框架层恒带 AlwaysRequire 审批边界，FICC 的审批拦截发生在权限层之前，
+                // 无人应答的审批请求会让整个 attempt 以异常告终（事务随之回滚）。
+                o.WorkingMode == WorkingMode.Plan || o.SuppressToolApproval
+                    ? null
+                    : b._runtime.CodeActService.TryCreateProvider(cwd),
         };
 }

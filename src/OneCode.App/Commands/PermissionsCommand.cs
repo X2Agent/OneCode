@@ -95,7 +95,7 @@ public sealed class PermissionsCommand(
                 var switchHint = string.Join(" / ", modes.Select(m => m.ToString().ToUpperInvariant()));
                 return CommandResult.Error(
                     $"'{modeArg}' is a working-mode-derived permission policy, not a permission level. " +
-                    $"Switch to {switchHint} mode instead (Tab or Alt+1/2/4).");
+                    $"Switch to {switchHint} mode instead (Tab).");
             }
             return CommandResult.Error(
                 $"Unknown permission mode: '{modeArg}'\nValid: {ValidModesHelp}");

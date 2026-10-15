@@ -3,11 +3,12 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
-using OneCode.App.Services.Compact;
 using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
+using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
+using OneCode.Infrastructure.Middleware;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -40,6 +41,11 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     private readonly ToolAssembler _toolAssembler;
     private readonly BuildPreambleRunner _buildPreambleRunner;
     private readonly HookDispatcher _hookDispatcher;
+    private readonly OneCode.Infrastructure.Agent.IHyperlightRuntimeProbe? _hyperlightRuntimeProbe;
+    private readonly OneCode.App.Services.AutoDream.IAutoDreamService? _autoDreamService;
+
+    /// <summary>Hyperlight 不可用提示只发一次（进程生命周期）。</summary>
+    private bool _hyperlightUnavailableNoticeShown;
 
     /// <summary>Latest cache-safe snapshot for sub-agent spawning.</summary>
     public CacheSafeParams? LastCacheSafeParams { get; private set; }
@@ -63,7 +69,9 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         IToolCatalog toolCatalog,
         IHookExecutionService hookExecutionService,
         ChatSessionDependencies session,
-        ChatObservabilityDependencies observability)
+        ChatObservabilityDependencies observability,
+        PlanRunCloser? planRunCloser = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _logger = logger;
         _mainAgentRunner = mainAgentRunner;
@@ -76,15 +84,14 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         _buildRunGate = new BuildRunGate(
             mainAgentRunner,
             session.SessionManager,
-            session.ToolProtocolValidator ?? new ToolProtocolValidator(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<BuildRunGate>.Instance,
+            // 有 factory 时给 gate 一份真实日志（回滚观测依赖它），否则保持 NullLogger。
+            loggerFactory?.CreateLogger<BuildRunGate>()
+                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<BuildRunGate>.Instance,
             session.BuildRunCoordinator,
-            session.ClarificationInteraction,
             session.ControlledBuildAttemptHost,
             session.BuildRunStore,
-            session.OperationLedger,
-            session.PlanWorkflow,
-            session.PlanCardPublisher);
+            planRunCloser,
+            loggerFactory);
         _tokenUsageTracker = observability.TokenUsageTracker;
         _tokenBreakdownEstimator = observability.TokenBreakdownEstimator;
         _notifierService = observability.NotifierService;
@@ -93,6 +100,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             _toolCatalog, _configManager, _sessionToolSetManager, _toolCapabilityResolver, _logger);
         _buildPreambleRunner = new BuildPreambleRunner(_buildRunGate, _toolAssembler);
         _hookDispatcher = new HookDispatcher(_hookExecutionService, _configManager, _notifierService);
+        _hyperlightRuntimeProbe = session.HyperlightRuntimeProbe;
+        _autoDreamService = observability.AutoDreamService;
     }
 
     /// <inheritdoc />
@@ -191,11 +200,10 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             ControlledExecution: false,
             WorkingMode: workingMode,
             FileChangeCallback: fileChangeCallback,
-            HarnessInstructions: harnessInstructions);
+            HarnessInstructions: harnessInstructions,
+            ToolCapabilities: capabilities);
 
-        await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
-            conversationId?.ToString(), capabilities, agentRunId,
-            () => StreamCoreAsync(request, ct), ct).ConfigureAwait(false))
+        await foreach (var e in StreamCoreAsync(request, ct).ConfigureAwait(false))
         {
             yield return e;
         }
@@ -203,7 +211,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 
     /// <summary>
     /// Starts an application-orchestrated run with an explicit context boundary.
-    /// It does not append a synthetic user message and does not replay the planning transcript.
+    /// It does not append a synthetic user message and applies the approved-plan history seed boundary.
     /// </summary>
     internal async IAsyncEnumerable<QueryEvent> StreamWorkflowAsync(
         WorkflowRunRequest request,
@@ -211,6 +219,13 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     {
         var capabilities = _toolCapabilityResolver.Resolve(request.WorkingMode);
         var localTools = _toolAssembler.AssembleTools(request.Instruction, capabilities, request.SessionId);
+
+        // 执行世代历史播种边界：保留 Plan 阶段的对话与只读检索结果，仅剥离边界之前的
+        // SubmitPlan 工具调用对；epoch 漂移（记录后发生过 compact/clear 等结构性变更）时边界失效，回退全量。
+        var seedBoundary = request.PrescribedBuildPlan is not null
+            && _sessionManager.GetConversation(request.SessionId) is { } boundaryConversation
+                ? HistorySeedBoundary.ReadValidated(boundaryConversation)
+                : null;
 
         var streamRequest = new QueryStreamRequest(
             request.SystemPrompt,
@@ -230,11 +245,11 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             WorkingMode: request.WorkingMode,
             FileChangeCallback: null,
             PrescribedBuildPlan: request.PrescribedBuildPlan,
-            HarnessInstructions: request.HarnessInstructions);
+            HarnessInstructions: request.HarnessInstructions,
+            ToolCapabilities: capabilities,
+            HistorySeedBoundary: seedBoundary);
 
-        await foreach (var e in QueryStreamHelpers.WithActivationContextAsync(
-            request.SessionId.ToString(), capabilities, request.RunId,
-            () => StreamCoreAsync(streamRequest, ct), ct).ConfigureAwait(false))
+        await foreach (var e in StreamCoreAsync(streamRequest, ct).ConfigureAwait(false))
         {
             yield return e;
         }
@@ -253,10 +268,38 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Hyperlight 沙箱运行时不可用的一次性用户可见降级提示（原先静默降级，用户无从知晓
+    /// execute_code 为何消失）。仅在会装载 CodeAct 的模式（非 Plan——Plan 已于装配期剔除）下提示，
+    /// 进程生命周期内只发一次。probe 未注入（测试路径）视为可用，不发提示。
+    /// </summary>
+    private IEnumerable<QueryEvent> ConsumeHyperlightUnavailableNotice(WorkingMode workingMode)
+    {
+        if (_hyperlightUnavailableNoticeShown
+            || workingMode == WorkingMode.Plan
+            || _hyperlightRuntimeProbe?.IsAvailable() != false)
+        {
+            return [];
+        }
+
+        _hyperlightUnavailableNoticeShown = true;
+        return
+        [
+            new NoticeEvent(
+                "⚠ 代码执行沙箱（execute_code）在本机不可用（未启用 Windows Hypervisor Platform / KVM），已停用。" +
+                "恢复方式：BIOS 开启 VT-x，并执行 dism /online /enable-feature /featurename:HypervisorPlatform /All。"),
+        ];
+    }
+
     private async IAsyncEnumerable<QueryEvent> StreamCoreAsync(
         QueryStreamRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        foreach (var notice in ConsumeHyperlightUnavailableNotice(request.WorkingMode))
+        {
+            yield return notice;
+        }
+
         var preambleState = new BuildPreambleState();
         await foreach (var gateEvent in _buildPreambleRunner.EnsureBuildRunPreambleAsync(request, preambleState, ct).ConfigureAwait(false))
             yield return gateEvent;
@@ -270,46 +313,75 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 "Controlled Build requires the durable attempt host, coordinator and BuildRun store.");
         }
 
+        // 预先读取全部 ambient 旧值：一次 try/finally 覆盖所有 set 点，
+        // 构建 run 骨架（StreamingSession/RunOptions/Channel/StartRun）抛出时不再泄漏。
         var previousBuildRunId = OneCodeAgentRunContext.CurrentBuildRunId;
-        OneCodeAgentRunContext.CurrentBuildRunId = preambleState.BuildRun?.Id.ToString();
+        var previousRunId = OneCodeAgentRunContext.CurrentRunId;
+        var previousConversationId = ToolActivationContext.CurrentConversationId;
+        var previousCapabilities = ToolActivationContext.CurrentCapabilities;
+        var previousSubagentWriter = OneCodeAgentRunContext.SubagentEventWriter;
+        var previousPlanSeal = OneCodeAgentRunContext.PlanSubmissionSeal;
 
         var aggregatedText = new System.Text.StringBuilder();
         var aggregatedTurns = 0;
         TokenUsage? aggregatedUsage = null;
         StreamingSession session = null!;
         var outcome = new TerminalOutcomeState { Reason = RunTerminalReason.Completed };
+        // 逐批落盘进度：已持久化的封口批次数（run 收尾的 TranscriptPersistence 只补增量）。
+        var persistedBatchCount = 0;
+        // 尾段（Flush 之后）仍需使用；赋值均发生在 try 内、任何使用之前。
+        MainAgentRunOptions options = null!;
+        Task<MainAgentRunResult> runTask = null!;
+        // Plan 收口防重入标记：正常路径收口后，外层 finally 的兜底收口跳过。
+        var planRunClosed = false;
+        // 单次收口包装：已收口直接跳过（收口本身对已终态工作流幂等，这里连调用都省去）。
+        async Task CloseOutOnceAsync(PlanRunEnd end, CancellationToken token)
+        {
+            if (planRunClosed)
+                return;
+            planRunClosed = true;
+            await CloseOutPlanRunAsync(request, session, end, token).ConfigureAwait(false);
+        }
         try
         {
+            // AsyncLocal 变更不跨 async iterator 的 yield 边界存续——每个 MoveNext 段都以消费方的
+            // ExecutionContext 恢复，迭代器内部早期段的 set 对后续段不可见。preamble 事件或纠偏
+            // NoticeEvent 的 yield 之后尤其如此。StartRun 捕获的 EC 决定工具执行时的 ambient
+            // （SubmitPlan 的 run 绑定、动态激活会话定位都依赖它），故在此显式重建；先例见
+            // ControlledBuildAttemptRuntime（受控路径的同款处理）。
+            OneCodeAgentRunContext.CurrentBuildRunId = preambleState.BuildRun?.Id.ToString();
+            OneCodeAgentRunContext.CurrentRunId = request.AgentRunId;
+            // 每个 Plan run 一枚新封条：SubmitPlan 成功后落封，工具中间件据此拒绝后续工具调用。
+            OneCodeAgentRunContext.PlanSubmissionSeal = request.WorkingMode == WorkingMode.Plan ? new RunSeal() : null;
+            ToolActivationContext.CurrentConversationId = request.ConversationId?.ToString();
+            ToolActivationContext.CurrentCapabilities = request.ToolCapabilities;
+
+            // CacheSafe 快照必须在 run 开始前就绪：AgentTool 在会话首个查询期间发起的 fork
+            // 会读取 Current，等到 FinalizeAsync 再写就让首轮 fork 拿到 null（子代理工具表被
+            // FilterChildTools 过滤成空）。此刻请求参数与工具集已全部冻结；UpdateCacheSafeParams
+            // 显式读 request.ToolCapabilities，与 FinalizeAsync 的收尾快照同源一致；
+            // LastCacheSafeParams 是普通实例属性，不受 AsyncLocal 跨 yield 边界失效的影响。
+            UpdateCacheSafeParams(request, request.LocalTools);
+
             // 单轮执行：output 是唯一的最终响应门；Stop hook 已退出 Hook 协议。
             session = new StreamingSession(
                 request.AgentRunId,
                 request.IncludeNextPrompt,
                 _logger,
                 name => _toolAssembler.TryAutoActivateUnknownTool(name, request.LocalTools));
-            var options = BuildAgentRunOptions(request);
+            options = BuildAgentRunOptions(request);
             var channel = Channel.CreateUnbounded<object>();
-            var runTask = StartRun(
-                preambleState.BuildRun, options, request.LocalTools, channel.Writer, useDurableBuildAttempt, ct);
-            try
+            // 子代理进度旁路：与 CurrentBuildRunId 同一模式——StartRun 同段注入，
+            // fork 的工具执行上下文可读取该写入器上报实时进度；finally 复位。
+            OneCodeAgentRunContext.SubagentEventWriter = channel.Writer;
+            runTask = StartRun(
+                preambleState.BuildRun, options, channel.Writer, useDurableBuildAttempt, ct);
+            await foreach (var evt in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                await foreach (var evt in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                {
-                    foreach (var e in session.Digest(evt))
-                        yield return e;
-                }
-            }
-            finally
-            {
-                if (ct.IsCancellationRequested)
-                {
-                    await _buildRunGate.PersistCancelledRunAsync(
-                        request.ConversationId,
-                        request.AgentRunId,
-                        request.WorkingMode,
-                        session.ToolBatchCollector,
-                        CancellationToken.None).ConfigureAwait(false);
-                }
-                OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
+                foreach (var e in session.Digest(evt))
+                    yield return e;
+                persistedBatchCount = await PersistSealedBatchesAsync(
+                    request, session, persistedBatchCount, ct).ConfigureAwait(false);
             }
             foreach (var e in session.FlushTrailingText())
                 yield return e;
@@ -318,15 +390,16 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             var (runException, runResult) = await AwaitRunAsync(runTask).ConfigureAwait(false);
             if (runException is not null)
             {
-                await OnRunFailedAsync(request, runException, ct).ConfigureAwait(false);
-                yield return new ErrorEvent(runException.Message);
+                await CloseOutOnceAsync(PlanRunEnd.Finished, ct).ConfigureAwait(false);
+                await OnRunFailedAsync(runException, ct).ConfigureAwait(false);
+                yield return new ErrorEvent(runException.Message + PromptTooLongHint(runException));
                 yield break;
             }
             aggregatedText.Append(session.FinalText);
             aggregatedTurns += session.TurnCount;
             aggregatedUsage = QueryStreamHelpers.SumUsage(aggregatedUsage, session.FinalUsage);
             await _transcriptPersistence.PersistAsync(
-                request, session, session.FinalText, session.FinalUsage, ct).ConfigureAwait(false);
+                request, session, session.FinalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
             outcome = QueryStreamHelpers.ResolveTerminalOutcome(session, options, runResult, session.FinalText);
             // output 拦截点：最终响应交付调用方前的策略门。终因只用于产品收尾，不作 hook matcher。
             // deny 拦截本次响应并终结本轮——纠偏、预算终结与异常收尾都不是该节点的职责。
@@ -339,6 +412,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             if (outputResult?.BlockingErrors is { Count: > 0 } outputBlocks)
             {
                 _logger.LogInformation("output hook blocked final response: {Error}", outputBlocks[0].Error);
+                await CloseOutOnceAsync(PlanRunEnd.Finished, ct).ConfigureAwait(false);
                 yield return new ErrorEvent($"Response blocked by hook: {outputBlocks[0].Error}");
                 yield return new DoneEvent(
                     null, session.FinalUsage, session.TurnCount, RunTerminalReason.Blocked, request.ConversationId);
@@ -356,15 +430,73 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             {
                 yield return e;
             }
+            // FinalizeAsync 首行已完成收口；置位防外层兜底重复调用。
+            planRunClosed = true;
         }
         finally
         {
+            // 兜底收口：run 已启动但以未收口路径离场（try 内非取消异常、取消与
+            // AwaitRunAsync 的 OCE 竞态）时补做收口，防止已提交的计划滞留
+            // FinalizingPlanRun 失去审批入口。对已收口/非 Plan 工作流为幂等 no-op；
+            // 用 None 而非 ct——取消时的批次落盘与取消写必须完成。
+            if (!planRunClosed && runTask is not null)
+            {
+                await CloseOutPlanRunAsync(
+                    request,
+                    session,
+                    ct.IsCancellationRequested ? PlanRunEnd.Cancelled : PlanRunEnd.Finished,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            // 全量复位 ambient：消费尾段（Flush/Finalize）无 ambient 读取方，
+            // 统一在外层收口，覆盖构建骨架阶段的早期异常路径。
             OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
+            OneCodeAgentRunContext.CurrentRunId = previousRunId;
+            OneCodeAgentRunContext.SubagentEventWriter = previousSubagentWriter;
+            OneCodeAgentRunContext.PlanSubmissionSeal = previousPlanSeal;
+            ToolActivationContext.CurrentConversationId = previousConversationId;
+            ToolActivationContext.CurrentCapabilities = previousCapabilities;
         }
     }
 
-    private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)
+    /// <summary>
+    /// 把新封口的工具批次立即持久化（逐批落盘）：长 run 中途被杀只丢尚未封口的当前批次，
+    /// 而不是整个 run 的工具历史。appender 按 batchId 幂等去重，与 run 收尾的整批投递不冲突。
+    /// 持久化失败不中断 run：收尾的 <see cref="TranscriptPersistence"/> 会重试剩余批次。
+    /// </summary>
+    /// <returns>更新后的已持久化批次数。</returns>
+    private async Task<int> PersistSealedBatchesAsync(
+        QueryStreamRequest request,
+        StreamingSession session,
+        int persistedBatchCount,
+        CancellationToken ct)
     {
+        var batches = session.ToolBatchCollector.CompletedBatches;
+        if (request.ConversationId is not { } conversationId
+            || ct.IsCancellationRequested
+            || batches.Count <= persistedBatchCount)
+            return persistedBatchCount;
+
+        try
+        {
+            await _sessionManager.AppendCompletedToolBatchesAsync(
+                    conversationId,
+                    batches.Skip(persistedBatchCount).ToList(),
+                    ct)
+                .ConfigureAwait(false);
+            return batches.Count;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist sealed tool batches for run {RunId}", request.AgentRunId);
+            return persistedBatchCount;
+        }
+    }
+
+    private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)    {
         return new MainAgentRunOptions
         {
             ModelId = request.ModelId,
@@ -383,26 +515,41 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             EnableThinking = request.ThinkingBudget > 0,
             ThinkingBudgetTokens = request.ThinkingBudget ?? 0,
             Tools = request.LocalTools.Cast<AITool>().ToList(),
-            ToolCapabilities = ToolActivationContext.CurrentCapabilities,
+            // 与 UpdateCacheSafeParams 同源：显式读请求参数而非 ambient。
+            ToolCapabilities = request.ToolCapabilities,
             WorkingMode = request.WorkingMode,
             FileChangeCallback = request.FileChangeCallback,
             ConversationId = request.ConversationId,
             AgentRunId = request.AgentRunId,
             // 从 IConfigManager.Current.Effective.MaxBudgetTokens 动态读取（支持运行时 /config 修改）。
             MaxBudgetTokens = _toolAssembler.ResolveMaxBudgetTokens(),
+            HistorySeedBoundary = request.HistorySeedBoundary,
+            SeedTodoTasks = request.PrescribedBuildPlan?.Tasks,
         };
     }
 
     private Task<MainAgentRunResult> StartRun(
         BuildRun? buildRun,
         MainAgentRunOptions options,
-        IReadOnlyList<AIFunction> localTools,
         ChannelWriter<object> eventWriter,
         bool useDurableBuildAttempt,
         CancellationToken ct)
         => useDurableBuildAttempt
-            ? _buildRunGate.RunControlledBuildAttemptAsync(buildRun!, options, localTools, eventWriter, ct)
+            ? _buildRunGate.RunControlledBuildAttemptAsync(buildRun!, options, eventWriter, ct)
             : _mainAgentRunner.RunStreamingAsync(options, eventWriter, ct);
+
+    private Task CloseOutPlanRunAsync(
+        QueryStreamRequest request,
+        StreamingSession session,
+        PlanRunEnd end,
+        CancellationToken ct)
+        => _buildRunGate.CloseOutPlanRunAsync(
+            request.ConversationId,
+            request.AgentRunId,
+            request.WorkingMode,
+            end,
+            session.ToolBatchCollector,
+            ct);
 
     /// <summary>Catch non-cancellation failures so the failure notification fires; cancellation propagates.</summary>
     private async Task<(Exception? RunException, MainAgentRunResult? RunResult)> AwaitRunAsync(
@@ -418,7 +565,9 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Agent run failed");
+            // run 失败是错误事件而非告警：2026-10-12 的 NRE 事故中，崩溃链条在日志里
+            // 一条 ERROR 都没有，只能靠 WARNING 与状态差异倒推。级别失真会拖慢排障。
+            _logger.LogError(ex, "Agent run failed");
             return (ex, null);
         }
     }
@@ -426,10 +575,19 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     /// <summary>
     /// 运行异常收场：桌面通知。异常分类与告警属可观测性平面，不进入 Hook 拦截点。
     /// </summary>
-    private async Task OnRunFailedAsync(QueryStreamRequest request, Exception runException, CancellationToken ct)
+    private async Task OnRunFailedAsync(Exception runException, CancellationToken ct)
     {
         await _hookDispatcher.NotifyAsync("OneCode 任务执行失败", runException.Message, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 上下文超限时附加可操作提示（/compact）。检测经
+    /// <see cref="PromptTooLongDetector"/>：覆盖 HTTP 413 与 provider 关键词。
+    /// </summary>
+    private static string PromptTooLongHint(Exception runException) =>
+        PromptTooLongDetector.IsPromptTooLong(runException)
+            ? " —— 上下文超出模型窗口，请执行 /compact 压缩会话历史后重试。"
+            : string.Empty;
 
     /// <summary>
     /// 终结段：Plan run 收尾 → 完成通知 → token 记账 → durable BuildRun 回读 →
@@ -446,12 +604,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         TerminalOutcomeState outcome,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        await _buildRunGate.CompletePlanRunIfPendingAsync(
-            request.ConversationId,
-            request.AgentRunId,
-            request.WorkingMode,
-            session.ToolBatchCollector.HasOpenBatch,
-            ct).ConfigureAwait(false);
+        await CloseOutPlanRunAsync(request, session, PlanRunEnd.Finished, ct).ConfigureAwait(false);
 
         await _hookDispatcher.NotifyAsync(
             "OneCode 任务执行完成",
@@ -460,8 +613,17 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 
         RecordUsage(request, session, finalUsage, request.LocalTools);
 
-        await foreach (var e in ResolveDurableOutcomeAsync(request, buildRun, outcome, finalText, ct).ConfigureAwait(false))
+        await foreach (var e in ResolveDurableOutcomeAsync(buildRun, outcome, session.LastTurnText, ct).ConfigureAwait(false))
             yield return e;
+
+        // 唯一自动记忆整合触发点：仅在 BUILD 模式（含普通交互式 Build 与 Plan 批准后转入的受控 Build）
+        // 且任务正常完成、文件事务未回滚时触发后台增量记忆整合。
+        if (request.WorkingMode == WorkingMode.Build
+            && outcome.Reason == RunTerminalReason.Completed
+            && !outcome.TransactionRolledBack)
+        {
+            _autoDreamService?.NotifyTaskCompleted();
+        }
 
         yield return new DoneEvent(
             finalText,
@@ -487,7 +649,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             ? _sessionManager.GetChatHistory(breakdownConversationId)
             : [];
         var breakdown = _tokenBreakdownEstimator.Estimate(
-            request.SystemPrompt, toolsForBreakdown, messagesForBreakdown, session.TotalInputTokens);
+            request.SystemPrompt, toolsForBreakdown, messagesForBreakdown, session.LastTurnInputTokens);
         _tokenUsageTracker.Record(finalUsage, breakdown);
     }
 
@@ -496,7 +658,6 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     /// authority for terminal reason / rollback / validation — and emits its completion event.
     /// </summary>
     private async IAsyncEnumerable<QueryEvent> ResolveDurableOutcomeAsync(
-        QueryStreamRequest request,
         BuildRun? buildRun,
         TerminalOutcomeState outcome,
         string finalText,
@@ -529,7 +690,10 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             ModelId = request.ModelId,
             ThinkingBudget = request.ThinkingBudget,
             Tools = toolList.Count > 0 ? toolList : null,
-            ToolCapabilities = ToolActivationContext.CurrentCapabilities,
+            // 显式读请求参数而非 ambient：FinalizeAsync 在 StreamCoreAsync 的 finally 复位
+            // ambient 之后执行，届时 CurrentCapabilities 已恢复为外层值（通常 null），
+            // fork 的 ParentCapabilities ∩ snapshot 交集会被静默跳过。
+            ToolCapabilities = request.ToolCapabilities,
             Metadata = new Dictionary<string, object?> { ["turn"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }
         };
     }

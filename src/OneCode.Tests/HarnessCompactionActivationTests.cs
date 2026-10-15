@@ -7,24 +7,19 @@ using Microsoft.Extensions.Logging;
 namespace OneCode.Tests;
 
 /// <summary>
-/// 框架行为守卫：锁定「Harness 的 per-service-call 历史持久化会关停 in-loop 压缩」这一 MAF 行为。
+/// 框架行为守卫：锁定「Harness per-service-call 历史持久化下，压缩在每次服务调用都激活」这一 MAF 行为。
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>为什么需要这组测试</b>：<c>HarnessAgent</c> 强制 <c>RequirePerServiceCallChatHistoryPersistence = true</c>，
 /// 该装饰器在框架自管历史的路径上会把哨兵值 <c>_agent_local_chat_history</c> 写进
-/// <c>ChatClientAgentSession.ConversationId</c>；而 <c>CompactionProvider</c> 把「ConversationId 非空」解读为
-/// 「历史由远端服务托管」并整个跳过压缩。两者叠加的结果是：一个会话里压缩只在<b>第一次服务调用</b>执行，
-/// 之后永久失效——而 <c>ConversationId</c> 的 setter 是 internal 且拒绝空值，产品侧无法复位。
+/// <c>ChatClientAgentSession.ConversationId</c>。MAF 曾把「ConversationId 非空」解读为「历史由远端服务托管」
+/// 并整个跳过压缩，导致一个会话里压缩只在第一次服务调用执行、之后永久失效；MAF 1.24 起允许对
+/// per-service-call 本地历史压缩，哨兵不再抑制 <c>CompactionProvider</c>。
 /// </para>
 /// <para>
 /// 该行为不是产品可配置项，因此这里断言的是<b>框架现状</b>而非期望值。MAF 升级后若行为改变，
-/// 这两个用例会失败，提示重新评估压缩装配（届时应改为断言「每次服务调用都压缩」）。
-/// </para>
-/// <para>
-/// 反证由 <see cref="Compaction_WithoutPerServiceCallPersistence_RunsOnEveryServiceCall"/> 提供：
-/// 去掉 per-service-call 装饰器后同一策略在每次服务调用上都会执行，证明跳过的成因确实是哨兵而非
-/// 消息过少、触发器未命中等其它原因。
+/// 这两个用例会失败，提示重新评估压缩装配。
 /// </para>
 /// </remarks>
 public sealed class HarnessCompactionActivationTests
@@ -101,7 +96,7 @@ public sealed class HarnessCompactionActivationTests
         [new(ChatRole.User, "one"), new(ChatRole.User, "two"), new(ChatRole.User, "three")];
 
     [Fact]
-    public async Task Compaction_UnderHarness_StopsAfterFirstServiceCall()
+    public async Task Compaction_UnderHarness_RunsOnEveryServiceCall()
     {
         var ct = TestContext.Current.CancellationToken;
         var strategy = new CountingCompactionStrategy();
@@ -113,15 +108,15 @@ public sealed class HarnessCompactionActivationTests
         await agent.RunAsync("four", session, cancellationToken: ct);
 
         chatClient.ServiceCalls.Should().Be(3, "two calls for the tool loop in run 1, one more in run 2");
-        strategy.Invocations.Should().Be(1,
-            "the per-service-call decorator stamps the local-history sentinel after the first call, " +
-            "after which CompactionProvider treats the session as service-managed and skips");
+        strategy.Invocations.Should().Be(3,
+            "MAF 1.24 allows compaction for per-service-call local chat history — " +
+            "the local-history sentinel no longer suppresses CompactionProvider");
         session.GetService<ChatClientAgentSession>()!.ConversationId.Should().Be(LocalHistorySentinel);
     }
 
     /// <summary>流式是产品主路径，必须确认它没有走到不同的分支上。</summary>
     [Fact]
-    public async Task Compaction_UnderHarnessStreaming_StopsAfterFirstServiceCall()
+    public async Task Compaction_UnderHarnessStreaming_RunsOnEveryServiceCall()
     {
         var ct = TestContext.Current.CancellationToken;
         var strategy = new CountingCompactionStrategy();
@@ -133,13 +128,13 @@ public sealed class HarnessCompactionActivationTests
         await foreach (var _ in agent.RunStreamingAsync("four", session, cancellationToken: ct)) { }
 
         chatClient.ServiceCalls.Should().Be(3);
-        strategy.Invocations.Should().Be(1, "streaming takes the same sentinel path as the non-streaming call");
+        strategy.Invocations.Should().Be(3, "streaming takes the same compaction path as the non-streaming call");
         session.GetService<ChatClientAgentSession>()!.ConversationId.Should().Be(LocalHistorySentinel);
     }
 
     /// <summary>
-    /// 反证：拆掉 per-service-call 装饰器，其余保持不变——同一策略会在<b>每一次</b>服务调用上执行。
-    /// 这排除了「消息太少 / 触发器没命中 / 策略只挂了一次」等替代解释。
+    /// 对照：拆掉 Harness 的 per-service-call 装饰器，改用裸 <c>ChatClientAgent</c> 装配——
+    /// 锁定无哨兵路径上压缩同样在每一次服务调用执行，防止两条装配路径漂移出不同行为。
     /// </summary>
     [Fact]
     public async Task Compaction_WithoutPerServiceCallPersistence_RunsOnEveryServiceCall()

@@ -88,10 +88,7 @@ public sealed class HarnessInstructionsWiringTests
             {
                 WorkingDirectory = Path.GetTempPath(),
                 EnableToolApproval = false,
-                EnableEditTransaction = false,
-                EnableToolResultBudget = false,
                 EnableStateMachine = false,
-                EnableSafetyInvariants = false,
                 EnableEditPreChecks = false,
             },
         });
@@ -171,6 +168,7 @@ public sealed class HarnessInstructionsWiringTests
             Substitute.For<IServiceProvider>(),
             new AgentContextPipeline(shared, main),
             CreateSubAgentPipelineFactory(modeProvider),
+            new WorkingModeController(),
             new ForkedAgentRuntimeDependencies(
                 client,
                 modelManager,
@@ -180,7 +178,8 @@ public sealed class HarnessInstructionsWiringTests
                     client,
                     modelManager,
                     new CompactPromptBuilder(promptManager)),
-                new SessionIdHolder()),
+                new SessionIdHolder(),
+                TestConfigManager.Create()),
             new PromptComposer(promptManager));
 
         var result = await runner.RunAsync(
@@ -223,6 +222,7 @@ public sealed class HarnessInstructionsWiringTests
             Substitute.For<IServiceProvider>(),
             new AgentContextPipeline(shared, main),
             CreateSubAgentPipelineFactory(modeProvider),
+            new WorkingModeController(),
             new ForkedAgentRuntimeDependencies(
                 client,
                 modelManager,
@@ -232,7 +232,8 @@ public sealed class HarnessInstructionsWiringTests
                     client,
                     modelManager,
                     new CompactPromptBuilder(promptManager)),
-                new SessionIdHolder()),
+                new SessionIdHolder(),
+                TestConfigManager.Create()),
             new PromptComposer(promptManager));
 
         var result = await runner.RunAsync(

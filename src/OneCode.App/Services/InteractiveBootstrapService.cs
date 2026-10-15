@@ -57,8 +57,7 @@ public sealed class InteractiveBootstrapService(
 
         return new InteractiveSession(
             session.ConversationRunner, systemPrompt, session.SessionManager,
-            modeController,
-            null, slashCommands, harnessPrompt);
+            modeController, slashCommands, harnessPrompt);
     }
 
     private void HydrateAppStateFromConfig()

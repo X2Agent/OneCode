@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
@@ -14,14 +15,72 @@ namespace OneCode.App.Tools;
 /// <remarks>
 /// Plan revisions and approval state are persisted by <see cref="IPlanWorkflowApplicationService"/>.
 /// The legacy mutable plan file and conversation metadata are not written by this tool.
+///
+/// <c>steps</c> 参数经 <see cref="CreateSubmitPlanFunction"/> 的
+/// <c>AIFunctionFactoryOptions.ConfigureParameterBinding</c> 接管绑定（见
+/// <see cref="PlanStepsArgumentParser"/>），使模型产出的畸形形状不会在反射编组阶段抛异常。
 /// </remarks>
 public sealed class CreatePlanTool(
     IPlanModeService planMode,
     PlanCardPublisher planCardPublisher,
     ISessionConversationAccess sessionManager,
     IPlanWorkflowApplicationService planWorkflow,
-    IPlanAggregateStore aggregateStore)
+    IPlanAggregateStore aggregateStore,
+    ILogger<CreatePlanTool>? logger = null)
 {
+    /// <summary>日志中保留的 steps 原始值最大长度——足够识别模型产出形状，又不被大 payload 淹没。</summary>
+    private const int MaxLoggedStepsLength = 512;
+
+    /// <summary>
+    /// 提交成功（含幂等重放）的终局指令：审批入口只在本 run 结束后才开放，模型继续调用工具只会拖延审批。
+    /// </summary>
+    internal const string PlanSubmittedMessage =
+        "Plan submitted and saved. This planning run is now complete: do NOT call any more tools and do NOT " +
+        "resubmit. Reply with one short sentence summarizing the plan and stop — the approval prompt appears " +
+        "automatically as soon as you finish.";
+
+    /// <summary>
+    /// 构建 SubmitPlan 的 AIFunction：为 <c>steps</c> 参数接管参数绑定，使模型产出的非数组形状
+    /// （二次编码字符串 / 单对象 / 包装对象）被容错解析，而不是在反射编组阶段抛 JsonException
+    /// 中断整个 run。参数声明类型保持不变，发给模型的 JSON Schema 因此逐字不变。
+    /// </summary>
+    public static AIFunction CreateSubmitPlanFunction(CreatePlanTool tool) =>
+        AIFunctionFactory.Create(tool.SubmitPlanAsync, options: new AIFunctionFactoryOptions
+        {
+            // 工具名必须与注册名一致：权限门、能力门（PlanExclusive）与 plan 协议校验都按 "SubmitPlan" 匹配。
+            Name = "SubmitPlan",
+            ConfigureParameterBinding = parameter => string.Equals(parameter.Name, "steps", StringComparison.Ordinal)
+                ? new AIFunctionFactoryOptions.ParameterBindingOptions
+                {
+                    BindParameter = (_, arguments) => tool.BindStepsParameter(arguments),
+                }
+                : default,
+        });
+
+    /// <summary>绑定 <c>steps</c> 参数：容错解析模型产出的任意形状，永不抛异常。</summary>
+    public object? BindStepsParameter(AIFunctionArguments arguments)
+    {
+        arguments.TryGetValue("steps", out var raw);
+        var parsed = PlanStepsArgumentParser.Parse(raw);
+        if (parsed.FailureReason is not null)
+        {
+            logger?.LogWarning(
+                "SubmitPlan received an unusable steps argument: {Reason}. Raw value: {Raw}",
+                parsed.FailureReason,
+                Truncate(raw, MaxLoggedStepsLength));
+        }
+
+        return parsed.Steps ?? [];
+    }
+
+    private static string Truncate(object? value, int maxLength)
+    {
+        var text = value is JsonElement element ? element.GetRawText() : value?.ToString() ?? "null";
+        return text.Length <= maxLength
+            ? text
+            : string.Concat(text.AsSpan(0, maxLength), "…(truncated)");
+    }
+
     /// <summary>
     /// 提交最终 plan：持久化 Submitted revision，并立即返回。
     /// 审批仅在当前 Plan Run 完整持久化且协议校验通过后开放。
@@ -69,7 +128,15 @@ public sealed class CreatePlanTool(
         }
 
         if (steps is not { Length: > 0 })
-            return ToolResult.Error("SubmitPlan requires at least one structured step.");
+        {
+            return ToolResult.Error(
+                "SubmitPlan requires at least one structured step. The `steps` argument must be a JSON array of " +
+                "step objects, e.g. [{\"id\":\"step-1\",\"title\":\"...\",\"description\":\"...\"," +
+                "\"files\":[\"src/...\"],\"acceptanceCriteria\":[\"...\"],\"dependsOn\":[],\"risk\":\"low\"}]. " +
+                "Pass the array itself as the value — not a JSON string, not a single object, " +
+                "and not nested under another property.",
+                suggestedNextAction: "Re-issue SubmitPlan with steps as a JSON array of objects.");
+        }
 
         var sessionId = sessionManager.ForegroundConversation?.Id;
         if (sessionId is null)
@@ -119,6 +186,10 @@ public sealed class CreatePlanTool(
 
         planCardPublisher.Publish(submission.Workflow);
 
+        // 落封：此后本 run 的任何工具调用都被中间件拒绝。终局指令只是第一层，模型是否听从不可依赖
+        // （实测提交后仍会继续调研并反复重提），封条保证 run 只能以纯文本收尾，收口漏斗随之接管。
+        OneCodeAgentRunContext.PlanSubmissionSeal?.Seal();
+
         return ToolResult.JsonSuccess(new
         {
             status = "plan_run_finalizing",
@@ -128,7 +199,7 @@ public sealed class CreatePlanTool(
             contentHash = submission.Revision.ContentHash,
             planFilePath = aggregateStore.GetRevisionMarkdownPath(
                 submission.Workflow.SessionId, submission.Workflow.Id, submission.Revision.Revision),
-            message = "Plan submitted. Approval will become available after the Plan run closes successfully.",
+            message = PlanSubmittedMessage,
         });
     }
 
@@ -192,7 +263,7 @@ public sealed class CreatePlanTool(
 /// call after exit). Its purpose is to block the privilege-escalation path where
 /// a prompt-injected LLM writes a malicious plan and auto-exits Plan mode.
 /// </summary>
-internal static class PlanContentSafetyScanner
+internal static partial class PlanContentSafetyScanner
 {
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(2);
 
@@ -226,10 +297,11 @@ internal static class PlanContentSafetyScanner
     // 机制级防御：markdown code block 命令提取
     // 匹配 ```sh / ```bash / ```shell / ```ps1 / ```powershell 开头的 code block，
     // 提取其中的命令文本逐条检查。即使 LLM 用 markdown 包裹危险命令，也能被检测到。
-    private static readonly Regex ShellCodeBlockRegex = new(
+    [GeneratedRegex(
         @"```(?:sh|bash|shell|ps1|powershell)\s*\n(.*?)```",
         RegexOptions.IgnoreCase | RegexOptions.Singleline,
-        MatchTimeout);
+        matchTimeoutMilliseconds: 2000)]
+    private static partial Regex ShellCodeBlockRegex();
 
     public static PlanScanResult Scan(string planContent)
     {
@@ -245,7 +317,7 @@ internal static class PlanContentSafetyScanner
         // 机制级：提取 code block 中的 shell 命令，逐条用 Layer0 正则检查
         // 这是比全文正则更结构化的防御：即使 LLM 用编码/变量拼接在 markdown 中
         // 写入危险命令，只要 code block 中的命令文本匹配 Layer0 模式就会被拦截。
-        foreach (Match blockMatch in ShellCodeBlockRegex.Matches(planContent))
+        foreach (Match blockMatch in ShellCodeBlockRegex().Matches(planContent))
         {
             var blockContent = blockMatch.Groups[1].Value;
             // 按行拆分，逐行检查（支持一个 code block 中多条命令）
@@ -349,43 +421,38 @@ internal sealed record PlanScanResult(bool IsSuspicious, IReadOnlyList<string> M
 /// 只检查"plan 内容是否具备最低结构化质量"。这避免了过度 restrictive 导致合理 plan 被拒。
 /// </para>
 /// </summary>
-internal static class PlanContentQualityGate
+internal static partial class PlanContentQualityGate
 {
     /// <summary>plan 内容最小允许长度（100 字符）。低于此值视为"空 plan 退出"。</summary>
     private const int MinPlanContentLength = 100;
 
     /// <summary>markdown 标题正则（匹配行首的 #、##、### 等）。</summary>
-    private static readonly Regex MarkdownHeadingRegex = new(
-        @"^\s{0,3}#{1,6}\s+\S",
-        RegexOptions.Multiline,
-        TimeSpan.FromSeconds(1));
+    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+\S", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex MarkdownHeadingRegex();
 
     /// <summary>
     /// 文件路径引用正则——匹配常见的源码文件路径模式：
     /// - 相对路径：src/...、lib/...、app/... 等
     /// - 文件扩展名：.cs、.py、.ts、.js、.go、.rs、.java、.cpp、.h、.md、.yaml、.json 等
     /// </summary>
-    private static readonly Regex FilePathReferenceRegex = new(
+    [GeneratedRegex(
         @"(?:(?:src|lib|app|test|tests|docs|scripts|components|services|models|views|controllers)/[^\s)""']*|" +
         @"\b\w+\.(?:cs|py|ts|tsx|js|jsx|go|rs|java|cpp|c|h|hpp|md|yaml|yml|json|xml|sql|sh|ps1)\b)",
         RegexOptions.IgnoreCase,
-        TimeSpan.FromSeconds(1));
+        matchTimeoutMilliseconds: 1000)]
+    private static partial Regex FilePathReferenceRegex();
 
     /// <summary>code block 正则（匹配任意语言的 markdown code block）。</summary>
-    private static readonly Regex CodeBlockRegex = new(
-        @"```\w*\s*\n",
-        RegexOptions.None,
-        TimeSpan.FromSeconds(1));
+    [GeneratedRegex(@"```\w*\s*\n", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex CodeBlockRegex();
 
     /// <summary>
     /// 编号步骤列表正则——匹配 markdown/中文语境的编号行（"1. …"、"2、 …"、"3) …"）。
     /// 用于调研/分析型计划的证据替代：此类计划无文件路径、无技术栈、无 code block，
     /// 但应给出编号的后续行动步骤（结论 → 分步建议），否则门槛会误杀调研型任务。
     /// </summary>
-    private static readonly Regex NumberedStepsRegex = new(
-        @"^\s{0,3}\d{1,2}[.、)]\s+\S",
-        RegexOptions.Multiline,
-        TimeSpan.FromSeconds(1));
+    [GeneratedRegex(@"^\s{0,3}\d{1,2}[.、)]\s+\S", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex NumberedStepsRegex();
 
     /// <summary>
     /// 技术栈关键词正则——匹配常见框架/技术栈名称。用于 Greenfield 场景（Phase 1 Branch B）
@@ -393,7 +460,7 @@ internal static class PlanContentQualityGate
     /// 涵盖前端（React/Vue/Angular/Svelte）、后端（Express/Nest/Django/Flask/Spring/ASP.NET/Rails）、
     /// 移动端（React Native/Flutter/SwiftUI）、构建工具（Vite/Webpack/Turborepo）等。
     /// </summary>
-    private static readonly Regex TechStackReferenceRegex = new(
+    [GeneratedRegex(
         @"\b(?:React|Vue|Angular|Svelte|SolidJS|Next\.js|Nuxt|Gatsby|Astro|" +
         @"Express|NestJS|Koa|Fastify|Django|Flask|FastAPI|Spring(?:\s+Boot)?|ASP\.NET(?:\s+Core)?|Rails|Laravel|Gin|Echo|Fiber|" +
         @"React\s+Native|Flutter|SwiftUI|Jetpack\s+Compose|Xamarin|MAUI|" +
@@ -402,7 +469,8 @@ internal static class PlanContentQualityGate
         @"GraphQL|gRPC|REST|WebSocket|" +
         @"Docker|Kubernetes|Terraform|AWS|Azure|GCP)\b",
         RegexOptions.IgnoreCase,
-        TimeSpan.FromSeconds(1));
+        matchTimeoutMilliseconds: 1000)]
+    private static partial Regex TechStackReferenceRegex();
 
     /// <summary>
     /// 校验 plan 内容质量。返回失败原因列表；空列表表示通过。
@@ -427,7 +495,7 @@ internal static class PlanContentQualityGate
         }
 
         // 2. 结构完整性检查：至少一个 markdown 标题
-        if (!MarkdownHeadingRegex.IsMatch(planContent))
+        if (!MarkdownHeadingRegex().IsMatch(planContent))
         {
             failures.Add(
                 "Plan lacks markdown structure (no headings found). " +
@@ -439,10 +507,10 @@ internal static class PlanContentQualityGate
         //    - 新项目/Greenfield 场景：引用技术栈关键词
         //    - 调研/分析型场景：编号的后续行动步骤（无文件路径/技术栈可引用）
         //    - 混合场景：任一证据满足即可通过
-        var hasFilePath = FilePathReferenceRegex.IsMatch(planContent);
-        var hasCodeBlock = CodeBlockRegex.IsMatch(planContent);
-        var hasTechStack = TechStackReferenceRegex.IsMatch(planContent);
-        var hasNumberedSteps = NumberedStepsRegex.IsMatch(planContent);
+        var hasFilePath = FilePathReferenceRegex().IsMatch(planContent);
+        var hasCodeBlock = CodeBlockRegex().IsMatch(planContent);
+        var hasTechStack = TechStackReferenceRegex().IsMatch(planContent);
+        var hasNumberedSteps = NumberedStepsRegex().IsMatch(planContent);
         var existingProjectEvidence = hasFilePath || hasCodeBlock;
         // Greenfield 证据：技术栈引用即可；架构决策关键词作为补充但不强制。
         var greenfieldEvidence = hasTechStack;

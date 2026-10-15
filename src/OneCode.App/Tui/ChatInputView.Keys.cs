@@ -12,14 +12,6 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView
 {
-    /// <summary>app:mode* 动作 → 目标工作模式映射（Alt+1/2/4 直达）。</summary>
-    private static readonly Dictionary<string, WorkingMode> ModeDirectActions = new()
-    {
-        [KeybindingDefaults.ActionAppModeBuild] = WorkingMode.Build,
-        [KeybindingDefaults.ActionAppModePlan] = WorkingMode.Plan,
-        [KeybindingDefaults.ActionAppModeGoal] = WorkingMode.Goal,
-    };
-
     /// <summary>
     /// Dispatches a key as if the nested editor raised KeyDownEvent.
     /// Tests use this to exercise the OnInputKeyPress path without a live driver loop.
@@ -203,25 +195,12 @@ public sealed partial class ChatInputView
             {
                 HandleTab();
             }
-            else
+            else if (!_isBusy)
             {
+                // Run 活跃期间不切工作模式：模式决定工具集与权限，运行中切换会让 Plan 工作流
+                // 与实际 run 脱节（实测一次误触把 Plan 悬死在 GoalAuto）。Tab 在此仅被吞掉。
                 CycleModeRequested?.Invoke();
             }
-            e.Handled = true;
-            return;
-        }
-
-        // Alt+1/2/4（app:mode*）— 工作模式直达，busy 态同样允许。
-        // 守卫：补全激活 / 交互挂起 / 提问模式下数字必须入文或交给交互会话；
-        // 被拦下时不置 Handled，按键交还后续处理（编辑器 / 交互会话）。
-        // 挂起分支在本方法前部已先行吞键返回，此处守卫作纵深防御。
-        if (action is not null
-            && ModeDirectActions.TryGetValue(action, out var targetMode)
-            && !_completion.IsCompletionActive
-            && !_interactionSuspended
-            && !_isQuestionMode)
-        {
-            ModeDirectRequested?.Invoke(targetMode);
             e.Handled = true;
             return;
         }

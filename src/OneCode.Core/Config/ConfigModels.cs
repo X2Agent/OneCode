@@ -23,7 +23,6 @@ public enum ConfigValueKind
     Int32,
     Int64,
     Double,
-    Decimal,
     StringList,
 }
 
@@ -134,13 +133,13 @@ public static class SettingDescriptors
             ["streamIdleTimeoutSeconds"] = new("streamIdleTimeoutSeconds", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 180),
             ["streamMaxRetries"] = new("streamMaxRetries", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 6),
             ["autodream.enabled"] = new("autodream.enabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, EnvironmentVariable: "ONECODE_AUTODREAM", BuiltInDefault: true),
-            ["autodream.minHours"] = new("autodream.minHours", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_HOURS", BuiltInDefault: 6),
-            ["autodream.minSessions"] = new("autodream.minSessions", ActivationMode.NextOperation, ConfigValueKind.Int32, EnvironmentVariable: "ONECODE_AUTODREAM_MIN_SESSIONS", BuiltInDefault: 3),
             ["goal.maxSubGoalAttempts"] = new("goal.maxSubGoalAttempts", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.GoalMaxSubGoalAttemptsDefault),
             ["goal.maxTurnsPerSubGoal"] = new("goal.maxTurnsPerSubGoal", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.GoalMaxTurnsPerSubGoalDefault),
             ["goal.maxTotalTokens"] = new("goal.maxTotalTokens", ActivationMode.NextOperation, ConfigValueKind.Int64, BuiltInDefault: Constants.Session.GoalMaxTotalTokensDefault),
             ["goal.maxWallClockHours"] = new("goal.maxWallClockHours", ActivationMode.NextOperation, ConfigValueKind.Double, BuiltInDefault: Constants.Session.GoalMaxWallClockHoursDefault),
             ["loop.maxIterations"] = new("loop.maxIterations", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.LoopMaxIterationsDefault),
+            ["agents.defaults.maxTurns"] = new("agents.defaults.maxTurns", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: 0),
+            ["agents.defaults.timeoutMinutes"] = new("agents.defaults.timeoutMinutes", ActivationMode.NextOperation, ConfigValueKind.Int32, BuiltInDefault: Constants.Session.SubAgentTimeoutMinutesDefault),
         };
 
     public static IEnumerable<SettingDescriptor> All => Items.Values;
@@ -168,7 +167,6 @@ public static class SettingDescriptors
                 ConfigValueKind.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
                 ConfigValueKind.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
                 ConfigValueKind.Double => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-                ConfigValueKind.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
                 ConfigValueKind.StringList => value switch
                 {
                     string text => text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),

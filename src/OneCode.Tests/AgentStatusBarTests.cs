@@ -90,6 +90,27 @@ public sealed class AgentStatusBarTests
     }
 
     [Fact]
+    public void BuildLeftItems_ActiveSubagents_ShowsBadgeAsDroppableItem()
+    {
+        var bar = CreateBar();
+        bar.SetSubagentCount(2);
+
+        var items = bar.BuildLeftItems();
+
+        items.Should().Contain(item => item.Text == "agents: 2" && item.Droppable,
+            "agents 徽标与 LSP/MCP 同级：窄终端下整条让位");
+    }
+
+    [Fact]
+    public void BuildLeftItems_ZeroSubagents_HidesBadge()
+    {
+        var bar = CreateBar();
+        bar.SetSubagentCount(0);
+
+        bar.BuildLeftItems().Should().NotContain(item => item.Text.Contains("agents:"));
+    }
+
+    [Fact]
     public void Fit_DropsDroppableItemsFromTail()
     {
         var bar = CreateBar();

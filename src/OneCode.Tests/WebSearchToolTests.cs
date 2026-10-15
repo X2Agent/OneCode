@@ -42,39 +42,12 @@ public sealed class WebSearchToolTests : IDisposable
         string[]? allowedDomains,
         string[]? blockedDomains)
     {
-        var searchHitType = typeof(WebSearchTool).GetNestedType("SearchHit", BindingFlags.NonPublic | BindingFlags.Instance)!
-            ?? typeof(WebSearchTool).GetNestedType("SearchHit", BindingFlags.NonPublic | BindingFlags.Public)!;
-        var hitObjects = hits.Select(h => CreateSearchHit(searchHitType, h.Title, h.Url, h.Snippet)).ToArray();
-        var hitListType = typeof(List<>).MakeGenericType(searchHitType);
-        var hitList = (System.Collections.IList)Activator.CreateInstance(hitListType)!;
-        foreach (var obj in hitObjects)
-            hitList.Add(obj);
-
+        var hitList = hits.Select(h => new WebSearchResult(h.Title, h.Url, h.Snippet)).ToList();
         var method = typeof(WebSearchTool).GetMethod(
             "FilterDomains",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (System.Collections.IEnumerable)method.Invoke(null, new object?[] { hitList, allowedDomains, blockedDomains })!;
-        return ExtractHits(result);
-    }
-
-    private static object CreateSearchHit(Type searchHitType, string title, string url, string? snippet)
-    {
-        var constructor = searchHitType.GetConstructor(new[] { typeof(string), typeof(string), typeof(string) })!;
-        return constructor.Invoke(new object?[] { title, url, snippet });
-    }
-
-    private static IReadOnlyList<(string Title, string Url, string? Snippet)> ExtractHits(System.Collections.IEnumerable source)
-    {
-        var list = new List<(string Title, string Url, string? Snippet)>();
-        foreach (var item in source)
-        {
-            var type = item.GetType();
-            var title = (string?)type.GetProperty("Title")?.GetValue(item);
-            var url = (string?)type.GetProperty("Url")?.GetValue(item);
-            var snippet = (string?)type.GetProperty("Snippet")?.GetValue(item);
-            list.Add((title ?? "", url ?? "", snippet));
-        }
-        return list;
+        var result = (IReadOnlyList<WebSearchResult>)method.Invoke(null, [hitList, allowedDomains, blockedDomains])!;
+        return result.Select(r => (r.Title, r.Url, r.Snippet)).ToList();
     }
 
     // SearchAsync: query-length validation
@@ -210,6 +183,40 @@ public sealed class WebSearchToolTests : IDisposable
         result.Content.Should().Contain("tavily: no usable results");
         result.Content.Should().NotContain("quota");
         result.Content.Should().Contain("duckduckgo:");
+        result.Content.Should().Contain("Do NOT retry WebSearch");
+    }
+
+    [Fact]
+    public async Task SearchAsync_ProviderQuotaOrAntiBotFailure_EntersCooldownAndSkipsProviderOnSubsequentCalls()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var config = new ConfigManager(_tempDir);
+        await config.ApplyAsync(ConfigPatch.Set(ConfigScope.User, "webSearchProvider", "tavily"), ct);
+
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<IReadOnlyList<WebSearchResult>>(
+                new InvalidOperationException("Tavily quota exceeded (HTTP 432).")));
+
+        var ddg = CreateDuckDuckGoProvider();
+        ddg.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<IReadOnlyList<WebSearchResult>>(
+                new InvalidOperationException("DuckDuckGo returned an anti-bot challenge (HTTP 202, no results).")));
+
+        var sut = new WebSearchTool(
+            config, NullLogger<WebSearchTool>.Instance, [ddg, tavily], CreateCache());
+
+        var first = await sut.SearchAsync("first query", ct: ct);
+        var second = await sut.SearchAsync("second query", ct: ct);
+
+        first.IsError.Should().BeTrue();
+        second.IsError.Should().BeTrue();
+        second.Content.Should().Contain("tavily: no usable results");
+        second.Content.Should().Contain("duckduckgo: no usable results");
+
+        // 冷却熔断：首次失败记录 HTTP 432 / HTTP 202 冷却后，后续不同 query 不得继续触网重锤已挂提供方。
+        await tavily.Received(1).SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await ddg.Received(1).SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -358,7 +365,6 @@ public sealed class WebSearchToolTests : IDisposable
 
         await tavily.Received(1).SearchAsync("shared query", Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
-
     /// <summary>
     /// 调用方取消必须传播，且不得触发提供方故障转移——
     /// 否则用户停止后仍会继续向外发请求。
@@ -376,5 +382,32 @@ public sealed class WebSearchToolTests : IDisposable
         var act = () => sut.SearchAsync("cancel me", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task SearchAsync_LongSnippets_CapsEachSnippetInlineAndReturnsAllResults()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var hits = Enumerable.Range(1, 8)
+            .Select(i => new WebSearchResult($"Result {i}", $"https://example.com/{i}", new string('s', WebSearchTool.MaxSnippetChars + 200) + $" tail-{i}"))
+            .ToArray();
+        var tavily = CreateTavilyProvider(configured: true);
+        tavily.SearchAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(hits);
+        var sut = CreateTool(tavily);
+
+        var result = await sut.SearchAsync("big query", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        using var envelope = System.Text.Json.JsonDocument.Parse(result.Content);
+        envelope.RootElement.GetProperty("resultCount").GetInt32().Should().Be(8);
+        var resultsArray = envelope.RootElement.GetProperty("results");
+        resultsArray.GetArrayLength().Should().Be(8, "all 8 results must be returned inline without spilling to disk");
+        foreach (var item in resultsArray.EnumerateArray())
+        {
+            var snippet = item.GetProperty("snippet").GetString()!;
+            snippet.Length.Should().Be(WebSearchTool.MaxSnippetChars + 1, "oversized snippets must be capped at MaxSnippetChars plus ellipsis");
+            snippet.Should().EndWith("…");
+        }
     }
 }

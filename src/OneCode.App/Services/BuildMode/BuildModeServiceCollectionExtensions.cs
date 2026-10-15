@@ -1,7 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Services;
 using OneCode.Core.Build;
-using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Build;
 
 namespace OneCode.App.Services.BuildMode;
@@ -22,11 +20,6 @@ public static class BuildModeServiceCollectionExtensions
         services.AddSingleton<BuildStateTransitionService>();
         services.AddSingleton<BuildTaskLinker>();
         services.AddSingleton<IBuildRunCoordinator, BuildRunCoordinator>();
-
-        services.AddSingleton<BuildModeAttachmentProvider>(sp =>
-            new BuildModeAttachmentProvider(
-                sp.GetRequiredService<IPermissionModeProvider>(),
-                sp.GetRequiredService<IPromptManager>()));
 
         services.AddSingleton<Services.BuildMode.ControlledBuildAttemptWorkflowCompiler>();
         services.AddSingleton<Services.BuildMode.ControlledBuildAttemptHost>();

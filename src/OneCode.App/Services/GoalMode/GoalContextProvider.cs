@@ -17,9 +17,6 @@ namespace OneCode.App.Services.GoalMode;
 /// - 当前子目标位置 + 总数
 /// - 已完成子目标的简短摘要（截断 lastOutput 避免上下文爆炸）
 /// - 已失败子目标的原因（gapAnalysis）
-///
-/// 与 BuildModeAttachmentProvider 对齐：gated on PermissionMode 内部判断，
-/// 非 Goal 模式时 no-op。
 /// </summary>
 public sealed class GoalContextProvider(IPermissionModeProvider modeProvider, GoalContextState state)
     : ReadOnlyAIContextProviderBase

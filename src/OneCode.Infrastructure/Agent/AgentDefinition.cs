@@ -11,7 +11,9 @@ public sealed record AgentDefinition(
     string Description,
     string Instructions,
     IReadOnlyList<string> AllowedTools,
-    string SourcePath);
+    string SourcePath,
+    // frontmatter max_turns：该代理的轮数上限（派工点经 AgentRunRequest.MaxTurnsCeiling 透传）。
+    int? MaxTurns = null);
 
 /// <summary>自定义代理定义解析失败。消息自带文件路径与原因（含 YAML 行号），由派工入口显式报错。</summary>
 public sealed class AgentDefinitionParseException(string sourcePath, string reason, Exception? innerException = null)
@@ -77,7 +79,17 @@ public static partial class AgentDefinitionParser
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return new AgentDefinition(name, description, body, allowedTools, sourcePath);
+        return new AgentDefinition(name, description, body, allowedTools, sourcePath, NormalizeMaxTurns(metadata.MaxTurns, sourcePath));
+    }
+
+    /// <summary>max_turns 非法值（≤0 或溢出）显式报错——静默取默认会让误配置的代理失控。</summary>
+    private static int? NormalizeMaxTurns(int? maxTurns, string sourcePath)
+    {
+        if (maxTurns is null)
+            return null;
+        if (maxTurns is <= 0)
+            throw new AgentDefinitionParseException(sourcePath, "frontmatter 'max_turns' must be a positive integer.");
+        return maxTurns;
     }
 
     internal sealed class AgentFrontmatter
@@ -85,5 +97,6 @@ public static partial class AgentDefinitionParser
         public string? Name { get; set; }
         public string? Description { get; set; }
         public string[]? AllowedTools { get; set; }
+        public int? MaxTurns { get; set; }
     }
 }

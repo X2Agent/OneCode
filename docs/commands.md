@@ -12,11 +12,13 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 类别 | 说明 | 数量 |
 |---|---|---|
-| `Builtin` | 内置通用命令（配置、模式、工具等） | 23 |
+| `Builtin` | 内置通用命令（配置、模式、工具等） | 22 |
 | `Session` | 会话管理（会话、记忆、检查点、导出、队列等） | 11 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
 | `Git` | Git 工作流命令 | 6 |
+
+当前共 44 个命令，数量由 `DocFactConsistencyTests` 的命令数守卫锚定。
 
 ---
 
@@ -421,7 +423,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 **`--session`（别名 `--once`）**：仅当前对话生效、**不写入配置文件**——重启 OneCode 后恢复持久档位。典型用法：`/permissions bypass --session` 在不污染后续会话的前提下，让本次对话自动执行所有操作。
 
-> **工作模式不是权限档位**：`plan` / `goalAuto` 是工作模式（PLAN/GOAL）派生的权限策略，由 `WorkingModeBridge` 在模式切换时自动设置。`/permissions plan` 一类写法会造成「权限轴与模式轴不一致的半状态」（plan 白名单生效但 SubmitPlan 被拒），已被显式拒绝——切换工作模式请用 Tab 或 Alt+1 / Alt+2 / Alt+4。
+> **工作模式不是权限档位**：`plan` / `goalAuto` 是工作模式（PLAN/GOAL）派生的权限策略，由 `WorkingModeBridge` 在模式切换时自动设置。`/permissions plan` 一类写法会造成「权限轴与模式轴不一致的半状态」（plan 白名单生效但 SubmitPlan 被拒），已被显式拒绝——切换工作模式请用 Tab。
 
 > **✅ 运行时立即生效**：`/permissions` 会更新 `PermissionModeProvider`（Agent 管道实际读取的鉴权源），并在未加 `--session` 时将 `permissionMode` 写入用户级配置文件。
 
@@ -576,12 +578,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /close
 
-关闭会话。不带参数关闭当前前台会话（下一条消息惰性开启新会话）；带会话 ID 可关闭前台或后台会话。
+关闭会话。不带参数关闭当前前台会话（下一条消息惰性开启新会话）；带会话 id 前缀可关闭前台或后台会话（前缀唯一命中即生效，歧义时列出候选）。
 
 **用法**：
 
 ```
-/close [session-id]
+/close [session-id-prefix]
 ```
 
 > 元数据：`Immediate = true`。
@@ -680,7 +682,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `clear [--all]` | 清空项目级条目；`--all` 同时清空用户级 |
 | `autodream [trigger\|status]` | 触发或查看 AutoDream 后台整合 |
 
-> **与 `/remember` 的边界**：`/memory` → `MEMORY.md`（摘要注入 + `search_memories`）；`/remember` → `AGENTS.md`（项目规范 / Project Context）。详见 [docs/memory-overview.md](memory-overview.md)。
+> **与 `/remember` 的边界**：`/memory` → `MEMORY.md`（经 `MemoryContextProvider` 全文注入）；`/remember` → `AGENTS.md`（项目规范 / Project Context）。详见 [docs/memory-overview.md](memory-overview.md)。
 
 
 ---
@@ -750,12 +752,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /session
 
-管理会话生命周期（list / new / switch / close）。运行时诊断见 `/status`。
+管理会话生命周期（list / new / switch / delete）。运行时诊断见 `/status`。
 
 **用法**：
 
 ```
-/session [list|new|switch|close]
+/session [list|new|switch|delete]
 ```
 
 **参数**：
@@ -763,11 +765,12 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 子命令 | 说明 |
 |---|---|
 | 无参数 | TUI：打开会话选择器；非 TUI：显示用法 |
-| `list` / `ls` | 列出所有会话 |
+| `list` / `ls` | 列出所有会话（8 位短 id） |
 | `new [name]` | 创建新会话（当前会话转入后台） |
-| `switch <session-id>` | 切换会话 |
-| `close <session-id>` | 关闭会话 |
+| `switch <id-prefix>` | 切换会话（id 前缀唯一命中即生效，歧义时列出候选） |
+| `delete <id-prefix> [--force]` | 从磁盘删除会话事件日志（两步确认：无 `--force` 时显示会话信息并要求带 `--force` 重输；前台/后台活跃会话须先 `/close` 再删） |
 
+> `switch`/`delete` 接受任意长度的 id 前缀；关闭会话用独立命令 `/close`。
 > 元数据：`Immediate = true`。
 
 ---
@@ -776,7 +779,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 ### /doctor
 
-诊断环境与配置健康：API Key 解析（settings.json → 环境变量，按 provider 判断是否必需）、settings.json 解析健康、MCP 服务器连通性（已配置 vs 已连接、每服务器工具数）、LSP 服务器状态（运行 vs 初始化）、Git 可用性（/commit、/review 等依赖）。
+诊断环境与配置健康：API Key 解析（settings.json → 环境变量，按 provider 判断是否必需）、settings.json 解析健康、MCP 服务器连通性（已配置 vs 已连接、每服务器工具数）、LSP 服务器状态（运行 vs 初始化）、Git 可用性（/commit、/review 等依赖）、CodeAct 沙箱运行时（WHP/KVM——不可用时 `execute_code` 静默降级，此项暴露降级状态与恢复方式）。
 
 **用法**：
 

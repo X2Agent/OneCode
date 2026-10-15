@@ -19,13 +19,13 @@ public sealed record ChatSessionDependencies(
     IToolProtocolValidator? ToolProtocolValidator = null,
     PlanCardPublisher? PlanCardPublisher = null,
     IBuildRunCoordinator? BuildRunCoordinator = null,
-    IClarificationInteractionService? ClarificationInteraction = null,
     ControlledBuildAttemptHost? ControlledBuildAttemptHost = null,
     OneCode.Core.Build.IBuildRunStore? BuildRunStore = null,
-    OneCode.Core.Workflows.IOperationLedger? OperationLedger = null);
+    OneCode.Infrastructure.Agent.IHyperlightRuntimeProbe? HyperlightRuntimeProbe = null);
 
 /// <summary>Token/cost/notification observability for interactive chat.</summary>
 public sealed record ChatObservabilityDependencies(
     ITokenUsageTracker TokenUsageTracker,
     ITokenBreakdownEstimator TokenBreakdownEstimator,
-    INotifierService NotifierService);
+    INotifierService NotifierService,
+    OneCode.App.Services.AutoDream.IAutoDreamService? AutoDreamService = null);

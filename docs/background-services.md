@@ -152,12 +152,12 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 |------|-----|
 | 文件 | [OneCode.App/Services/AutoDream/AutoDreamService.cs](../src/OneCode.App/Services/AutoDream/AutoDreamService.cs) |
 | 类型 | `BackgroundService`（Singleton + HostedService 双注册） |
-| 执行时机 | 定时轮询（每小时 1 次，硬编码安全网）+ 外部 `Trigger()` 信号（如 `/memory autodream trigger` 命令） |
-| 职责 | 四重门控后启动轻量 Agent 整理**会话工作记忆与历史会话**，增量变更 JSON 合并写入 `MEMORY.md` |
-| 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor` |
+| 执行时机 | `BUILD` 任务正常完成且未回滚时（`QueryStreamEngine.FinalizeAsync` → `NotifyTaskCompleted()`）+ 手动 `/memory autodream trigger` |
+| 职责 | 经 C# 零 Token 增量快检后启动轻量 Agent 整理**会话工作记忆与当前项目历史会话**，增量变更 JSON 合并写入 `MEMORY.md` |
+| 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor`、`ITextSearchService`、`IMemoryService` |
 
-双注册模式说明：`AddSingleton<AutoDreamService>()` + `AddHostedService(sp => sp.GetRequiredService<AutoDreamService>())`，
-确保既可通过 DI 获取实例调用 `Trigger()`，又让 `BackgroundService.ExecuteAsync` 随宿主自动启停。
+注册模式说明：`AddSingleton<AutoDreamService>()` + `AddSingleton<IAutoDreamService>(...)` + `AddHostedService(sp => sp.GetRequiredService<AutoDreamService>())`，
+确保既可通过 `IAutoDreamService` / `AutoDreamService` 发送信号，又让 `BackgroundService.ExecuteAsync` 随宿主自动启停。
 注册位置：`src/OneCode.App/Services/AutoDream/AutoDreamServiceCollectionExtensions.cs` 的 `AddAutoDreamServices()`。
 
 详见 [AutoDream 记忆整合](#5-autodream-记忆整合)。
@@ -169,7 +169,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs](../src/OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs) |
 | 类型 | `BackgroundService`（注册于 `src/OneCode.App/Services/PlanMode/PlanWorkflowServiceCollectionExtensions.cs`） |
 | 执行时机 | `PeriodicTimer` 每 **5 秒**扫描 + `AttachSession` 时立即触发一次 |
-| 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing`/`Verifying` 状态与持久化 BuildRun 对账后由幂等派发器续跑；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
+| 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing` 状态与持久化 BuildRun 对账后由幂等派发器续跑；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
 | 依赖 | `IPlanAggregateStore`、`IPlanWorkflowApplicationService`、`IBuildRunStore`、`IPlanAgentRunDispatcher` |
 
 会话门控：TUI 启动时通过 `AttachSession` 挂接交互会话；未挂接或会话未加载时仅保留持久化恢复状态，不执行派发。扫描经 `SemaphoreSlim(1,1)` 串行化，单工作流恢复失败仅记 Warning，不影响其余工作流。
@@ -298,39 +298,33 @@ JSON 形式合并写入 `MEMORY.md`。
 - 知识积累：随时间构建知识库，改善后续交互
 - 模式识别：识别单次会话无法发现的跨会话规律
 
-### 5.2 触发机制（双触发）
+### 5.2 触发机制（事件驱动，无周期轮询）
 
 | 触发方式 | 机制 | 说明 |
 |----------|------|------|
-| 定时轮询 | `BackgroundService.ExecuteAsync` 周期循环 | 每小时 1 次（硬编码，安全网） |
-| 外部信号 | `Trigger()` | 供 `/memory autodream trigger` 命令、测试调用 |
+| BUILD 任务完成自动触发 | `QueryStreamEngine.FinalizeAsync` → `IAutoDreamService.NotifyTaskCompleted()` | 仅当 `WorkingMode.Build`（含普通交互式 Build 与 Plan 批准后转入的受控 Build）正常完成且未回滚时触发；`PLAN` 与 `GOAL` 模式不触发 |
+| 手动强制触发 | `Trigger(force: true)` | 供 `/memory autodream trigger` 命令调用，跳过增量快检 |
 
-双触发通过 `Channel<bool>` 实现：`ExecuteAsync` 同时等待定时器和通道信号，
-任一就绪即执行门控检查。通道容量 1（DropWrite 模式），保证幂等。
+后台服务通过 `Channel<bool>` 挂起等待信号（无 1h 定时轮询空转）。
 
-### 5.3 门控条件（四重）
+### 5.3 门控条件
 
 | 门控 | 条件 | 默认值 | 配置键 / 环境变量 |
 |------|------|--------|----------|
 | 启用门控 | 非远程模式 + AutoDream 未被显式关闭 | **开启** | `autodream.enabled` / `ONECODE_AUTODREAM=false` 关闭；`ONECODE_REMOTE=true` 自动关闭 |
-| 时间门控 | 距上次整合 ≥ `minHours` | 6 小时 | `autodream.minHours` / `ONECODE_AUTODREAM_MIN_HOURS` |
-| 扫描节流 | 距上次扫描 ≥ 10 分钟 | 10 分钟（硬编码） | — |
-| 会话门控 | 新会话数 ≥ `minSessions` | 3 个 | `autodream.minSessions` / `ONECODE_AUTODREAM_MIN_SESSIONS` |
-
-AutoDream **默认开启**，无需任何配置。两个自然门控（时间 + 会话数）已足够防止频繁触发。
-扫描节流时间戳持久化到 `{cwd}/.onecode/memory/last_session_scan_at` 文件，跨重启生效，且按项目隔离。
+| 增量门控 | 自 `last_consolidated_at` 以来存在新增 working-memory 笔记或当前内存会话存在新对话轮次 | 有增量才运行 LLM | 手动 `Trigger(force: true)` 可跳过 |
 
 ### 5.4 执行流程
 
-1. 门控检查（四重，任一不通过即退出）
+1. 启用检查与 C# 零 Token 增量快检（任一不通过即退出）
 2. 获取跨进程文件锁（`FileStream` + `FileShare.None`，原子获取）——锁文件在 `{cwd}/.onecode/memory/autodream.lock`
-3. 收集候选：`{cwd}/.onecode/agent-file-memory/` 中自上次整合后被改动的**会话工作记忆**（最多 20 个，最新优先，只读快照）；再扫描 `~/.onecode/events/*.jsonl` 统计**当前项目**的新会话（按事件信封的 `payload.working_directory` 字段过滤）
-4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`session_count`、`working_memory_root`、`working_memory_section` 变量）
-5. 启动轻量 `ChatClientAgent`（仅 Read/Glob/Grep 只读工具）
-6. Agent 输出结构化 JSON 数组
-7. 解析增量变更 JSON 数组后，按 `scope` 写入 `IMemoryEntryStore`：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md`（Agent 输出经 `SanitizeKey`/`SanitizeValue` 清洗，防 MEMORY.md 结构注入）
-8. 清理过期/超容量记忆条目（`IMemoryEntryStore.PruneAsync`，按 `MemoryScope.User`/`Project` 分别调用，移除过期条目 + 按使用价值驱逐超容量条目）
-9. 更新 `last_consolidated_at` 时间戳（仅成功时更新，存入 `{cwd}/.onecode/memory/`）
+3. 收集候选：`{cwd}/.onecode/agent-file-memory/` 中自上次整合后被改动的**会话工作记忆**（最多 20 个，最新优先，只读快照），以及 `ISessionManager.ForegroundConversation` 当前内存会话自 `last_consolidated_at` 以来的 `User` / `Assistant` 对话轮次摘要
+4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`working_memory_root`、`working_memory_section`、`current_conversation_section` 变量）
+5. 启动单轮无工具 `HarnessAgent`（挂载 `MemoryContextProvider` 注入既有 `MEMORY.md`）
+6. Agent 输出增量变更 JSON 数组（支持 `upsert`、`supersedes` 原子替换旧 Key、`delete`）
+7. 解析增量变更 JSON 数组后，按 `scope` 写入 `IMemoryEntryStore`：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md`（未指定 `ttlHours` 默认 `720h`，输出经 `SanitizeKey`/`SanitizeValue` 清洗，防 MEMORY.md 结构注入）
+8. 清理过期/超容量记忆条目（`IMemoryEntryStore.PruneAsync`，单作用域上限 `50` 条，移除过期条目 + 豁免 `manual` 后按 `UpdatedAt` 驱逐最旧条目）
+9. 更新 `last_consolidated_at` 时间戳（仅当 JSON 数组合法解析并应用成功时更新，存入 `{cwd}/.onecode/memory/`）
 
 ### 5.5 写入位置与项目隔离
 
@@ -341,22 +335,20 @@ AutoDream **默认开启**，无需任何配置。两个自然门控（时间 + 
 | `MemoryScope.User` | `~/.onecode/memory/` | `MEMORY.md` | 跨项目用户偏好（如沟通风格、工具偏好） |
 | `MemoryScope.Project` | `{cwd}/.onecode/memory/` | `MEMORY.md` | 项目特定决策与约定（如 OAuth 必须用 DPAPI） |
 
-**状态文件按项目隔离**：`autodream.lock`、`last_consolidated_at`、`last_session_scan_at` 存入 `{cwd}/.onecode/memory/`，与项目 `MEMORY.md` 同目录，每个项目有独立的整合时间线和锁。
+**状态文件按项目隔离**：`autodream.lock` 与 `last_consolidated_at` 存入 `{cwd}/.onecode/memory/`，与项目 `MEMORY.md` 同目录，每个项目有独立的整合时间线和锁。
 
-**会话扫描按项目过滤**：仅统计 `working_directory` 匹配当前项目的会话文件。
+**对话来源按当前会话限定**：仅从匹配当前项目工作目录的活动内存会话（`ISessionManager.ForegroundConversation`）提取对话轮次，不跨会话扫描磁盘历史事件。
 
 **AutoDream 不写入 AGENTS.md 等工程规范文件。** AGENTS.md 是人工维护的约束规范，自动改写会污染规范并破坏稳定性。
 
 ### 5.6 配置
 
-AutoDream **默认开启**，开箱即用。如需调整，在 `settings.json` 中配置：
+AutoDream **默认开启**，开箱即用。如需关闭，在 `settings.json` 中配置：
 
 ```json
 {
   "autodream": {
-    "enabled": true,
-    "minHours": 6,
-    "minSessions": 3
+    "enabled": true
   }
 }
 ```
@@ -364,16 +356,12 @@ AutoDream **默认开启**，开箱即用。如需调整，在 `settings.json` �
 | 配置键 | 类型 | 默认值 | 作用 |
 |--------|------|--------|------|
 | `autodream.enabled` | `bool` | `true` | 是否启用。设为 `false` 关闭 |
-| `autodream.minHours` | `int` | `6` | 距上次整合的最小间隔小时数 |
-| `autodream.minSessions` | `int` | `3` | 触发整合的最小新会话数 |
 
 **优先级**：环境变量 > `settings.json` > 默认值。
 
 | 环境变量 | 覆盖的配置键 | 说明 |
 |----------|-------------|------|
 | `ONECODE_AUTODREAM` | `autodream.enabled` | `false` 时关闭 |
-| `ONECODE_AUTODREAM_MIN_HOURS` | `autodream.minHours` | — |
-| `ONECODE_AUTODREAM_MIN_SESSIONS` | `autodream.minSessions` | — |
 | `ONECODE_REMOTE` | — | `true` 时无论配置如何都强制关闭（远程模式） |
 
 模型直接复用已有的 `fastModel`（未配置时回退到主 `model`），不需要单独配置。

@@ -401,9 +401,7 @@ public sealed partial class BuildRunCoordinator(
             validationStatus,
             current.Plan?.ValidationCommands ?? [],
             string.IsNullOrWhiteSpace(result.ValidationFailureSummary)
-                ? [validationStatus == BuildValidationStatus.Passed
-                    ? "Final validation passed."
-                    : "Final validation did not produce passing evidence."]
+                ? [BuildDefaultValidationEvidence(validationStatus)]
                 : [result.ValidationFailureSummary],
             now,
             DateTimeOffset.UtcNow);
@@ -418,6 +416,7 @@ public sealed partial class BuildRunCoordinator(
             Metrics = current.Metrics with
             {
                 TurnsCompleted = result.TurnCount,
+                ToolCalls = result.ToolCallCount,
                 InputTokens = result.TotalInputTokens,
                 OutputTokens = result.TotalOutputTokens,
             },
@@ -446,9 +445,10 @@ public sealed partial class BuildRunCoordinator(
 
         // Skipped = 无匹配验证 profile（如生成 HTML 报告类工件），验证"不适用"而非失败——
         // 与 MainAgentRunner 的 Skipped 语义一致；只有显式 Failed 才走失败收口。
+        // 验证失败 = 产物已写出但需要人复核：转 Blocked（保留现场），不是丢弃产物的 Failed。
         if (validationStatus == BuildValidationStatus.Failed)
         {
-            current = transitions.Transition(current, BuildRunState.Failed, DateTimeOffset.UtcNow) with
+            current = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
             {
                 TerminalReason = RunTerminalReason.ValidationFailed,
                 FailureSummary = result.ValidationFailureSummary ?? "Final validation did not pass.",
@@ -460,12 +460,13 @@ public sealed partial class BuildRunCoordinator(
         current = transitions.Transition(current, BuildRunState.Accepting, DateTimeOffset.UtcNow);
         try
         {
-            ValidateChangedFileAttribution(current);
+            current = ValidateChangedFileAttribution(current);
             current = MarkExecutionEvidencePassed(current);
         }
         catch (InvalidOperationException ex)
         {
-            current = transitions.Transition(current, BuildRunState.Failed, DateTimeOffset.UtcNow) with
+            // 归属/证据对账失败同样转 Blocked：文件已落盘，等待人工复核而非整体回滚。
+            current = transitions.Transition(current, BuildRunState.Blocked, DateTimeOffset.UtcNow) with
             {
                 TerminalReason = RunTerminalReason.ValidationFailed,
                 FailureSummary = ex.Message,
@@ -518,4 +519,15 @@ public sealed partial class BuildRunCoordinator(
         if (expectedWorkflowFencingToken != currentToken)
             throw new InvalidOperationException("Stale BuildRun workflow fencing token.");
     }
+
+    /// <summary>
+    /// 无显式验证摘要时的默认证据文案。Skipped 是"验证不适用"（修改文件无匹配验证
+    /// profile），写成"未产出通过证据"会误导排查方向为验证失败。
+    /// </summary>
+    private static string BuildDefaultValidationEvidence(BuildValidationStatus status) => status switch
+    {
+        BuildValidationStatus.Passed => "Final validation passed.",
+        BuildValidationStatus.Skipped => "Final validation skipped: no verification profile matches changed files.",
+        _ => "Final validation did not pass.",
+    };
 }

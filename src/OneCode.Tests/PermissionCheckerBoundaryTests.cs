@@ -375,6 +375,27 @@ public sealed class PermissionCheckerBoundaryTests
             $"{mode} mode should {expected} unknown tool");
     }
 
+    [Theory]
+    [InlineData("todos_get_remaining")]
+    [InlineData("todos_complete")]
+    [InlineData("file_memory_ls")]
+    [InlineData("file_memory_grep")]
+    public async Task CheckAsync_AcceptEdits_AllowsHarnessProviderTools(string toolName)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = new ToolPermissionContext
+        {
+            Mode = PermissionMode.AcceptEdits,
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        var input = ParseJson("{}");
+
+        var result = await _sut.CheckAsync(toolName, input, ctx, ct);
+
+        result.Decision.Should().Be(PermissionDecision.Allow,
+            $"AcceptEdits mode must allow harness provider tool '{toolName}' without prompting");
+    }
+
     // Mode × tool-category decision matrix (behavior lock)
 
     [Theory]

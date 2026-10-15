@@ -25,8 +25,6 @@ public static class PlatformServiceCollectionExtensions
         services.AddSingleton<OneCode.Core.ITokenEstimator, OneCode.Infrastructure.TokenEstimator>();
 
         services.AddSingleton<Core.Workflows.IWorkflowRunRegistry, OneCode.Infrastructure.Workflows.JsonWorkflowRunRegistry>();
-        services.AddSingleton<Core.Workflows.IOperationLedger>(
-            new OneCode.Infrastructure.Workflows.FileOperationLedger());
 
         services.AddSingleton<SshRemoteService>();
 

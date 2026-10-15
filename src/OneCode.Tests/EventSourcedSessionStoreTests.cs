@@ -31,19 +31,34 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
     [Fact]
     public async Task SaveAsync_AppendsOnlyNewMessages()
     {
+        var ct = TestContext.Current.CancellationToken;
         var events = new FileSessionEventStore(_root);
         var store = new EventSourcedSessionStore(events);
         var conversation = CreateConversation();
         conversation.Messages.Add(new UserMessage("user", "first", DateTimeOffset.UtcNow));
 
-        await store.SaveAsync(conversation, TestContext.Current.CancellationToken);
-        await store.SaveAsync(conversation, TestContext.Current.CancellationToken);
+        await store.SaveAsync(conversation, ct);
+        await store.SaveAsync(conversation, ct);
+        conversation.Messages.Add(new AssistantMessage(
+            "asst-1",
+            [new TextBlock("reply 1"), new ToolUseBlock("call-1", "Read", """{"path":"a.cs"}""")],
+            DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+        conversation.Messages.Add(new ToolResultMessage(
+            "tool-1", "call-1", "Read", "file content", IsError: false, DateTimeOffset.UtcNow));
         conversation.Messages.Add(new UserMessage("user-2", "second", DateTimeOffset.UtcNow));
-        await store.SaveAsync(conversation, TestContext.Current.CancellationToken);
+        await store.SaveAsync(conversation, ct);
 
-        var loaded = await store.LoadAsync(conversation.Id, TestContext.Current.CancellationToken);
-        loaded!.Messages.Select(message => ((UserMessage)message).Content)
-            .Should().Equal("first", "second");
+        var loaded = await store.LoadAsync(conversation.Id, ct);
+        loaded!.Messages.Select(message => message.Id)
+            .Should().Equal("user", "asst-1", "tool-1", "user-2");
+
+        var storedEvents = await events.ReadAsync(conversation.Id, ct);
+        storedEvents.OfType<MessagesReplacedEvent>().Should().BeEmpty(
+            "normal message appends must emit incremental events without full-history MessagesReplacedEvent");
+        storedEvents.OfType<UserMessageEvent>().Should().HaveCount(2);
+        storedEvents.OfType<AssistantMessageEvent>().Should().ContainSingle();
+        storedEvents.OfType<ToolResultEvent>().Should().ContainSingle();
     }
 
     [Fact]

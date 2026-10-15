@@ -1,6 +1,8 @@
 using OneCode.App.Query;
+using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
 using OneCode.App.Tui;
+using OneCode.Core.Build;
 using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
 
@@ -57,7 +59,7 @@ public sealed class PlanAgentRunDispatcher(
         PlanWorkflow workflow,
         CancellationToken ct = default)
     {
-        if (workflow.State is not (PlanWorkflowState.Executing or PlanWorkflowState.Verifying)
+        if (workflow.State != PlanWorkflowState.Executing
             || workflow.ApprovedSnapshot is null
             || string.IsNullOrWhiteSpace(workflow.ExecutionRequestId)
             || string.IsNullOrWhiteSpace(workflow.ActiveRunId))
@@ -111,7 +113,7 @@ public sealed class PlanAgentRunDispatcher(
             return;
         if (isRecovery)
         {
-            if (current.State is not (PlanWorkflowState.Executing or PlanWorkflowState.Verifying))
+            if (current.State != PlanWorkflowState.Executing)
                 return;
             ValidateRecoveryIdentity(current);
             // 执行世代入口 claim（幂等）：恢复路径的所有后续持久化都携带世代令牌。
@@ -123,7 +125,7 @@ public sealed class PlanAgentRunDispatcher(
             await RunConversationAsync(session, current, ct).ConfigureAwait(false);
             return;
         }
-        if (current.State is PlanWorkflowState.Executing or PlanWorkflowState.Verifying)
+        if (current.State == PlanWorkflowState.Executing)
             return;
         if (current.State != PlanWorkflowState.StartingExecution || current.ApprovedSnapshot is null)
             throw new PlanTransitionException($"Plan '{current.Id}' cannot start from '{current.State}'.");
@@ -183,11 +185,20 @@ public sealed class PlanAgentRunDispatcher(
         var starting = current.State == PlanWorkflowState.StartingExecution;
         try
         {
-            if (session.SessionManager.GetConversation(current.SessionId) is { } conversation)
+            // 恢复路径不丢弃 MAF 会话：上次 attempt 已持久化的会话同时携带本执行世代的历史与
+            // 待办进度，丢弃会让已勾选的步骤全部归零重做。只有新世代首次启动才重建 MAF 运行时会话。
+            if (starting && session.SessionManager.GetConversation(current.SessionId) is { } conversation)
             {
-                MafSessionInvalidator.InvalidateRuntime(
-                    conversation,
-                    starting ? "approved-plan-build-boundary" : "approved-plan-build-recovery");
+                MafSessionInvalidator.InvalidateRuntime(conversation, "approved-plan-build-boundary");
+                if (current.ExecutionRequestId is { } executionRequestId)
+                {
+                    // 执行世代历史播种边界：首次启动时记录转录位置，受控 run 的历史播种据此
+                    // 剥离边界之前的 SubmitPlan 调用并保留规划期只读检索结果；同世代重试沿用不回移。
+                    HistorySeedBoundary.RecordForExecution(
+                        conversation,
+                        executionRequestId,
+                        session.SessionManager.GetChatHistory(current.SessionId).Count);
+                }
                 await session.SessionManager.SaveAsync(ct).ConfigureAwait(false);
             }
 
@@ -218,7 +229,7 @@ public sealed class PlanAgentRunDispatcher(
             var request = new WorkflowRunRequest(
                 runId,
                 current.SessionId,
-                BuildInstruction(approvedSnapshot, runId, current.State),
+                PlanExecutionProtocol.BuildTriggerInstruction(approvedSnapshot),
                 session.SystemPrompt,
                 modelId,
                 WorkingMode.Build,
@@ -226,15 +237,17 @@ public sealed class PlanAgentRunDispatcher(
                 approvedSnapshot.Project(),
                 HarnessInstructions: session.HarnessPrompt);
 
-            // 绑定只需一次：BuildRunStateEvent 会在执行中多次投影（Implementing/Verifying…），
+            // 绑定只需一次：BuildRunStateEvent 会在执行中多次投影（Implementing、Verifying 等），
             // 重复调用 BindBuildRunAsync 会被单槽幂等标记放行为新命令，且收尾事件到达时
             // plan workflow 可能已 Completed——首绑成功后跳过后续绑定。
             var buildRunBound = false;
+            BuildRunStateEvent? lastBuildState = null;
             await foreach (var queryEvent in session.ConversationRunner
                 .StreamWorkflowRunAsync(request, ct).ConfigureAwait(false))
             {
                 if (queryEvent is BuildRunStateEvent buildState)
                 {
+                    lastBuildState = buildState;
                     if (!buildRunBound)
                     {
                         var binding = await workflowService.BindBuildRunAsync(new BindPlanBuildRunCommand(
@@ -252,17 +265,13 @@ public sealed class PlanAgentRunDispatcher(
                     tui.EmitEvent?.Invoke(tuiEvent);
             }
 
+            // 计划成败只看 BuildRun 终态：Completed = run 正常结束且最终验证通过。
+            // 流期间用户可能已取消工作流（终态），此时不再追加收口事件。
             var terminal = await workflowService.GetAsync(current.SessionId, ct).ConfigureAwait(false);
-            if (terminal?.State is PlanWorkflowState.Executing or PlanWorkflowState.Verifying)
+            if (terminal?.State == PlanWorkflowState.Executing)
             {
-                await workflowService.HandleRunEventAsync(new BuildRunFailedEvent(
-                    current.SessionId,
-                    current.Id,
-                    runId,
-                    "ExecutionClosureMissing",
-                    "Build run ended without completing plan steps and verification.",
-                    DateTimeOffset.UtcNow,
-                    fencingToken), ct).ConfigureAwait(false);
+                await workflowService.HandleRunEventAsync(
+                    ClosureEvent(current, runId, lastBuildState, fencingToken), ct).ConfigureAwait(false);
                 terminal = await workflowService.GetAsync(current.SessionId, ct).ConfigureAwait(false);
             }
 
@@ -277,7 +286,7 @@ public sealed class PlanAgentRunDispatcher(
                 current.Id,
                 runId);
             var latest = await workflowService.GetAsync(current.SessionId, CancellationToken.None).ConfigureAwait(false);
-            if (latest?.State is PlanWorkflowState.Executing or PlanWorkflowState.Verifying
+            if (latest?.State is PlanWorkflowState.Executing
                 || latest is { State: PlanWorkflowState.StartingExecution, StartAttempt: >= 5 })
             {
                 await workflowService.HandleRunEventAsync(new BuildRunFailedEvent(
@@ -305,6 +314,12 @@ public sealed class PlanAgentRunDispatcher(
                     ? $"Approved plan start failed and will retry after {latest.NextRetryAt:u}: {ex.Message}"
                     : $"Approved plan execution failed: {ex.Message}"));
         }
+        finally
+        {
+            // 与 TuiWorkflowRunStarted 配对：无论成功、失败还是异常收尾都要复位 TUI 的
+            // 忙碌/流式状态，否则 run 结束后界面会一直停留在"等待模型响应"。
+            tui.EmitEvent?.Invoke(new TuiWorkflowRunEnded(current.Id.ToString()));
+        }
     }
 
     private static void ValidateRecoveryIdentity(PlanWorkflow workflow)
@@ -317,28 +332,25 @@ public sealed class PlanAgentRunDispatcher(
         }
     }
 
-    private static string BuildInstruction(
-        ApprovedPlanSnapshot snapshot,
+    /// <summary>流末收口事件：终态由最后一次 BuildRun 状态投影决定；没有任何投影按未完成计。</summary>
+    private static PlanAgentRunEvent ClosureEvent(
+        PlanWorkflow workflow,
         string runId,
-        PlanWorkflowState state)
+        BuildRunStateEvent? lastBuildState,
+        long fencingToken)
     {
-        var steps = string.Join("\n", snapshot.Steps.Select(step =>
-            $"- {step.Id}: {step.Title}\n  {step.Description}\n  Acceptance: {string.Join("; ", step.AcceptanceCriteria)}"));
-        var recoveryDirective = state == PlanWorkflowState.Verifying
-            ? PlanExecutionProtocol.VerifyingRecoveryDirective
-            : PlanExecutionProtocol.ExecutionDirective;
-        return $"""
-            Execute approved plan {snapshot.PlanId} revision {snapshot.Revision}.
-            The approved snapshot is immutable; do not reinterpret or replace it.
-            {recoveryDirective}
+        var now = DateTimeOffset.UtcNow;
+        if (lastBuildState?.State == BuildRunState.Completed)
+            return new BuildRunSucceededEvent(workflow.SessionId, workflow.Id, runId, now, fencingToken);
 
-            ## Approved plan
-            {snapshot.Markdown}
-
-            ## Structured steps
-            {steps}
-
-            {PlanExecutionProtocol.BuildProtocolBlock(runId)}
-            """;
+        var state = lastBuildState?.State ?? BuildRunState.Created;
+        return new BuildRunFailedEvent(
+            workflow.SessionId,
+            workflow.Id,
+            runId,
+            BuildRunClosure.FailureCode(state),
+            BuildRunClosure.FailureMessage(state, lastBuildState?.FailureSummary),
+            now,
+            fencingToken);
     }
 }

@@ -47,11 +47,16 @@ public sealed class GlobTool
                 ? new WorkspaceIgnoreSnapshot(null, [], [])
                 : await _ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
             var workspaceRoot = Path.GetFullPath(_wd.WorkingDirectory);
+            // 搜索目标位于工作区外的附加目录（如 ~/.onecode/events 或 /add-dir 外部目录）时，
+            // 以搜索目录自身为相对路径基准，避免祖先路径段（如 ~/.onecode）误触发 FileIgnore 的工作区段过滤。
+            var effectiveRoot = OneCode.Core.IO.PathBoundary.IsWithinDirectory(fullPath, workspaceRoot)
+                ? workspaceRoot
+                : fullPath;
 
             // Task.Run's token only prevents the task from *starting*; once the synchronous
             // enumeration is running it cannot be interrupted. Checking inside the loop makes a
             // cancel take effect during a large tree instead of after it finishes.
-            var files = await Task.Run(() => FindFiles(fullPath, pattern, ignore, workspaceRoot, ct), ct)
+            var files = await Task.Run(() => FindFiles(fullPath, pattern, ignore, effectiveRoot, ct), ct)
                 .ConfigureAwait(false);
 
             if (files.Count == 0)

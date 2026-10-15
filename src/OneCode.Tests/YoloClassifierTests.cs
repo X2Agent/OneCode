@@ -37,7 +37,7 @@ public sealed class YoloClassifierTests
             "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
             "BackgroundWait",
             "CronList",
-            "WebSearch", "SymbolSearch", "Lsp", "FindReferences", "LS", "WebFetch",
+            "WebSearch", "Lsp", "LS", "WebFetch",
         };
         foreach (var name in safeTools)
             reg.Register(new OneCode.Core.Tools.ToolMetadata

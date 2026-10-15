@@ -23,6 +23,19 @@ public static class SafetyInvariantMiddleware
                 return await next(ctx, ct).ConfigureAwait(false);
 
             var parameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, ctx.Function.Name, logger);
+            var parseError = ctx.CallContent.Exception;
+            if (parseError is not null || (parameters is { Count: 0 } && DeclaresRequiredParameters(ctx.Function)))
+            {
+                // 工具调用的 JSON 参数无法解析或为空 —— 典型原因是模型单次输出过长被截断
+                // （日志实证：Write 三连败，每次参数为 {}，模型已花约 40 秒生成整篇报告）。
+                // 返回可指导自愈的错误，而不是让 [SAFETY] fail-closed 消息误导模型盲目重发同样的大参数。
+                logger.LogWarning(
+                    parseError,
+                    "Tool '{ToolName}' received empty or unparseable arguments",
+                    ctx.Function.Name);
+                return ToolResult.Error(BuildTruncatedArgumentsHint(ctx.Function.Name, parseError));
+            }
+
             if (parameters is null)
             {
                 // 参数解析失败时 fail-closed，但只失败当前调用以保留批次完整性。
@@ -60,4 +73,34 @@ public static class SafetyInvariantMiddleware
         };
     }
 
+    /// <summary>判断工具 schema 是否声明了非空的 required 参数列表。</summary>
+    private static bool DeclaresRequiredParameters(AIFunction function)
+    {
+        var schema = function.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        // required 数组非空即视为"本工具必须带参数调用"，空参数一定不是合法调用。
+        foreach (var _ in required.EnumerateArray())
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// 构造针对"参数为空/被截断"场景的可自愈错误消息，指导模型改用分段写入策略。
+    /// </summary>
+    private static string BuildTruncatedArgumentsHint(string toolName, Exception? parseError)
+    {
+        var detail = parseError?.Message ?? "arguments were empty";
+        return
+            $"[TOOL ERROR] Tool '{toolName}' received empty or unparseable arguments ({detail}). " +
+            "This usually means the tool-call output was truncated because it was too long. " +
+            "Do NOT retry the same large call. Instead, split the work: first Write a short skeleton file, " +
+            "then append the remaining content in several smaller Edit calls.";
+    }
 }

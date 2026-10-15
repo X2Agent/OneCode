@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services.Compact;
 using OneCode.Core.Build;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Ai;
 
 namespace OneCode.App.Services.Agent;
 
@@ -38,6 +39,10 @@ public partial class MainAgentRunner(
     private readonly IVerificationProvider? _verificationProvider = verificationProvider;
     private readonly TodoProjectionService? _todoProjection = todoProjection;
 
+    // 输出预算耗尽（Length + 零文本零工具调用）时的升级值与默认输出上限共用
+    // MaxOutputTokensDecorator.EscalatedMaxTokens 单一事实源。
+    internal const int EscalatedZeroOutputRetryMaxTokens = MaxOutputTokensDecorator.EscalatedMaxTokens;
+
     /// <summary>
     /// 构建已装配全部中间件的 <see cref="AIAgent"/>，供外部编排器（如 Goal 模式的 LoopAgent）包装使用。
     ///
@@ -49,8 +54,10 @@ public partial class MainAgentRunner(
     /// - OrchestrationEventSink（工具调用事件推送到 TUI）
     /// - 全量 AIContextProvider（Skills/Memory/Design/LSP/Todo/Shell/Compaction）
     ///
-    /// 注意：此方法不包含 RunAsync/RunStreamingAsync 中的 PromptTooLong 恢复循环，
-    /// 因为 CompactionProvider 已在 context provider 层面处理压缩。
+    /// 注意：此方法不包含 PromptTooLong 恢复逻辑——run 输入仅含本轮用户消息
+    /// （历史由 TranscriptChatHistoryProvider 在会话层持有），截断重试无效；
+    /// 上下文超限由 CompactionProvider 在 context provider 层面压缩处理，
+    /// run 失败时由 QueryStreamEngine 给出用户提示。
     /// 调用方负责创建/管理 AgentSession 并调用 RunAsync/RunStreamingAsync。
     /// </summary>
     /// <param name="options">
@@ -75,7 +82,7 @@ public partial class MainAgentRunner(
         var cwd = options.WorkingDirectory ?? Environment.CurrentDirectory;
         var transaction = options.SharedTransaction;
 
-        var pipeline = await BuildAgentPipelineAsync(options, transaction, cwd, ct).ConfigureAwait(false);
+        var pipeline = (await BuildAgentPipelineAsync(options, transaction, cwd, ct: ct).ConfigureAwait(false)).Handle;
         return pipeline.Agent;
     }
 
@@ -138,11 +145,23 @@ public partial class MainAgentRunner(
                         writer,
                         options.OnPermissionPrompt,
                         _loggerFactory.CreateLogger<ApprovalBroker>()),
+                // 预算预警：70%/90% 经事件流发横幅事件（TUI 渲染黄/橙预警）
+                OnBudgetWarning = (level, used, limit)
+                    => writer.TryWrite(new Query.BudgetWarningEvent(level, used, limit)),
+                // 预算 100%：交互模式弹窗三选一（追加预算继续/收尾总结/直接停止）；
+                // 无人值守（SuppressToolApproval，如受控 Build/GOAL 编排）保持 null → 硬停短路
+                OnBudgetExceeded = options.SuppressToolApproval
+                    ? null
+                    : (used, limit, token) => RequestBudgetDecisionAsync(writer, used, limit, token),
             };
 
-            // PromptTooLong 恢复由 PromptTooLongRecoveryRunMiddleware 在 Agent Run 级处理，
-            // Runner 层不再包裹恢复循环 — 符合 MAF 最佳实践（异常在 middleware 层拦截）。
-            pipeline = await BuildAgentPipelineAsync(runOptions, transaction, cwd, ct: ct).ConfigureAwait(false);
+            // 上下文超限不在 pipeline 内恢复（run 输入只有本轮用户消息，截断重试无效）：
+            // 检测后附加可操作提示（/compact），失败收场逻辑见 OnRunFailedAsync。
+            var built = await BuildAgentPipelineAsync(runOptions, transaction, cwd, ct: ct).ConfigureAwait(false);
+            pipeline = built.Handle;
+            // 零输出重试若不传首轮基线，装配层会就地重快照 ledger，
+            // 首轮 attempt 的真实消耗将逃出 BUILD 预算（见重试处）。
+            var originalBudgetBaseline = built.BudgetBaselineTokens;
             var builtAgent = pipeline.Agent;
 
             _logger.LogDebug("MainAgentRunner session creating...");
@@ -151,6 +170,9 @@ public partial class MainAgentRunner(
                 runOptions.ConversationId,
                 ct).ConfigureAwait(false);
             _logger.LogDebug("MainAgentRunner session created, starting agent stream...");
+
+            if (options.SeedTodoTasks is { Count: > 0 } seedTasks)
+                await PlanTodoSeeder.SeedAsync(builtAgent, session, seedTasks, ct).ConfigureAwait(false);
 
             // 待办投影（初始态）：恢复的会话可能带着上一轮留下的待办——先发一次快照，
             // 即使本轮随后被取消，TUI 也能看到清单。run 的最终快照见工具循环之后。
@@ -162,6 +184,8 @@ public partial class MainAgentRunner(
             // queues excess unapproved requests, surfaces them one at a time, and executes the tools
             // only when the host re-enters with responses.
             var currentMessages = chatMessages;
+            var zeroOutputLengthRetried = false;
+            var todoMutations = new TodoMutationObserver();
 
             while (true)
             {
@@ -170,6 +194,11 @@ public partial class MainAgentRunner(
                 await foreach (var evt in builtAgent.RunStreamingAsync(
                     currentMessages, session, new AgentRunOptions(), ct).ConfigureAwait(false))
                 {
+                    // 待办投影（工具边界）：todos_* 变更完成的那一刻就刷新快照，而不是等整个 run 结束——
+                    // 一个 run 可长达十几分钟，run 末才刷新会让步骤进度在界面上长时间停滞。
+                    if (_todoProjection is not null && todoMutations.Observe(evt))
+                        await _todoProjection.PublishAsync(builtAgent, session, ct).ConfigureAwait(false);
+
                     // An update can carry approval requests alongside ordinary content: the framework
                     // converts every call in a response once any tool in it requires approval, and on
                     // reaching its auto-approval cap it returns a multi-request batch. Splitting the
@@ -205,22 +234,58 @@ public partial class MainAgentRunner(
                     await writer.WriteAsync(visibleUpdate, ct).ConfigureAwait(false);
                 }
 
-                // MAF completed the run without surfacing another approval request.
-                if (approvalRequests.Count == 0)
-                    break;
-
-                // MAF binds these responses to the surfaced tool calls on the next request, and
-                // ToolApprovalAgent injects the whole batch as ONE user message
-                // (InjectCollectedResponses) — mirror that shape instead of one message per response.
-                var approvalResponses = new List<AIContent>(approvalRequests.Count);
-                foreach (var req in approvalRequests)
+                if (approvalRequests.Count != 0)
                 {
-                    approvalResponses.Add(await HandleToolApprovalAsync(
-                        req,
-                        runOptions.ApprovalBroker!,
-                        ct).ConfigureAwait(false));
+                    // MAF binds these responses to the surfaced tool calls on the next request, and
+                    // ToolApprovalAgent injects the whole batch as ONE user message
+                    // (InjectCollectedResponses) — mirror that shape instead of one message per response.
+                    var approvalResponses = new List<AIContent>(approvalRequests.Count);
+                    foreach (var req in approvalRequests)
+                    {
+                        approvalResponses.Add(await HandleToolApprovalAsync(
+                            req,
+                            runOptions.ApprovalBroker,
+                            ct).ConfigureAwait(false));
+                    }
+                    currentMessages = [new ChatMessage(ChatRole.User, approvalResponses)];
+                    continue;
                 }
-                currentMessages = [new ChatMessage(ChatRole.User, approvalResponses)];
+
+                // 流式零输出兜底：推理模型可能把全部输出预算耗在 reasoning 上，返回
+                // Length + 零文本零工具调用（BuildRun 随即以 Failed 收场，用户侧表现为
+                // "没有任何内容产生"）。无工具调用的 run 没有副作用，整轮重试幂等安全；
+                // 流式无法中途 continuation（MaxOutputTokensDecorator 的升级+续跑恢复只
+                // 覆盖非流式路径），只能在 run 结束后以提升的输出上限重跑，限一次。
+                if (ShouldRetryZeroOutputLength(
+                        zeroOutputLengthRetried, evidence.TurnCount, evidence.ToolCallCount, evidence.FinishReason))
+                {
+                    zeroOutputLengthRetried = true;
+                    _logger.LogWarning(
+                        "Zero-output run hit the output token cap (out={OutputTokens}) — retrying once with MaxOutputTokens={Escalated}",
+                        evidence.OutputTokens,
+                        EscalatedZeroOutputRetryMaxTokens);
+
+                    // 首次 attempt 的 pipeline 租约就地释放，让位给重建的 pipeline（finally 只释放最后一个）。
+                    pipeline?.ContextProviderLease?.Dispose();
+                    pipeline = (await BuildAgentPipelineAsync(
+                        runOptions with { MaxOutputTokens = EscalatedZeroOutputRetryMaxTokens },
+                        transaction,
+                        cwd,
+                        budgetBaselineTokens: originalBudgetBaseline,
+                        ct: ct).ConfigureAwait(false)).Handle;
+                    builtAgent = pipeline.Agent;
+                    // 复用同一会话：首轮零输出最多只会让历史里多一条 user 消息，
+                    // 重试的可见收益远大于可能的重复提示。
+                    session = await _sessionStore.CreateOrRestoreSessionAsync(
+                        builtAgent,
+                        runOptions.ConversationId,
+                        ct).ConfigureAwait(false);
+                    if (options.SeedTodoTasks is { Count: > 0 } retrySeedTasks)
+                        await PlanTodoSeeder.SeedAsync(builtAgent, session, retrySeedTasks, ct).ConfigureAwait(false);
+                    continue;
+                }
+
+                break;
             }
 
             // 产出画像诊断日志：2026-09 的"对话静默停止"事故中，模型返回 200 + 零内容
@@ -244,18 +309,6 @@ public partial class MainAgentRunner(
                     evidence.OutputTokens,
                     evidence.FinishReason?.ToString() ?? "none");
             }
-
-            await _sessionStore.PersistSessionAsync(
-                builtAgent,
-                session,
-                runOptions.ConversationId,
-                ct).ConfigureAwait(false);
-
-            // 待办投影（最终态）：一次 run（含审批续跑的全部迭代）结束后发布权威快照。
-            // 刷新粒度是"轮"而非工具调用中间——provider 快照不做增量重建，见
-            // TodoProjectionService 注释。
-            if (_todoProjection is not null)
-                await _todoProjection.PublishAsync(builtAgent, session, ct).ConfigureAwait(false);
 
             // Final validation before commit: Build mode may provide a shared transaction
             // whose commit is deferred until the BuildRun final decision is durably persisted.
@@ -288,12 +341,16 @@ public partial class MainAgentRunner(
                     if (ShouldRollBackForValidation(finalValidationStatus))
                     {
                         _logger.LogWarning(
-                            "Final validation failed (status={Status}, errors={ErrorCount}) — rolling back {FileCount} file changes",
-                            finalValidationStatus, finalCheck.Errors.Count, transaction.SnapshotCount);
+                            "Final validation failed (status={Status}, errors={ErrorCount}) with {FileCount} changed files (rolledBack={RolledBack})",
+                            finalValidationStatus, finalCheck.Errors.Count, transaction.SnapshotCount,
+                            !options.DeferTransactionCommit);
 
                         validationFailureSummary = finalCheck.FormatForLlm();
                         terminalReason = RunTerminalReason.ValidationFailed;
-                        transactionRolledBack = true;
+                        // 受控 Build attempt（延迟提交）把文件处置权交给其 runtime：
+                        // 验证失败保留产物供人工复核，不在此宣告回滚。
+                        transactionRolledBack = !options.DeferTransactionCommit;
+                        await PersistSessionAndPublishTodosAsync().ConfigureAwait(false);
                         return BuildResult();
                     }
 
@@ -301,12 +358,37 @@ public partial class MainAgentRunner(
                 }
             }
 
+            // 计划预置待办的收尾补账：受控 Build 正常完成且验证通过（且非零交付物）时，
+            // 将剩余未勾选的待办一并标为完成，避免模型漏调 todos_complete 让已完成计划残留 "1/7" 未完成态。
+            if (options.SeedTodoTasks is { Count: > 0 } completedSeedTasks
+                && terminalReason == RunTerminalReason.Completed
+                && (transaction.SnapshotCount > 0 || completedSeedTasks.All(task => task.ExpectedFiles.Count == 0)))
+            {
+                await PlanTodoSeeder.CompleteRemainingAsync(builtAgent, session, ct).ConfigureAwait(false);
+            }
+
+            await PersistSessionAndPublishTodosAsync().ConfigureAwait(false);
+
             // Shared transactions and explicitly deferred Build transactions are committed
             // by their coordinator after the durable business decision is saved.
             if (ownsTransaction && !options.DeferTransactionCommit)
             {
                 transaction.Commit();
                 transactionCommitted = true;
+            }
+
+            async Task PersistSessionAndPublishTodosAsync()
+            {
+                await _sessionStore.PersistSessionAsync(
+                    builtAgent,
+                    session,
+                    runOptions.ConversationId,
+                    ct).ConfigureAwait(false);
+
+                // 待办投影（最终态）：一次 run（含审批续跑的全部迭代与收尾补账）结束后发布权威快照，
+                // 兜住流式循环里没有观察到变更工具结果的路径（如取消前最后一批）。
+                if (_todoProjection is not null)
+                    await _todoProjection.PublishAsync(builtAgent, session, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -344,7 +426,8 @@ public partial class MainAgentRunner(
             FinalValidationStatus: finalValidationStatus,
             ModifiedFiles: modifiedFiles,
             ValidationFailureSummary: validationFailureSummary,
-            CompletedToolBatches: evidence.CompletedToolBatches);
+            CompletedToolBatches: evidence.CompletedToolBatches,
+            ToolCallCount: evidence.ToolCallCount);
     }
 
     /// <summary>
@@ -355,17 +438,54 @@ public partial class MainAgentRunner(
     internal static bool ShouldRollBackForValidation(BuildValidationStatus status)
         => status == BuildValidationStatus.Failed;
 
+    /// <summary>
+    /// 预算 100% 消耗时的用户询问（复用工具审批管道）：经 ApprovalRequestEvent 弹窗，
+    /// 决策语义映射 AllowOnce=追加预算继续 / AllowAlways=收尾总结 / Deny=直接停止。
+    /// 选项说明写入 Prompt 字段，由 TUI 审批组件原样呈现。
+    /// </summary>
+    private static async Task<ApprovalDecision> RequestBudgetDecisionAsync(
+        System.Threading.Channels.ChannelWriter<object> writer,
+        long usedTokens,
+        long limitTokens,
+        CancellationToken ct)
+    {
+        var evt = new Query.ApprovalRequestEvent(
+            RequestId: Guid.NewGuid().ToString("N"),
+            ToolName: "预算已达上限",
+            ToolInput: $"可计费 token 已消耗 {usedTokens:N0}，达到本次执行上限 {limitTokens:N0}",
+            Prompt: "allow_once=追加预算继续（上限加倍） · allow_always=收尾总结 · deny=直接停止");
+        await writer.WriteAsync(evt, ct).ConfigureAwait(false);
+        return await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 流式零输出的重试判定：仅当 run 尚未重试过、且产出完全为零（零文本零轮次零工具调用）、
+    /// 且终因为输出上限（Length）时才重试。已有工具调用的 run 绝不重试——重放有副作用的
+    /// run 会重复执行工具；其他终因（Stop/取消/错误）重跑也不会改变结果。
+    /// </summary>
+    internal static bool ShouldRetryZeroOutputLength(
+        bool alreadyRetried, int turnCount, int toolCallCount, ChatFinishReason? finishReason)
+        => !alreadyRetried
+            && turnCount == 0
+            && toolCallCount == 0
+            && finishReason == ChatFinishReason.Length;
+
     internal static ChatOptions BuildChatOptions(MainAgentRunOptions options)
     {
-        // 开启扩展思考时不能再用 4096 这个默认上限：Anthropic 要求 budget_tokens < max_tokens，
+        // 开启扩展思考时不能再用低默认上限：Anthropic 要求 budget_tokens < max_tokens，
         // 显式设了 MaxOutputTokens 时适配器只能把 budget 压到 max_tokens - 1，输出预算会被吃光。
         // 留空则由适配器按 budget 自行抬高 max_tokens。
         var reasoningEffort = ResolveReasoningEffort(options);
 
+        // 未开思考时的默认上限取升级值而非 4096：推理模型不经 Reasoning 设置也会自行推理
+        // （o 系 / gpt-5 默认推理消耗输出预算），4K 会被 reasoning 全部吃光触发零输出重试
+        // （受控 Build 即此案例——首轮空转 65 秒）。显式 MaxOutputTokens 仍优先。
         var chatOptions = new ChatOptions
         {
             ModelId = options.ModelId,
-            MaxOutputTokens = reasoningEffort is null ? options.MaxOutputTokens ?? 4096 : options.MaxOutputTokens,
+            MaxOutputTokens = reasoningEffort is null
+                ? options.MaxOutputTokens ?? EscalatedZeroOutputRetryMaxTokens
+                : options.MaxOutputTokens,
             // 主体正文走 MAF 的 agent-instructions 入口，而不是自己拼一条 system 消息：
             // HarnessAgent 会把 harness 片段拼在它前面（片段缺失时用 MAF 默认文案）。
             Instructions = string.IsNullOrEmpty(options.SystemPrompt) ? null : options.SystemPrompt,

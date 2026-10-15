@@ -9,7 +9,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup Label="Microsoft Extensions (.NET 10)">
-    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.22.0-preview.260918.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Tools.Shell" Version="1.24.0-preview.261006.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
@@ -36,14 +36,14 @@
   </ItemGroup>
   <ItemGroup Label="AI / LLM Abstraction">
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.10.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.10.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.1" />
     <PackageVersion Include="Anthropic" Version="12.40.0" />
   </ItemGroup>
   <ItemGroup Label="Agent Framework">
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Harness" Version="1.22.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.24.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.24.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Harness" Version="1.24.0" />
     <!--
       Workflows.Declarative 评估结论：
       该包要求 ResponseAgentProvider（Azure AI Foundry），与本地 IChatClient 架构不兼容。
@@ -51,8 +51,8 @@
       Microsoft.Agents.AI.Workflows 仍被 AgentTaskWorkflow（ParallelAgents DAG 底座）使用。
     -->
     <!-- Mcp：MCP 工具 → AIFunction 桥接 + 2026-07-28 Tasks extension（long-running 工具）透明处理 -->
-    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.22.0-alpha.260918.1" />
-    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.22.0-preview.260918.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Mcp" Version="1.24.0-alpha.261006.1" />
+    <PackageVersion Include="Microsoft.Agents.AI.Hyperlight" Version="1.24.0-preview.261006.1" />
     <PackageVersion Include="Hyperlight.HyperlightSandbox.Api" Version="0.6.0" />
   </ItemGroup>
   <ItemGroup Label="Tooling">
@@ -67,7 +67,7 @@
          版本 1.5.2：修复 1.3.0 的 GHSA-pgww-w46g-26qg（中等严重性）漏洞。 -->
     <PackageVersion Include="AngleSharp" Version="1.7.1" />
     <PackageVersion Include="SkiaSharp" Version="4.151.1" />
-    <PackageVersion Include="System.ClientModel" Version="1.14.0" />
+    <PackageVersion Include="System.ClientModel" Version="1.15.0" />
   </ItemGroup>
   <ItemGroup Label="Testing">
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />

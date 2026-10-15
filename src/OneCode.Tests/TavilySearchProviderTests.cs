@@ -101,16 +101,18 @@ public sealed class TavilySearchProviderTests
             .WithMessage("*401*");
     }
 
-    [Fact]
-    public async Task SearchAsync_Http429_ThrowsQuotaExceeded()
+    [Theory]
+    [InlineData(429)]
+    [InlineData(432)]
+    public async Task SearchAsync_Http429Or432_ThrowsQuotaExceeded(int statusCode)
     {
         var ct = TestContext.Current.CancellationToken;
-        var sut = CreateProvider(new StubHandler(HttpStatusCode.TooManyRequests, """{"detail":"quota"}"""));
+        var sut = CreateProvider(new StubHandler((HttpStatusCode)statusCode, """{"detail":"quota"}"""));
 
         var act = () => sut.SearchAsync("q", maxResults: 8, ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*429*");
+            .WithMessage($"*HTTP {statusCode}*");
     }
 
     [Fact]

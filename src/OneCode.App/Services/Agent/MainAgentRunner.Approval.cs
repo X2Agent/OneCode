@@ -18,9 +18,9 @@ public partial class MainAgentRunner
     /// 处理单个 MAF ToolApprovalRequestContent（流式 + 非流式统一路径）。
     /// 推送 <see cref="ApprovalRequestEvent"/> 到 channel，await ResponseSource 回传决策。
     /// </summary>
-    private async Task<AIContent> HandleToolApprovalAsync(
+    internal async Task<AIContent> HandleToolApprovalAsync(
         ToolApprovalRequestContent request,
-        IApprovalBroker broker,
+        IApprovalBroker? broker,
         CancellationToken ct)
     {
         var functionCall = request.ToolCall as FunctionCallContent;
@@ -30,6 +30,21 @@ public partial class MainAgentRunner
             : JsonSerializer.SerializeToElement(new { });
 
         _logger.LogDebug("ToolApprovalRequest: tool={Tool}, requestId={Id}", toolName, request.RequestId);
+
+        // 受控 Build（SuppressToolApproval）等无审批通道的 run 也会漏出审批请求
+        // （如 execute_code 恒带 AlwaysRequire 审批边界，FICC 拦截在权限层之前）。
+        // 无人应答时必须 fail-closed 拒绝本次调用——抛异常会让整个 run 失败，
+        // 进而回滚事务内全部文件改动。
+        if (broker is null)
+        {
+            _logger.LogWarning(
+                "Tool approval request for {Tool} (request {RequestId}) surfaced without an approval broker; denying",
+                toolName,
+                request.RequestId);
+            return request.CreateResponse(
+                approved: false,
+                $"Tool '{toolName}' requires approval but no approval channel is available in this run.");
+        }
 
         var decision = await broker.RequestAsync(
             new ApprovalRequest(

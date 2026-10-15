@@ -31,6 +31,8 @@ public static class SessionServiceCollectionExtensions
         services.AddSingleton<ISessionIdProvider>(sp => sp.GetRequiredService<SessionIdHolder>());
         services.AddSingleton<IWorkingDirectoryAccessor, SessionWorkingDirectoryAccessor>();
 
+        services.AddSingleton<SessionCandidateProvider>();
+
         services.AddSingleton<SessionToolSetManager>();
         services.AddSingleton<ISessionToolSetManager>(sp => sp.GetRequiredService<SessionToolSetManager>());
 

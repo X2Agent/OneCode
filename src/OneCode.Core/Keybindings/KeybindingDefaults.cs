@@ -48,12 +48,6 @@ public static class KeybindingDefaults
     public const string ActionAppSidebarWider = "app:sidebarWider";
     public const string ActionAppSidebarNarrower = "app:sidebarNarrower";
 
-    // 工作模式直达（Alt+1/2/4 独立单键绑定，与裸 Tab 循环解耦——共享 tab 前缀
-    // 会与循环/补全语义冲突；经典终端把 ctrl+2/3/4 编码为 NUL/ESC/FS。注册于 Chat 上下文。
-    public const string ActionAppModeBuild = "app:modeBuild";
-    public const string ActionAppModePlan = "app:modePlan";
-    public const string ActionAppModeGoal = "app:modeGoal";
-
     // 历史导航
     public const string ActionHistoryPrevious = "history:previous";
     public const string ActionHistoryNext = "history:next";
@@ -81,7 +75,7 @@ public static class KeybindingDefaults
     public const string ActionAutocompletePrevious = "autocomplete:previous";
     public const string ActionAutocompleteNext = "autocomplete:next";
     // Tab 接受建议：tab 自身在 Autocomplete 上下文绑定，补全激活时立即触发；
-    // 模式直达已改绑 alt+1..4，tab 不再承担和弦前缀职责。
+    // tab 不承担和弦前缀职责。
     public const string ActionAutocompleteAccept = "autocomplete:accept";
     public const string ActionAutocompleteDismiss = "autocomplete:dismiss";
 
@@ -107,7 +101,6 @@ public static class KeybindingDefaults
         ActionAppExit,
         ActionAppSidebarToggle,
         ActionAppSidebarWider, ActionAppSidebarNarrower,
-        ActionAppModeBuild, ActionAppModePlan, ActionAppModeGoal,
         ActionHistoryPrevious, ActionHistoryNext, ActionHistoryRecallLast,
         ActionChatCancel, ActionChatKillAgents,
         ActionChatSubmit, ActionChatNewline, ActionChatPaste,
@@ -137,9 +130,6 @@ public static class KeybindingDefaults
         [ActionAppSidebarToggle] = "切换右侧侧边栏可见性（Plan 面板）",
         [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan 面板）",
         [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan 面板）",
-        [ActionAppModeBuild] = "切换到 BUILD 模式",
-        [ActionAppModePlan] = "切换到 PLAN 模式",
-        [ActionAppModeGoal] = "切换到 GOAL 模式",
 
         // 历史导航
         [ActionHistoryPrevious] = "上一条历史输入",
@@ -237,12 +227,6 @@ public static class KeybindingDefaults
             // 占位建议循环（占位符可见时生效；占位符不可见时不 Handled，交给编辑器移动光标）。
             ["ctrl+left"] = ActionChatSuggestionPrevious,
             ["ctrl+right"] = ActionChatSuggestionNext,
-
-            // 工作模式直达（Alt+数字独立绑定；裸 Tab 循环为硬编码行为，不经 Resolver，
-            // 两者无共享前缀、互不干扰）。
-            ["alt+1"] = ActionAppModeBuild,
-            ["alt+2"] = ActionAppModePlan,
-            ["alt+4"] = ActionAppModeGoal,
         }),
         new(ContextAutocomplete, new Dictionary<string, string?>
         {

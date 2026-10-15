@@ -13,8 +13,15 @@ namespace OneCode.App.Tui;
 /// </summary>
 internal abstract class SidebarViewBase : View
 {
-    public const int DefaultWidth = 35;
     public const int MinWidth = 28;
+
+    /// <summary>宽度封顶列数：40% 屏宽的 proportional 上限在超宽终端上过大（挤占主区），
+    /// 封顶 100 列。</summary>
+    public const int MaxWidthCap = 100;
+
+    /// <summary>比例化宽度的分子：屏宽 40%（全屏时侧边栏占比明显不足，30% 过窄）。</summary>
+    internal const int ProportionalNumerator = 2;
+    private const int ProportionalDenominator = 5;
 
     /// <summary>分隔线拖动手柄的宽度（列）。未处理鼠标事件会冒泡到本视图，
     /// 因此手柄区可覆盖分隔线列及紧邻的一列内容列，便于抓取。</summary>
@@ -32,8 +39,12 @@ internal abstract class SidebarViewBase : View
     private bool _isDragging;
     private bool _isHovering;
 
+    /// <summary>用户是否手动调整过宽度（拖拽或键盘）。调过后终端 resize 只按新上限 clamp，
+    /// 不再重设比例默认值——尊重用户的选择。</summary>
+    private bool _userAdjustedWidth;
+
     /// <summary>Current panel width in columns (mutable via separator drag).</summary>
-    public int CurrentWidth { get; private set; } = DefaultWidth;
+    public int CurrentWidth { get; private set; }
 
     /// <summary>标题行前缀字形（如 📋 / 🛠），由具体面板指定。</summary>
     protected abstract string HeaderGlyph { get; }
@@ -52,12 +63,12 @@ internal abstract class SidebarViewBase : View
         _dragEnded = dragEnded;
         _defaultTitle = defaultTitle;
         _headerTitle = defaultTitle;
-        _content = new MessageListView();
+        _content = new MessageListView(app: _app);
         CanFocus = false;
         TabStop = TabBehavior.NoStop;
 
         var screenWidth = _app.Screen.Width > 0 ? _app.Screen.Width : 120;
-        CurrentWidth = Math.Clamp(DefaultWidth, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
+        CurrentWidth = ComputeDefaultWidth(screenWidth);
         Width = CurrentWidth;
         Height = Dim.Fill();
         SetScheme(TuiStyles.ConversationArea);
@@ -123,7 +134,7 @@ internal abstract class SidebarViewBase : View
 
     /// <summary>
     /// 左侧分隔线是拖动手柄：按住拖动调整宽度。侧边栏右停靠贴屏幕右缘，
-    /// 因此新宽度 = 屏幕宽 - 鼠标屏幕 x；clamp 到 [MinWidth, 屏幕宽 60%]。
+    /// 因此新宽度 = 屏幕宽 - 鼠标屏幕 x；clamp 到 [MinWidth, <see cref="ComputeMaxWidth(int)"/>]。
     /// 拖动期间仅通过 <c>_widthChanged</c> 通知宿主重排布局；释放时通过
     /// <c>_dragEnded</c> 触发一次内容重渲（见类头注释）。
     /// </summary>
@@ -176,6 +187,7 @@ internal abstract class SidebarViewBase : View
         if (newWidth == CurrentWidth)
             return;
 
+        _userAdjustedWidth = true;
         CurrentWidth = newWidth;
         Width = newWidth;
         X = Pos.AnchorEnd(newWidth);
@@ -187,7 +199,8 @@ internal abstract class SidebarViewBase : View
 
     /// <summary>
     /// 键盘调整宽度：按 <paramref name="delta"/> 列增减，clamp 规则与分隔线拖拽一致
-    /// （下限 <see cref="MinWidth"/>，上限 <see cref="ComputeMaxWidth(int)"/>：Standard 取「30% 与主区保底 65 列」较小值，Wide 封顶 45 列）。
+    /// （下限 <see cref="MinWidth"/>，上限 <see cref="ComputeMaxWidth(int)"/>：屏宽 40% 与
+    /// <see cref="MaxWidthCap"/> 取小、主区保底 65 列）。
     /// 宽度实际变化时更新几何并触发 <c>_widthChanged</c>（仅重排布局）。
     /// </summary>
     /// <returns>宽度是否实际变化（被 clamp 抵消时为 false，调用方无需重渲内容）。</returns>
@@ -199,6 +212,7 @@ internal abstract class SidebarViewBase : View
         if (newWidth == CurrentWidth)
             return false;
 
+        _userAdjustedWidth = true;
         CurrentWidth = newWidth;
         Width = newWidth;
         X = Pos.AnchorEnd(newWidth);
@@ -213,32 +227,42 @@ internal abstract class SidebarViewBase : View
         Math.Clamp(screenWidth - screenX, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
 
     /// <summary>
-    /// 宽度上限：依据三档断点规范（Compact &lt; 100, Standard 100..140, Wide &gt; 140），
-    /// Standard 下上限为屏幕 30%（28..42 列），Wide 下上限为 45 列，
-    /// 主会话区保底 <see cref="ChatColumnMinWidth"/>（65 列）。与拖拽及键盘调整共享规则。
+    /// 终端宽度变化后的宽度重定：用户手动调过宽度则尊重其选择（仅按新上限 clamp），
+    /// 否则按比例默认值跟随窗口——侧边栏应自适应窗口尺寸而非固定列数。
+    /// </summary>
+    /// <returns>宽度是否实际变化；变化时调用方需重排布局并重渲内容。</returns>
+    public bool OnTerminalResized(int screenWidth)
+    {
+        var target = _userAdjustedWidth
+            ? Math.Clamp(CurrentWidth, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth))
+            : ComputeDefaultWidth(screenWidth);
+        if (target == CurrentWidth)
+            return false;
+
+        CurrentWidth = target;
+        Width = target;
+        X = Pos.AnchorEnd(target);
+        return true;
+    }
+
+    /// <summary>
+    /// 比例化默认宽度：屏宽 40%（clamp 到 [MinWidth, <see cref="ComputeMaxWidth(int)"/>]），
+    /// 让面板随窗口尺寸缩放而非固定 35 列。
+    /// </summary>
+    internal static int ComputeDefaultWidth(int screenWidth) =>
+        Math.Clamp(screenWidth * ProportionalNumerator / ProportionalDenominator, ComputeMinWidth(screenWidth), ComputeMaxWidth(screenWidth));
+
+    /// <summary>
+    /// 宽度上限：屏宽 40% 与 <see cref="MaxWidthCap"/>（100 列）取小者，再与主区保底
+    /// <see cref="ChatColumnMinWidth"/>（65 列）平衡。极窄终端上退化为不超过屏幕宽。
     /// </summary>
     internal static int ComputeMaxWidth(int screenWidth)
     {
         if (screenWidth <= MinWidth)
             return screenWidth;
 
-        int targetMax;
-        if (screenWidth > TuiSpacing.BreakpointWide)
-        {
-            // Wide (> 140): 45 columns max (main chat >= 95)
-            targetMax = Math.Min(45, screenWidth - ChatColumnMinWidth);
-        }
-        else if (screenWidth >= TuiSpacing.BreakpointCompact)
-        {
-            // Standard (100..140): 30% of screen (28..42 columns), main chat >= 65
-            targetMax = Math.Min(screenWidth * 3 / 10, screenWidth - ChatColumnMinWidth);
-        }
-        else
-        {
-            // Compact (<100): fallback clamped to MinWidth
-            targetMax = MinWidth;
-        }
-
+        var proportional = Math.Max(MinWidth, screenWidth * ProportionalNumerator / ProportionalDenominator);
+        var targetMax = Math.Min(Math.Min(proportional, MaxWidthCap), screenWidth - ChatColumnMinWidth);
         return Math.Min(screenWidth, Math.Max(MinWidth, targetMax));
     }
 
@@ -257,7 +281,12 @@ internal abstract class SidebarViewBase : View
         // 拖动时在标题行尾部实时展示当前宽度，作为调整过程的反馈。
         if (_isDragging)
             title += $"  ◂ {CurrentWidth}";
-        AddStr(title.Length >= w ? title[..Math.Max(0, w - 1)] : title + new string(' ', w - title.Length));
+        // 截断/补齐按显示宽度计算——title.Length 对 CJK 文本会算窄，导致溢出或补齐不足。
+        var titleWidth = TextWidthHelper.GetDisplayWidth(title);
+        var displayTitle = titleWidth >= w
+            ? TextWidthHelper.TruncateByWidth(title, Math.Max(1, w - 1))
+            : title + new string(' ', w - 1 - titleWidth);
+        AddStr(displayTitle);
 
         // 左侧竖分隔线（拖动手柄）：悬停/拖动时高亮并换用双线字形，提示可横向调整宽度。
         var handleActive = _isHovering || _isDragging;

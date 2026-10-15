@@ -5,7 +5,6 @@ using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Permissions;
 using OneCode.Core.Permissions.Yolo;
@@ -371,7 +370,6 @@ public sealed class AgentPipelineBuilderTests
         FileChangeCallback: null,
         ModelId: "test-model",
         ProviderId: "test-provider",
-        SafetyInvariants: new[] { Substitute.For<ISafetyInvariant>() },
 
         EditTransaction: transaction ?? new EditTransaction(),
         PermissionChecker: permissionChecker);
@@ -385,7 +383,9 @@ public sealed class AgentPipelineBuilderTests
         var main = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Full, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 50, ToolLimitMessage: "main limit"));
-        var worker = AgentPipelineOptionsFactory.CreateForWorker(ctx, maxToolCalls: 10);
+        var worker = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker limit"));
         var worker2 = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Worker, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "worker limit"));
@@ -399,9 +399,6 @@ public sealed class AgentPipelineBuilderTests
 
         main.AdditionalWorkingDirectories.Should().BeSameAs(worker.AdditionalWorkingDirectories);
         main.AdditionalWorkingDirectories.Should().BeSameAs(worker2.AdditionalWorkingDirectories);
-
-        main.SafetyInvariants.Should().BeSameAs(worker.SafetyInvariants);
-        main.SafetyInvariants.Should().BeSameAs(worker2.SafetyInvariants);
 
         main.EditTransaction.Should().BeSameAs(worker.EditTransaction);
         main.EditTransaction.Should().BeSameAs(worker2.EditTransaction);
@@ -421,7 +418,7 @@ public sealed class AgentPipelineBuilderTests
         worker2.MaxToolCalls.Should().Be(20);
 
         main.ToolLimitMessage.Should().Be("main limit");
-        worker.ToolLimitMessage.Should().Contain("10");
+        worker.ToolLimitMessage.Should().Be("worker limit");
         worker2.ToolLimitMessage.Should().Be("worker limit");
     }
 
@@ -433,7 +430,9 @@ public sealed class AgentPipelineBuilderTests
         var main = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Full, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 50, ToolLimitMessage: "main"));
-        var worker = AgentPipelineOptionsFactory.CreateForWorker(ctx, maxToolCalls: 10);
+        var worker = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker limit"));
         var worker2 = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Worker, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 20, ToolLimitMessage: "worker"));
@@ -457,7 +456,9 @@ public sealed class AgentPipelineBuilderTests
         var main = AgentPipelineOptionsFactory.Create(
             PipelineProfile.Full, ctx,
             new PipelineRoleOverrides(MaxToolCalls: 50, ToolLimitMessage: "main"));
-        var worker = AgentPipelineOptionsFactory.CreateForWorker(ctx, maxToolCalls: 10);
+        var worker = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, ctx,
+            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker limit"));
 
         // PermissionChecker 与 RulesBySource 在两条路径上一致
         main.PermissionChecker.Should().BeSameAs(worker.PermissionChecker);
@@ -507,7 +508,9 @@ public sealed class AgentPipelineBuilderTests
             "Auto Profile.EnableVerification=true 应覆盖 ctx.EnableVerification=false");
 
         // Worker 路径同样跟随 Profile
-        var autoWorker = AgentPipelineOptionsFactory.CreateForWorker(autoCtx, maxToolCalls: 10);
+        var autoWorker = AgentPipelineOptionsFactory.Create(
+            PipelineProfile.Worker, autoCtx,
+            new PipelineRoleOverrides(MaxToolCalls: 10, ToolLimitMessage: "worker"));
         autoWorker.EnableVerification.Should().BeTrue(
             "Worker 路径也应跟随 Auto Profile.EnableVerification=true");
 

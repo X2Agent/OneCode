@@ -101,9 +101,18 @@ public static class UsageTrackingRunMiddleware
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, [EnumeratorCancellation] CancellationToken ct)
         {
-            // 取最后一个有效的 UsageContent（与 Agent 事件消费侧同规则）。
-            // MAF streaming 中的 UsageContent 通常包含当前 agent run 的累积 usage。
-            UsageDetails? lastUsage = null;
+            // 多轮工具调用流式累加 + 同轮重放去重：
+            // 同一轮模型调用内的多次 UsageContent（如 message_start + message_delta 或重放）以最新值覆盖当轮槽位；
+            // 跨越工具执行边界（FunctionResultContent）或新 ResponseId 时，将上一轮槽位结算累加到本轮运行总量中。
+            long committedInput = 0;
+            long committedOutput = 0;
+            long committedCacheRead = 0;
+            long committedCacheWrite = 0;
+            long committedReasoning = 0;
+            UsageDetails? currentTurnUsage = null;
+            string? currentResponseId = null;
+            var turnBoundaryAfterUsage = false;
+            HashSet<string>? seenResultCallIds = null;
 
             // try/finally 确保流式传输因异常中断时，已收到的 usage 仍被记录。
             // 否则 BudgetGuard 的 pre-execution 检查会因累计成本偏低而无法及时熔断。
@@ -111,9 +120,43 @@ public static class UsageTrackingRunMiddleware
             {
                 await foreach (var update in agent.RunStreamingAsync(messages, session, options, ct).ConfigureAwait(false))
                 {
+                    if (update.Contents is { Count: > 0 })
+                    {
+                        foreach (var content in update.Contents)
+                        {
+                            if (content is FunctionResultContent frc
+                                && !string.IsNullOrWhiteSpace(frc.CallId)
+                                && (seenResultCallIds ??= new HashSet<string>(StringComparer.Ordinal)).Add(frc.CallId)
+                                && currentTurnUsage is not null)
+                            {
+                                turnBoundaryAfterUsage = true;
+                            }
+                        }
+                    }
+
                     var usageContent = update.Contents?.OfType<UsageContent>().FirstOrDefault();
                     if (usageContent?.Details is { } details && HasValidTokens(details))
-                        lastUsage = details;
+                    {
+                        var isNewResponseId = !string.IsNullOrEmpty(update.ResponseId)
+                            && !string.IsNullOrEmpty(currentResponseId)
+                            && !string.Equals(update.ResponseId, currentResponseId, StringComparison.Ordinal);
+
+                        if (currentTurnUsage is not null && (turnBoundaryAfterUsage || isNewResponseId))
+                        {
+                            CommitTurnUsage(
+                                currentTurnUsage,
+                                ref committedInput,
+                                ref committedOutput,
+                                ref committedCacheRead,
+                                ref committedCacheWrite,
+                                ref committedReasoning);
+                            turnBoundaryAfterUsage = false;
+                        }
+
+                        currentTurnUsage = details;
+                        if (!string.IsNullOrEmpty(update.ResponseId))
+                            currentResponseId = update.ResponseId;
+                    }
 
                     yield return update;
                 }
@@ -122,8 +165,35 @@ public static class UsageTrackingRunMiddleware
             {
                 // 无论正常结束还是异常，只要收到过有效 usage 就记录。
                 // 异常会在此 finally 执行后继续向上传播（yield return 语义保证）。
-                if (lastUsage is not null)
-                    RecordUsage(lastUsage, tokenLedger, modelId, logger, sessionId);
+                if (currentTurnUsage is not null)
+                {
+                    CommitTurnUsage(
+                        currentTurnUsage,
+                        ref committedInput,
+                        ref committedOutput,
+                        ref committedCacheRead,
+                        ref committedCacheWrite,
+                        ref committedReasoning);
+                }
+
+                if (committedInput > 0 || committedOutput > 0)
+                {
+                    var aggregated = new UsageDetails
+                    {
+                        InputTokenCount = committedInput,
+                        OutputTokenCount = committedOutput,
+                        TotalTokenCount = committedInput + committedOutput,
+                        CachedInputTokenCount = committedCacheRead > 0 ? committedCacheRead : null,
+                        ReasoningTokenCount = committedReasoning > 0 ? committedReasoning : null,
+                        AdditionalCounts = committedCacheWrite > 0
+                            ? new AdditionalPropertiesDictionary<long>
+                            {
+                                ["cache_creation_input_tokens"] = committedCacheWrite,
+                            }
+                            : null,
+                    };
+                    RecordUsage(aggregated, tokenLedger, modelId, logger, sessionId);
+                }
             }
         }
     }
@@ -149,6 +219,25 @@ public static class UsageTrackingRunMiddleware
         {
             logger?.LogWarning(ex, "Failed to record usage to ITokenLedger for model {ModelId}", modelId);
         }
+    }
+
+    private static void CommitTurnUsage(
+        UsageDetails details,
+        ref long committedInput,
+        ref long committedOutput,
+        ref long committedCacheRead,
+        ref long committedCacheWrite,
+        ref long committedReasoning)
+    {
+        committedInput += details.InputTokenCount ?? 0;
+        committedOutput += details.OutputTokenCount ?? 0;
+        committedCacheRead += details.CachedInputTokenCount ?? 0;
+        committedReasoning += details.ReasoningTokenCount ?? 0;
+        committedCacheWrite += ExtractAdditionalCount(details,
+            "cache_creation_input_tokens",
+            "cache_creation",
+            "cacheWriteInputTokens",
+            "cache_write_input_tokens");
     }
 
     private static bool HasValidTokens(UsageDetails details)

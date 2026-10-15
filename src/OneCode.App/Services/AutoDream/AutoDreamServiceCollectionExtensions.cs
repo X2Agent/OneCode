@@ -10,12 +10,13 @@ public static class AutoDreamServiceCollectionExtensions
 {
     public static IServiceCollection AddAutoDreamServices(this IServiceCollection services)
     {
-        // AutoDream: 后台记忆整合服务。注册为 Singleton + HostedService：
-        // - Singleton：供 /memory autodream trigger 命令通过 DI 获取并调用 Trigger()
-        // - HostedService：让 BackgroundService.ExecuteAsync 随宿主生命周期自动启停（1h 轮询是唯一自动触发路径）
+        // AutoDream: 任务级后台记忆整合服务。注册为 Singleton + IAutoDreamService + HostedService：
+        // - Singleton / IAutoDreamService：供 QueryStreamEngine.FinalizeAsync 与 /memory autodream trigger 调用
+        // - HostedService：让 BackgroundService.ExecuteAsync 随宿主生命周期启停，异步消费任务完成信号
         services.AddSingleton<AutoDreamAgentDependencies>();
         services.AddSingleton<AutoDreamStorageDependencies>();
         services.AddSingleton<AutoDreamService>();
+        services.AddSingleton<IAutoDreamService>(sp => sp.GetRequiredService<AutoDreamService>());
         services.AddHostedService(sp => sp.GetRequiredService<AutoDreamService>());
 
         return services;

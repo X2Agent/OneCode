@@ -1,6 +1,4 @@
-using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Compact;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
@@ -17,27 +15,20 @@ namespace OneCode.App.Services.BuildMode;
 public sealed class BuildRunGate(
     IMainAgentRunner mainAgentRunner,
     ISessionManager sessionManager,
-    IToolProtocolValidator toolProtocolValidator,
     ILogger<BuildRunGate> logger,
     IBuildRunCoordinator? buildRunCoordinator = null,
-    IClarificationInteractionService? clarificationInteraction = null,
     ControlledBuildAttemptHost? controlledBuildAttemptHost = null,
     IBuildRunStore? buildRunStore = null,
-    OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
-    IPlanWorkflowApplicationService? planWorkflow = null,
-    PlanCardPublisher? planCardPublisher = null)
+    PlanRunCloser? planRunCloser = null,
+    ILoggerFactory? loggerFactory = null)
 {
     private readonly IMainAgentRunner _mainAgentRunner = mainAgentRunner;
     private readonly ISessionManager _sessionManager = sessionManager;
-    private readonly IToolProtocolValidator _toolProtocolValidator = toolProtocolValidator;
     private readonly ILogger<BuildRunGate> _logger = logger;
     private readonly IBuildRunCoordinator? _buildRunCoordinator = buildRunCoordinator;
-    private readonly IClarificationInteractionService? _clarificationInteraction = clarificationInteraction;
     private readonly ControlledBuildAttemptHost? _controlledBuildAttemptHost = controlledBuildAttemptHost;
     private readonly IBuildRunStore? _buildRunStore = buildRunStore;
-    private readonly OneCode.Core.Workflows.IOperationLedger? _operationLedger = operationLedger;
-    private readonly IPlanWorkflowApplicationService? _planWorkflow = planWorkflow;
-    private readonly PlanCardPublisher? _planCardPublisher = planCardPublisher;
+    private readonly PlanRunCloser? _planRunCloser = planRunCloser;
 
     /// <summary>Whether all required Build Run dependencies are configured.</summary>
     public bool IsConfigured => _buildRunCoordinator is not null
@@ -45,15 +36,13 @@ public sealed class BuildRunGate(
         && _buildRunStore is not null;
 
     /// <summary>Whether Plan workflow integration is available.</summary>
-    public bool HasPlanWorkflow => _planWorkflow is not null;
+    public bool HasPlanWorkflow => _planRunCloser is not null;
 
     public IBuildRunCoordinator? Coordinator => _buildRunCoordinator;
-    public IClarificationInteractionService? Clarification => _clarificationInteraction;
 
     public Task<MainAgentRunResult> RunControlledBuildAttemptAsync(
         BuildRun buildRun,
         MainAgentRunOptions options,
-        IReadOnlyList<AIFunction> localTools,
         System.Threading.Channels.ChannelWriter<object> eventWriter,
         CancellationToken ct)
     {
@@ -70,12 +59,14 @@ public sealed class BuildRunGate(
             new ControlledBuildAttemptContext(
                 options,
                 eventWriter,
-                static () => new EditTransaction(),
+                // 事务必须带 logger：受控 attempt 失败时 dispose 回滚会删除新建文件，
+                // 无日志的回滚在事故中完全不可观测（文件消失却查无痕迹）。
+                () => new EditTransaction(loggerFactory?.CreateLogger<EditTransaction>()),
                 // durableStateObserver → BuildRunStateEvent 双通道改造——
                 // attempt 运行时以 OrchestrationEvent.BuildStateProjectionChanged 统一信封发射，
                 // StreamingSession.Digest 为其解信封唯一投影点。
                 static run => new OrchestrationEvent.BuildStateProjectionChanged(run),
-                Ledger: _operationLedger));
+                loggerFactory?.CreateLogger<ControlledBuildAttemptRuntime>()));
         var toolCapabilityHash = ControlledBuildAttemptWorkflowCompiler.ComputeToolCapabilityHash(
             ControlledBuildAttemptWorkflowCompiler.ApprovedPolicyCapabilities(buildRun, options.ToolCapabilities),
             buildRun.ApprovedToolPolicy?.ToolNames ?? []);
@@ -96,8 +87,8 @@ public sealed class BuildRunGate(
         {
             var result = await host.RunNextAsync(
                 buildRun,
-                options.ModelId,
-                options.SystemPrompt,
+                options.ModelId ?? string.Empty,
+                options.SystemPrompt ?? string.Empty,
                 toolCapabilityHash,
                 runtime,
                 new System.Text.Json.JsonSerializerOptions(),
@@ -121,12 +112,16 @@ public sealed class BuildRunGate(
             _ => RunTerminalReason.AgentException,
         };
 
-    public static BuildRunResult CreateBuildRunResult(BuildRun run, string? summary) =>
-        new(
+    public static BuildRunResult CreateBuildRunResult(BuildRun run, string? summary)
+    {
+        var effectiveSummary = !string.IsNullOrWhiteSpace(summary)
+            ? summary
+            : run.Plan?.Summary;
+        return new(
             run.Id,
             run.State,
             run.TerminalReason ?? RunTerminalReason.AgentException,
-            summary,
+            effectiveSummary,
             run.ChangedFiles,
             run.Plan?.Tasks ?? [],
             run.Validations,
@@ -136,18 +131,29 @@ public sealed class BuildRunGate(
             run.TransactionCommitted,
             run.TransactionRolledBack,
             run.Metrics);
+    }
 
-    internal async Task PersistCancelledRunAsync(
+    /// <summary>
+    /// Plan run 收口的唯一入口：run 以任意终态离场（正常结束、输出被拦截、异常、取消）都必须经过这里，
+    /// 否则已提交的计划会停在 <see cref="PlanWorkflowState.FinalizingPlanRun"/>，审批入口永不出现。
+    /// 对非 Plan 模式、无工作流的情形幂等 no-op。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PlanRunEnd.Cancelled"/> 先落盘已封口的工具批次，再写工作流取消（落盘必须先于取消写，
+    /// 否则取消后转录缺失工具结果）。
+    /// </remarks>
+    internal async Task CloseOutPlanRunAsync(
         SessionId? conversationId,
         string agentRunId,
         WorkingMode workingMode,
+        PlanRunEnd end,
         ToolBatchCollector collector,
         CancellationToken ct)
     {
         if (conversationId is not { } sessionId)
             return;
 
-        if (collector.CompletedBatches.Count > 0)
+        if (end == PlanRunEnd.Cancelled && collector.CompletedBatches.Count > 0)
         {
             await _sessionManager.AppendCompletedToolBatchesAsync(
                 sessionId,
@@ -155,70 +161,13 @@ public sealed class BuildRunGate(
                 ct).ConfigureAwait(false);
         }
 
-        if (_planWorkflow is null || workingMode != WorkingMode.Plan)
+        if (_planRunCloser is null || workingMode != WorkingMode.Plan)
             return;
-        var workflow = await _planWorkflow.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (workflow is null
-            || workflow.State is PlanWorkflowState.Completed or PlanWorkflowState.Failed or PlanWorkflowState.Cancelled)
-        {
-            return;
-        }
-        if (workflow.ActiveRunId is not null
-            && !string.Equals(workflow.ActiveRunId, agentRunId, StringComparison.Ordinal))
-        {
-            return;
-        }
 
-        await _planWorkflow.CancelAsync(new CancelPlanCommand(
-            $"cancel-run-{agentRunId}",
-            sessionId,
-            workflow.Id,
-            workflow.Version,
-            "Plan agent run was cancelled."), ct).ConfigureAwait(false);
-    }
-
-    public async Task CompletePlanRunIfPendingAsync(
-        SessionId? conversationId,
-        string agentRunId,
-        WorkingMode workingMode,
-        bool hasOpenToolBatch,
-        CancellationToken ct)
-    {
-        if (_planWorkflow is null
-            || conversationId is not { } sessionId
-            || workingMode != WorkingMode.Plan)
-        {
-            return;
-        }
-
-        var workflow = await _planWorkflow.GetAsync(sessionId, ct).ConfigureAwait(false);
-        if (workflow is null
-            || workflow.State != PlanWorkflowState.FinalizingPlanRun
-            || !string.Equals(workflow.ActiveRunId, agentRunId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var protocolValid = !hasOpenToolBatch
-            && _toolProtocolValidator.Validate(_sessionManager.GetChatHistory(sessionId)).IsValid;
-        await _planWorkflow.HandleRunEventAsync(
-            new PlanRunCompletedEvent(
-                sessionId,
-                workflow.Id,
-                agentRunId,
-                protocolValid,
-                DateTimeOffset.UtcNow),
-            ct).ConfigureAwait(false);
-
-        if (protocolValid && _planCardPublisher is not null)
-        {
-            var awaiting = await _planWorkflow.GetAsync(sessionId, ct).ConfigureAwait(false);
-            if (awaiting?.State == PlanWorkflowState.AwaitingApproval
-                && awaiting.SubmittedRevision is { } revision)
-            {
-                _planCardPublisher.Publish(awaiting);
-            }
-        }
+        if (end == PlanRunEnd.Cancelled)
+            await _planRunCloser.CancelAsync(sessionId, agentRunId, ct).ConfigureAwait(false);
+        else
+            await _planRunCloser.FinishAsync(sessionId, agentRunId, collector.HasOpenBatch, ct).ConfigureAwait(false);
     }
 
     public IBuildRunStore? BuildRunStore => _buildRunStore;

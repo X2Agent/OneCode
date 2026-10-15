@@ -15,11 +15,10 @@ public sealed class WebFetchTool(
     ILogger<WebFetchTool> logger)
 {
     // Constants matching TypeScript implementation
-    private const int MaxUrlLength = 2000;
     private const int MaxHttpContentLength = 10 * 1024 * 1024; // 10MB
     private const int FetchTimeoutMs = 60000;
     private const int MaxRedirects = 10;
-    public const int MaxMarkdownLength = 100000;
+    public const int MaxMarkdownLength = 25_000; // Single-page inline budget (~6K tokens)
     private const int CacheTtlMs = 15 * 60 * 1000; // 15 minutes
 
     // 降级引导（失败路径）：工具不做浏览器渲染等替代路径的硬编码调用，
@@ -56,7 +55,7 @@ public sealed class WebFetchTool(
                  "Cross-host redirects return a redirect notice instead of following automatically — call WebFetch again with the redirected URL. " +
                  "JavaScript-only SPA shells are NOT auto-rendered: WebFetch returns a hint instead; decide yourself whether to render via the BrowserFetch tool (real headless browser). " +
                  "Caching: successful fetches are cached for 15 minutes (max 50MB total); identical URLs return cached content within TTL. " +
-                 "Size limits: max URL length 2000 chars, max response 10MB, max markdown output 100,000 chars (truncated with notice). " +
+                 "Size limits: max URL length 2000 chars, max response 10MB, max markdown output 25,000 chars (truncated with notice). " +
                  "HTTP is automatically upgraded to HTTPS.")]
     public async Task<ToolResult> FetchAsync(
         [Description("The URL to fetch. Must be http(s) and not point to a private/loopback host. Max 2000 chars. http:// is auto-upgraded to https://.")] string url,
@@ -85,12 +84,7 @@ public sealed class WebFetchTool(
         string? upgradedUrl = null;
         try
         {
-            upgradedUrl = url;
-            if (Uri.TryCreate(url, UriKind.Absolute, out var parsedUrl) && parsedUrl.Scheme == "http")
-            {
-                var builder = new UriBuilder(parsedUrl) { Scheme = "https" };
-                upgradedUrl = builder.Uri.ToString();
-            }
+            upgradedUrl = NormalizeFetchUrl(url);
 
             var fetchResult = await FetchWithRedirects(upgradedUrl, url, 0, ct).ConfigureAwait(false);
 
@@ -116,7 +110,6 @@ public sealed class WebFetchTool(
 
             var content = fetchResult.Content ?? "";
             var contentType = fetchResult.ContentType ?? "";
-            var bytes = Encoding.UTF8.GetByteCount(content);
 
             string markdownContent;
             if (contentType.Contains("text/html", StringComparison.OrdinalIgnoreCase))
@@ -162,6 +155,26 @@ public sealed class WebFetchTool(
             _logger.LogWarning(ex, "WebFetch failed for {Url}", upgradedUrl ?? url);
             return ToolResult.Error($"{ex.Message}{DegradationHint}");
         }
+    }
+
+    /// <summary>
+    /// 规范化抓取 URL：http 升级为 https 时同步剥离协议默认端口——<see cref="UriBuilder"/>
+    /// 会把 http 默认的 80 当显式端口保留，产出 <c>https://host:80/...</c> 这种协议/端口
+    /// 错配的 URL（对明文端口做 TLS 握手必然失败）。模型直接传入 <c>https://host:80/...</c>
+    /// 同样在此规范化；显式非默认端口（如 :8080）保持不变。
+    /// </summary>
+    internal static string NormalizeFetchUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+            return url;
+        var builder = new UriBuilder(parsed)
+        {
+            Scheme = parsed.Scheme == "http" ? "https" : parsed.Scheme,
+            Port = parsed.IsDefaultPort ? -1 : parsed.Port,
+        };
+        if (builder.Scheme == "https" && builder.Port == 80)
+            builder.Port = -1;
+        return builder.Uri.ToString();
     }
 
     private async Task<FetchResult> FetchWithRedirects(
@@ -232,9 +245,13 @@ public sealed class WebFetchTool(
     }
 
 
-    internal static ToolResult ApplyPromptAndReturn(string content, string prompt, long startMs)
+    /// <summary>
+    /// 把抓取到的正文打包为成功信封 <c>{bytes, code, codeText, result, durationMs}</c>，
+    /// 超出 <see cref="MaxMarkdownLength"/> 时内联截断。
+    /// </summary>
+    internal ToolResult ApplyPromptAndReturn(string content, string prompt, long startMs)
     {
-        var truncatedContent = content.Length > MaxMarkdownLength
+        var forModel = content.Length > MaxMarkdownLength
             ? content[..MaxMarkdownLength] + "\n\n[Content truncated due to length...]"
             : content;
 
@@ -245,7 +262,7 @@ public sealed class WebFetchTool(
             bytes = Encoding.UTF8.GetByteCount(content),
             code = 200,
             codeText = "OK",
-            result = $"Content from URL (prompt: {prompt}):\n\n{truncatedContent}",
+            result = $"Content from URL (prompt: {prompt}):\n\n{forModel}",
             durationMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startMs,
         });
 

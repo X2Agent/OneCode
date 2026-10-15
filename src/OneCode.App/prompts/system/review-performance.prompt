@@ -25,7 +25,7 @@ You are performing a **performance-only** review. Ignore style and correctness u
 - **GC pressure** — closure allocations in hot paths, delegate allocations from LINQ in inner loops, `params` arrays on hot paths
 - **I/O amplification** — reading entire files when streaming suffices, full-table scans, missing pagination, unbatched writes
 
-For each finding, estimate the magnitude (e.g., "O(n²) over 10k items", "per-request allocation of ~50KB") and cite the line.
+For each finding, estimate the magnitude (e.g., "O(n²) over 10k items", "per-request allocation of ~50KB") and cite the line. If a diff hunk lacks surrounding context (such as collection size or call frequency), use `Read`, `Grep`, or `Lsp` to verify before reporting — avoid speculative false positives on cold paths.
 
 {{severityScope}}
 

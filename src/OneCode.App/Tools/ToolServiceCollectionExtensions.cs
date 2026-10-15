@@ -43,6 +43,9 @@ public static class ToolServiceCollectionExtensions
         services.AddToolInstance("Bash", (BashTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Bash"), ToolRisk.Dynamic,
             aliases: ["shell", "sh", "ps"], concurrency: false,
             searchHint: "execute a shell command (bash or PowerShell via shell parameter)");
+        // Read-only git inspection — the only git surface reachable in Plan mode (Bash is excluded there).
+        services.AddToolInstance("Git", (GitTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Git"), ToolRisk.ReadOnly,
+            searchHint: "read-only git inspection: status/log/diff/show/blame/branch/remote", category: ToolCategory.PlanAllowed);
         services.AddSingleton<ConversationShellExecutorManager>();
         services.AddSingleton<IShellExecutorCleanup>(sp => sp.GetRequiredService<ConversationShellExecutorManager>());
 
@@ -59,8 +62,6 @@ public static class ToolServiceCollectionExtensions
         services.AddToolInstance("LS", (LsTool tool) => AIFunctionFactory.Create(tool.ListAsync, name: "LS"), ToolRisk.ReadOnly, searchHint: "list directory contents");
         services.AddToolInstance("Glob", (GlobTool tool) => AIFunctionFactory.Create(tool.GlobAsync, name: "Glob"), ToolRisk.ReadOnly, searchHint: "glob pattern file search");
         services.AddToolInstance("Grep", (GrepTool tool) => AIFunctionFactory.Create(tool.SearchAsync, name: "Grep"), ToolRisk.ReadOnly, searchHint: "regex content search (ripgrep)");
-        services.AddToolInstance("FindReferences", (FindReferencesTool tool) => AIFunctionFactory.Create(tool.FindAsync, name: "FindReferences"), ToolRisk.ReadOnly, searchHint: "find code references",
-            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["reference"]);
         services.AddToolInstance("ApplyWorkspaceEdit", (ApplyWorkspaceEditTool tool) => AIFunctionFactory.Create(tool.ApplyAsync, name: "ApplyWorkspaceEdit"), ToolRisk.Destructive, concurrency: false, searchHint: "apply an LSP workspace edit to files",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["workspace edit"], category: ToolCategory.FileWrite);
 
@@ -85,18 +86,13 @@ public static class ToolServiceCollectionExtensions
 
         services.AddSingleton<TuiInteractionBridge>();
         services.AddSingleton<IUserQuestionService, UserQuestionService>();
-        services.AddSingleton<IClarificationInteractionService, ClarificationInteractionService>();
 
         services.AddSingleton<AskUserQuestionTool>();
-        services.AddToolInstance("AskUserQuestion", (AskUserQuestionTool tool) => AIFunctionFactory.Create(tool.AskAsync, name: "AskUserQuestion"), ToolRisk.ReadOnly, searchHint: "ask the user one blocking question",
-            category: ToolCategory.PlanAllowed);
-        services.AddToolInstance("AskUserQuestions", (AskUserQuestionTool tool) => AIFunctionFactory.Create(tool.AskMultipleAsync, name: "AskUserQuestions"), ToolRisk.ReadOnly, searchHint: "ask the user multiple related questions in one wizard",
+        services.AddToolInstance("AskUserQuestion", (AskUserQuestionTool tool) => AIFunctionFactory.Create(tool.AskAsync, name: "AskUserQuestion"), ToolRisk.ReadOnly, searchHint: "ask the user one or more blocking questions in a single dialog or wizard",
             category: ToolCategory.PlanAllowed);
 
-        services.AddToolInstance("SymbolSearch", (SymbolSearchTool tool) => AIFunctionFactory.Create(tool.SymbolSearchAsync, name: "SymbolSearch"), ToolRisk.ReadOnly, searchHint: "search code symbols",
-            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["symbol"]);
-        services.AddToolInstance("Lsp", (LspTool tool) => AIFunctionFactory.Create(tool.ExecuteLspAsync, name: "Lsp"), ToolRisk.ReadOnly, searchHint: "perform language-server operations",
-            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["lsp", "language server"]);
+        services.AddToolInstance("Lsp", (LspTool tool) => AIFunctionFactory.Create(tool.ExecuteLspAsync, name: "Lsp"), ToolRisk.ReadOnly, searchHint: "perform language-server operations, symbol search, and find references",
+            loadPolicy: ToolLoadPolicy.Contextual, keywords: ["lsp", "language server", "symbol", "references"]);
         services.AddToolInstance("EnterWorktree", (EnterWorktreeTool tool) => AIFunctionFactory.Create(tool.EnterAsync, name: "EnterWorktree"), ToolRisk.Destructive, concurrency: false, searchHint: "enter or create a git worktree",
             loadPolicy: ToolLoadPolicy.Deferred, keywords: ["worktree"]);
         services.AddToolInstance("ExitWorktree", (ExitWorktreeTool tool) => AIFunctionFactory.Create(tool.ExitAsync, name: "ExitWorktree"), ToolRisk.Destructive, concurrency: false, searchHint: "exit a git worktree",
@@ -108,18 +104,8 @@ public static class ToolServiceCollectionExtensions
         // approved-plan Build run must not re-plan via SubmitPlan (ToolCapabilityResolver
         // enforces this boundary).
         services.AddSingleton<OrchestrationEventBus>();
-        services.AddToolInstance("SubmitPlan", (CreatePlanTool tool) => AIFunctionFactory.Create(tool.SubmitPlanAsync, name: "SubmitPlan"), ToolRisk.Safe, searchHint: "write and submit the finalized plan for persisted user approval",
+        services.AddToolInstance<CreatePlanTool>("SubmitPlan", CreatePlanTool.CreateSubmitPlanFunction, ToolRisk.Safe, searchHint: "write and submit the finalized plan for persisted user approval",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["plan", "submit", "approve"], category: ToolCategory.PlanAllowed | ToolCategory.PlanExclusive);
-
-        // Approved Build runs must persist structured progress and verification evidence.
-        // CompletePlanExecution is auto-derived by the orchestration layer (see PlanExecutionTool)
-        // when every step reaches a terminal state — no longer exposed to the LLM.
-        services.AddToolInstance(PlanToolNames.UpdateStep, (PlanExecutionTool tool) => AIFunctionFactory.Create(tool.UpdatePlanStepAsync, name: PlanToolNames.UpdateStep), ToolRisk.Safe,
-            searchHint: "update approved plan step execution status", loadPolicy: ToolLoadPolicy.Always,
-            keywords: ["plan", "step", "progress"]);
-        services.AddToolInstance(PlanToolNames.CompleteVerification, (PlanExecutionTool tool) => AIFunctionFactory.Create(tool.CompletePlanVerificationAsync, name: PlanToolNames.CompleteVerification), ToolRisk.Safe,
-            searchHint: "persist approved plan verification evidence", loadPolicy: ToolLoadPolicy.Always,
-            keywords: ["plan", "verification", "evidence"]);
 
         // Cron tools (registered via AddCronTools in OneCode.Automation)
         services.AddCronTools();

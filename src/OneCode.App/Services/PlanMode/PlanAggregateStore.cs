@@ -131,9 +131,9 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
             try
             {
                 var aggregate = await ReadAndValidateAsync(file, ct).ConfigureAwait(false);
-                if (aggregate.Workflow.State is PlanWorkflowState.StartingExecution
-                    or PlanWorkflowState.Executing
-                    or PlanWorkflowState.Verifying)
+                if (aggregate.Workflow.State is PlanWorkflowState.FinalizingPlanRun
+                    or PlanWorkflowState.StartingExecution
+                    or PlanWorkflowState.Executing)
                 {
                     workflows.Add(aggregate.Workflow);
                 }
@@ -150,11 +150,12 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
                 {
                     if (_reportedUnreadable.Count > MaxReportedUnreadableEntries)
                         _reportedUnreadable.Clear();
-                    _logger?.LogWarning(ex, "Skipping unreadable Plan aggregate {Path}", file);
+                    // 只记原因不带堆栈：损坏/旧版本文件是预期的磁盘状态，不是程序缺陷。
+                    _logger?.LogWarning("Skipping unreadable Plan aggregate {Path}: {Reason}", file, ex.Message);
                 }
                 else
                 {
-                    _logger?.LogDebug(ex, "Skipping unreadable Plan aggregate {Path} (already reported)", file);
+                    _logger?.LogDebug("Skipping unreadable Plan aggregate {Path} (already reported)", file);
                 }
             }
         }

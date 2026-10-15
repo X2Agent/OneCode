@@ -187,7 +187,8 @@ public sealed partial class MessageListView
 
     /// <summary>
     /// 在视口右侧绘制 1 列宽的滚动位置指示器。
-    /// 仅当内容行数超过视口高度时显示。拇指位置反映当前滚动偏移。
+    /// 仅当内容行数超过视口高度时显示。拇指位置反映当前滚动偏移；
+    /// 几何计算与拖动命中判断共用 <see cref="MessageListView.ComputeScrollBarGeometry"/>。
     /// </summary>
     private void DrawScrollIndicator()
     {
@@ -195,11 +196,8 @@ public sealed partial class MessageListView
         var barCol = viewport.Width - 1;
         if (barCol < 0) return;
 
-        var scrollRange = _lines.Count - viewport.Height;
-        if (scrollRange <= 0) return;
-
-        var thumbSize = Math.Max(1, viewport.Height * viewport.Height / _lines.Count);
-        var thumbPos = (int)((float)_scroll.ScrollOffset / scrollRange * (viewport.Height - thumbSize));
+        var (thumbSize, thumbPos) = MessageListView.ComputeScrollBarGeometry(_lines.Count, viewport.Height, _scroll.ScrollOffset);
+        if (thumbSize == 0) return;
 
         for (var i = 0; i < viewport.Height; i++)
         {

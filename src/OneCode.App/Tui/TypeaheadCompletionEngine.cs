@@ -1,20 +1,25 @@
+using System.Text.RegularExpressions;
+
 namespace OneCode.App.Tui;
 
 /// <summary>
 /// Provides typeahead completion suggestions for the REPL prompt.
-/// Supports three completion modes:
+/// Supports four completion modes:
 ///   1. Slash commands (/command → /config, /help, ...)
 ///   2. File paths  (read "path → read "path/to/file.cs")
 ///   3. Tool names   (@Tool → @WebFetch, @Read, ...)
+///   4. Session ids  (/session switch 4f, /close 4f → full 32-char id insertion)
 /// </summary>
-public sealed class TypeaheadCompletionEngine(
+public sealed partial class TypeaheadCompletionEngine(
     IReadOnlyList<SlashCommandEntry> commands,
     string workingDirectory,
-    Func<IReadOnlyCollection<string>> toolNameProvider)
+    Func<IReadOnlyCollection<string>> toolNameProvider,
+    Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? sessionCandidatesProvider = null)
 {
     private IReadOnlyList<SlashCommandEntry> _commands = commands;
     private readonly string _workingDirectory = workingDirectory;
     private readonly Func<IReadOnlyCollection<string>> _toolNameProvider = toolNameProvider;
+    private readonly Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? _sessionCandidatesProvider = sessionCandidatesProvider;
 
     private IReadOnlyCollection<string> GetToolNames()
         => _toolNameProvider.Invoke();
@@ -33,6 +38,12 @@ public sealed class TypeaheadCompletionEngine(
     {
         if (string.IsNullOrEmpty(input))
             return [];
+
+        // Mode 0: Session id arguments (/session switch|delete <prefix>, /close <prefix>).
+        // Matched before other modes: the input starts with '/', but the trailing
+        // id prefix does not, so mode 1 would never fire for these lines anyway.
+        if (TryGetSessionIdItems(input, out var sessionItems))
+            return sessionItems.Select(i => i.Insert).ToList();
 
         // Mode 1: Slash commands — check the last word, not just the whole input.
         // This lets "/help" work even after other text like "hello /help".
@@ -88,9 +99,49 @@ public sealed class TypeaheadCompletionEngine(
     /// </summary>
     public List<(string Display, string Insert)> GetCompletionItems(string input)
     {
+        // 会话 id 模式的展示文本（短 id + 标题）无法从插入文本反推，须成对产出。
+        // 以当前 input 现场解析为准：不经缓存转发，输入切到其他模式时不会拿到
+        // 上一个输入残留的会话候选（GetCompletions 与本方法可各自独立调用）。
+        if (TryGetSessionIdItems(input, out var sessionItems))
+            return sessionItems;
+
         var completions = GetCompletions(input);
         return completions.Select(c => (ExtractDisplayText(input, c), c)).ToList();
     }
+
+    /// <summary>
+    /// Session-id completion: input like "/session switch 4f", "/session delete 4f"
+    /// or "/close 4f" (cursor at the id argument). Popup shows short id + title +
+    /// mode/message count; accepting inserts the full 32-char id (the whole line
+    /// is replaced, matching generic-completion semantics).
+    /// </summary>
+    private bool TryGetSessionIdItems(string input, out List<(string Display, string Insert)> items)
+    {
+        items = [];
+        if (_sessionCandidatesProvider is null)
+            return false;
+
+        var match = SessionIdArgumentRegex().Match(input);
+        if (!match.Success)
+            return false;
+
+        var idPrefix = match.Groups["id"].Value;
+        var commandPart = input[..^idPrefix.Length];
+
+        items = _sessionCandidatesProvider.Invoke()
+            .Where(c => string.IsNullOrEmpty(idPrefix)
+                || c.FullId.StartsWith(idPrefix, StringComparison.OrdinalIgnoreCase))
+            .Select(c => (
+                Display: $"{c.ShortId}  {c.Title}  ({c.Mode}, {c.MessageCount} msgs)",
+                Insert: $"{commandPart}{c.FullId} "))
+            .ToList();
+
+        return items.Count > 0;
+    }
+
+    // 触发形态：命令 + 空白 + 可空 id 前缀，且 id 参数位于行尾（光标即行尾）。
+    [GeneratedRegex(@"^/(?:session (?:switch|delete)|close)\s+(?<id>\S*)$")]
+    private static partial Regex SessionIdArgumentRegex();
 
     /// <summary>
     /// Extracts a human-friendly display string from a completion result.

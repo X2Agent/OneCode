@@ -1,18 +1,13 @@
-using OneCode.Core.Prompt;
-
 namespace OneCode.App.Services.PlanMode;
 
 /// <summary>
-/// Plan 模式运行时实现：会话模式、提示词缓存与权限 provider 同步。
+/// Plan 模式运行时实现：会话模式与权限 provider 同步。
 /// </summary>
 public sealed class PlanModeService(
-    IPermissionModeProvider permissionModeProvider,
-    IPromptManager promptManager) : IPlanModeService
+    IPermissionModeProvider permissionModeProvider) : IPlanModeService
 {
     private readonly IPermissionModeProvider _permissionModeProvider = permissionModeProvider;
-    private readonly IPromptManager _promptManager = promptManager;
     private readonly Lock _lock = new();
-    private string? _cachedPlanPrompt;
 
     private bool _inPlanMode;
     private PermissionMode? _prePlanMode;
@@ -56,15 +51,5 @@ public sealed class PlanModeService(
 
         _permissionModeProvider.SetCurrentMode(restored);
         return restored;
-    }
-
-    public async Task<string> GetWorkflowInstructionsAsync(CancellationToken ct)
-    {
-        if (_cachedPlanPrompt is not null) return _cachedPlanPrompt;
-
-        var prompt = await _promptManager.GetPromptAsync("system/plan", ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Plan prompt 'system/plan' not found in any IPromptManager store.");
-        _cachedPlanPrompt = prompt;
-        return _cachedPlanPrompt;
     }
 }

@@ -38,11 +38,14 @@ public sealed partial class ChatTranscriptView
 
         if (_stream.PendingLines is { Count: > 0 } && _messageView.StreamingPreviewLineCount > 0)
         {
-            // 日志条目捕获不可变快照（StatusLines 副本 + 文本），ResetForNextTurn
-            // 会清空 _stream——闭包不能引用可变状态。
-            _committedJournal.Add(BuildCommittedStreamJournalEntry(
-                _stream.StatusLines.ToList(), _stream.TextBuffer.ToString()));
-            var committedLines = BuildFinalCommittedLines();
+            // 中间工具轮（Turn 1..N-1）归入过程轨迹：工具/思考行紧凑排列，
+            // 过渡旁白折叠为单行步骤摘要，避免多轮中间废话与最终交付结论混排。
+            var statusSnapshot = _stream.StatusLines.ToList();
+            var intermediateText = _stream.TextBuffer.ToString();
+            _committedJournal.Add(BuildCommittedIntermediateTurnJournalEntry(
+                statusSnapshot, intermediateText));
+            var committedLines = BuildCommittedIntermediateTurnLines(
+                statusSnapshot, intermediateText, ContentWidth);
             _messageView.ReplaceStreamingPreview(committedLines);
         }
 
@@ -120,6 +123,15 @@ public sealed partial class ChatTranscriptView
             _app.Invoke(() => ActivityChanged?.Invoke("回复中"));
         }
 
+        // 部分模型在 reasoning/text 交错输出时给第一段文本带前导缩进，回复起点剥掉；
+        // 剥完为空的段直接丢弃（TextBuffer 保持为空，下一段仍按起点处理）。
+        if (_stream.TextBuffer.Length == 0)
+        {
+            text = MessageFlowRenderer.TrimReplyLeadingWhitespace(text);
+            if (text.Length == 0)
+                return;
+        }
+
         _stream.TextBuffer.Append(text);
 
         // Debounce the rebuild: fast token streams would otherwise re-wrap the
@@ -164,12 +176,6 @@ public sealed partial class ChatTranscriptView
             for (var i = 0; i < _stream.StatusLines.Count; i++)
             {
                 pending.Add(_stream.StatusLines[i]);
-                if (i < _stream.StatusLines.Count - 1
-                    && _stream.StatusLines[i].Tag is not ThinkingDetailLineTag
-                    && _stream.StatusLines[i + 1].Tag is not ThinkingDetailLineTag)
-                {
-                    pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-                }
             }
 
             // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
@@ -306,22 +312,60 @@ public sealed partial class ChatTranscriptView
         IReadOnlyList<FormattedLine> statusLines)
         => _ => statusLines;
 
+    private Func<int, IReadOnlyList<FormattedLine>> BuildCommittedIntermediateTurnJournalEntry(
+        IReadOnlyList<FormattedLine> statusLines, string text)
+        => width => BuildCommittedIntermediateTurnLines(statusLines, text, width);
+
     /// <summary>
-    /// 构建一段已提交流的最终行：状态行（含间隔空行）+ 回复文本的 markdown 渲染。
+    /// 构建中间工具轮（ContinueStreaming）的紧凑轨迹行：
+    /// 工具与思考行紧凑叠放；超过 2 行的长篇过渡旁白自动收起为可展开的单行摘要。
+    /// </summary>
+    private IReadOnlyList<FormattedLine> BuildCommittedIntermediateTurnLines(
+        IReadOnlyList<FormattedLine> statusLines, string text, int width)
+    {
+        List<FormattedLine> lines = [.. statusLines];
+
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var trimmed = text.Trim();
+            var wrapWidth = Math.Max(20, width - ConversationRenderer.ContentIndent - 2);
+            List<string> wrapped = [];
+            foreach (var paragraph in trimmed.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+            {
+                if (paragraph.Length == 0)
+                    continue;
+                wrapped.AddRange(ConversationRenderer.WordWrapStreaming(paragraph, wrapWidth));
+            }
+
+            if (wrapped.Count > 2)
+            {
+                var preview = TextWidthHelper.TruncateByWidth(wrapped[0], Math.Max(16, wrapWidth - 16));
+                var tag = new ThinkingLineTag(trimmed, IsExpanded: false);
+                lines.Add(FormattedLine.FromSegmentsWithTag(
+                [
+                    new LineSegment(ConversationRenderer.Indent, TuiPalette.BgPrimary),
+                    new LineSegment($"{TuiGlyphs.Collapsed} ", TuiPalette.FgMuted),
+                    new LineSegment(preview, TuiPalette.FgSecondary),
+                    new LineSegment($" \u00b7 +{wrapped.Count - 1} 行", TuiPalette.FgMuted),
+                ], tag));
+            }
+            else
+            {
+                foreach (var w in wrapped)
+                    lines.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{w}", TuiPalette.FgSecondary));
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// 构建一段已提交流的最终行：状态行紧凑排列 + 回复文本的 markdown 渲染。
     /// </summary>
     private IReadOnlyList<FormattedLine> BuildCommittedStreamLines(
         IReadOnlyList<FormattedLine> statusLines, string text, int width)
     {
-        List<FormattedLine> lines = [];
-
-        // Preserve tool-call / thinking / notice lines with uniform spacing.
-        foreach (var line in statusLines)
-        {
-            lines.Add(line);
-            lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-        }
-        if (statusLines.Count > 0 && lines.Count > 0)
-            lines.RemoveAt(lines.Count - 1);
+        List<FormattedLine> lines = [.. statusLines];
 
         // Re-render the accumulated text through the Markdown renderer.
         if (!string.IsNullOrWhiteSpace(text))

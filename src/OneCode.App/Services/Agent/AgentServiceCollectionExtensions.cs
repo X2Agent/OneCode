@@ -39,7 +39,7 @@ public static class AgentServiceCollectionExtensions
         services.AddSingleton<IMainAgentRunner>(sp => sp.GetRequiredService<MainAgentRunner>());
 
         // MAF 工作流运行时基础设施（物理上位于本目录：DurableWorkflowHost 等）。
-        // IWorkflowRunRegistry / IOperationLedger 由 AddPlatformServices 统一注册。
+        // IWorkflowRunRegistry 由 AddPlatformServices 统一注册。
         services.AddSingleton<IWorkflowCheckpointStoreFactory, WorkflowCheckpointStoreFactory>();
         services.AddSingleton<IWorkflowEventAdapter, WorkflowEventAdapter>();
         services.AddSingleton<IWorkflowRequestAdapter, WorkflowRequestAdapter>();

@@ -1,13 +1,13 @@
 using Microsoft.Extensions.Hosting;
-using OneCode.App.Tools;
 using OneCode.Core.Build;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
 
 /// <summary>
-/// Scans persisted execution workflows. StartingExecution workflows retry due starts;
-/// Executing and Verifying workflows are reconciled with their durable BuildRun before
+/// Scans persisted execution workflows. FinalizingPlanRun workflows orphaned by a previous process are
+/// closed out so the approval prompt becomes available; StartingExecution workflows retry due starts;
+/// Executing workflows are reconciled with their durable BuildRun before
 /// the idempotent dispatcher restarts execution. The interactive session is attached
 /// when the TUI starts; until then the service only preserves persisted recovery state.
 /// </summary>
@@ -16,11 +16,18 @@ public sealed class PlanExecutionRecoveryService(
     IPlanWorkflowApplicationService workflowService,
     IBuildRunStore buildRunStore,
     IPlanAgentRunDispatcher dispatcher,
+    PlanRunCloser planRunCloser,
     ILogger<PlanExecutionRecoveryService> logger)
     : BackgroundService
 {
+    // 孤儿判据：FinalizingPlanRun 在本进程内是活跃 run 的正常中间态（SubmitPlan 到 run 收口之间），
+    // 只有进程启动前就停在该状态的计划，其 run 才必然已随旧进程消亡。以进程启动时刻为界，
+    // 无需任何跨组件的「run 是否存活」登记。
+    private readonly DateTimeOffset _processStartedAt = DateTimeOffset.UtcNow;
+
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(5);
     private readonly SemaphoreSlim _scanGate = new(1, 1);
+    private readonly HashSet<PlanWorkflowId> _skippedNotLoaded = [];
     private InteractiveSession? _session;
 
     public void AttachSession(InteractiveSession session)
@@ -49,9 +56,20 @@ public sealed class PlanExecutionRecoveryService(
         try
         {
             var workflows = await store.LoadRecoverableExecutionAsync(ct).ConfigureAwait(false);
+
+            // 会话未加载期间每 5 秒扫描一次都会命中同一批计划；先清掉已从可恢复列表
+            // 消失的计划，避免去重集合无限增长（计划 ID 是 Guid，不会复用）。
+            var workflowIds = workflows.Select(w => w.Id).ToHashSet();
+            _skippedNotLoaded.RemoveWhere(id => !workflowIds.Contains(id));
+
             foreach (var workflow in workflows)
             {
                 ct.ThrowIfCancellationRequested();
+                if (workflow.State == PlanWorkflowState.FinalizingPlanRun
+                    && workflow.UpdatedAt >= _processStartedAt)
+                {
+                    continue;
+                }
                 if (workflow.State == PlanWorkflowState.StartingExecution
                     && workflow.NextRetryAt is { } retryAt
                     && retryAt > now)
@@ -60,16 +78,37 @@ public sealed class PlanExecutionRecoveryService(
                 }
                 if (session.SessionManager.GetConversation(workflow.SessionId) is null)
                 {
+                    // 同一计划只在首次跳过时打日志，状态变化后再打一次（实证：单次会话期间该日志重复 201 条）。
+                    if (_skippedNotLoaded.Add(workflow.Id))
+                    {
+                        logger.LogDebug(
+                            "Skipping Plan {PlanId} execution recovery because session {SessionId} is not loaded",
+                            workflow.Id,
+                            workflow.SessionId);
+                    }
+                    continue;
+                }
+                if (_skippedNotLoaded.Remove(workflow.Id))
+                {
                     logger.LogDebug(
-                        "Skipping Plan {PlanId} execution recovery because session {SessionId} is not loaded",
+                        "Plan {PlanId} execution recovery resumed after session {SessionId} loaded",
                         workflow.Id,
                         workflow.SessionId);
-                    continue;
                 }
 
                 try
                 {
-                    if (workflow.State == PlanWorkflowState.StartingExecution)
+                    if (workflow.State == PlanWorkflowState.FinalizingPlanRun)
+                    {
+                        // 计划已完整提交，只是旧进程没来得及收口：按「run 正常结束」补做收口，
+                        // 经同一漏斗推进到待审批（含转录协议校验与审批卡发布）。
+                        await planRunCloser.FinishAsync(
+                            workflow.SessionId,
+                            workflow.ActiveRunId ?? string.Empty,
+                            hasOpenToolBatch: false,
+                            ct).ConfigureAwait(false);
+                    }
+                    else if (workflow.State == PlanWorkflowState.StartingExecution)
                     {
                         await dispatcher.StartBuildAsync(session, workflow, ct).ConfigureAwait(false);
                     }
@@ -166,12 +205,13 @@ public sealed class PlanExecutionRecoveryService(
         switch (buildRun.State)
         {
             case BuildRunState.Completed:
-                await FailWorkflowAsync(
-                    workflow,
-                    "PlanVerificationProtocolMissing",
-                    "BuildRun completed, but the Plan workflow did not persist " +
-                    $"{PlanToolNames.CompleteVerification} evidence.",
-                    ct).ConfigureAwait(false);
+                // 进程在 BuildRun 收口之后、工作流收口之前退出：BuildRun 已 Completed 即计划完成。
+                await workflowService.HandleRunEventAsync(new BuildRunSucceededEvent(
+                    workflow.SessionId,
+                    workflow.Id,
+                    workflow.ActiveRunId!,
+                    DateTimeOffset.UtcNow,
+                    workflow.WorkflowFencingToken ?? 0), ct).ConfigureAwait(false);
                 return;
             case BuildRunState.Cancelled:
                 await workflowService.CancelAsync(new CancelPlanCommand(
@@ -181,14 +221,15 @@ public sealed class PlanExecutionRecoveryService(
                     workflow.Version,
                     buildRun.FailureSummary ?? "The persisted BuildRun was cancelled."), ct).ConfigureAwait(false);
                 return;
-            case BuildRunState.Failed:
             case BuildRunState.Blocked:
+            case BuildRunState.Failed:
             case BuildRunState.LimitReached:
             case BuildRunState.BudgetExceeded:
+                // Blocked 的产物已保留待人工复核：终态仍是失败，但错误码与文案会说明"文件还在"。
                 await FailWorkflowAsync(
                     workflow,
-                    $"BuildRun{buildRun.State}",
-                    buildRun.FailureSummary ?? $"The persisted BuildRun terminated in state '{buildRun.State}'.",
+                    BuildRunClosure.FailureCode(buildRun.State),
+                    BuildRunClosure.FailureMessage(buildRun.State, buildRun.FailureSummary),
                     ct).ConfigureAwait(false);
                 return;
             default:
@@ -234,7 +275,7 @@ public sealed class PlanExecutionRecoveryService(
     {
         var snapshot = workflow.ApprovedSnapshot;
         var plan = buildRun.Plan;
-        if (snapshot is null || plan is null || !plan.RequireExplicitTaskCompletion)
+        if (snapshot is null || plan is null)
             return false;
         if (snapshot.Steps.Count != plan.Tasks.Count)
             return false;

@@ -5,11 +5,10 @@ For each sub-goal provide:
 1. A clear description of what needs to be done
 2. Success criteria — a specific, measurable condition that proves the sub-goal is complete
 3. requiredTools — a list of tool names the sub-goal executor is allowed to use.
-   Use tool names from this catalog (case-sensitive):
-   - Read, Glob, Grep, LS, WebFetch, WebSearch (read-only tools)
-   - Write, Edit (file editing tools)
+   Choose from this tool catalog (case-sensitive):
+   - Read, Glob, Grep, LS, Git, Lsp, WebFetch, WebSearch, BrowserFetch, ToolSearch (read-only & discovery tools; prefer Git over Bash for read-only git status/diff/log/blame)
+   - Write, Edit, Delete (file modification tools)
    - Bash (shell execution; supports the PowerShell dialect via the shell parameter)
-   - Lsp (specialized tool)
    Do NOT list Agent or ParallelAgents: sub-goals cannot dispatch sub-agents
    (nested dispatch depth limit 1), and such names fail the tool filter.
    Use ["*"] to allow all tools (default when omitted or empty).
@@ -83,4 +82,4 @@ Rules:
   Read-only analysis sub-goals should NOT include Write/Edit/Bash.
 - Mark needsFurtherDecomposition=true only when the sub-goal is genuinely complex
   (e.g., "Build the authentication subsystem" → true; "Write unit tests for X" → false).
-  When in doubt, prefer false — the executor can still call sub-agents.
+  When in doubt, prefer false — the sub-goal executor can handle multi-step work within its turn budget.

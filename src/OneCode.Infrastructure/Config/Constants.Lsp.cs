@@ -32,10 +32,6 @@ public static partial class Constants
         // LspNotifier
         public const int MaxDiagnosticsInSummary = 5;
 
-        // LspNotifier — didChange 后诊断发布等待的轮询节奏常量已随实现移至
-        // LspNotifier（internal static，同 McpConnectionManager.AutoReconnectInterval 先例，
-        // 供测试注入加速轮询）。
-
         // LanguagePackInstaller
         public static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(5);
         public static readonly TimeSpan DetectionTimeout = TimeSpan.FromSeconds(15);
@@ -44,10 +40,8 @@ public static partial class Constants
         // LspTool
         public const int DefaultTabSize = 4;
 
-        // SymbolSearchTool
+        // LspTool: symbol-search result cap / declaration-lookup width
         public const int MaxResultsUpper = 100;
-
-        // FindReferencesTool
         public const int DeclarationSearchMax = 5;
     }
 }

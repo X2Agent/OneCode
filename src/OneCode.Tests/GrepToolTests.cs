@@ -389,4 +389,21 @@ public sealed class GrepToolTests : IDisposable
         capturedArgs.Should().Contain("-n", "管道与重定向环境下需强制开启行号输出");
         capturedArgs.Should().Contain("-H", "单文件检索等场景下需强制开启文件名输出");
     }
+
+    [Fact]
+    public async Task SearchAsync_GiantSingleLineFile_TruncatesLineAroundMatchWithoutDumpingFullMegabytes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var giantLine = new string('x', 2000) + "NEEDLE_TARGET" + new string('y', 2000);
+        WriteFile("src/giant.jsonl", giantLine);
+        var tool = CreateNativeTool();
+
+        var result = await tool.SearchAsync("NEEDLE_TARGET", path: "src", output_mode: "content", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("NEEDLE_TARGET");
+        result.Content.Should().Contain("[line truncated, use Read with offset/limit]");
+        result.Content.Length.Should().BeLessThan(650,
+            "single-line matches exceeding 500 columns must be truncated around the match");
+    }
 }

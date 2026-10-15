@@ -47,9 +47,55 @@ public static class FileMemoryStorePaths
     /// </summary>
     /// <param name="workingDirectory">The session's project directory.</param>
     /// <remarks>
-    /// The directory itself is created lazily by the store on first write, so a session that never uses
-    /// working memory leaves no trace on disk.
+    /// The store defers all directory creation to the first write (see
+    /// <see cref="LazyRootAgentFileStore"/>): Harness assigns a fresh working folder per session
+    /// and eagerly creates it on every run, so an eagerly-created root would accumulate one empty
+    /// directory per session on disk.
     /// </remarks>
     public static AgentFileStore CreateStore(string workingDirectory)
-        => new FileSystemAgentFileStore(ResolveRoot(workingDirectory));
+        => new LazyRootAgentFileStore(ResolveRoot(workingDirectory));
+
+    /// <summary>
+    /// Wraps <see cref="FileSystemAgentFileStore"/> so that nothing before the first write touches
+    /// the disk. The inner store's constructor eagerly creates the root, so it is only materialized
+    /// on write; reads, listings, searches and deletes over a not-yet-existing root short-circuit
+    /// to empty results without constructing the inner store at all.
+    /// </summary>
+    private sealed class LazyRootAgentFileStore(string rootDirectory) : AgentFileStore
+    {
+        // 双重创建无害（CreateDirectory 幂等，后创建者胜出），不加锁。
+        private FileSystemAgentFileStore? _inner;
+
+        private FileSystemAgentFileStore Inner => _inner ??= new FileSystemAgentFileStore(rootDirectory);
+
+        public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default)
+            => Inner.WriteAsync(path, content, cancellationToken);
+
+        public override Task<string?> ReadAsync(string path, CancellationToken cancellationToken = default)
+            => RootMissing ? Task.FromResult<string?>(null) : Inner.ReadAsync(path, cancellationToken);
+
+        public override Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
+            => RootMissing ? Task.FromResult(false) : Inner.DeleteAsync(path, cancellationToken);
+
+        public override Task<bool> FileExistsAsync(string path, CancellationToken cancellationToken = default)
+            => RootMissing ? Task.FromResult(false) : Inner.FileExistsAsync(path, cancellationToken);
+
+        public override Task<IReadOnlyList<FileStoreEntry>> ListChildrenAsync(string directory, CancellationToken cancellationToken = default)
+            => RootMissing
+                ? Task.FromResult<IReadOnlyList<FileStoreEntry>>([])
+                : Inner.ListChildrenAsync(directory, cancellationToken);
+
+        public override Task<IReadOnlyList<FileSearchResult>> SearchAsync(
+            string directory, string regexPattern, string? globPattern = null, bool recursive = false, CancellationToken cancellationToken = default)
+            => RootMissing
+                ? Task.FromResult<IReadOnlyList<FileSearchResult>>([])
+                : Inner.SearchAsync(directory, regexPattern, globPattern, recursive, cancellationToken);
+
+        // FileMemoryProvider 每个 run 都会对会话工作目录调用此方法；实际目录由首次写入时
+        // WriteAsync 的逐级建目录完成，这里不再响应。
+        public override Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        private bool RootMissing => !Directory.Exists(rootDirectory);
+    }
 }

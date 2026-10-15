@@ -80,6 +80,12 @@ public static class TuiEventMapper
                 => new TuiToolPoolReady(tt, rot, mt),
             ErrorEvent { Message: var errMsg }
                 => new TuiError(errMsg),
+            NoticeEvent { Message: var noticeMsg }
+                => new TuiNotice(noticeMsg),
+            BudgetWarningEvent { Level: var level, UsedTokens: var used, LimitTokens: var limit }
+                => new TuiBudgetWarning(level, used, limit),
+            SubagentProgressEvent { ForkId: var fid, AgentName: var an, Phase: var ph, ToolCallCount: var tc, TurnCount: var tn, CurrentToolName: var ct, ElapsedMs: var em }
+                => new TuiSubagentProgress(fid, an, ph, tc, tn, ct, em),
             // 审批请求事件映射（传递 ResponseSource 以支持事件驱动回调）
             ApprovalRequestEvent { RequestId: var rid, ToolName: var tn, ToolInput: var ti, ResponseSource: var rs }
                 => MapApprovalRequest(rid, tn, ti, rs),

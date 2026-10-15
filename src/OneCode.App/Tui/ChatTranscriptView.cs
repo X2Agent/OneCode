@@ -54,7 +54,7 @@ public sealed partial class ChatTranscriptView : View
         _renderer = new MessageFlowRenderer();
         _renderer.GetShowThinking = getShowThinking;
 
-        _messageView = new MessageListView(clipboard);
+        _messageView = new MessageListView(clipboard, app);
 
         Width = Dim.Fill();
         Height = Dim.Fill();

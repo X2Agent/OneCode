@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
+using OneCode.App.Services.PlanMode;
 
 namespace OneCode.App.Query;
 
@@ -22,7 +23,9 @@ public static class ChatQueryServiceCollectionExtensions
             sp.GetRequiredService<IToolCatalog>(),
             sp.GetRequiredService<IHookExecutionService>(),
             sp.GetRequiredService<ChatSessionDependencies>(),
-            sp.GetRequiredService<ChatObservabilityDependencies>()));
+            sp.GetRequiredService<ChatObservabilityDependencies>(),
+            sp.GetRequiredService<PlanRunCloser>(),
+            sp.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IConversationRunner>(sp => sp.GetRequiredService<QueryStreamEngine>());
         services.AddSingleton<ICacheSafeParamsProvider>(sp => sp.GetRequiredService<QueryStreamEngine>());
 

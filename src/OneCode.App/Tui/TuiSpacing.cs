@@ -10,13 +10,6 @@ namespace OneCode.App.Tui;
 /// </summary>
 internal static class TuiSpacing
 {
-    // 响应式断点（DESIGN.md §2）
-    /// <summary>紧凑屏断点下限（列）：低于 100 列为单栏紧凑模式（Compact）。</summary>
-    public const int BreakpointCompact = 100;
-
-    /// <summary>宽屏断点下限（列）：高于 140 列为并列双栏宽屏模式（Wide）。</summary>
-    public const int BreakpointWide = 140;
-
     /// <summary>主会话区保底宽度（列）。</summary>
     public const int ChatColumnMinWidth = 65;
 

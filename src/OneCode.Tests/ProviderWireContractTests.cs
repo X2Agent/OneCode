@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Core;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.Infrastructure.Ai;
@@ -346,5 +347,33 @@ public sealed class ProviderWireContractTests
         // 装饰器可以给内容块加断点，但不能增删消息（否则重试/回放会看到不同的历史）
         messages.Should().HaveCount(1);
         messages[0].Role.Should().Be(ChatRole.User);
+    }
+
+    [Fact]
+    public async Task Anthropic_WhenTrailingContextProviderMessagesExist_PlacesBreakpointOnLastPersistentMessage()
+    {
+        var (sut, capture) = CreateAnthropicSut();
+        var transientContextMsg = new ChatMessage(ChatRole.User, "transient todo context")
+            .WithAgentRequestMessageSource(Microsoft.Agents.AI.AgentRequestMessageSourceType.AIContextProvider, "todo");
+
+        List<ChatMessage> messages =
+        [
+            new(ChatRole.System, "shared harness"),
+            new(ChatRole.User, "persistent user turn"),
+            transientContextMsg,
+        ];
+
+        await sut.GetResponseAsync(messages, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = Body(capture);
+        CountCacheControlBlocks(body).Should().Be(2);
+        var wireMessages = body.GetProperty("messages");
+        // Anthropic adapter merges consecutive user messages or keeps content blocks in order;
+        // verify the cache_control is on "persistent user turn" rather than "transient todo context".
+        var allContentBlocks = wireMessages.EnumerateArray()
+            .SelectMany(m => m.GetProperty("content").EnumerateArray())
+            .ToList();
+        var cachedBlock = allContentBlocks.Single(b => b.TryGetProperty("cache_control", out _));
+        cachedBlock.GetProperty("text").GetString().Should().Be("persistent user turn");
     }
 }

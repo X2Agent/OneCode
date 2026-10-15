@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using OneCode.App.Session;
 using OneCode.App.Services.AutoDream;
 using OneCode.Core.Memory;
@@ -6,18 +7,24 @@ using OneCode.Core.Memory;
 namespace OneCode.App.Commands;
 
 /// <summary>
-/// /memory — manage the searchable memory subsystem (MEMORY.md entries).
+/// /memory — manage the persistent memory subsystem (MEMORY.md entries).
 /// Project coding rules belong in <c>AGENTS.md</c> via <c>/remember</c>, not here.
 /// </summary>
-public sealed class MemoryCommand(
+public sealed partial class MemoryCommand(
     ISessionManager sessionManager,
     IMemoryService memoryService,
     IMemoryEntryStore entryStore,
     AutoDreamService autoDreamService) : Command
 {
+    private const int MaxSlugTokens = 4;
+    private const int MaxSlugLength = 40;
+
+    [GeneratedRegex(@"[\p{L}\p{N}]{2,}")]
+    private static partial Regex SlugWordRegex();
+
     public override string Name => "memory";
     public override string Description =>
-        "Manage searchable memory (MEMORY.md). For project rules use /remember → AGENTS.md";
+        "Manage persistent memory (MEMORY.md). For project rules use /remember → AGENTS.md";
     public override CommandCategory Category => CommandCategory.Session;
     public override string? ArgumentHint => "[list|add|remove|clear|autodream]";
 
@@ -46,7 +53,7 @@ public sealed class MemoryCommand(
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Searchable memory (not AGENTS.md — use /remember for project rules):");
+        sb.AppendLine("Persistent memory (not AGENTS.md — use /remember for project rules):");
         sb.AppendLine();
 
         // Persistent memory entries from MEMORY.md
@@ -70,7 +77,7 @@ public sealed class MemoryCommand(
         }
 
         sb.AppendLine("\nUsage:");
-        sb.AppendLine("  /memory add [--user] <text>   Add a MEMORY.md fact/preference (searchable)");
+        sb.AppendLine("  /memory add [--user] <text>   Add a MEMORY.md fact/preference");
         sb.AppendLine("  /memory remove <n>           Remove persistent entry #n");
         sb.AppendLine("  /memory clear [--all]        Clear project (or --all for user+project)");
         sb.AppendLine("  /memory autodream trigger    Trigger AutoDream consolidation");
@@ -97,7 +104,7 @@ public sealed class MemoryCommand(
 
         var text = string.Join(" ", textArgs);
         var now = DateTimeOffset.UtcNow;
-        var key = $"manual:{now:yyyyMMdd-HHmmss}";
+        var key = BuildManualKey(text, now);
 
         var entry = new MemoryEntry
         {
@@ -115,8 +122,26 @@ public sealed class MemoryCommand(
         await entryStore.UpsertAsync(scope, [entry], ct).ConfigureAwait(false);
         var scopeLabel = useUserScope ? "user" : "project";
         return CommandResult.Text(
-            $"Added MEMORY.md entry [{scopeLabel}]: {text}\n" +
-            "(Searchable via memory index / search_memories. For AGENTS.md project rules use /remember.)");
+            $"Added MEMORY.md entry [{scopeLabel}] ({key}): {text}\n" +
+            "(Injected into context via MemoryContextProvider. For AGENTS.md project rules use /remember.)");
+    }
+
+    internal static string BuildManualKey(string text, DateTimeOffset timestamp)
+    {
+        var tokens = SlugWordRegex().Matches(text)
+            .Select(m => m.Value.ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaxSlugTokens)
+            .ToArray();
+
+        if (tokens.Length == 0)
+            return $"manual:{timestamp:yyyyMMdd-HHmmss}";
+
+        var slug = string.Join('-', tokens);
+        if (slug.Length > MaxSlugLength)
+            slug = slug[..MaxSlugLength].TrimEnd('-');
+
+        return $"manual:{slug}-{timestamp:MMddHHmm}";
     }
 
     private async Task<CommandResult> RemoveAsync(string[] args, CancellationToken ct)
@@ -169,7 +194,7 @@ public sealed class MemoryCommand(
 
     private async Task<CommandResult> AutoDreamTriggerAsync(CancellationToken ct)
     {
-        autoDreamService.Trigger();
+        autoDreamService.Trigger(force: true);
         // Give the background service a moment to start
         await Task.Delay(500, ct).ConfigureAwait(false);
         return CommandResult.Text("AutoDream trigger signaled. Check /memory autodream status for results.");
@@ -180,11 +205,10 @@ public sealed class MemoryCommand(
         var sb = new StringBuilder();
         sb.AppendLine("AutoDream Status:");
         sb.AppendLine(CultureInfo.InvariantCulture, $"  Enabled: {autoDreamService.IsEnabled()}");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Last consolidated: {autoDreamService.GetLastConsolidatedAt():O}");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Min hours: {autoDreamService.GetMinHours()}");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Min sessions: {autoDreamService.GetMinSessions()}");
-        var lastScan = autoDreamService.GetLastSessionScanAt();
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  Last session scan: {(lastScan == DateTimeOffset.MinValue ? "never" : lastScan.ToString("O"))}");
+        sb.AppendLine("  Trigger mode: BUILD task completion (incremental) or manual /memory autodream trigger");
+        var lastConsolidated = autoDreamService.GetLastConsolidatedAt();
+        sb.AppendLine(CultureInfo.InvariantCulture,
+            $"  Last consolidated: {(lastConsolidated == DateTimeOffset.MinValue ? "never" : lastConsolidated.ToString("O"))}");
         return Task.FromResult(CommandResult.Text(sb.ToString().TrimEnd()));
     }
 }

@@ -94,19 +94,33 @@ public static partial class DisplayJsonSerializer
     /// 或没有可解的字符串信封字段即停止，返回 false（<paramref name="unwrapped"/> 保持原值）。
     /// </summary>
     public static bool TryUnwrapEnvelope(string value, out string unwrapped)
+        => TryUnwrapEnvelope(value, out _, out unwrapped);
+
+    /// <summary>
+    /// 循环解包 JSON-in-string 信封并还原工具结果的 <paramref name="isError"/> 错误状态。
+    /// 同时识别 JSON 信封中的 <c>isError</c>/<c>IsError</c>/<c>severity: "error"</c>
+    /// 以及非结构化序列化输出的 <c>[ERROR]</c> / <c>Error:</c> / <c>[STATE MACHINE]</c> 文本前缀。
+    /// </summary>
+    public static bool TryUnwrapEnvelope(string value, out bool isError, out string unwrapped)
     {
+        isError = false;
         unwrapped = value;
+        var unwrappedAny = false;
+
         for (var depth = 0; depth < 3; depth++)
         {
             var trimmed = unwrapped.TrimStart();
             if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '"'))
-                return depth > 0;
+                break;
 
             if (!TryParseJson(trimmed, out var doc))
-                return depth > 0;
+                break;
 
             using (doc)
             {
+                if (doc.RootElement.ValueKind == JsonValueKind.Object && IsJsonErrorObject(doc.RootElement))
+                    isError = true;
+
                 var next = doc.RootElement.ValueKind switch
                 {
                     JsonValueKind.String => doc.RootElement.GetString(),
@@ -114,12 +128,48 @@ public static partial class DisplayJsonSerializer
                     _ => null,
                 };
                 if (string.IsNullOrEmpty(next))
-                    return depth > 0;
+                    break;
                 unwrapped = next;
+                unwrappedAny = true;
             }
         }
 
-        return true;
+        if (!isError)
+            isError = IsPlainTextToolError(unwrapped);
+
+        return unwrappedAny;
+    }
+
+    private static bool IsJsonErrorObject(JsonElement root)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Name is "isError" or "IsError" or "is_error"
+                && property.Value.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (property.Name is "severity" or "Severity"
+                && property.Value.ValueKind == JsonValueKind.String
+                && string.Equals(property.Value.GetString(), "error", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsPlainTextToolError(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        var trimmed = text.AsSpan().TrimStart();
+        return trimmed.StartsWith("[ERROR]", StringComparison.Ordinal)
+            || trimmed.StartsWith("Error:", StringComparison.Ordinal)
+            || trimmed.StartsWith("[STATE MACHINE]", StringComparison.Ordinal);
     }
 
     private static string? FindContentStringField(JsonElement root)

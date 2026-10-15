@@ -153,7 +153,6 @@
 | `Shift+Down` / `Ctrl+PgDn` | `chat:scrollDown` | 对话区向下滚动（行级，3行） |
 | `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
-| `Alt+1` / `Alt+2` / `Alt+4` | `app:modeBuild/Plan/Goal` | 工作模式直达（裸 Tab 为循环切模式：硬编码不经 Resolver，不占用绑定；macOS 需终端开启 Option 作为 Meta 键） |
 | `Ctrl+Left` / `Ctrl+Right` | `chat:suggestionPrevious/Next` | 占位建议循环（占位符可见时） |
 | `Shift+PageUp` | `sidebar:pageUp` | 计划侧栏向上翻页（侧栏未显示时无操作） |
 | `Shift+PageDown` | `sidebar:pageDown` | 计划侧栏向下翻页 |
@@ -200,7 +199,6 @@
 | `Esc` 关闭 Overlay | 关闭居中浮层（设置/恢复会话/Diff 详情等） | `OverlayHost.cs` | 关闭必须永远可用，不受重映射影响 |
 | `Tab`（空输入 + 占位建议） | 接受占位建议 | `ChatInputView.Keys.cs` | 行为依赖运行时状态（是否有建议），非单一动作 |
 | `Tab`（斜杠前缀，补全未激活） | 打开命令补全列表 | `ChatInputView.Keys.cs` | 同上（补全未激活时 `Autocomplete` 上下文不在场） |
-| `Ctrl+Right` / `Ctrl+Left` | 占位建议可见时循环切换建议 | `ChatInputView.Keys.cs` | 同上 |
 | `↑↓ PgUp PgDn Home End`（导航/Diff 视图聚焦时） | 原生滚动 | `MessageListView` / `DiffView` OnKeyDown 之前 | 滚动是视图基础能力；可交互跳转已由 diff:* 覆盖 |
 | `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch | 斜杠命令入口 |
 | `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch | 斜杠命令入口 |
@@ -213,8 +211,7 @@
 
 | 按键 | 行为 | 处理位置 |
 |---|---|---|
-| `Tab` | 空输入时接受占位建议；其他情况切换工作模式（补全激活时 `Autocomplete` 上下文接管为 `autocomplete:accept`） | `ChatInputView.Keys.cs` |
-| `Ctrl+Right` / `Ctrl+Left` | 占位建议可见时循环切换建议 | `ChatInputView.Keys.cs` |
+| `Tab` | 空输入时接受占位建议；其他情况在空闲时切换工作模式（agent run 活跃期间不切换，按键被忽略；补全激活时 `Autocomplete` 上下文接管为 `autocomplete:accept`） | `ChatInputView.Keys.cs` |
 | `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch |
 | `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch |
 
@@ -262,7 +259,7 @@
 - 按 `Escape` 可取消当前挂起的和弦
 - 和弦序列在配置文件中用空格分隔：`"ctrl+x ctrl+k": "chat:killAgents"`（用户自定义示例）
 - **Eager-fire（立即触发）**：若某个按键自身已精确绑定动作、同时又是更长和弦的前缀，该键会**立即触发自身绑定**，并在 1s 窗口内继续监听和弦尾键。纯前缀键（自身无绑定，如 `ctrl+x ctrl+k` 的 `ctrl+x`）不受影响，仍等待尾键。
-- 模式直达为独立单键 `Alt+1/2/4`，不与任何和弦共享监听窗口；裸 Tab 循环为硬编码行为，不经 Resolver。
+- 裸 Tab 循环为硬编码行为，不经 Resolver；agent run 活跃（`_isBusy`）期间不触发模式循环。
 
 ---
 

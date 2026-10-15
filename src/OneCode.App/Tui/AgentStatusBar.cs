@@ -38,6 +38,7 @@ public sealed class AgentStatusBar : View
     private int _lspErrorCount;
     private int _lspWarningCount;
     private McpConnectionSummary? _mcpSummary;
+    private int _activeSubagentCount;
 
     public AgentStatusBar(IApplication app, WorkingModeController modeController)
     {
@@ -177,6 +178,16 @@ public sealed class AgentStatusBar : View
         SetNeedsDraw();
     }
 
+    /// <summary>
+    /// Update the active sub-agent (fork) count shown as an "agents: N" badge.
+    /// Pass 0 to hide the indicator. 与 LSP/MCP 指示器同级：窄终端下整条让位。
+    /// </summary>
+    public void SetSubagentCount(int activeCount)
+    {
+        _activeSubagentCount = Math.Max(0, activeCount);
+        SetNeedsDraw();
+    }
+
     protected override bool OnDrawingContent(DrawContext? context)
     {
         var w = Viewport.Width;
@@ -224,6 +235,10 @@ public sealed class AgentStatusBar : View
         // 以下均为可丢弃条目：空间不足时从尾部整条移除。
         if (_sandbox != "Normal")
             items.Add(new LeftItem(" · ", $"\U0001f512 {_sandbox}", TuiPalette.Info, Droppable: true));
+
+        // 活跃子代理徽标：与 LSP/MCP 指示器同级行为（窄终端整条让位），N=0 隐藏。
+        if (_activeSubagentCount > 0)
+            items.Add(new LeftItem(" · ", $"agents: {_activeSubagentCount}", TuiPalette.Info, Droppable: true));
 
         if (_lspServerCount > 0)
         {

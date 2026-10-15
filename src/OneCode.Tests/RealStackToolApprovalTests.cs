@@ -197,6 +197,32 @@ public sealed class RealStackToolApprovalTests
             "an unmounted provider contributes no declared tools");
     }
 
+    /// <summary>
+    /// provider 工具必须登记 PlanAllowed 类别：这些工具只读写 agent 会话状态，
+    /// Plan 白名单按类别放行。漏登记的表现是模型能看到工具、审批也通过，
+    /// 最后却被 Plan 白名单拒掉（工具不可用死循环）。
+    /// </summary>
+    [Fact]
+    public void RegisterMetadata_DeclaresPlanAllowedCategoryForAllProviderTools()
+    {
+        var registry = new ToolMetadataRegistry();
+        HarnessProviderTools.RegisterMetadata(registry, includeTodo: true, includeFileMemory: true);
+
+        foreach (var name in HarnessProviderTools.Names)
+        {
+            registry.IsInCategory(name, ToolCategory.PlanAllowed).Should().BeTrue(
+                $"'{name}' must be PlanAllowed so the Plan-mode whitelist lets it through");
+        }
+
+        // 反证守卫：白名单之外的类别不得误登记（file_memory_write 是写入工具，
+        // 若被登记 FileWrite 会进入文件写入集合，参与路径校验与并发决策）。
+        foreach (var name in HarnessProviderTools.FileMemoryToolNames)
+        {
+            registry.IsInCategory(name, ToolCategory.FileWrite).Should().BeFalse(
+                $"'{name}' only touches session state, not workspace files");
+        }
+    }
+
     // Helpers
 
     private static IReadOnlyList<ToolApprovalRequestContent> ApprovalRequests(AgentResponse response) =>
@@ -264,10 +290,7 @@ public sealed class RealStackToolApprovalTests
                 PermissionChecker = new AskOnlyChecker([.. askFor ?? [], ProviderToolName, ProductToolName]),
                 AutoApprovalRules = autoApprovalRules,
                 EnableTodo = enableTodo,
-                EnableEditTransaction = false,
-                EnableToolResultBudget = false,
                 EnableStateMachine = false,
-                EnableSafetyInvariants = false,
                 EnableEditPreChecks = false,
             },
         });

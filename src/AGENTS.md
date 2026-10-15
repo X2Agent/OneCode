@@ -77,6 +77,9 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release
 # 运行所有测试
 dotnet test src/OneCode.slnx
 
+# 日常开发（排除文档守卫 DocFactConsistencyTests——它不测产品行为且 I/O 重，提交前/CI 全量跑仍执行）
+dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "Category!=Docs"
+
 # 运行特定测试类
 dotnet test src/OneCode.Tests/OneCode.Tests.csproj --filter "FullyQualifiedName~PermissionCheckerTests"
 
@@ -200,7 +203,7 @@ public class ConversationOptions {
 /// <exception cref="OperationCanceledException">当 ct 被取消时抛出。</exception>
 /// <remarks>
 /// 异常处理策略：
-/// - PromptTooLong → 触发自动压缩并重试一次
+/// - PromptTooLong（上下文超限）→ 不自动截断重试，以 ErrorEvent 收场并附 /compact 操作提示
 /// - 其他错误 → 包装为 ErrorEvent 并终止查询
 /// </remarks>
 public async IAsyncEnumerable<QueryEvent> StreamQueryAsync(
@@ -643,7 +646,7 @@ var chatOptions = new ChatOptions
 
 | 级别 | API | 适用场景 |
 |------|-----|---------|
-| Agent Run 级 | `agent.AsBuilder().Use(Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, …, CancellationToken, Task>)` | 预算短路、Usage 追踪、PromptTooLong 恢复等 run 级观测 |
+| Agent Run 级 | `agent.AsBuilder().Use(Func<IEnumerable<ChatMessage>, AgentSession?, AgentRunOptions?, …, CancellationToken, Task>)` | 预算短路、Usage 追踪等 run 级观测 |
 | 工具调用级 | `agent.AsBuilder().Use(Func<AIAgent, FunctionInvocationContext, Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>, CancellationToken, ValueTask<object?>>)` | 审计、权限、状态机、事务等需要顺序编排的工具中间件 |
 
 两者都是 MAF 标准 API，**不是**自定义实现。
@@ -767,7 +770,7 @@ var maxTurns = options.MaxTurns ?? 100;  // ← 为什么默认 100？
 | Model Provider 标识 | [Core.Constants.ModelProviders](OneCode.Core/Constants.cs) | `Anthropic`, `OpenAI`, `Ollama` |
 | 会话默认值 | [Core.Constants.Session](OneCode.Core/Constants.cs) | `MaxTurnsDefault`, `MaxBudgetTokensDefault` |
 | Permission 模式 | [Core.Constants.PermissionModes](OneCode.Core/Constants.cs) | `Default` |
-| 消息类型 | [Core.Constants.MessageTypes](OneCode.Core/Constants.cs) | `User`, `Assistant`, `Result` |
+| 消息类型 | [Core.Constants.MessageTypes](OneCode.Core/Constants.cs) | `Assistant` |
 | HttpClient 注册名 | [Infrastructure.Constants.HttpClientNames](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
 | 子目录名 | [Infrastructure.Constants.Subdirs](OneCode.Infrastructure/Config/Constants.cs) | `Skills`, `Prompts`, `Events` |
 | 超时/阈值 | [Infrastructure.Constants.Timeouts](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |

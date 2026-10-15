@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Hooks;
 using OneCode.Core.Hooks;
+using OneCode.Tests.TestSupport;
 
 namespace OneCode.Tests;
 
@@ -75,7 +76,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     // 热重载：正常重建
 
     [Fact]
-    public void HooksJsonChanged_RegistryRebuiltAfterDebounce()
+    public async Task HooksJsonChanged_RegistryRebuiltAfterDebounce()
     {
         WriteHooksJson("""
             {
@@ -97,13 +98,14 @@ public sealed class HookConfigHotReloaderTests : IDisposable
             }
             """);
 
-        WaitUntil(() => _registry.GetAll().Count == 2, "热重载应在防抖窗口后重建出 2 个 hook");
-        _registry.GetMatchesForPoint(HookInterceptionPoint.Output, "Completed").Should().ContainSingle();    }
+        await WaitUntil(() => _registry.GetAll().Count == 2, "热重载应在防抖窗口后重建出 2 个 hook");
+        _registry.GetMatchesForPoint(HookInterceptionPoint.Output, "Completed").Should().ContainSingle();
+    }
 
     // 热重载：last-good 保护
 
     [Fact]
-    public void HooksJsonBroken_KeepsLastGoodConfigAndRecordsFailedDiagnostics()
+    public async Task HooksJsonBroken_KeepsLastGoodConfigAndRecordsFailedDiagnostics()
     {
         WriteHooksJson("""
             {
@@ -116,7 +118,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
 
         WriteHooksJson("{ broken json");
 
-        WaitUntil(
+        await WaitUntil(
             () => _diagnostics.Reports.Any(r => r.Status == HookFileLoadStatus.Failed),
             "热重载应把解析失败写入诊断");
         _registry.GetAll().Should().ContainSingle("解析失败时必须保留上一次有效配置");
@@ -125,7 +127,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     // 编程注册 hook 保留
 
     [Fact]
-    public void Rebuild_PreservesProgrammaticallyRegisteredHooks()
+    public async Task Rebuild_PreservesProgrammaticallyRegisteredHooks()
     {
         WriteHooksJson("""
             {
@@ -154,14 +156,14 @@ public sealed class HookConfigHotReloaderTests : IDisposable
             }
             """);
 
-        WaitUntil(() => _registry.GetAll().Count == 3, "重建后应为 1 个编程注册 hook + 2 个 config hook");
+        await WaitUntil(() => _registry.GetAll().Count == 3, "重建后应为 1 个编程注册 hook + 2 个 config hook");
         _registry.GetAll().Should().Contain(h => h.Name == "my-plugin:audit", "编程注册 hook 不得被整体交换清掉");
     }
 
     // 热重载：文件删除
 
     [Fact]
-    public void HooksJsonDeleted_ConfigHooksRemoved()
+    public async Task HooksJsonDeleted_ConfigHooksRemoved()
     {
         WriteHooksJson("""
             {
@@ -174,7 +176,7 @@ public sealed class HookConfigHotReloaderTests : IDisposable
 
         File.Delete(Path.Combine(_configDir, "hooks.json"));
 
-        WaitUntil(() => _registry.GetAll().Count == 0, "删除 hooks.json 应清空 config hook（NotFound 参与整体交换）");
+        await WaitUntil(() => _registry.GetAll().Count == 0, "删除 hooks.json 应清空 config hook（NotFound 参与整体交换）");
         _diagnostics.Reports.Should().ContainSingle().Which.Status.Should().Be(HookFileLoadStatus.NotFound);
     }
 
@@ -183,16 +185,6 @@ public sealed class HookConfigHotReloaderTests : IDisposable
     private void WriteHooksJson(string content) =>
         File.WriteAllText(Path.Combine(_configDir, "hooks.json"), content, new UTF8Encoding(false));
 
-    private void WaitUntil(Func<bool> condition, string because)
-    {
-        var deadline = DateTime.UtcNow + WaitTimeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            if (condition())
-                return;
-            Thread.Sleep(50);
-        }
-
-        condition().Should().BeTrue($"等待超时：{because}");
-    }
+    private Task WaitUntil(Func<bool> condition, string because) =>
+        Eventually.TrueAsync(condition, WaitTimeout, because, TestContext.Current.CancellationToken);
 }

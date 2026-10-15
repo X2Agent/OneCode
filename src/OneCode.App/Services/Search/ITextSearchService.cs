@@ -14,10 +14,11 @@ public sealed record TextSearchRequest(
     string OutputMode = "content",
     int ContextBefore = 0,
     int ContextAfter = 0,
-    string? WorkspaceRoot = null);
+    string? WorkspaceRoot = null,
+    IReadOnlyList<string>? AdditionalDirectories = null);
 
 /// <summary>
-/// 文本内容搜索内核——ripgrep 优先，C# Regex 兜底。GrepTool 与 FindReferencesTool 共用，
+/// 文本内容搜索内核——ripgrep 优先，C# Regex 兜底。GrepTool 与 LspTool（symbol 基于 references 的回退路径）共用，
 /// 消除两者各自重复实现的 ripgrep/native 扫描逻辑。
 /// </summary>
 public interface ITextSearchService

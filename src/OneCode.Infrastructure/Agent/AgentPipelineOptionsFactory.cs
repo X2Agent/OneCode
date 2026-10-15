@@ -1,18 +1,18 @@
 using OneCode.Core.Agent;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
+using OneCode.Core.Goals;
 using OneCode.Core.Hooks;
 using OneCode.Core.Permissions;
 using OneCode.Core.Tools;
 using OneCode.Core.Tokens;
-using OneCode.Infrastructure.Middleware;
 using Microsoft.Agents.AI;
 
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
 /// PIPE-1: 跨角色共享的安全上下文。
-/// 所有 profile 的 SafetyInvariants/RulesBySource/AdditionalWorkingDirectories
+/// 所有 profile 的 RulesBySource/AdditionalWorkingDirectories
 /// 必须从同一 PipelineSecurityContext 获取，确保 Worker 与 Main 安全字段等价。
 /// </summary>
 public sealed record PipelineSecurityContext(
@@ -27,12 +27,14 @@ public sealed record PipelineSecurityContext(
     Action<FileChange>? FileChangeCallback,
     string? ModelId,
     string? ProviderId,
-    IReadOnlyList<ISafetyInvariant>? SafetyInvariants = null,
     EditTransaction? EditTransaction = null,
     IPermissionChecker? PermissionChecker = null,
     ITokenLedger? TokenLedger = null,
     long? MaxBudgetTokens = null,
-    SessionId? ConversationId = null);
+    SessionId? ConversationId = null,
+    long BudgetBaselineTokens = 0,
+    Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded = null,
+    Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning = null);
 
 /// <summary>
 /// 角色级覆盖 — 仅裁剪工具集与配额，不裁剪安全层。
@@ -45,7 +47,8 @@ public sealed record PipelineRoleOverrides(
     Func<string, bool>? IsToolAllowed = null,
     bool EnableToolApproval = true,
     IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules = null,
-    VerificationOptions? VerificationOptions = null);
+    // 轮数上限（模型往返次数）；null = 不设轮数上限（迭代上限退回 MaxToolCalls）。
+    int? MaxTurns = null);
 
 /// <summary>
 /// PIPE-1: 统一的 AgentPipelineOptions 工厂。
@@ -102,7 +105,6 @@ public static class AgentPipelineOptionsFactory
             RulesBySource = ctx.RulesBySource,
             AdditionalWorkingDirectories = ctx.AdditionalWorkingDirectories,
             HookExecutionService = ctx.Hook,
-            SafetyInvariants = ctx.SafetyInvariants,
 
             EnableStateMachine = behavior.EnableStateMachine,
             EnableEditPreChecks = behavior.EnableEditPreChecks,
@@ -112,11 +114,11 @@ public static class AgentPipelineOptionsFactory
 
             VerificationProvider = ctx.VerificationProvider,
             EnableVerification = enableVerification,
-            VerificationOptions = overrides.VerificationOptions,
 
             AutoApprovalRules = autoApprovalRules,
 
             MaxToolCalls = overrides.MaxToolCalls,
+            MaxTurns = overrides.MaxTurns,
             ToolLimitMessage = overrides.ToolLimitMessage,
             IsToolAllowed = isToolAllowed,
 
@@ -126,31 +128,10 @@ public static class AgentPipelineOptionsFactory
             TokenLedger = ctx.TokenLedger,
             ConversationId = ctx.ConversationId,
             MaxBudgetTokens = ctx.MaxBudgetTokens,
+            BudgetBaselineTokens = ctx.BudgetBaselineTokens,
+            OnBudgetExceeded = ctx.OnBudgetExceeded,
+            OnBudgetWarning = ctx.OnBudgetWarning,
         };
-    }
-
-    /// <summary>
-    /// 为 Worker 角色创建标准 pipeline options（便捷重载）。
-    /// </summary>
-    // 仅单元测试使用：生产代码经 DI 工厂构建（测试接缝）。
-    public static AgentPipelineOptions CreateForWorker(
-        PipelineSecurityContext ctx,
-        int maxToolCalls,
-        Func<string, bool>? isToolAllowed = null,
-        string? modelId = null,
-        string? providerId = null,
-        PipelineProfile profile = PipelineProfile.Worker)
-    {
-        var fullCtx = ctx with
-        {
-            ModelId = modelId ?? ctx.ModelId,
-            ProviderId = providerId ?? ctx.ProviderId,
-        };
-
-        return Create(profile, fullCtx, new PipelineRoleOverrides(
-            MaxToolCalls: maxToolCalls,
-            ToolLimitMessage: $"Sub-agent tool call limit ({maxToolCalls}) reached.",
-            IsToolAllowed: isToolAllowed));
     }
 }
 

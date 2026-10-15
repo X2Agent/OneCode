@@ -33,6 +33,7 @@ public sealed record TuiQueryServices(
 /// <summary>Current session and workspace dependencies.</summary>
 public sealed record TuiSessionServices(
     Func<IReadOnlyList<string>>? GetSessionUserPrompts = null,
+    Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? GetSessionCandidates = null,
     OneCode.Core.Commands.IGitHelper? GitHelper = null);
 
 /// <summary>LSP / MCP status and diagnostic subscriptions.</summary>
@@ -68,7 +69,6 @@ public sealed record TuiLaunchOptions(
     string Version,
     CancellationToken ExternalCancellation,
     IReadOnlyList<SlashCommandEntry> SlashCommands,
-    string? SshHost = null,
     string? InitialPrompt = null);
 
 /// <summary>
@@ -100,6 +100,7 @@ public sealed record TuiContext(
     public Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun => Query.ReplayCurrentBuildRun;
 
     public Func<IReadOnlyList<string>>? GetSessionUserPrompts => Session.GetSessionUserPrompts;
+    public Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? GetSessionCandidates => Session.GetSessionCandidates;
     public IGitHelper? GitHelper => Session.GitHelper;
 
     public Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus => Diagnostics.GetLspServerStatus;
@@ -128,6 +129,5 @@ public sealed record TuiContext(
     public string Version => Options.Version;
     public CancellationToken ExternalCancellation => Options.ExternalCancellation;
     public IReadOnlyList<SlashCommandEntry> SlashCommands => Options.SlashCommands;
-    public string? SshHost => Options.SshHost;
     public string? InitialPrompt => Options.InitialPrompt;
 }

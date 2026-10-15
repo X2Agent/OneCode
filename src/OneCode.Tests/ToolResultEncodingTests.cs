@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 
@@ -19,11 +21,16 @@ public sealed class ToolResultEncodingTests
     [Fact]
     public void ApplyPromptAndReturn_KeepsCjkReadable()
     {
-        var result = WebFetchTool.ApplyPromptAndReturn("正文内容", Prompt, startMs: 0);
+        var result = CreateSut().ApplyPromptAndReturn("正文内容", Prompt, startMs: 0);
 
         result.Content.Should().Contain("孙宇晨");
         result.Content.Should().NotContain("\\u", "默认 encoder 会把中文转成 \\uXXXX");
     }
+
+    private static WebFetchTool CreateSut() => new(
+        Substitute.For<IHttpClientFactory>(),
+        new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+        NullLogger<WebFetchTool>.Instance);
 
     [Fact]
     public void MafWrappedToolResult_DisplaysReadableCjk()

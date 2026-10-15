@@ -24,15 +24,15 @@ namespace OneCode.Tests;
 public sealed class ModePromptToolReferenceTests
 {
     /// <summary>
-    /// 主代理模式管线实际加载的提示词（<c>MainModeContextProviderBuilder</c> /
-    /// <c>BuildModeAttachmentProvider</c> / <c>PlanModeAttachmentProvider</c> /
-    /// <c>GoalSubGoalExecutor</c>）。
-    /// 只有这组会被主模型逐轮看到，工具名引用必须与注册表一致。
+    /// 主代理与模式管线实际加载的提示词（<c>PromptComposer</c> / <c>MainModeContextProviderBuilder</c> /
+    /// <c>GoalDecomposer</c>）。
+    /// 这组提示词点名的工具名必须与生产注册表完全一致。
     /// </summary>
     private static readonly string[] ModePrompts =
     [
+        "harness", "default",
         "build", "plan", "goal",
-        "goal-subgoal", "default",
+        "goal-decomposer",
     ];
 
     /// <summary>

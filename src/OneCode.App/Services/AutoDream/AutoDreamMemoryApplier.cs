@@ -28,6 +28,9 @@ internal sealed class AutoDreamMemoryApplier(
     /// <summary>用户手写条目的 key 前缀；AutoDream 也不得以该前缀创建条目（否则分类语义混乱）。</summary>
     private const string ManualKeyPrefix = "manual:";
 
+    /// <summary>当 Agent 省略 ttlHours 时的默认过期小时数（720 小时 = 30 天，与提示词契约对齐）。</summary>
+    private const int DefaultTtlHours = 720;
+
     /// <summary>
     /// 解析 Agent 输出的增量变更 JSON 数组，合并写入对应的 MEMORY.md 文件。
     /// 容错：容忍 Agent 在 JSON 前后添加 markdown 围栏或额外说明文本。
@@ -37,14 +40,30 @@ internal sealed class AutoDreamMemoryApplier(
     /// </summary>
     public async Task<int> ApplyConsolidationChangesAsync(string outputText, CancellationToken ct)
     {
+        var (_, entriesWritten) = await TryApplyConsolidationChangesAsync(outputText, ct).ConfigureAwait(false);
+        return entriesWritten;
+    }
+
+    /// <summary>
+    /// 解析并应用整合变更，返回 <c>(Succeeded, EntriesWritten)</c>。
+    /// 当输出为空、无法提取 JSON 数组或 JSON 反序列化失败时，<c>Succeeded</c> 为 <see langword="false"/>；
+    /// 当输出为合法空数组 <c>[]</c> 时，<c>Succeeded</c> 为 <see langword="true"/> 且 <c>EntriesWritten</c> 为 0。
+    /// </summary>
+    public async Task<(bool Succeeded, int EntriesWritten)> TryApplyConsolidationChangesAsync(
+        string outputText,
+        CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(outputText))
-            return 0;
+        {
+            _logger.LogWarning("AutoDream: agent returned empty output");
+            return (false, 0);
+        }
 
         var json = AutoDreamOutputSanitizer.ExtractJsonArray(outputText);
         if (json is null)
         {
             _logger.LogWarning("AutoDream: failed to extract JSON array from agent output");
-            return 0;
+            return (false, 0);
         }
 
         List<ConsolidationChange>? changes;
@@ -55,11 +74,14 @@ internal sealed class AutoDreamMemoryApplier(
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "AutoDream: failed to parse consolidation changes JSON");
-            return 0;
+            return (false, 0);
         }
 
-        if (changes is null || changes.Count == 0)
-            return 0;
+        if (changes is null)
+            return (false, 0);
+
+        if (changes.Count == 0)
+            return (true, 0);
 
         // 配额限制：防止 Agent 输出过多变更导致 MEMORY.md 膨胀或写入风暴。
         // 50 条覆盖典型整合场景（事实/约定/教训/纠正），超出部分丢弃并记录。
@@ -189,9 +211,8 @@ internal sealed class AutoDreamMemoryApplier(
             }
 
             var category = MemoryEntry.DeriveCategory(key);
-            TimeSpan? ttl = change.TtlHours is > 0
-                ? TimeSpan.FromHours(change.TtlHours.Value)
-                : null;
+            var effectiveTtlHours = change.TtlHours is > 0 ? change.TtlHours.Value : DefaultTtlHours;
+            var ttl = TimeSpan.FromHours(effectiveTtlHours);
 
             var entry = new MemoryEntry
             {
@@ -201,7 +222,7 @@ internal sealed class AutoDreamMemoryApplier(
                 Category = category,
                 CreatedAt = now,
                 UpdatedAt = now,
-                ExpiresAt = ttl.HasValue ? now.Add(ttl.Value) : null,
+                ExpiresAt = now.Add(ttl),
             };
 
             if (scope == MemoryScope.User)
@@ -209,6 +230,37 @@ internal sealed class AutoDreamMemoryApplier(
             else
                 projectEntries.Add(entry);
             written++;
+
+            // 原子替换旧 Key：当 upsert 通过 supersedes 声明替代了旧条目时，在同一作用域移除非 manual 旧条目
+            if (change.Supersedes is { Count: > 0 })
+            {
+                foreach (var rawSupersededKey in change.Supersedes)
+                {
+                    var supersededKey = AutoDreamOutputSanitizer.SanitizeKey(rawSupersededKey);
+                    if (string.IsNullOrEmpty(supersededKey)
+                        || string.Equals(supersededKey, key, StringComparison.OrdinalIgnoreCase)
+                        || supersededKey.StartsWith(ManualKeyPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!existing.TryGetValue(supersededKey, out var supersededTarget))
+                        continue;
+
+                    if (string.Equals(supersededTarget.Source, ManualSource, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning(
+                            "AutoDream: refusing to supersede user-authored entry '{Key}' (source={Source})",
+                            supersededKey, supersededTarget.Source);
+                        continue;
+                    }
+
+                    if (scope == MemoryScope.User)
+                        userDeleteKeys.Add(supersededKey);
+                    else
+                        projectDeleteKeys.Add(supersededKey);
+                }
+            }
         }
 
         if (skipped > 0)
@@ -241,6 +293,6 @@ internal sealed class AutoDreamMemoryApplier(
         // Prune user-scope expired entries
         await _entryStore.PruneAsync(MemoryScope.User, ct).ConfigureAwait(false);
 
-        return written;
+        return (true, written);
     }
 }

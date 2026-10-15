@@ -22,26 +22,11 @@ public sealed record AgentRunRequest(
     // AllowedToolNames 与父级能力取交集（只减不增）。两者为空即按内置代理处理。
     string? Instructions = null,
     IReadOnlyList<string>? AllowedToolNames = null,
+    // 派工点解析的轮数上限（自定义代理 frontmatter max_turns）。与 MaxTurns（调用方请求的
+    // 上限，只降不升）分离：runner 取 min(请求值, 上限链)，上限链 = 本值 > settings > profile 默认。
+    int? MaxTurnsCeiling = null,
     // 工作目录覆盖（如 GOAL 隔离 worktree）。null 时 fork 使用会话工作目录访问器。
-    string? WorkingDirectory = null,
-    // fork 级账本接线（GOAL 步内并行）：把 fork 的文件写入 intent 挂到 step 级 run 账本下，
-    // 崩溃后新世代的 ReconcileRunAsync 才能回滚孤儿写入。非 GOAL 路径为 null。
-    ForkLedgerScope? LedgerScope = null);
-
-/// <summary>
-/// fork 级账本事务的作用域：同一 run 账本前缀 + 同一围栏令牌，每个 fork 一个
-/// operationId。fork 侧只做 Begin + PersistTo + Commit，不做 ReconcileRunAsync——
-/// 并发 fork 各自 reconcile 会回滚彼此刚持久化的 intent，世代清扫由 step 级独占。
-/// </summary>
-public sealed record ForkLedgerScope(
-    OneCode.Core.Workflows.IOperationLedger Ledger,
-    string RunLedgerId,
-    string OperationId,
-    long FencingToken)
-{
-    /// <summary>派生 fork 级事务标识（operationId 追加任务段，账本前缀与围栏不变）。</summary>
-    public ForkLedgerScope ForTask(string taskId) => this with { OperationId = $"{OperationId}/task/{taskId}" };
-}
+    string? WorkingDirectory = null);
 
 /// <summary>
 /// 子 Agent 执行结果。<see cref="Error"/> 非 null 表示执行失败（异常已捕获并转换为
@@ -57,4 +42,6 @@ public sealed record AgentRunResult(
     // fork 事务提交的变更文件与 token 消耗（GOAL 步内 DAG 的证据与预算依赖此透传）。
     IReadOnlyList<string>? ChangedFiles = null,
     long InputTokens = 0,
-    long OutputTokens = 0);
+    long OutputTokens = 0,
+    // 工具调用总数（结果摘要行 "N tool calls" 的数据源；历史调用方默认 0 保持兼容）。
+    int ToolCallCount = 0);

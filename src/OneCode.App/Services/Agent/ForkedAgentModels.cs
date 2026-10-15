@@ -42,8 +42,11 @@ public sealed class ForkedAgentParams
     /// <summary>Maximum output tokens.</summary>
     public int? MaxOutputTokens { get; init; }
 
-    /// <summary>Maximum turns (default 10).</summary>
+    /// <summary>Maximum turns (模型往返次数；RunAsync 按分层配置解析后传入)。</summary>
     public int? MaxTurns { get; init; }
+
+    /// <summary>墙钟超时（null = 不限制）。到时由 linked CTS 触发取消，结果标记 partial。</summary>
+    public TimeSpan? Timeout { get; init; }
 
     /// <summary>Whether to skip transcript recording.</summary>
     public bool SkipTranscript { get; init; }
@@ -59,12 +62,6 @@ public sealed class ForkedAgentParams
 
     /// <summary>Pipeline profile controlling middleware trimming and tool filtering.</summary>
     public PipelineProfile Profile { get; init; } = PipelineProfile.Worker;
-
-    /// <summary>
-    /// fork 级账本接线（GOAL 步内并行）。非 null 时 fork 的写入 intent 先于文件写入持久化、
-    /// fork 成功时先于事务提交落账，崩溃后新世代的 reconcile 才能回滚孤儿写入。
-    /// </summary>
-    public ForkLedgerScope? LedgerScope { get; init; }
 }
 
 /// <summary>
@@ -84,8 +81,17 @@ public sealed class ForkedAgentResult
     /// <summary>Total output tokens consumed.</summary>
     public long TotalOutputTokens { get; init; }
 
-    /// <summary>Number of turns executed.</summary>
+    /// <summary>真实模型往返次数。</summary>
     public int TurnCount { get; init; }
+
+    /// <summary>工具调用总数（MAF 管道计数；AgentTool 结果 JSON 与摘要行的数据源）。</summary>
+    public int ToolCallCount { get; init; }
+
+    /// <summary>轮预算（模型往返）或工具安全上限已触发；结果为 partial。</summary>
+    public bool BudgetExhausted { get; init; }
+
+    /// <summary>墙钟超时触发（外部取消令牌未取消）。结果为 partial，输出为已完成工作的总结。</summary>
+    public bool TimedOut { get; init; }
 
     /// <summary>Structured error details when the forked agent fails (ERR-1.4).</summary>
     public AgentProblemDetails? Error { get; init; }

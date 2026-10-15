@@ -68,7 +68,13 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
   会把整份 transcript 重新注入每一轮，使 fresh context 形同虚设。因此循环路径的
   `MainAgentRunOptions.ConversationId` 必须为 `null`（不挂 `TranscriptChatHistoryProvider`）。
   GOAL 子目标循环天然如此；`/loop` 曾传入会话 id，已修正。
-- **不引入 GOAL 的重机制**：不接 workspace 隔离、operation ledger、step receipt 与三级预算。
+  同族约束也约束 approved-plan 受控 Build run：run 边界（`MafSessionInvalidator.InvalidateRuntime`）
+  作废 MAF 会话快照后，若原样回放全部转录，Plan 阶段的 `SubmitPlan` 调用会随历史进入不挂载该工具的执行轮。
+  因此采用阶段播种边界（[`HistorySeedBoundary`](../../src/OneCode.App/Services/Agent/HistorySeedBoundary.cs)）：
+  plan→build 切换时记录 (执行世代, historyEpoch, 转录消息数)，provider 保留边界之前的对话与只读工具结果
+  （复用检索上下文与 Prompt Cache），仅成对剥离边界之前的 `SubmitPlan` 工具调用与结果；
+  同世代重试/恢复沿用边界不回移，epoch 漂移回退全量播种。
+- **不引入 GOAL 的重机制**：不接 workspace 隔离、step receipt 与三级预算。
   `/loop` 用 `EditTransaction` 收纳本轮改动，未通过则整体回滚。
 - **复用不复制**：判定原语与证据格式化复用 `GoalSubGoalAssessment`；组装方式复用 `LoopAgent` +
   `DelegateLoopEvaluator` + `LoopContext.AdditionalProperties` 承载 per-run 状态。
@@ -84,6 +90,8 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
 隐性的权限放宽，`LoopCommand` 在入口**fail-closed**：当前权限模式必须是
 `goalAuto` / `dontAsk` / `auto` / `bypassPermissions` 之一，否则直接报错并说明原因。
 权限政策本身仍由 `PermissionChecker` 强制执行，命令只是拒绝在不匹配的模式下启动。
+装配层同样按"无审批通道"收缩能力面：CodeAct provider 不挂载——`execute_code` 在框架层恒带
+AlwaysRequire 审批边界，审批请求无人应答会让整个 run 以异常告终。
 
 ### 4. `GoalSubGoalJudge` 保留自研，但判定规则向框架对齐（闭环结构化输出文本降级未覆贴项）
 
@@ -131,8 +139,8 @@ agent 对上一轮产出**零记忆**，不回显就会重复已完成的动作�
   （`GoalWorkflowRuntimeTests` 用 `FakeStepExecutionService` 整条替换掉子目标执行路径）。
   本轮新增 `GoalSubGoalLoopTests`（10 例）与 `IterativeLoopServiceTests`（9 例）锚定循环语义，
   并对 fail-open 判定与"无证据判通过"两道守卫做了反证。
-- 成本：`/loop` 新增一条命令（Builtin 22 → 23，总数 44 → 45）与一个配置键；
-  DI 注册面快照随之更新（`ServiceRegistrationSnapshot.approved.txt`：/loop 贡献 2 条新增 + 序号重排）。
+- 成本：`/loop` 带来一条 Builtin 命令与一个配置键（命令计数：Builtin 22、斜杠命令总数 44）；
+  DI 注册面快照随之更新（`ServiceRegistrationSnapshot.approved.txt`）。
 - 未覆贴：`/loop` 目前只支持单个 `--check` 命令作为判据，多阶段门禁（如"先编译再测试"）
   需由该命令自行串联；`WorkflowResumeKind` 式的循环断点恢复未做（`/loop` 取消后不可续跑）。
 

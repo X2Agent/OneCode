@@ -115,7 +115,7 @@ public sealed class EditTool(
                 ? $"File updated: {fullPath} ({count} {(count == 1 ? "occurrence" : "occurrences")} replaced)"
                 : $"File updated: {fullPath}";
             var message = await FileWritePipeline.CompleteWriteAsync(
-                fullPath, newContent, _notifier,
+                fullPath, _notifier,
                 successMessage, ct).ConfigureAwait(false);
             return ToolResult.Success(message);
         }

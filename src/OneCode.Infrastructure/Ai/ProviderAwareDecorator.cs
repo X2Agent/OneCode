@@ -1,3 +1,4 @@
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
 using OllamaSharp.Models;
@@ -85,19 +86,41 @@ public sealed class ProviderAwareDecorator(IChatClient inner, string providerId,
     /// </remarks>
     private static void InjectAnthropicStrategy(IList<ChatMessage> messages)
     {
+        var lastSystemIndex = -1;
+        var lastPersistentConversationIndex = -1;
+        var lastNonSystemIndex = -1;
+
         for (var i = 0; i < messages.Count; i++)
         {
-            var ttl = i == messages.Count - 1 ? Ttl.Ttl5m
-                : messages[i].Role == ChatRole.System ? Ttl.Ttl1h
-                : (Ttl?)null;
-            if (ttl is not { } breakpointTtl)
+            if (messages[i].Role == ChatRole.System)
+            {
+                if (LastCacheableIndex(messages[i]) >= 0)
+                    lastSystemIndex = i;
+                continue;
+            }
+
+            if (LastCacheableIndex(messages[i]) < 0)
                 continue;
 
-            var index = LastCacheableIndex(messages[i]);
-            if (index < 0)
-                continue;
+            lastNonSystemIndex = i;
+            if (messages[i].GetAgentRequestMessageSourceType() != AgentRequestMessageSourceType.AIContextProvider)
+                lastPersistentConversationIndex = i;
+        }
 
-            messages[i] = WithCacheBreakpoint(messages[i], index, breakpointTtl);
+        var conversationBreakpointIndex = lastPersistentConversationIndex >= 0
+            ? lastPersistentConversationIndex
+            : lastNonSystemIndex;
+
+        if (lastSystemIndex >= 0)
+        {
+            var blockIdx = LastCacheableIndex(messages[lastSystemIndex]);
+            messages[lastSystemIndex] = WithCacheBreakpoint(messages[lastSystemIndex], blockIdx, Ttl.Ttl1h);
+        }
+
+        if (conversationBreakpointIndex >= 0 && conversationBreakpointIndex != lastSystemIndex)
+        {
+            var blockIdx = LastCacheableIndex(messages[conversationBreakpointIndex]);
+            messages[conversationBreakpointIndex] = WithCacheBreakpoint(messages[conversationBreakpointIndex], blockIdx, Ttl.Ttl5m);
         }
     }
 

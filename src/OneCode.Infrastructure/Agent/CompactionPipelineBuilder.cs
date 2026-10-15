@@ -15,10 +15,9 @@ namespace OneCode.Infrastructure.Agent;
 /// 由 Harness 自行挂载 <c>CompactionProvider</c>。产品侧不再单独构建 provider——
 /// 两处各挂一份会造成同一次模型调用被压缩两次，而外层一份会覆盖内层的状态。</para>
 ///
-/// <para><b>不按调用参数去重</b>：曾有一层按 <c>(toolName, args)</c> 剔除「重复」调用组。
-/// 该判定不等价——同名同参数的调用完全可能产生不同结果（失败→成功、文件已被修改），
-/// 因此该层已移除；需要压缩时由 L1 折叠 / L2 摘要 / L3 截断按预算处理，
-/// 而不是把非等价调用当作重复丢弃。</para>
+/// <para><b>不按调用参数去重</b>：同名同参数的工具调用可能产生不同结果（例如首次失败后修复重试成功、
+/// 或目标文件已被外部修改），因此压缩管道不按 <c>(toolName, args)</c> 剔除调用组；
+/// 需要压缩时由 L1 折叠 / L2 摘要 / L3 截断按预算处理。</para>
 ///
 /// <para><b>策略管道（按 escalation 顺序）</b>：
 /// <list type="number">
@@ -43,6 +42,13 @@ public static class CompactionPipelineBuilder
     private const double WorkerToolEvictionRatio = 0.4;
     private const double WorkerSummarizationRatio = 0.6;
     private const double WorkerTruncationRatio = 0.8;
+
+    // 只读调研档（Explore / Plan 子代理）的绝对阈值上限。比例阈值在 1M 窗口上会放任单个调研子代理
+    // 把上下文涨到数十万 token：每轮请求都重复付费这份前缀，而调研结果的价值随轮次递减。
+    // 实际阈值取 min(比例阈值, 绝对上限)，小窗口模型仍按比例走。
+    private const int ResearchToolEvictionCapTokens = 40_000;
+    private const int ResearchSummarizationCapTokens = 80_000;
+    private const int ResearchTruncationCapTokens = 120_000;
 
     /// <summary>
     /// Fraction of the input budget held back for instructions, tool schemas and protocol framing.
@@ -82,12 +88,14 @@ public static class CompactionPipelineBuilder
     /// <summary>
     /// Builds the standard compaction strategy for worker agents (sub-agents).
     /// Worker 的阈值比 Main 更激进，因为 sub-agent 上下文更短、生命周期更短。
+    /// <paramref name="readOnlyResearch"/> 为 true（Explore / Plan）时再叠加绝对 token 上限。
     /// </summary>
     public static CompactionStrategy BuildForWorkerAgent(
         IChatClient chatClient,
         int maxContextWindowTokens,
         int maxOutputTokens,
-        string? summarizationPrompt = null)
+        string? summarizationPrompt = null,
+        bool readOnlyResearch = false)
     {
         return BuildPipeline(
             chatClient,
@@ -96,7 +104,10 @@ public static class CompactionPipelineBuilder
             WorkerToolEvictionRatio,
             WorkerSummarizationRatio,
             WorkerTruncationRatio,
-            summarizationPrompt);
+            summarizationPrompt,
+            readOnlyResearch
+                ? (ResearchToolEvictionCapTokens, ResearchSummarizationCapTokens, ResearchTruncationCapTokens)
+                : null);
     }
 
     private static CompactionStrategy BuildPipeline(
@@ -106,13 +117,14 @@ public static class CompactionPipelineBuilder
         double toolEvictionRatio,
         double summarizationRatio,
         double truncationRatio,
-        string? summarizationPrompt)
+        string? summarizationPrompt,
+        (int ToolEviction, int Summarization, int Truncation)? absoluteCaps = null)
     {
         var inputBudget = ResolveInputBudget(maxContextWindowTokens, maxOutputTokens);
 
-        var toolEvictionTokens = (int)(inputBudget * toolEvictionRatio);
-        var summarizationTokens = (int)(inputBudget * summarizationRatio);
-        var truncationTokens = (int)(inputBudget * truncationRatio);
+        var toolEvictionTokens = Capped((int)(inputBudget * toolEvictionRatio), absoluteCaps?.ToolEviction);
+        var summarizationTokens = Capped((int)(inputBudget * summarizationRatio), absoluteCaps?.Summarization);
+        var truncationTokens = Capped((int)(inputBudget * truncationRatio), absoluteCaps?.Truncation);
 
         // L2 的触发条件同时交给原生策略与守卫适配器：守卫必须在与内部策略完全相同的条件下
         // 决定是否放行，否则会出现「守卫以为不该跑、内部却已经改了索引」的分叉。
@@ -150,6 +162,8 @@ public static class CompactionPipelineBuilder
 
         return strategy;
     }
+
+    private static int Capped(int ratioThreshold, int? cap) => cap is { } limit ? Math.Min(ratioThreshold, limit) : ratioThreshold;
 
     /// <summary>
     /// Derives the message budget from the model's context-window / output-token pair.

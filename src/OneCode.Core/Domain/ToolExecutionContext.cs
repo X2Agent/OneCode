@@ -12,9 +12,6 @@ public enum GuidanceKind
     /// <summary>非 guidance：普通工具结果（成功或失败）。</summary>
     None,
 
-    /// <summary>ToolResultUnwrapMiddleware 的恢复指导（[RECOVERY]，如 overloaded/529）。</summary>
-    Recovery,
-
     /// <summary>StateMachineMiddleware 的任务级恢复指导（[STATE MACHINE]）。</summary>
     TaskRecovery,
 }
@@ -30,9 +27,7 @@ public enum GuidanceKind
 /// </remarks>
 public sealed class ToolExecutionContext
 {
-    /// <summary>
-    /// 工具执行是否为错误。由 ToolResultUnwrapMiddleware 写入；可恢复错误（overloaded/529）覆盖为 false。
-    /// </summary>
+    /// <summary>工具执行是否为错误。由 ToolResultUnwrapMiddleware 从 ToolResult.IsError 写入。</summary>
     public bool IsError { get; set; }
 
     /// <summary>

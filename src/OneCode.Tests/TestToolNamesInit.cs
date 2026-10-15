@@ -16,8 +16,8 @@ internal static class TestToolNamesInit
 
         // ReadOnly tools
         foreach (var name in new[] { "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch",
-                                     "SymbolSearch", "Lsp", "FindReferences", "BackgroundWait",
-                                     "CronList", "AskUserQuestion", "AskUserQuestions" })
+                                     "Lsp", "BackgroundWait",
+                                     "CronList", "AskUserQuestion", "Git" })
         {
             registry.Register(new ToolMetadata { Name = name, Risk = ToolRisk.ReadOnly });
         }
@@ -52,8 +52,8 @@ internal static class TestToolNamesInit
                 Category = ToolCategory.PlanAllowed,
             });
         }
-        // User-question tools are both ReadOnly and PlanAllowed.
-        foreach (var name in new[] { "AskUserQuestion", "AskUserQuestions" })
+        // User-question tool is both ReadOnly and PlanAllowed.
+        foreach (var name in new[] { "AskUserQuestion" })
         {
             registry.Register(new ToolMetadata
             {
@@ -65,6 +65,20 @@ internal static class TestToolNamesInit
 
         // Shell tools
         registry.Register(new ToolMetadata { Name = "Bash", Risk = ToolRisk.Dynamic });
+
+        // Harness 注入工具（todos_* / file_memory_*）：只读写 agent 会话状态，Plan 模式放行。
+        // 生产路径经 HarnessProviderTools.RegisterMetadata 登记同一类别声明（见 AgentPipelineBuilder）。
+        foreach (var name in OneCode.Infrastructure.Agent.HarnessProviderTools.Names)
+        {
+            registry.Register(new ToolMetadata
+            {
+                Name = name,
+                Risk = ToolRisk.Safe,
+                Category = ToolCategory.PlanAllowed,
+                IsVisible = false,
+                LoadPolicy = ToolLoadPolicy.Deferred,
+            });
+        }
 
         ToolNames.Initialize(registry);
     }

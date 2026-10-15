@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
 
 namespace OneCode.App.Query;
@@ -23,10 +24,8 @@ internal sealed record QueryStreamRequest(
     string UserPrompt,
     bool IsMultimodal,
     ChatMessage? LastUserMessage,
-    /// <summary>
-    /// 本轮附加输入消息（如 input hook 的 AdditionalContexts），位于 <see cref="UserPrompt"/> 之前。
-    /// 多轮历史不在此字段——由 <c>TranscriptChatHistoryProvider</c> 经 MAF 契约提供。
-    /// </summary>
+    // 本轮附加输入消息（如 input hook 的 AdditionalContexts），位于 UserPrompt 之前。
+    // 多轮历史不在此字段——由 TranscriptChatHistoryProvider 经 MAF 契约提供。
     IReadOnlyList<ChatMessage>? RunInputMessages,
     bool IncludeNextPrompt,
     IReadOnlyList<AIFunction> LocalTools,
@@ -35,4 +34,10 @@ internal sealed record QueryStreamRequest(
     WorkingMode WorkingMode,
     Action<FileChange>? FileChangeCallback,
     BuildPlan? PrescribedBuildPlan = null,
-    string? HarnessInstructions = null);
+    string? HarnessInstructions = null,
+    // 本 run 的工具能力集。随请求显式传递：AsyncLocal ambient 不跨 async iterator 的
+    // yield 边界存续，StreamCoreAsync 需在 run 启动前据此重建 ToolActivationContext。
+    ToolCapabilitySet? ToolCapabilities = null,
+    // 阶段播种边界（approved-plan 受控 run）：provider 只播种边界之后的转录。
+    // null = 全量转录播种（交互路径）。
+    HistorySeedBoundary? HistorySeedBoundary = null);

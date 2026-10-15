@@ -29,9 +29,13 @@ public sealed class SessionTokenUsage
     public long TotalCacheReadTokens => _cacheReadTokens;
     public long TotalCacheWriteTokens => _cacheWriteTokens;
 
-    /// <summary>输入 + 输出 + 缓存写入（不含缓存读取，读取是命中不产生新 token）。</summary>
+    /// <summary>输入 + 输出 + 缓存写入（原始口径；注意 InputTokens 按 MEAI 契约已含缓存读）。</summary>
     public long TotalAllTokens =>
         _inputTokens + _outputTokens + _cacheWriteTokens;
+
+    /// <summary>可计费口径（<see cref="UsageMath.BillableTokens(long, long, long, long)"/>）：预算熔断用，缓存读按 10% 折算。</summary>
+    public long TotalBillableTokens =>
+        UsageMath.BillableTokens(_inputTokens, _outputTokens, _cacheReadTokens, _cacheWriteTokens);
 
     public void Record(UsageRecord usage)
     {
@@ -56,6 +60,6 @@ public interface ITokenLedger
 
     void RemoveSession(SessionId sessionId);
 
-    /// <summary>进程级累计 token 数（输入 + 输出），供预算熔断检查。</summary>
+    /// <summary>进程级累计可计费 token 数（<see cref="UsageMath.BillableTokens(long, long, long, long)"/> 口径，缓存读 10% 折算），供预算熔断检查。</summary>
     long GetTotalTokens();
 }

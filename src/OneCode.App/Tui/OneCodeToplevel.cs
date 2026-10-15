@@ -48,6 +48,9 @@ public sealed partial class OneCodeToplevel : Window
     private int _cacheReadTokens;
     private int _cacheWriteTokens;
     private int _turnNumber;
+    // 活跃子代理（fork）计数：TuiSubagentProgress Started +1 / Completed|Failed -1，
+    // run 收尾（TuiDone）清零兜底（后台 fork 在 channel 关闭后无终态事件）。
+    private int _activeSubagentCount;
     // 上下文窗口最大容量（来自 ModelCatalog）
     private int _maxContextTokens;
     // 最近一轮 API 调用的 input tokens（≈ 当前上下文窗口实际占用）
@@ -85,7 +88,7 @@ public sealed partial class OneCodeToplevel : Window
             new ReplShellEnvironment(app, ctx.GetModel(), ctx.Clipboard, ctx.GitHelper),
             modeController,
             new ReplShellKeyServices(keyResolver, keyContextManager),
-            new ReplShellInputSources(ctx.SlashCommands, toolNameProvider, ctx.GetSessionUserPrompts));
+            new ReplShellInputSources(ctx.SlashCommands, toolNameProvider, ctx.GetSessionUserPrompts, ctx.GetSessionCandidates));
         _transcriptPresenter = new TranscriptEventPresenter(_shell.Transcript);
         _shell.ChatInput.Submitted += OnUserSubmitted;
         _shell.ChatInput.QuitRequested += OnQuitRequested;

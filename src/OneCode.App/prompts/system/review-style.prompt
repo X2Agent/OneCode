@@ -24,7 +24,7 @@ You are performing a **style & maintainability** review. Ignore correctness, sec
 - **Idiomatic usage** — non-idiomatic patterns for the language (e.g., manual iteration where LINQ is idiomatic in C#, `Task.Run` misuse, exception-based control flow)
 - **File / module structure** — god classes, mixed responsibilities, files that should be split, missing `sealed`/`readonly` where intent is clear
 
-Be constructive: pair every style issue with the concrete improvement, and acknowledge code that is unusually clear.
+Be constructive: pair every style issue with the concrete improvement, and acknowledge code that is unusually clear. When checking consistency or duplication across a module, use `Read`, `Grep`, or `Lsp` to confirm surrounding conventions rather than guessing from a partial diff.
 
 {{severityScope}}
 

@@ -13,17 +13,22 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
         StreamingSession session,
         string finalText,
         TokenUsage finalUsage,
-        CancellationToken ct)
+        CancellationToken ct,
+        int alreadyPersistedBatchCount = 0)
     {
         try
         {
             if (request.ConversationId is { } completedConversationId)
             {
-                if (session.ToolBatchCollector.CompletedBatches.Count > 0)
+                // 逐批落盘的批次已入账（appender 按 batchId 幂等去重），这里只补剩余增量。
+                var pendingBatches = session.ToolBatchCollector.CompletedBatches
+                    .Skip(alreadyPersistedBatchCount)
+                    .ToList();
+                if (pendingBatches.Count > 0)
                 {
                     await _sessionManager.AppendCompletedToolBatchesAsync(
                             completedConversationId,
-                            session.ToolBatchCollector.CompletedBatches,
+                            pendingBatches,
                             ct)
                         .ConfigureAwait(false);
                 }

@@ -28,10 +28,12 @@ internal static class ConversationRenderer
         string name, bool isError, string? toolInput, string? duration, string? result = null, string? agentName = null, int maxWidth = 0,
         int groupCount = 0, IReadOnlyList<ToolGroupEntry>? group = null)
     {
-        var statusColor = isError ? TuiPalette.Error : TuiPalette.Success;
+        var hasGroupFailures = group is { Count: > 1 } && group.Any(static m => m.IsError);
+        var effectiveIsError = isError || hasGroupFailures;
+        var statusColor = effectiveIsError ? TuiPalette.Error : TuiPalette.Success;
 
         // 尾部状态段宽度固定，先计算出来，从中间内容段的截断预算中扣除。
-        var statusText = isError
+        var statusText = effectiveIsError
             ? (string.IsNullOrEmpty(duration) ? " \u00b7 error" : $" \u00b7 {duration}")
             : string.IsNullOrEmpty(duration) ? string.Empty : $" \u00b7 {duration}";
 
@@ -50,9 +52,7 @@ internal static class ConversationRenderer
         // 折叠行按单行布局绘制，目标/摘要含真实换行会令整行错位，先压成单行。
         var target = TextWidthHelper.CollapseToSingleLine(
             ToolResultSummarizer.FormatTarget(name, toolInput));
-        var summary = !isError && !string.IsNullOrEmpty(result)
-            ? TextWidthHelper.CollapseToSingleLine(ToolResultSummarizer.Summarize(name, result, toolInput) ?? string.Empty)
-            : string.Empty;
+        var summary = BuildOutcomeSummary(name, effectiveIsError, result, toolInput, group);
 
         if (maxWidth > 0)
         {
@@ -95,11 +95,61 @@ internal static class ConversationRenderer
 
         if (!string.IsNullOrEmpty(duration))
             segments.Add(new($" \u00b7 {duration}", TuiPalette.FgMuted));
-        else if (isError)
+        else if (effectiveIsError)
             segments.Add(new(" \u00b7 error", statusColor));
 
         var tag = new ToolLineTag(name, toolInput, result, IsExpanded: false, Group: group);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
+    }
+
+    private static string BuildOutcomeSummary(
+        string name,
+        bool effectiveIsError,
+        string? result,
+        string? toolInput,
+        IReadOnlyList<ToolGroupEntry>? group)
+    {
+        if (!effectiveIsError)
+        {
+            return !string.IsNullOrEmpty(result)
+                ? TextWidthHelper.CollapseToSingleLine(ToolResultSummarizer.Summarize(name, result, toolInput) ?? string.Empty)
+                : string.Empty;
+        }
+
+        var errorSource = result;
+        if (string.IsNullOrWhiteSpace(errorSource) && group is { Count: > 0 })
+            errorSource = group.LastOrDefault(static m => m.IsError)?.Result;
+
+        var firstLine = ExtractConciseErrorFirstLine(errorSource);
+        if (group is { Count: > 1 })
+        {
+            var failedCount = group.Count(static m => m.IsError);
+            var prefix = failedCount == group.Count
+                ? $"失败 ×{failedCount}"
+                : $"{failedCount}/{group.Count} 失败";
+            return string.IsNullOrEmpty(firstLine) ? prefix : $"{prefix}: {firstLine}";
+        }
+
+        return firstLine;
+    }
+
+    private static string ExtractConciseErrorFirstLine(string? rawError)
+    {
+        if (string.IsNullOrWhiteSpace(rawError))
+            return string.Empty;
+
+        var content = OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(rawError, out var inner)
+            ? inner
+            : rawError;
+        var firstLine = content
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? string.Empty;
+
+        if (firstLine.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase))
+            firstLine = firstLine["[ERROR]".Length..].TrimStart();
+
+        return TextWidthHelper.CollapseToSingleLine(firstLine);
     }
 
     /// <summary>构建流式通知行（横线分隔 + 文本）。</summary>

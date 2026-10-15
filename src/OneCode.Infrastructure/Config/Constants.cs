@@ -43,8 +43,8 @@ public static partial class Constants
 
         /// <summary>
         /// 会话事件 JSONL 目录（<c>~/.onecode/events/</c>）。
-        /// 单一真相源：<c>FileSessionEventStore</c>（写入）与 <c>AutoDreamSessionScanner</c> /
-        /// <c>InsightsCommand</c>（读取）必须共用本常量，避免目录名漂移导致读不到会话。
+        /// 单一真相源：<c>FileSessionEventStore</c>（写入）与 <c>InsightsCommand</c>（读取）
+        /// 必须共用本常量，避免目录名漂移导致读不到会话。
         /// </summary>
         public const string Events = "events";
     }

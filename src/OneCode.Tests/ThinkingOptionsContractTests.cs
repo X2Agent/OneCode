@@ -84,15 +84,6 @@ public sealed class ThinkingOptionsContractTests
     }
 
     [Fact]
-    public void BuildChatOptions_ThinkingDisabled_KeepsTheDefaultOutputCapAndNoReasoning()
-    {
-        var chatOptions = MainAgentRunner.BuildChatOptions(new MainAgentRunOptions { UserPrompt = "hello" });
-
-        chatOptions.Reasoning.Should().BeNull("an unset effort must let the provider use its own default");
-        chatOptions.MaxOutputTokens.Should().Be(4096);
-    }
-
-    [Fact]
     public void BuildChatOptions_ThinkingFlagWithoutAnyBudget_DoesNotInventAReasoningLevel()
     {
         var options = new MainAgentRunOptions

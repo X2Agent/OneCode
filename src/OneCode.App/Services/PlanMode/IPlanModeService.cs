@@ -22,10 +22,4 @@ public interface IPlanModeService
     /// </summary>
     /// <returns>恢复后的权限模式。</returns>
     PermissionMode ExitPlanMode();
-
-    /// <summary>
-    /// 获取当前 Plan 模式的完整工作流指令（从 prompt 文件加载，带缓存）。
-    /// 不改变 Plan 模式状态，仅用于注入 system prompt。
-    /// </summary>
-    Task<string> GetWorkflowInstructionsAsync(CancellationToken ct);
 }

@@ -22,7 +22,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 |------|------|--------|------|----------|
 | Permission Middleware | Allow/Deny 策略决策 | **有**（最终 Allow/Deny） | 管道中游，ToolApproval 之前 | 基于 `PermissionProfiles` / `IPermissionChecker` 的安全决策 |
 | ToolApproval | MAF 协议层审批 | **有**（Ask → AutoRule/用户审批） | 管道中游，Permission 之后 | 处理 `ToolApprovalRequestContent`、AutoApprovalRules 匹配、`ApprovalBroker` 事件桥交互 |
-| 观测性中间件（.Use()） | 预算/用量/超长恢复观测 | **无工具调用决策权** | Agent Run 级最外层（包裹 function calling 管道），非工具管道末段 | 日志、指标采集、token 预算短路、PromptTooLong 历史截断重试等 |
+| 观测性中间件（.Use()） | 预算/用量观测 | **无工具调用决策权** | Agent Run 级最外层（包裹 function calling 管道），非工具管道末段 | 日志、指标采集、token 预算短路等 |
 
 > **`IFunctionInvocationFilter` 不可用**：该接口在 MAF 1.13 / Microsoft.Extensions.AI 10.7.0 中不存在，OneCode pinned 的 10.10.0 亦不含。观测性拦截因此用 `.Use()` 委托式中间件实现，语义一致（无工具调用决策权，只观测 run 级行为）。
 
@@ -46,15 +46,15 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
       ├─ 规则匹配 → 自动放行
       └─ 不匹配   → ToolApprovalRequestContent → ApprovalBroker 事件桥（Main 流式拆分）→ 续跑
   → 实际工具执行
-（图外：Agent Run 级最外层还有 BudgetGuard / UsageTracking / PromptTooLongRecovery 三个 .Use() 观测中间件，
- 见「当前实现形态」。）
+（图外：Agent Run 级最外层还有 BudgetGuard / UsageTracking 两个 .Use() 观测中间件，
+    见「当前实现形态」。）
 ```
 
 ### 约束
 
 1. **Permission Middleware 是唯一的安全决策权威**：Allow/Deny 只在此层产生，ToolApproval 不做安全决策（只做协议层审批交互）
 2. **ToolApproval 不重复 Permission 逻辑**：Permission 已 Deny 的请求不会到达 ToolApproval 层
-3. **观测性中间件无工具调用决策权**：不能对工具调用做 Allow/Deny 或改写其参数/结果；其 run 级行为（token 预算短路、PromptTooLong 历史截断重试）不触及以上边界
+3. **观测性中间件无工具调用决策权**：不能对工具调用做 Allow/Deny 或改写其参数/结果；其 run 级行为（token 预算短路）不触及以上边界
 4. **禁止同一关注点双重注册**：已在 `.Use()` 中间件处理的关注点，不得重复注册（AGENTS.md「不许重复造轮子」已约定）
 5. **Ask 只在审批边界内成立**：权限层的 Ask 本身不产生任何用户交互，只有工具带 `ApprovalRequiredAIFunction` 标记时 MAF 才会把调用换成 `ToolApprovalRequestContent`。因此 Ask 分支必须断言标记存在，缺失时 fail-closed 拒绝——放行等于把 Ask 静默降级成「照常执行」
 
@@ -68,7 +68,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 
 - PERM-1.5 删除 ApprovalHandler 垫片的决策有 ADR 背书
 - 未来新增拦截机制时有明确的归属判断依据
-- 观测性 `.Use()` 中间件符合本 ADR：即 `OneCode.Infrastructure/Agent/RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking 三个类
+- 观测性 `.Use()` 中间件符合本 ADR：即 `OneCode.Infrastructure/Agent/RunMiddleware/` 下的 BudgetGuard / UsageTracking 两个类
 
 ## 当前实现形态
 
@@ -88,7 +88,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 
 **审批边界的第二类自动批准例外**：`AutoApprovalRulesFactory` 的自动批准集合除「权限检查器判定 Allow」外，还含按名匹配 `todos_*` / `file_memory_*` 的规则（`HarnessProviderTools.AutoApprovalRule`）。这两类工具不属于权限检查器的任何工具分类（非只读、非文件写入、非 Shell），在默认规则集下规则评估会落到 `Ask`；但它们是 agent 自查清单与工作记忆，弹窗只会打断流程。产品判定：注册为 `Risk = Safe` + `ApprovalMode = Conditional`（仍带边界，不绕过协议），由按名规则静默放行。按名放行沿用框架的撞名前提（MCP 工具带 `mcp__{server}__` 前缀，产品工具名来自 `HarnessProviderTools` 的封闭名单）：新增工具前必须核对这两份名单，撞名即等于绕过人机审批边界。
 
-观测性中间件（`OneCode.Infrastructure/Agent/RunMiddleware/` 下的 BudgetGuard / PromptTooLongRecovery / UsageTracking）是 **Agent Run 级最外层**的 `.Use()` 拦截器（注册于全部工具中间件之前）：对工具调用无 Allow/Deny 决策权，与本 ADR 约束一致；其中 BudgetGuard 可对超预算 run 整体短路、PromptTooLongRecovery 可截断消息历史并重试，二者均不介入工具级安全决策。
+观测性中间件（`OneCode.Infrastructure/Agent/RunMiddleware/` 下的 BudgetGuard / UsageTracking）是 **Agent Run 级最外层**的 `.Use()` 拦截器（注册于全部工具中间件之前）：对工具调用无 Allow/Deny 决策权，与本 ADR 约束一致；其中 BudgetGuard 可对超预算 run 整体短路，二者均不介入工具级安全决策。
 
 **AutoApprovalRules 与 Permission 共用同一确定性源**，不用 `PermissionProfile.AutoApprove*` 平行旗标编码同一意图：
 

@@ -200,8 +200,7 @@ public sealed class ToolRetrievalIndex
 
     private static List<string> Tokenize(string text, bool isHint)
     {
-        // 分词规则与记忆检索共用 TextTokenizer：两条检索路径对同一查询必须给出同一套 token，
-        // 否则中文查询在一边能召回、在另一边为空。此处只叠加 Hint 字段的停用词政策。
+        // 分词规则使用统一的 TextTokenizer（拉丁词大小写边界切分 + CJK 二字滑窗），此处只叠加 Hint 字段的停用词政策。
         var tokens = new List<string>();
         foreach (var token in TextTokenizer.Tokenize(text))
         {

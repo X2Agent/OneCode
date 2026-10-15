@@ -34,21 +34,24 @@
 
 | 来源 | 标识 | 用途 |
 |------|------|------|
-| NuGet 包 | `Microsoft.Agents.AI` / `.Workflows` / `.Harness` = **1.22.0**；`.Mcp` / `.Hyperlight` / `.Tools.Shell` = 1.22.0 系列预发布（见 `src/Directory.Packages.props`） | **运行时真正加载的二进制** |
+| NuGet 包 | `Microsoft.Agents.AI` / `.Workflows` / `.Harness` = **1.24.0**；`.Mcp` = `1.24.0-alpha.261006.1`；`.Hyperlight` / `.Tools.Shell` = `1.24.0-preview.261006.1`（见 `src/Directory.Packages.props`） | **运行时真正加载的二进制** |
 | 本地 checkout | `agent-framework/`，`git describe --tags` = `dotnet-1.22.0-6-g669c8b95e`（即已发布的 `dotnet-1.22.0` 再前进 6 个提交） | 阅读源码、查语义 |
 
-本地 checkout 与 pinned 包**同基线**：均在 `dotnet-1.22.0`（checkout 额外 +6 提交，下列【已核对】路径在该区间内无差异）。
+本地 checkout 与 pinned 包**不再同基线**：pinned 已升到 1.24.0，checkout 停在 `dotnet-1.22.0`。下文【已核对】/【版本敏感】
+两档证据均在 1.22.0 基线取证，对 1.24.0 不自动成立。升级 1.24.0 时已按 §13.2 复查并通过的条目（审批协议真实包测试、
+压缩装配真实包测试、摘要守卫字面量核对）以 1.24.0 包为证；引用其余源码结论前需先升级 checkout 并重做取证。
+
 因此每条源码结论仍需标注证据等级，本文采用两档：
 
 | 等级 | 含义 | 覆盖范围 |
 |------|------|---------|
-| **【已核对】** | 该目录在 `dotnet-1.22.0..HEAD` 内无差异（且 `1.21.0..1.22.0` 亦无改动），源码结论等同 **1.22.0 包**行为 | `Microsoft.Agents.AI.Harness`、`Microsoft.Agents.AI/Harness/{Loop,BackgroundAgents,Todo,FileMemory,FileAccess,FileStore}/**`、`Microsoft.Agents.AI/Compaction/**` |
-| **【版本敏感】** | `1.21.0..1.22.0` 区间内有改动（实测：`ChatClient/**`、`Harness/ToolApproval/**`、`Harness/AgentMode/**`、`Skills/**`），结论以 **1.22.0 包**取证为准 | `Microsoft.Agents.AI/ChatClient/**`（审批协议装饰器被 `[BREAKING]` 改写）、`Harness/ToolApproval/**`（`ToolApprovalAgent` 被 `#8432` 重写）、`Harness/AgentMode/**`（`#8458` 新增 `AgentModeProviderOptions`）、`Microsoft.Agents.AI/Skills/**`（frontmatter 校验变严）、`OpenTelemetryAgent.cs`、`AgentExtensions.cs` |
+| **【已核对】** | 该目录在 `dotnet-1.22.0..HEAD` 内无差异（且 `1.21.0..1.22.0` 亦无改动），1.22.0 基线的源码结论在此成立 | `Microsoft.Agents.AI.Harness`、`Microsoft.Agents.AI/Harness/{Loop,BackgroundAgents,Todo,FileMemory,FileAccess,FileStore}/**`、`Microsoft.Agents.AI/Compaction/**` |
+| **【版本敏感】** | `1.21.0..1.22.0` 区间内有改动（实测：`ChatClient/**`、`Harness/ToolApproval/**`、`Harness/AgentMode/**`、`Skills/**`） | `Microsoft.Agents.AI/ChatClient/**`（审批协议装饰器曾被 `[BREAKING]` 改写）、`Harness/ToolApproval/**`（`ToolApprovalAgent` 曾被 `#8432` 重写）、`Harness/AgentMode/**`（`#8458` 新增 `AgentModeProviderOptions`）、`Microsoft.Agents.AI/Skills/**`（frontmatter 校验变严）、`OpenTelemetryAgent.cs`、`AgentExtensions.cs` |
 
-【版本敏感】区域的结论**不能只凭源码断言**，需要在真实包上取证。本文唯一一条会改变接入决策的此类结论是
-§6.4 的压缩失效，由 [`HarnessCompactionActivationTests.cs`](../../src/OneCode.Tests/HarnessCompactionActivationTests.cs)
-在真实包上跑出（行为未变，失效仍未修复）。其余【版本敏感】描述（审批装饰器内部语义、agent 级遥测细节）
-以 1.22.0 包源码与 §13.2 复查清单为准。
+【版本敏感】区域的结论**不能只凭源码断言**，需要在真实包上取证。本文涉及接入决策的此类结论（§6.4 压缩激活、
+审批协议语义）由 [`HarnessCompactionActivationTests.cs`](../../src/OneCode.Tests/HarnessCompactionActivationTests.cs)
+与审批链路真实栈测试在真实包上锁定（当前基线 1.24.0，全部通过）。其余【版本敏感】描述（agent 级遥测细节）
+以 §13.2 复查清单为准。
 
 ### 1.2 包名 ≠ 目录名
 
@@ -402,55 +405,41 @@ if (index.IncludedNonSystemGroupCount <= 1 || !this.Trigger(index)) { /* 跳过 
 `HarnessAgent` 用的是第 1 种，且**只允许一个 owner**：策略经 `HarnessAgentOptions.CompactionStrategy` 交给 Harness，
 它自己 `new CompactionProvider(...)` 挂到 chat client 链上。产品侧再挂一个会导致同一次调用被压两次，且外层状态覆盖内层。
 
-### 6.4 ⚠️ 已验证的失效：Harness 下 in-loop 压缩只跑一次
+### 6.4 压缩激活：Harness 下每次服务调用都会执行（1.24 起修复的旧失效）
 
-**这是本文最重要的一条结论，已在真实 NuGet 1.22.0 上取证。**
+**已在真实 NuGet 1.24.0 上取证。**
 
 链路：
 
 1. `PerServiceCallChatHistoryPersistingChatClient` 在「框架自管历史」路径上，每次服务调用后执行
    `session.ConversationId = "_agent_local_chat_history"`（哨兵值，目的是让 `FunctionInvokingChatClient`
    把会话当作服务托管，从而在迭代之间清掉累积历史）。流式与非流式两条路径都会置位。
-2. `CompactionProvider.InvokingCoreAsync` 的跳过条件是
-   `session.GetService<ChatClientAgentSession>()?.ConversationId` **非空** → 记
-   `"session managed by remote service"` 并原样返回。
+2. `CompactionProvider` 在 MAF 1.22 上曾把「`ConversationId` 非空」解读为「历史由远端服务托管」并整个跳过
+   压缩，导致 in-loop 压缩在一个会话里只在第一次服务调用执行、之后永久跳过（`ConversationId` 的 setter 是
+   internal 且拒绝空值，产品侧无法复位）。**MAF 1.24 起允许对 per-service-call 本地历史压缩，该跳过判定解除**，
+   哨兵不再抑制 `CompactionProvider`。
 3. `HarnessAgent` 把 `CompactionProvider` 挂在 `PerServiceCall` 的**内层**，而 `PerServiceCall` 是硬编码启用的。
-4. `ChatClientAgentSession.ConversationId` 的 setter 是 `internal`，且**拒绝写入空值**——一旦置上哨兵，
-   产品代码无法复位。
-
-结果：**一个会话里，in-loop 压缩只在第一次服务调用时执行，之后永久跳过。**
 
 实测数据（[`HarnessCompactionActivationTests.cs`](../../src/OneCode.Tests/HarnessCompactionActivationTests.cs)）：
 
 | 装配 | 服务调用次数 | 压缩执行次数 |
 |------|------------|------------|
-| `HarnessAgent`（per-service-call 持久化开启） | 3 | **1** |
+| `HarnessAgent`（per-service-call 持久化开启） | 3 | **3** |
 | `ChatClientAgent` + `CompactionProvider`（无 per-service-call） | 3 | **3** |
 
-第二行是反证：拆掉 per-service-call 装饰器后，同一策略在每次服务调用上都执行——排除了「消息太少 / 触发器没命中 /
-策略只挂了一次」等替代解释，把成因锁定在哨兵上。
+两条装配路径行为一致；测试同时断言哨兵仍被写入——per-service-call 持久化机制本身未变，变的只是
+`CompactionProvider` 对哨兵的解读。
 
-**对 OneCode 的影响**：主路径（`AgentPipelineBuilder.BuildHarnessAgent`）显式传入 `ChatHistoryProvider`
-（`TranscriptChatHistoryProvider`），因此连 Harness 的兜底也没有——Harness 只有在**自己**构造默认历史
-provider 时才会给它装上 `compactionStrategy.AsChatReducer()`。产品既提供了自己的 history provider，
-又依赖 in-loop 压缩，两个口子同时落空（`HarnessCompactionActivationTests` 覆盖该行为）。
+**对 OneCode 的影响**：1.22 时代「主路径显式传入 `ChatHistoryProvider` 导致 in-loop 压缩失效、需依赖
+`MafSessionInvalidator` 剔除哨兵重新武装」的问题随 1.24 的哨兵判定解除而消失。压缩现在在每次服务调用前
+正常激活（`GuardedSummarizationCompactionStrategy` 自身的触发条件与守卫仍生效）。
 
-**产品侧唯一的复位杠杆**：哨兵的序列化位置是会话**根**属性 `conversationId`（不在 `stateBag` 里）。
-[`MafSessionInvalidator`](../../src/OneCode.App/Services/Compact/MafSessionInvalidator.cs) 在
-`/compact`（full / partial）与 `/checkpoint restore` 等结构性改动后失效快照时，除剪掉 `stateBag` 中的
-压缩索引外，还会**定向剔除哨兵本身**——否则「压缩索引被剪掉」与「provider 永不重建它」会同时成立。
-真·远端 `ConversationId` 保留不动（服务端托管历史的会话靠它续跑），剔除只按哨兵值定向。
-因此：**压缩在会话内只跑一次，但每次结构性历史改动后重新武装一次。**
+**`MafSessionInvalidator` 的哨兵剔除仍然保留**，但动机已变：哨兵是旧历史的运行时簿记戳，结构性历史变更
+（`/compact`、`/checkpoint restore`）后属于应随历史失效的状态——剔除后由 per-service-call 装饰器在恢复后的
+第一次服务调用重新打戳，恢复会话与新建会话行为对齐。真·远端 `ConversationId` 保留不动（服务端托管历史的
+会话靠它续跑），剔除只按哨兵值定向。
 
-**可选的应对方向**（尚未立项，此处只列出源码支持的路径，不作裁决）：
-
-| 方向 | 代价 |
-|------|------|
-| 给产品的 `InMemoryChatHistoryProvider` 配上 `InMemoryChatHistoryProviderOptions.ChatReducer = strategy.AsChatReducer()` | 压缩时机从「每次服务调用前」变成「历史 provider 读取时」，语义不同 |
-| 放弃 `HarnessAgent`，自行用 `ChatClientBuilder` 装配并省掉 per-service-call | 要逐项接手 approval binding / bypass / 消息注入 / 逐次历史持久化 |
-| 等 MAF 上游修正 `CompactionProvider` 的哨兵判定 | 需要跟踪上游 |
-
-无论选哪条，`HarnessCompactionActivationTests` 都会在行为改变时失败并提示复查。
+`HarnessCompactionActivationTests` 会在压缩激活行为再次改变时失败并提示复查。
 
 ---
 
@@ -658,19 +647,20 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 | 函数调用中间件 | 必须挂在有 FICC 的 agent 上 | 全部挂在 `HarnessAgent` 上 | 符合 |
 | Harness opt-out | `DisableXxx` + 追加自己的 provider | [`OneCodeHarnessDefaults.cs`](../../src/OneCode.Infrastructure/Agent/OneCodeHarnessDefaults.cs) 设 3 个（AgentMode / AgentSkills / WebSearch），Todo / FileMemory 按 profile | 符合 |
 | 实验性 API 抑制 | 就地 `#pragma warning disable MAAI001`，勿在 csproj 全局 `NoWarn` | [`src/Directory.Build.props`](../../src/Directory.Build.props) 全局 `NoWarn` 含 `MAAI001` | **偏差**：全局屏蔽使「升级新增了哪些实验 API 依赖」编译期不可见；方向是逐文件就地抑制（见 §1.3） |
-| 待办清单 | `TodoProvider` 五工具 + 每轮注入清单消息 | 原样采用。三分工且有唯一权威：`todos_*` = 模型自查清单；`TaskTool`（get/list/stop/output）= 宿主执行记录；批准计划 Build run 中 `UpdatePlanStep` = 权威跟踪器——分工由 [`PlanExecutionProtocol.ChecklistOwnershipLine`](../../src/OneCode.App/Services/PlanMode/PlanExecutionProtocol.cs) 在每次执行的协议块中固定陈述，否则每轮注入的清单消息会把计划步骤镜像进 `todos_*`（双重记账）或让模型漏报步骤状态 | 符合 |
+| 待办清单 | `TodoProvider` 五工具 + 每轮注入清单消息 | 原样采用。批准计划的 Build run 由 [`PlanTodoSeeder`](../../src/OneCode.App/Services/Agent/PlanTodoSeeder.cs) 通过 `todos_add` 把计划步骤播种为待办（标题 `{stepId}: {title}`），模型用 `todos_complete` 汇报进度，TUI 计划卡进度读待办投影（`MainAgentRunner` 在 run 开始、每个 `todos_add/complete/remove` 工具结果到达时、run 结束三个时点重读权威快照并发布；「进行中」是最后一个已勾选步骤之后的第一个未勾选步骤，由 [`PlanStepProjector`](../../src/OneCode.App/Services/PlanMode/PlanStepProjector.cs) 计算；计划侧边栏可见且持有步骤时，底部待办横条隐去计划预置项、只显示模型自加待办，计划 Completed 且侧边栏可见时横条整体隐藏；受控 Build 正常完成且验证通过时由 `PlanTodoSeeder.CompleteRemainingAsync` 补账勾选剩余未勾选项）；计划执行 run 另装 [`TodoStallNudgeChatClient`](../../src/OneCode.Infrastructure/Ai/TodoStallNudgeChatClient.cs)——自上次待办变更起累计 8 次工具调用仍无勾选时，向当次请求追加一次催办（每满一档提醒一次，勾选后重新装填）；`TaskTool`（get/list/stop/output）= 宿主执行记录。受控 Build 单轮直接执行，待办完成度不是 run 成败的闸门——成败只由可验证产物与 BuildRun 终态决定（当计划声明了 `ExpectedFiles` 但全部预期交付物未落盘且零文件改动时，收口阻断假阳性完成） | 符合 |
+| Plan run 收口与封条 | MAF 无「交付物已提交，结束本 run」的原语 | 产品层三件套：① `SubmitPlan` 成功即落 run 级封条（[`RunSeal`](../../src/OneCode.App/Services/Agent/AgentRunContext.cs)，引擎在 Plan run 起点放入 `OneCodeAgentRunContext.PlanSubmissionSeal`；之所以是引用对象而非 bool，是因为工具内对 `AsyncLocal` 的写入不会回流到外层中间件），`PermissionAndLimitMiddleware` 经 `AgentPipelineOptions.IsRunSealed` 见封即拒绝一切后续工具调用（含重复的 `SubmitPlan`），模型只剩纯文本收尾；② 同一计划内容重放时状态机按内容哈希（[`PlanContentHash`](../../src/OneCode.App/Services/PlanMode/PlanContentHash.cs)）幂等返回既有 revision；③ run 以任意终态离场（正常、输出被 hook 拦截、异常、取消）都经 `BuildRunGate.CloseOutPlanRunAsync` 单一入口，由 [`PlanRunCloser`](../../src/OneCode.App/Services/PlanMode/PlanRunCloser.cs) 推进到待审批或置为已取消；旧进程遗留的 `FinalizingPlanRun` 由 `PlanExecutionRecoveryService` 启动对账经同一个 `PlanRunCloser` 补做收口 | 符合 |
 | 计划/执行循环 | `TodoCompletionLoopEvaluator` + `LoopAgent`（`Modes=["execute"]`，`MaxIterations` 有界）跑到待办清零 | 交互 BUILD 保持单轮（用户旁观流式输出；且 pending tool approval 无人解析时 LoopAgent 会直接停止，见 [`AgentPipelineAssembly.cs`](../../src/OneCode.App/Services/Agent/AgentPipelineAssembly.cs) 注释）；GOAL 子目标用 `LoopAgent` + `DelegateLoopEvaluator` 语义 judge。`TodoCompletionLoopEvaluator` **未接入**（`OneCodeHarnessDefaultsTests` 守卫 `LoopEvaluators` 为 null） | **偏差（有意）**：headless / YOLO 需要「持续运行到待办清零」时应在此接入，交互路径不接 |
 | 审批协议 | binding + bypass 默认开 | 均未关闭；`harnessOwnsToolApproval` 阻止第二套 `UseToolApproval` | 符合 |
-| 审批标记 | `ApprovalRequiredAIFunction` | [`ToolApprovalMarker.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarker.cs) 按 `ToolMetadataRegistry` 在装配期包装产品工具目录，[`ToolApprovalMarkingContextProvider.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarkingContextProvider.cs) 在请求期（provider 链末位）包装 provider 注入的工具；名单与元数据统一由 [`HarnessProviderTools.cs`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs) 提供 | 符合 |
+| 审批标记 | `ApprovalRequiredAIFunction` | [`ToolApprovalMarker.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarker.cs) 按 `ToolMetadataRegistry` 在装配期包装产品工具目录，[`ToolApprovalMarkingContextProvider.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarkingContextProvider.cs) 在请求期（provider 链末位）包装 provider 注入的工具；配额组工具（Plan 调研配额）另由 `BuildHarnessAgent` 幂等补标——超限 Ask 依赖标记，`WebSearch` 等只读工具按注册元数据不带标记；名单与元数据统一由 [`HarnessProviderTools.cs`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs) 提供 | 符合 |
 | 自动批准规则 | 只按工具名匹配，需防撞名 | [`AutoApprovalRulesFactory.cs`](../../src/OneCode.Infrastructure/Agent/AutoApprovalRulesFactory.cs) 从权限模型派生 + 技能只读规则 + provider 注入工具按名放行（[`HarnessProviderTools.AutoApprovalRule`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs)） | 符合 |
 | 迭代上限 | `MaximumIterationsPerRequest` 管 FICC 单请求轮数 | 与 `PipelineOptions.MaxToolCalls` **同一个数值**，但一个管轮数、一个管工具计数 | **符合（有意同源）**：工具调用数 ≥ 迭代轮数，以 `MaxToolCalls` 作迭代上限是保守上界，不会提前截断；避开新增调优参数。代价是两者无法分别调优 |
 | 压缩 owner | 单一 owner | 策略经 `HarnessAgentOptions.CompactionStrategy` 交给 Harness，产品不再挂 provider | 符合 |
-| 压缩生效 | 每次服务调用前压一次 | **一个会话只压一次**（§6.4，已取证）；`/compact`、`/checkpoint restore` 等结构性改动后由 `MafSessionInvalidator` 定向剔除哨兵重新武装 | **缺口** |
+| 压缩生效 | 每次服务调用前压一次 | 每次服务调用前压一次（1.24 起哨兵判定解除，§6.4 已在真实包取证）；`MafSessionInvalidator` 在结构性改动后剔除旧历史哨兵，恢复会话与新建会话行为对齐 | 符合 |
 | 摘要守卫 | — | [`GuardedSummarizationCompactionStrategy.cs`](../../src/OneCode.Infrastructure/Agent/GuardedSummarizationCompactionStrategy.cs) 按字符串匹配 MAF 的 `[Summary unavailable]` / `[Summary]` 字面量 | **缺口（框架无公开判据）**：`SummarizationCompactionStrategy.cs:210,215` 为方法内联字面量，无公开常量/标志可替代——守卫是必要适配；MAF 改字面量即静默失效 → 保留在 §13 升级复查清单 |
 | Context provider 释放 | 框架不负责 | [`AgentContextProviderLease.cs`](../../src/OneCode.App/Services/Agent/AgentContextProviderLease.cs) 按 run 释放 | 符合 |
 | provider 会话态 | 存 `StateBag`，不存实例字段 | [`SessionStateExtensions.cs`](../../src/OneCode.Infrastructure/Agent/SessionStateExtensions.cs) 统一封装 | 符合 |
 | 会话持久化 | `SerializeSessionAsync` / `DeserializeSessionAsync` | [`AgentSessionPersistence.cs`](../../src/OneCode.App/Services/Agent/AgentSessionPersistence.cs) + epoch 守卫，压缩后作废旧快照 | 符合 |
-| 聊天历史契约 | `ChatHistoryProvider` 承载历史读写 | [`TranscriptChatHistoryProvider.cs`](../../src/OneCode.App/Services/Agent/TranscriptChatHistoryProvider.cs) 桥接会话转录，**读写两侧都实现**：读 = 会话状态为空时从转录播种（排除本轮已落库的输入 user 消息，识别只看非中间件注入的 External 消息）；写 = InvokedAsync 回写进 session StateBag（`ProviderSessionState`，随 mafSession 快照序列化、受 epoch 围栏保护），过滤掉本 provider 盖戳供应的历史与 AIContextProvider 注入的上下文消息。回写侧是必需的：FICC 收到 per-service-call 哨兵后会在工具迭代间清空自身缓冲，assistant(tool_calls)/tool 消息只经回写到达——provider 只读时第二轮请求只剩孤儿 tool 消息，严格上游（OpenRouter 实测）确定性拒绝为 200 + 空 SSE（`TranscriptHistoryOrphanToolTests` 守卫）。事件溯源转录仍是持久化真相：工具批次在回合结束后经 `ToolBatchTranscriptAppender` 落库，供 UI/恢复/下一次播种使用 | 符合 |
+| 聊天历史契约 | `ChatHistoryProvider` 承载历史读写 | [`TranscriptChatHistoryProvider.cs`](../../src/OneCode.App/Services/Agent/TranscriptChatHistoryProvider.cs) 桥接会话转录，**读写两侧都实现**：读 = 会话状态为空时从转录播种（排除本轮已落库的输入 user 消息，识别只看非中间件注入的 External 消息；approved-plan 受控 Build run 的播种受阶段边界 [`HistorySeedBoundary.cs`](../../src/OneCode.App/Services/Agent/HistorySeedBoundary.cs) 约束——plan→build 切换时记录 (执行世代, historyEpoch, 转录消息数)，provider 保留 Plan 阶段对话与只读工具结果以复用检索上下文与 Prompt Cache，仅成对剥离边界之前的 `SubmitPlan` 调用与结果；同世代重试/恢复沿用边界不回移，epoch 漂移（记录后发生过 compact/clear）回退全量播种）；写 = InvokedAsync 回写进 session StateBag（`ProviderSessionState`，随 mafSession 快照序列化、受 epoch 围栏保护），过滤掉本 provider 盖戳供应的历史与 AIContextProvider 注入的上下文消息。回写侧是必需的：FICC 收到 per-service-call 哨兵后会在工具迭代间清空自身缓冲，assistant(tool_calls)/tool 消息只经回写到达——provider 只读时第二轮请求只剩孤儿 tool 消息，严格上游（OpenRouter 实测）确定性拒绝为 200 + 空 SSE（`TranscriptHistoryOrphanToolTests` 守卫）。事件溯源转录仍是持久化真相：工具批次在回合结束后经 `ToolBatchTranscriptAppender` 落库，供 UI/恢复/下一次播种使用 | 符合 |
 | Skills | builder 自带聚合/缓存/去重，`ownsSource: true` | [`SkillProviderFactory.cs`](../../src/OneCode.App/Services/Skills/SkillProviderFactory.cs) 用官方 builder，按 run 构建并经 lease 释放 | 符合 |
 | MCP 桥接 | `ListAgentToolsWithTasksAsync` | [`McpConnectionManager.cs`](../../src/OneCode.App/Services/Mcp/McpConnectionManager.cs) 调官方扩展，外包 `RenamedAIFunction` 加前缀 | 符合 |
 | FileMemory 根目录 | 默认进程当前目录，多项目须显式指定 | [`FileMemoryStorePaths.cs`](../../src/OneCode.Infrastructure/Agent/FileMemoryStorePaths.cs) 绑定工作目录 | 符合 |
@@ -680,7 +670,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 | 决策模型（Jev 等） | `IDecisionClient` 决策抽象（MEAI 提案，上游未受理） | 未接入——不引用 MAF `[Experimental(MAAI001)]` 决策类型，也不预依赖未受理的 MEAI API；现有辅助判断（工具短名单、GOAL 子目标判定、记忆相关性）统一复用同一个 `IChatClient` | 符合（有意为之；抽象归属、接入点白名单与重评触发条件见[决策模型接入](../adr/0012-decision-model-integration-jev.md)） |
 | 结构化输出 | `RunAsync<T>` / `ResponseFormat` / `GetResponseAsync<T>` | [`StructuredChatCall.cs`](../../src/OneCode.App/Services/StructuredChatCall.cs) 三段式（schema 请求 → 同响应文本降级 → 无格式重试），GoalDecomposer 已接入；AutoDream 工具循环 Agent 有意保持 prompt-only | 符合（见 §2.4 与[结构化输出文本降级策略](../adr/0008-structured-output-text-fallback.md)） |
 | 循环上限 | `LoopAgentOptions.MaxIterations` 限制 agent **调用次数** | GOAL 子目标 1:1 映射 `GoalLoopDefaults.MaxAttemptsPerSubGoal`；`/loop` 1:1 映射 `loop.maxIterations`。上限强停发生在评估**之前**，因此 N 次调用 = 最多 N-1 次完整“评估→重试” | 符合（语义已在校验层与文档中固化，见[代理循环边界](../adr/0010-agent-loop-boundaries.md)） |
-| Loop 装配层序 | 用 `HarnessAgentOptions.LoopEvaluators` 时 `LoopAgent` 由 Harness 挂在**最外层**（`HarnessAgent.cs` 先注册该装饰器 → 位于 Harness 自身 `UseToolApproval` + `UseOpenTelemetry` **之上**，即每轮独立审批、独立 trace） | 不设 `LoopEvaluators`（[`OneCodeHarnessDefaultsTests`](../../src/OneCode.Tests/OneCodeHarnessDefaultsTests.cs) 守卫为 null）；`/loop` 与 GOAL 子目标在 [`AgentPipelineBuilder.BuildHarnessAgent()`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 的 run middleware **之外**自建 `LoopAgent`，层级为 `LoopAgent → BudgetGuard / UsageTracking / … → HarnessAgent → FICC` | **偏差（有意）**：预算按**轮**校验，比 MAF 原生路径更严；代价是 `LoopAgent` 落在 Harness 遥测覆盖之外，且内层 agent 以 `SuppressToolApproval` 装配（无审批中间件、无原生审批标记），自主性由 [`LoopCommand`](../../src/OneCode.App/Commands/LoopCommand.cs) 的自主权限模式门 + `PermissionChecker` 保证 |
+| Loop 装配层序 | 用 `HarnessAgentOptions.LoopEvaluators` 时 `LoopAgent` 由 Harness 挂在**最外层**（`HarnessAgent.cs` 先注册该装饰器 → 位于 Harness 自身 `UseToolApproval` + `UseOpenTelemetry` **之上**，即每轮独立审批、独立 trace） | 不设 `LoopEvaluators`（[`OneCodeHarnessDefaultsTests`](../../src/OneCode.Tests/OneCodeHarnessDefaultsTests.cs) 守卫为 null）；`/loop` 与 GOAL 子目标在 [`AgentPipelineBuilder.BuildHarnessAgent()`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 的 run middleware **之外**自建 `LoopAgent`，层级为 `LoopAgent → BudgetGuard / UsageTracking / … → HarnessAgent → FICC` | **偏差（有意）**：预算按**轮**校验，比 MAF 原生路径更严；代价是 `LoopAgent` 落在 Harness 遥测覆盖之外，且内层 agent 以 `SuppressToolApproval` 装配（无审批中间件、无原生审批标记、装配期剔除 CodeAct——`execute_code` 恒带 AlwaysRequire 审批边界，无人应答的审批请求会让 run 异常收场），自主性由 [`LoopCommand`](../../src/OneCode.App/Commands/LoopCommand.cs) 的自主权限模式门 + `PermissionChecker` 保证 |
 
 ---
 
@@ -703,19 +693,21 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 
 ### 13.2 MAF 升级复查清单
 
-升级 MAF 版本时逐条执行。当前 pinned 为 `dotnet-1.22.0`，以下条目即按它复查：
+升级 MAF 版本时逐条执行。当前 pinned 为 **1.24.0**（1.22.0 → 1.24.0 升级已按条目 1-4 复查通过；
+条目 5-11 引用的源码结论仍是 1.22.0 基线取证，见 §1.1），以下条目即按它复查：
 
 1. **核对实际版本**：读 `project.assets.json`，不要用旧 artifacts 或本地 NuGet 缓存代替。
 2. **审批协议**【版本敏感】：重跑「暂停 → 恢复 → 审批响应绑定」与「只回显响应、不回放请求」两组用例
    （审批协议行为测试）。1.22（`#8432`）把「只承认框架自身记录过的请求」作为授权依据（1.21.0
-   仍允许回放历史请求），并**同时**改写了 `ToolApprovalAgent` 与 `ApprovalResponseBindingChatClient` 两侧的
-   "已浮出"登记语义（整批登记 → 只登记真正交给调用方者；上限轮返回前补登记），用例必须覆盖上限轮与排队出队
+   仍允许回放历史请求），1.23（`#8641`）进一步强制审批响应与请求绑定一致；用例必须覆盖上限轮与排队出队
    两条路径，不能只测 binding 一侧。
 3. **压缩装配**：重跑 [`HarnessCompactionActivationTests.cs`](../../src/OneCode.Tests/HarnessCompactionActivationTests.cs)。
-   若失败，说明上游改了哨兵判定 —— 这是**好消息**，需要把断言从「只压一次」改成「每次都压」。
+   1.24 起哨兵判定已解除（MAF `#8845` 允许对 per-service-call 本地历史压缩），断言为「每次服务调用都压缩」；
+   若失败，说明上游又改了压缩激活条件。
 4. **摘要守卫字面量**：核对 MAF `SummarizationCompactionStrategy` 的 `[Summary unavailable]` / `[Summary]`
    是否仍是原样，以及空摘要 / 超长摘要是否仍按原语义提交。变了就同步
    [`GuardedSummarizationCompactionStrategy.cs`](../../src/OneCode.Infrastructure/Agent/GuardedSummarizationCompactionStrategy.cs)。
+   1.24 核对结果：两处字面量未变。
 5. **装饰链顺序**：对照本文 §3.3 的两张顺序表重读 `HarnessAgent.cs`，确认层数与相对位置没变。
 6. **默认 provider 集合**：确认 `HarnessAgent` 的 `BuildContextProviders` 没有新增默认 provider
    （新增的会自动挂到所有 profile 上）。

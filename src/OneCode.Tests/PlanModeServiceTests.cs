@@ -1,7 +1,6 @@
 using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
 using OneCode.Core.Permissions;
-using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests;
@@ -15,7 +14,7 @@ public sealed class PlanModeServiceTests : IDisposable
     {
         _modeProvider = new PermissionModeProvider(new ConfigManager(
             Path.Combine(Path.GetTempPath(), "OneCodePlanModeTests-" + Guid.NewGuid().ToString("N")[..8])));
-        _service = new PlanModeService(_modeProvider, new PromptManager());
+        _service = new PlanModeService(_modeProvider);
     }
 
     [Fact]

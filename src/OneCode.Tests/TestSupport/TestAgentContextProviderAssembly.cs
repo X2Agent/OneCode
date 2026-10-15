@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.GoalMode;
@@ -16,7 +15,6 @@ using OneCode.Core.Mcp;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
-using OneCode.Core.Tasks;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.Tests.TestSupport;
@@ -31,7 +29,6 @@ public static class TestAgentContextProviderAssembly
         IModelManager? modelManager = null,
         IPermissionModeProvider? modeProvider = null,
         IPromptManager? promptManager = null,
-        IPlanModeService? planModeService = null,
         IPlanWorkflowApplicationService? planWorkflowService = null)
     {
         sessionManager ??= Substitute.For<ISessionManager>();
@@ -43,7 +40,6 @@ public static class TestAgentContextProviderAssembly
             foreach (var name in new[] { "system/build", "system/plan", "system/goal" })
                 concretePrompts.RegisterTemplate(new PromptTemplate(name, $"[TEST MODE PROMPT: {name}]"));
         }
-        planModeService ??= Substitute.For<IPlanModeService>();
         planWorkflowService ??= Substitute.For<IPlanWorkflowApplicationService>();
 
         var memory = new AgentMemoryDependencies(
@@ -67,10 +63,8 @@ public static class TestAgentContextProviderAssembly
 
         var main = new MainModeContextProviderBuilder(
             shared,
-            planModeService,
             modeProvider,
             promptManager,
-            new BuildModeAttachmentProvider(modeProvider, promptManager),
             new PlanExecutionContextProvider(planWorkflowService, modeProvider),
             new GoalContextState());
 

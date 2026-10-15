@@ -30,22 +30,14 @@ public static class PromptTooLongDetector
     ];
 
     /// <summary>
-    /// 判断 <see cref="HttpRequestException"/> 是否为 prompt-too-long 错误。
-    /// </summary>
-    public static bool IsPromptTooLong(HttpRequestException ex)
-    {
-        if (ex.StatusCode == HttpStatusCode.RequestEntityTooLarge)
-            return true;
-
-        return ContainsKeyword(ex.Message);
-    }
-
-    /// <summary>
-    /// 判断异常消息是否包含 prompt-too-long 关键词。
-    /// 用于检测非 HttpRequestException 类型的 prompt-too-long 错误（如 provider 特定异常）。
+    /// 判断异常是否为 prompt-too-long 错误。
+    /// 覆盖两个维度：HTTP 413 (RequestEntityTooLarge) 与异常消息关键词。
+    /// 单一入口按运行时类型分派，避免调用方因静态类型为 <see cref="Exception"/>
+    /// 而漏掉状态码维度（413 无关键词的失败同样可经 /compact 自愈）。
     /// </summary>
     public static bool IsPromptTooLong(Exception ex)
-        => ContainsKeyword(ex.Message);
+        => ex is HttpRequestException { StatusCode: HttpStatusCode.RequestEntityTooLarge }
+            || ContainsKeyword(ex.Message);
 
     /// <summary>
     /// 判断文本是否包含 prompt-too-long 关键词。

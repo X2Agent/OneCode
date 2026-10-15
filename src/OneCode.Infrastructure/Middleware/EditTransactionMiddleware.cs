@@ -53,21 +53,9 @@ public sealed class EditTransactionMiddleware(
                     editedPath = Path.GetFullPath(path, _workingDirectory);
                     _transaction.Snapshot(editedPath);
 
-                    // S-04: 在写入前把文件意图（路径 + 前值内容）持久化到 Operation Ledger，
-                    // 消除"写入已发生、receipt 未持久化"的崩溃窗口——崩溃后可凭 receipt 回滚残留。
-                    if (_transaction.Persistence is { IsEnabled: true } persistence)
-                    {
-                        var before = TryReadFileBytes(editedPath);
-                        await persistence.Ledger!.AddFileIntentAsync(
-                            persistence.OperationId!,
-                            persistence.FencingToken,
-                            editedPath,
-                            before,
-                            ct).ConfigureAwait(false);
-                    }
-
-                    // 读取编辑前的当前内容（用于增量 Diff，与 EditTransaction 的快照独立）
-                    contentBefore = TryReadFileText(editedPath);
+                    // 仅在需要发射增量 Diff 通知时读取编辑前文本，避免无回调路径上的冗余文件读取。
+                    if (_onFileChange is not null)
+                        contentBefore = TryReadFileText(editedPath);
                 }
             }
 
@@ -81,28 +69,6 @@ public sealed class EditTransactionMiddleware(
 
             return result;
         };
-    }
-
-    private static byte[]? TryReadFileBytes(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-                return null;
-            var fileSize = new FileInfo(path).Length;
-            if (fileSize > PathsHelper.MaxFileReadSize)
-            {
-                return null;
-            }
-
-            return File.ReadAllBytes(path);
-        }
-        // 读失败按"无前值"处理属有意设计：缺失/超限的 before 内容以 null 入账，
-        // 崩溃恢复时该文件按"事务前不存在"策略处理。
-        catch (Exception)
-        {
-            return null;
-        }
     }
 
     /// <summary>

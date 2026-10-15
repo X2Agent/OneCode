@@ -30,10 +30,18 @@ namespace OneCode.Tests;
 /// 不要为了让测试变绿而放宽断言。
 /// </para>
 /// </remarks>
+/// <remarks>
+/// 本类不测产品行为（文档漂移不影响运行时），且 I/O 重（全量读文档 + 枚举 src 源文件树），
+/// 故标记 <c>Category=Docs</c>：日常开发用 <c>--filter "Category!=Docs"</c> 排除，
+/// 提交前 / CI 全量跑仍执行，防护不丢。
+/// </remarks>
+[Trait("Category", "Docs")]
 public sealed class DocFactConsistencyTests
 {
     // 权威真相源文件（相对仓库根）
     private const string ToolRegistrationFile = "src/OneCode.App/Tools/ToolServiceCollectionExtensions.cs";
+    private const string CommandRegistrationFile = "src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs";
+    private const string CommandsDocFile = "docs/commands.md";
     private const string AutomationRegistrationFile = "src/OneCode.Automation/ServiceCollectionExtensions.cs";
     private const string ReadmeCnFile = "README_CN.md";
     private const string ReadmeFile = "README.md";
@@ -63,7 +71,7 @@ public sealed class DocFactConsistencyTests
     {
         foreach (var doc in OperativeDocs())
         {
-            var text = File.ReadAllText(RepoPath(doc));
+            var text = ReadOperativeDoc(doc);
             text.Should().NotContain(ghostApi,
                 $"{doc} 引用了不存在的 API '{ghostApi}'——请改为真实入口（见 Core/Tools/ToolRegistrationExtensions.cs）");
         }
@@ -84,7 +92,7 @@ public sealed class DocFactConsistencyTests
         foreach (var doc in OperativeDocs())
         {
             // 反证发现：单行可能同时含正确写法与错误写法，必须校验全部匹配而非首个。
-            foreach (Match match in ghost.Matches(File.ReadAllText(RepoPath(doc))))
+            foreach (Match match in ghost.Matches(ReadOperativeDoc(doc)))
             {
                 violations.Add($"{doc} 出现幽灵 API '{match.Value}'");
             }
@@ -319,6 +327,23 @@ public sealed class DocFactConsistencyTests
     }
 
     /// <summary>
+    /// 命令数 = <c>RegisterAllCommands</c> 中的 <c>ICommand</c> 注册数（直接泛型注册 +
+    /// 具体类型转发注册；NewCommand/CloseCommand 经转发保证与具体单例同源）。命令数无
+    /// 编译期锚点，曾出现 Builtin 分类 23/实际 22 的漂移，此处按工具数同款方式守卫。
+    /// </summary>
+    [Fact]
+    public void Docs_CommandCountMatchesRegistrationSource()
+    {
+        var count = Regex.Matches(
+            File.ReadAllText(RepoPath(CommandRegistrationFile)),
+            @"s\.AddSingleton<ICommand[,>(]").Count;
+
+        AssertDeclaredCount(CommandsDocFile, @"当前共 (\d+) 个命令", count, "命令总数");
+        AssertDeclaredCount(ReadmeCnFile, @"(\d+) 个斜杠命令", count, "命令总数");
+        AssertDeclaredCount(RootAgentsFile, @"(\d+) 个斜杠命令", count, "命令总数");
+    }
+
+    /// <summary>
     /// 权限模式数 = <c>PermissionMode</c> 枚举成员数。文档曾长期写 9 种并包含一个不存在的 <c>Bubble</c>。
     /// </summary>
     [Fact]
@@ -351,7 +376,7 @@ public sealed class DocFactConsistencyTests
         var count = Enum.GetValues<MemoryScope>().Length;
         count.Should().Be(2, "MemoryScope 只有 User / Project 两级；会话记忆子系统已物理删除");
 
-        var readme = File.ReadAllText(RepoPath(ReadmeCnFile));
+        var readme = ReadOperativeDoc(ReadmeCnFile);
         readme.Should().Contain($"{CountToChinese(count)}级作用域",
             "README_CN 的记忆作用域描述须与 MemoryScope 枚举一致");
         readme.Should().NotContain("Session（当前会话）",
@@ -692,7 +717,7 @@ public sealed class DocFactConsistencyTests
     /// <summary>断言文档中的数字声明与代码真相值一致。</summary>
     private static void AssertDeclaredCount(string doc, string pattern, int expected, string what)
     {
-        var match = Regex.Match(File.ReadAllText(RepoPath(doc)), pattern);
+        var match = Regex.Match(ReadOperativeDoc(doc), pattern);
         match.Success.Should().BeTrue(
             $"{doc} 应包含形如「{pattern}」的{what}声明——若表述已改，请同步更新本测试的正则");
 
@@ -707,6 +732,22 @@ public sealed class DocFactConsistencyTests
         3 => "三",
         _ => count.ToString(CultureInfo.InvariantCulture),
     };
+
+    // 操作性文档文本缓存：同一测试运行内每个文档只读一次盘。
+    // 幽灵 API Theory（6 行 InlineData）+ 计数守卫会重复读同一批文档，
+    // 无缓存时一次全量跑产生 ~40 次冗余 ReadAllText。
+    private static readonly Dictionary<string, string> OperativeDocCache = new(StringComparer.Ordinal);
+
+    private static string ReadOperativeDoc(string doc)
+    {
+        if (!OperativeDocCache.TryGetValue(doc, out var text))
+        {
+            text = File.ReadAllText(RepoPath(doc));
+            OperativeDocCache[doc] = text;
+        }
+
+        return text;
+    }
 
     private static string RepoPath(string relativePath) =>
         Path.Combine(FindRepoRoot(), relativePath.Replace('/', Path.DirectorySeparatorChar));

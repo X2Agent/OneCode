@@ -83,16 +83,64 @@ public sealed class ReviewCommand(
     private const string ReadOnlyEditInstruction =
         "This is a read-only review. Do NOT use Edit or Write tools — report findings only.";
 
+    /// <summary>Shared Markdown output format contract injected into all review prompts via <c>{{outputFormat}}</c>.</summary>
+    internal const string OutputFormatSection =
+        """
+        ## Output Format (Markdown)
+
+        Structure your response as:
+
+        ### Summary
+        One paragraph summarising the overall quality and the most important findings.
+
+        ### Functional Issues
+        Issues that cause errors, crashes, or data loss if left unfixed.
+
+        For each issue use this exact format:
+        ```
+        **[SEVERITY] Category — file.cs:line**
+        ```csharp
+        // relevant code snippet from the file
+        ```
+        Description of the problem.
+        > 💡 Fix: how to fix it.
+        ```
+
+        ### Design Suggestions
+        Issues where the code works correctly but could be improved.
+
+        For each issue use this exact format:
+        ```
+        **[SEVERITY] Category — file.cs:line**
+        ```csharp
+        // relevant code snippet from the file
+        ```
+        Description of the problem.
+        > 💡 Suggestion: how to improve.
+        ```
+
+        Severity tags: `[CRITICAL]` `[WARNING]` `[SUGGESTION]`
+        Category tags: `Bug` `Security` `Performance` `Quality` `Style`
+
+        If a section has no issues, state "None" explicitly.
+
+        End with a **Verdict** line:
+        - ✅ LGTM — no blockers found
+        - ⚠️ NEEDS WORK — has warnings that should be addressed
+        - 🚫 BLOCKED — has critical issues that must be fixed before merging
+        """;
+
     private static readonly string[] AllowedTools =
     [
-        "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-        "Bash(git blame:*)", "Bash(grep:*)", "Read(*)",
+        "Git", "Read(*)", "Grep(*)", "Glob(*)", "LS(*)", "Lsp(*)",
+        "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
     ];
 
     private static readonly string[] AllowedToolsWithEdit =
     [
-        "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-        "Bash(git blame:*)", "Bash(grep:*)", "Read(*)", "Edit(*)", "Write(*)",
+        "Git", "Read(*)", "Grep(*)", "Glob(*)", "LS(*)", "Lsp(*)",
+        "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+        "Edit(*)", "Write(*)",
     ];
 
     /// <summary>单份 AGENTS.md 注入上限（字符），规则文件过长时截断，防止撑爆 prompt。</summary>
@@ -210,9 +258,6 @@ public sealed class ReviewCommand(
         // Gather LSP diagnostics for changed files (provides static analysis backing)
         string? lspContext = TryGatherLspDiagnostics(changedFiles, repoRoot);
 
-        var outputFormat = await promptManager.GetPromptAsync("system/review-output-text", ct).ConfigureAwait(false)
-            ?? "Structure your response with Summary, Functional Issues, and Design Suggestions sections.";
-
         var severityScope = severity switch
         {
             "critical" => "Report only **Functional Issues** (bugs that cause errors, crashes, or data loss if left unfixed). Every finding must include file path + line number + code snippet as evidence.",
@@ -241,7 +286,7 @@ public sealed class ReviewCommand(
                 : "",
             ["severityScope"] = severityScope,
             ["editInstruction"] = editInstruction,
-            ["outputFormat"] = outputFormat,
+            ["outputFormat"] = OutputFormatSection,
         };
 
         // Defer cache write until the review completes successfully. The single-view path

@@ -228,4 +228,102 @@ public sealed class SafetyInvariantMiddlewareTests
         await act.Should().ThrowAsync<InvalidOperationException>(
             "仅兜底参数绑定（ArgumentException）；其他异常保持原有传播语义");
     }
+
+    // 工具调用的 JSON 参数在模型侧解析失败（CallContent.Exception 非空，参数为空字典）：
+    // 典型原因是单次输出过长被截断。必须返回可指导自愈的错误（分段写入策略），
+    // 而不是 [SAFETY] fail-closed 消息误导模型原样重发同样的大参数。
+    [Fact]
+    public async Task CallContentParseException_ReturnsTruncationHintWithoutExecuting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        var middleware = SafetyInvariantMiddleware.Create(
+            new[] { invariant }, NullLogger.Instance);
+
+        var function = AIFunctionFactory.Create((string filePath, string content) => "ok", name: "Write");
+        var ctx = new FunctionInvocationContext
+        {
+            Function = function,
+            Arguments = new AIFunctionArguments(),
+            CallContent = new FunctionCallContent("call-1", "Write")
+            {
+                Exception = new InvalidOperationException("Error parsing function call arguments."),
+            },
+        };
+        var holder = new FlagHolder();
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => { holder.Value = true; return new ValueTask<object?>("tool-result"); },
+            ct);
+
+        holder.Value.Should().BeFalse("参数解析失败时不得执行工具");
+        result.Should().BeOfType<ToolResult>().Which.IsError.Should().BeTrue();
+        result.Should().BeOfType<ToolResult>().Which.Content.Should()
+            .Contain("truncated", "错误必须指出截断这一可能原因")
+            .And.Contain("Edit", "错误必须给出分段写入的自愈路径");
+        await invariant.DidNotReceive().CheckAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    // 参数为空（无 CallContent 异常）但工具声明了必需参数：空参数不可能是合法调用，
+    // 同样返回截断/自愈提示，而不是让工具或 invariant 层报出难以理解的错误。
+    [Fact]
+    public async Task EmptyArgumentsForToolWithRequiredParameters_ReturnsTruncationHint()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var middleware = SafetyInvariantMiddleware.Create(
+            [], NullLogger.Instance);
+
+        var function = AIFunctionFactory.Create((string filePath, string content) => "ok", name: "Write");
+        var ctx = new FunctionInvocationContext
+        {
+            Function = function,
+            Arguments = new AIFunctionArguments(),
+            CallContent = new FunctionCallContent("call-2", "Write"),
+        };
+        var holder = new FlagHolder();
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => { holder.Value = true; return new ValueTask<object?>("tool-result"); },
+            ct);
+
+        holder.Value.Should().BeFalse("声明了必需参数的工具收到空参数时不得执行");
+        result.Should().BeOfType<ToolResult>().Which.Content.Should()
+            .Contain("truncated").And.Contain("Edit");
+    }
+
+    // 反证：无必需参数的工具收到空参数是合法调用，不得被截断守卫拦截。
+    [Fact]
+    public async Task EmptyArgumentsForToolWithoutRequiredParameters_StillExecutes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        invariant.CheckAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(InvariantCheckResult.Allow);
+        var middleware = SafetyInvariantMiddleware.Create(
+            new[] { invariant }, NullLogger.Instance);
+
+        // 所有参数都有默认值 → schema 的 required 为空，空参数调用合法。
+        var function = AIFunctionFactory.Create((string? path = null) => "ok", name: "Sleep");
+        var ctx = new FunctionInvocationContext
+        {
+            Function = function,
+            Arguments = new AIFunctionArguments(),
+            CallContent = new FunctionCallContent("call-3", "Sleep"),
+        };
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => new ValueTask<object?>("tool-result"),
+            ct);
+
+        result.Should().Be("tool-result", "无必需参数的工具空参调用不应被拦截");
+    }
 }

@@ -4,6 +4,7 @@ using OneCode.Infrastructure.Ai;
 using OneCode.Core.Tokens;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
+using OneCode.Core.Goals;
 using OneCode.Core.Permissions;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
@@ -16,10 +17,16 @@ namespace OneCode.Infrastructure.Agent;
 public sealed class AgentPipelineMetrics
 {
     private int _toolCallCount;
+    private int _modelCallCount;
 
     public int ToolCallCount => Volatile.Read(ref _toolCallCount);
 
+    /// <summary>真实模型往返次数（Harness 每次迭代一次）；子代理"轮数"的权威口径。</summary>
+    public int ModelCallCount => Volatile.Read(ref _modelCallCount);
+
     public int IncrementToolCallCount() => Interlocked.Increment(ref _toolCallCount);
+
+    public int IncrementModelCallCount() => Interlocked.Increment(ref _modelCallCount);
 }
 
 public sealed record AgentPipelineHandle(AIAgent Agent, AgentPipelineMetrics Metrics)
@@ -83,21 +90,40 @@ public sealed record AgentPipelineOptions
     public IPermissionChecker? PermissionChecker { get; init; }
     public PermissionMode PermissionMode { get; init; } = PermissionMode.Default;
     public int MaxToolCalls { get; init; } = 50;
-    public string ToolLimitMessage { get; init; } = "Maximum tool call limit reached.";
+    public string ToolLimitMessage { get; init; } = "Tool call budget reached. Stop calling tools and summarize completed work and remaining items.";
+    /// <summary>
+    /// 轮数上限（模型往返次数）。设置时 Harness 迭代上限 = 该值 + 1（预留一轮收尾——
+    /// 工具预算触发后模型至少还有一次无工具迭代产出总结）。null = 沿用 MaxToolCalls
+    /// 作为迭代上限（主路径既有语义）。
+    /// </summary>
+    public int? MaxTurns { get; init; }
+    /// <summary>
+    /// 轮次预算收尾提醒（依赖 <see cref="MaxTurns"/>）：模型调用达到上限的 80% 时
+    /// 注入一次收尾指令。只用于单次 run 生命周期的子代理管道——主会话管道跨多条
+    /// 用户消息长存，逐调用计数会失真。
+    /// </summary>
+    public bool EnableTurnBudgetNudge { get; init; }
+
+    /// <summary>
+    /// 待办停滞提醒：自上次待办变更累计多次工具调用仍无进展时注入一次催办。
+    /// 只用于计划执行 run（待办即步骤进度），见 <c>TodoStallNudgeChatClient</c>。
+    /// </summary>
+    public bool EnableTodoStallNudge { get; init; }
+
+    /// <summary>
+    /// run 封条探针：返回 true 时工具中间件拒绝本 run 的一切后续工具调用并回复
+    /// <see cref="RunSealedMessage"/>。用于「交付物已提交，只允许纯文本收尾」的 run（Plan 提交计划后）。
+    /// </summary>
+    public Func<bool>? IsRunSealed { get; init; }
+
+    /// <summary>封条落下后返回给模型的错误文本。</summary>
+    public string RunSealedMessage { get; init; } = "This run is sealed: no more tool calls are accepted. Reply with a short text summary and stop.";
+
     public Func<string, bool>? IsToolAllowed { get; init; }
     public IHookExecutionService? HookExecutionService { get; init; }
-    public bool EnableEditTransaction { get; init; } = true;
-    /// <summary>
-    /// When true, installs tool-result size truncation middleware (character budget).
-    /// Unrelated to <see cref="MaxToolCalls"/> / Harness MaximumIterationsPerRequest
-    /// which limit invocation count or rounds.
-    /// </summary>
-    public bool EnableToolResultBudget { get; init; } = true;
 
     // Harness Engineering: safety invariants + state machine (Layer 0 + Layer 2)
-    public IReadOnlyList<ISafetyInvariant>? SafetyInvariants { get; init; }
     public bool EnableStateMachine { get; init; } = true;
-    public bool EnableSafetyInvariants { get; init; } = true;
 
     // Harness Engineering: edit pre-checks
     public bool EnableEditPreChecks { get; init; } = true;
@@ -107,7 +133,6 @@ public sealed record AgentPipelineOptions
     // Multi-language: routed by IVerificationProvider.IsSourceFile + VerificationProfile.
     public IVerificationProvider? VerificationProvider { get; init; }
     public bool EnableVerification { get; init; } = false;
-    public VerificationOptions? VerificationOptions { get; init; }
 
     // MAF Harness: ToolApprovalAgent — standard MAF approval flow
     public bool EnableToolApproval { get; init; } = true;
@@ -170,13 +195,30 @@ public sealed record AgentPipelineOptions
     public SessionId? ConversationId { get; init; }
 
     /// <summary>
-    /// 预算上限（token 数，输入 + 输出，可选）。当设置且 <see cref="ITokenLedger"/> 非空时，
+    /// 预算上限（token 数，可计费口径，可选）。当设置且 <see cref="ITokenLedger"/> 非空时，
     /// BudgetGuardRunMiddleware 会在 Agent Run 级执行 <b>pre-execution</b> 预算检查：
     /// 若 <see cref="ITokenLedger.GetTotalTokens"/> 已达到或超过此值，短路返回错误响应，
     /// 不发起 LLM 调用。null 表示不限制预算（不执行 pre-execution 检查）。
     /// post-execution 的预算状态报告仍由 MainAgentRunner 负责。
     /// </summary>
     public long? MaxBudgetTokens { get; init; }
+
+    /// <summary>
+    /// 预算基线（run 启动时对 ledger 的快照，默认 0 = 会话级累计口径）。
+    /// BudgetGuard 只对 <c>GetTotalTokens() - 基线</c> 的增量计预算；BUILD 模式主 run
+    /// 传快照值，使 Plan 阶段的调研消耗不占用计划执行的预算。
+    /// </summary>
+    public long BudgetBaselineTokens { get; init; }
+
+    /// <summary>
+    /// 预算 100% 消耗时的用户询问回调（交互模式）。参数：(超出基线的已消耗量, 预算上限, 取消令牌)，
+    /// 返回 AllowOnce=追加预算继续 / AllowAlways=收尾总结 / Deny=直接停止。
+    /// null（无人值守路径）时 BudgetGuard 硬停短路。
+    /// </summary>
+    public Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded { get; init; }
+
+    /// <summary>预算 70%/90% 预警回调（参数：级别、超出基线的已消耗量、预算上限）。</summary>
+    public Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning { get; init; }
 
 }
 
@@ -190,6 +232,18 @@ public static class AgentPipelineBuilder
         var chatClient = options.PipelineOptions.HookExecutionService is not null
             ? new ModelCallHookDecorator(options.ChatClient, options.PipelineOptions.HookExecutionService)
             : options.ChatClient;
+
+        // 轮次预算收尾提醒（子代理管道）：达到 MaxTurns 的 80% 时注入一次收尾指令，
+        // 同时把每次模型往返记入 metrics（子代理轮数的权威口径）。
+        // 包在 Hook 装饰器外侧——审计看到的就是模型实际收到的（含提醒）请求。
+        // 单次 run 内逐模型调用计数，装饰器随管道实例新建，见 TurnBudgetNudgeChatClient。
+        var metrics = new AgentPipelineMetrics();
+        if (options.PipelineOptions.EnableTurnBudgetNudge && options.PipelineOptions.MaxTurns is { } nudgeMaxTurns)
+            chatClient = new TurnBudgetNudgeChatClient(chatClient, nudgeMaxTurns, metrics);
+
+        // 待办停滞提醒（计划执行 run）：逐模型请求观察「自上次勾选以来的工具调用数」。
+        if (options.PipelineOptions.EnableTodoStallNudge && options.PipelineOptions.EnableTodo)
+            chatClient = new TodoStallNudgeChatClient(chatClient);
 
         var harnessToolApproval = options.PipelineOptions.EnableToolApproval
             ? new ToolApprovalAgentOptions
@@ -239,8 +293,11 @@ public static class AgentPipelineBuilder
             ChatHistoryProvider = options.ChatHistoryProvider ?? new InMemoryChatHistoryProvider(),
             ToolApprovalAgentOptions = harnessToolApproval,
             DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
-            // P1: same numeric source as middleware MaxToolCalls (iteration rounds ≈ tool-call budget).
-            MaximumIterationsPerRequest = options.PipelineOptions.MaxToolCalls,
+            // 轮数上限 + 1：预留一轮收尾（工具预算触发后模型至少还有一次无工具迭代可产出总结）。
+            // MaxTurns 未设置时沿用 MaxToolCalls 作迭代上限——主路径（轮=调用同值）行为不变。
+            MaximumIterationsPerRequest = options.PipelineOptions.MaxTurns is { } maxTurns
+                ? maxTurns + 1
+                : options.PipelineOptions.MaxToolCalls,
 
             // Harness owns the composition order: harness fragment first, then the agent body.
             HarnessInstructions = options.HarnessInstructions,
@@ -272,7 +329,7 @@ public static class AgentPipelineBuilder
             options.LoggerFactory,
             options.ServiceProvider);
 
-        return Build(agent, options.PipelineOptions, options.LoggerFactory, options.ServiceProvider);
+        return Build(agent, options.PipelineOptions, metrics, options.LoggerFactory, options.ServiceProvider);
     }
 
     /// <summary>
@@ -303,11 +360,10 @@ public static class AgentPipelineBuilder
     private static AgentPipelineHandle Build(
         AIAgent agent,
         AgentPipelineOptions options,
+        AgentPipelineMetrics metrics,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider)
     {
-        var metrics = new AgentPipelineMetrics();
-
         var builder = agent.AsBuilder();
 
         // Agent Run 级中间件（最外层）：BudgetGuard 预算守卫
@@ -319,7 +375,10 @@ public static class AgentPipelineBuilder
             var (guardRun, guardStream) = BudgetGuardRunMiddleware.Create(
                 options.TokenLedger,
                 options.MaxBudgetTokens,
-                loggerFactory.CreateLogger("BudgetGuardRunMiddleware"));
+                loggerFactory.CreateLogger("BudgetGuardRunMiddleware"),
+                options.BudgetBaselineTokens,
+                options.OnBudgetExceeded,
+                options.OnBudgetWarning);
             builder = builder.Use(guardRun, guardStream);
         }
 
@@ -338,36 +397,18 @@ public static class AgentPipelineBuilder
             builder = builder.Use(runFunc, runStreamingFunc);
         }
 
-        // Agent Run 级中间件（最内层 Run 中间件）：PromptTooLong 恢复
-        // MAF 最佳实践：PromptTooLong 是模型推理阶段的异常，应在 Run middleware 层拦截，
-        // 而非在 Runner 层重建 pipeline。中间件包裹 innerAgent.RunAsync，catch 异常后
-        // 截断消息历史 + 重试。注册为 agent-level（对所有 run 生效），
-        // Main/Worker/Goal 路径自动获得恢复能力。
-        //
-        // 层次顺序：BudgetGuard → UsageTracking → PromptTooLongRecovery → [function calling]
-        // PromptTooLongRecovery 在 UsageTracking 内层：retry 时只有最终成功的 response
-        // 流经 UsageTracking（记录 usage）；失败的 attempt（PromptTooLong 不消耗 token）
-        // 被 PromptTooLongRecovery 内部捕获，不影响 UsageTracking。
-        {
-            var (ptlRun, ptlStream) = PromptTooLongRecoveryRunMiddleware.Create(
-                loggerFactory.CreateLogger("PromptTooLongRecoveryRunMiddleware"));
-            builder = builder.Use(ptlRun, ptlStream);
-        }
-
         // Tool middleware install order (source order == MAF AsBuilder.Use order).
         // Optional stages are skipped when disabled; relative order of enabled stages stays fixed:
         // SafetyInvariant → Hook → ToolCallEvent → PermissionAndLimit → StateMachine →
-        // EditTransaction → EditGuard(contract pre + verification) → ResultBudget → ResultUnwrap → ToolApproval.
+        // EditTransaction → EditGuard(contract pre + verification) → ResultBudget → ResultUnwrap → ArgumentBinding.
         // Custom behavior belongs in these middleware / MAF extension points — not a Stage registry.
 
-        if (options.EnableSafetyInvariants)
-        {
-            var invariants = options.SafetyInvariants
-                ?? OneCodeToolMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory);
-            builder = builder.Use(
-                SafetyInvariantMiddleware.Create(
-                    invariants, loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
-        }
+        // Safety invariants always mount (Layer 0): they guard destructive edits and
+        // sensitive-file access regardless of role or profile.
+        builder = builder.Use(
+            SafetyInvariantMiddleware.Create(
+                OneCodeToolMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
+                loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
 
         if (options.HookExecutionService is not null)
         {
@@ -392,7 +433,7 @@ public static class AgentPipelineBuilder
                     loggerFactory.CreateLogger("StateMachineMiddleware")));
         }
 
-        if (options.EnableEditTransaction && options.EditTransaction is not null)
+        if (options.EditTransaction is not null)
         {
             builder = builder.Use(
                 new EditTransactionMiddleware(
@@ -411,22 +452,28 @@ public static class AgentPipelineBuilder
                     options.EnableEditPreChecks,
                     editVerification,
                     options.WorkingDirectory,
-                    options.VerificationOptions ?? Middleware.VerificationOptions.Default,
+                    Middleware.VerificationOptions.Default,
                     loggerFactory.CreateLogger("EditGuardMiddleware")));
         }
 
-        if (options.EnableToolResultBudget)
-        {
-            builder = builder.Use(
-                new ToolExecutionBudgetMiddleware(
-                    logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
-        }
+        // Tool-result size truncation (character budget) always mounts.
+        builder = builder.Use(
+            new ToolExecutionBudgetMiddleware(
+                logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
 
         builder = builder.Use(
             new ToolResultUnwrapMiddleware(
                 modelId: options.ModelId,
                 providerId: options.ProviderId,
                 logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate());
+
+        // ArgumentBinding is the innermost layer: it sits directly against the AIFunction so it can
+        // normalize malformed array arguments before MEAI reflection marshalling throws JsonException
+        // (which happens before the tool body runs), and turn that failure into a self-correctable
+        // ToolResult.Error that the outer ResultUnwrap layer serializes.
+        builder = builder.Use(
+            new ToolArgumentBindingMiddleware(
+                loggerFactory.CreateLogger<ToolArgumentBindingMiddleware>()).CreateDelegate());
 
         return new AgentPipelineHandle(builder.Build(serviceProvider), metrics);
     }

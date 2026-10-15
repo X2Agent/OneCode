@@ -60,7 +60,7 @@ internal sealed record PermissionModeConfig
     public bool CheckReadOnlyAndPath { get; init; } = true;
     public DestructiveShellPolicy DestructiveShell { get; init; } = DestructiveShellPolicy.EvaluateRules;
     public UnknownToolPolicy UnknownTools { get; init; } = UnknownToolPolicy.EvaluateRules;
-    public IReadOnlySet<string>? ExtraAllowedTools { get; init; }
+    public bool IncludePlanAllowedTools { get; init; }
 }
 
 /// <summary>
@@ -147,7 +147,7 @@ public static class PermissionProfiles
         if (result is not null)
             return result;
 
-        if (config.ExtraAllowedTools?.Contains(toolName) == true)
+        if (config.IncludePlanAllowedTools && PlanModeAllowedTools.Contains(toolName))
             return PermissionCheckResult.Allow;
 
         return config.UnknownTools switch
@@ -170,11 +170,13 @@ public static class PermissionProfiles
         if (readOnlyResult is not null)
             return readOnlyResult;
 
-        if (config.ExtraAllowedTools?.Contains(toolName) == true)
+        // Plan 白名单实时查询注册表：Harness provider 工具（todos_* / file_memory_*）
+        // 在装配 agent 时登记（AgentPipelineBuilder），可能晚于 Definitions 的首次构建。
+        if (config.IncludePlanAllowedTools && PlanModeAllowedTools.Contains(toolName))
             return PermissionCheckResult.Allow;
 
         return PermissionCheckResult.Deny(
-            $"Tool '{toolName}' is not permitted in plan mode. Only read-only tools, SubmitPlan, task management, sub-agent tools (Agent/ParallelAgents), AskUserQuestion, and AskUserQuestions are allowed.");
+            $"Tool '{toolName}' is not permitted in plan mode. Only read-only tools, SubmitPlan, task management, sub-agent tools (Agent/ParallelAgents), and AskUserQuestion are allowed.");
     }
 
     private static PermissionCheckResult AllowWithPathValidation(
@@ -221,7 +223,7 @@ public static class PermissionProfiles
             {
                 Profile = noVerification,
                 Flow = PermissionCheckFlow.PlanWhitelist,
-                ExtraAllowedTools = PlanModeAllowedTools,
+                IncludePlanAllowedTools = true,
             },
             [PermissionMode.AcceptEdits] = new()
             {
@@ -229,6 +231,7 @@ public static class PermissionProfiles
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.EvaluateRules,
                 UnknownTools = UnknownToolPolicy.EvaluateRules,
+                IncludePlanAllowedTools = true,
             },
             [PermissionMode.GoalAuto] = new()
             {

@@ -186,8 +186,7 @@ public sealed record BuildPlan(
     IReadOnlyList<BuildPlanTask> Tasks,
     IReadOnlyList<string> ValidationCommands,
     IReadOnlyList<string> Risks,
-    IReadOnlyList<string> NonGoals,
-    bool RequireExplicitTaskCompletion = false);
+    IReadOnlyList<string> NonGoals);
 
 /// <summary>
 /// A task within a BuildPlan.

@@ -33,7 +33,7 @@ internal static class QuestionCardRenderer
         if (!string.IsNullOrWhiteSpace(prompt))
         {
             // 对话视图渲染时按 contentWidth 截断不换行，长问题必须在卡片渲染期
-            // 按 viewWidth 预换行（与 ChatBlockRenderers.AddWrappedField 同一模式）。
+            // 按 viewWidth 预换行。
             const string indent = "    ";
             var typePrefix = string.IsNullOrWhiteSpace(typeLabel) ? string.Empty : $"[{typeLabel}] ";
             var available = Math.Max(8, viewWidth - indent.Length - TextWidthHelper.GetDisplayWidth(typePrefix));

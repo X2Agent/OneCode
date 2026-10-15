@@ -42,10 +42,11 @@ public static class FileIgnore
         ".svn",
         ".hg",
 
-        // Editors / IDEs
+        // Editors / IDEs / Agent workspace state
         ".vs",
         ".vscode",
         ".idea",
+        ".onecode",
 
         // Cloud / framework infra
         ".turbo",

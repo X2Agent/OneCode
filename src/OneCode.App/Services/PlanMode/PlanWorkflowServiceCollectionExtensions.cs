@@ -14,6 +14,7 @@ public static class PlanWorkflowServiceCollectionExtensions
         services.AddSingleton<IPlanWorkflowApplicationService, PlanWorkflowApplicationService>();
         services.AddSingleton<IPlanAgentRunDispatcher, PlanAgentRunDispatcher>();
         services.AddSingleton<AggregateApprovalGate>();
+        services.AddSingleton<PlanRunCloser>();
         services.AddSingleton<PlanExecutionRecoveryService>();
         services.AddHostedService(sp => sp.GetRequiredService<PlanExecutionRecoveryService>());
 

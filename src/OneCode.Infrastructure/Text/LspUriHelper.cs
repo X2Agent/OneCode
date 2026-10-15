@@ -4,8 +4,7 @@ namespace OneCode.Infrastructure.Text;
 /// LSP file:// URI ⇄ file path conversion helpers.
 ///
 /// Centralises URI↔path logic used across
-/// <c>LspTool</c>, <c>EnhancedLspService</c>, <c>LspNotifier</c>,
-/// <c>SymbolSearchTool</c>, <c>FindReferencesTool</c>, and
+/// <c>LspTool</c>, <c>EnhancedLspService</c>, <c>LspNotifier</c>, and
 /// <c>ApplyWorkspaceEditTool</c>.
 /// </summary>
 public static class LspUriHelper

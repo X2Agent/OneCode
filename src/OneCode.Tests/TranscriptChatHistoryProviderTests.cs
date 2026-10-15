@@ -129,6 +129,150 @@ public sealed class TranscriptChatHistoryProviderTests
             "失败调用不回写，状态仍为空 → 重新从转录播种");
     }
 
+    /// <summary>
+    /// 阶段边界播种：保留边界之前的 Plan 阶段对话与只读工具结果（如 WebSearch），
+    /// 仅成对剥离边界之前的 SubmitPlan 调用与结果，同时保留边界之后的同阶段恢复消息。
+    /// </summary>
+    [Fact]
+    public async Task InvokingAsync_WithSeedBoundary_RetainsPlanResearchAndStripsSubmitPlanPair()
+    {
+        var reader = CreateReader(
+        [
+            new ChatMessage(ChatRole.User, "plan-stage question"),
+            AssistantWithToolCall(),
+            ToolResult(),
+            new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-submit", "SubmitPlan")]),
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-submit", "Plan submitted")]),
+            new ChatMessage(ChatRole.Assistant, "build attempt message"),
+        ]);
+        var provider = new TranscriptChatHistoryProvider(
+            reader, ConversationId, new HistorySeedBoundary("req-1", 0, 5));
+
+        var result = (await provider.InvokingAsync(CreateContext(
+            new ChatMessage(ChatRole.User, "execute approved plan")))).ToList();
+
+        result.Should().HaveCount(5,
+            "plan-stage user prompt + WebSearch call/result + post-boundary build message + current request must all be present, with the SubmitPlan pair stripped");
+        result[0].Text.Should().Be("plan-stage question");
+        result[1].Contents.OfType<FunctionCallContent>().Single().Name.Should().Be("WebSearch");
+        result[2].Contents.OfType<FunctionResultContent>().Single().CallId.Should().Be("call-1");
+        result[3].Text.Should().Be("build attempt message");
+        result[4].Text.Should().Be("execute approved plan");
+        result.SelectMany(m => m.Contents).OfType<FunctionCallContent>()
+            .Should().NotContain(c => c.Name == "SubmitPlan");
+        result.SelectMany(m => m.Contents).OfType<FunctionResultContent>()
+            .Should().NotContain(r => r.CallId == "call-submit");
+    }
+
+    /// <summary>混合消息剥离：当同一条 assistant 消息同时含文本与 SubmitPlan 调用时，仅剔除 SubmitPlan 调用并保留文本。</summary>
+    [Fact]
+    public async Task InvokingAsync_WithSeedBoundary_MixedAssistantMessage_PreservesNonSubmitPlanContent()
+    {
+        var reader = CreateReader(
+        [
+            new ChatMessage(ChatRole.User, "plan-stage question"),
+            new ChatMessage(ChatRole.Assistant,
+            [
+                new TextContent("I have verified the scope."),
+                new FunctionCallContent("call-submit", "SubmitPlan"),
+            ]),
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-submit", "Plan submitted")]),
+        ]);
+        var provider = new TranscriptChatHistoryProvider(
+            reader, ConversationId, new HistorySeedBoundary("req-1", 0, 3));
+
+        var result = (await provider.InvokingAsync(CreateContext(
+            new ChatMessage(ChatRole.User, "execute approved plan")))).ToList();
+
+        result.Should().HaveCount(3);
+        result[0].Text.Should().Be("plan-stage question");
+        result[1].Text.Should().Be("I have verified the scope.");
+        result[1].Contents.OfType<FunctionCallContent>().Should().BeEmpty();
+        result[2].Text.Should().Be("execute approved plan");
+    }
+
+    /// <summary>
+    /// 流式推理模型产生的空 <see cref="TextContent"/> 块在回写与读取时必须被剔除，
+    /// 保留非空文本、推理内容与工具调用，避免请求体出现连续的 <c>{"type":"text","text":""}</c>。
+    /// </summary>
+    [Fact]
+    public async Task InvokedThenInvoking_StripsEmptyTextContentBlocks()
+    {
+        var reader = CreateReader([]);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId);
+        var session = await CreateSessionAsync();
+
+        var assistantMessage = new ChatMessage(ChatRole.Assistant,
+        [
+            new TextContent(""),
+            new TextContent(""),
+            new TextReasoningContent("thinking about query"),
+            new TextContent("Here is the result."),
+            new TextContent(""),
+            new FunctionCallContent("call-1", "WebSearch", new Dictionary<string, object?> { ["query"] = "q" }),
+        ]);
+
+        await provider.InvokedAsync(CreateInvoked(
+            session,
+            requestMessages: [new ChatMessage(ChatRole.User, "search news")],
+            responseMessages: [assistantMessage]));
+
+        var history = (await provider.InvokingAsync(CreateSessionContext(
+            session, ToolResult()))).ToList();
+
+        var storedAssistant = history.Single(m => m.Role == ChatRole.Assistant);
+        storedAssistant.Contents.OfType<TextContent>().Should()
+            .ContainSingle().Which.Text.Should().Be("Here is the result.");
+        storedAssistant.Contents.OfType<TextReasoningContent>().Should()
+            .ContainSingle().Which.Text.Should().Be("thinking about query");
+        storedAssistant.Contents.OfType<FunctionCallContent>().Should()
+            .ContainSingle().Which.CallId.Should().Be("call-1");
+    }
+
+    [Fact]
+    public async Task SeedFromTranscript_BeforePlanBoundary_CompactsOversizedFailedToolResultsAndKeepsSuccessIntact()
+    {
+        var longError = "[ERROR] WebSearch error: all providers failed.\n" + new string('e', 500);
+        var longSuccess = "Successfully fetched article body: " + new string('s', 500);
+
+        List<ChatMessage> transcript =
+        [
+            new(ChatRole.User, "plan research"),
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("call-err", "WebSearch", new Dictionary<string, object?> { ["query"] = "q1" }),
+                new FunctionCallContent("call-ok", "WebFetch", new Dictionary<string, object?> { ["url"] = "https://example.com" }),
+                new FunctionCallContent("call-plan", "SubmitPlan", new Dictionary<string, object?> { ["plan"] = "# Plan" }),
+            ]),
+            new(ChatRole.Tool,
+            [
+                new FunctionResultContent("call-err", longError),
+                new FunctionResultContent("call-ok", longSuccess),
+                new FunctionResultContent("call-plan", "Plan submitted"),
+            ]),
+            new(ChatRole.User, "build handoff"),
+        ];
+
+        var reader = CreateReader(transcript);
+        var boundary = new HistorySeedBoundary("req-1", 0, 3);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId, boundary);
+        var session = await CreateSessionAsync();
+
+        var seeded = (await provider.InvokingAsync(CreateSessionContext(
+            session, new ChatMessage(ChatRole.User, "build handoff")))).ToList();
+
+        var toolMsg = seeded.Single(m => m.Role == ChatRole.Tool);
+        var results = toolMsg.Contents.OfType<FunctionResultContent>().ToList();
+        results.Should().HaveCount(2, "SubmitPlan result is stripped while other tool results remain");
+
+        var errResult = results.Single(r => r.CallId == "call-err").Result?.ToString();
+        errResult.Should().Contain("[prior-phase error compacted]");
+        errResult!.Length.Should().BeLessThan(300);
+
+        var okResult = results.Single(r => r.CallId == "call-ok").Result?.ToString();
+        okResult.Should().Be(longSuccess, "successful tool results must be 100% preserved without truncation");
+    }
+
     private static ISessionChatHistoryReader CreateReader(IReadOnlyList<ChatMessage> history)
     {
         var reader = Substitute.For<ISessionChatHistoryReader>();

@@ -53,8 +53,7 @@ public sealed partial class OneCodeToplevel
             {
                 options.Add(new("allow", "允许执行 (仅本次)", request.Message));
                 options.Add(new("always", "始终允许此工具 (不再提示)"));
-                if (request.AllowSessionEscalation)
-                    options.Add(new("session-all", "本次对话全部允许 (所有工具不再提示)"));
+                options.Add(new("session-all", "本次对话全部允许 (所有工具不再提示)"));
             }
             options.Add(new("deny", "拒绝", request.AllowApprovals ? null : request.Message));
             var selector = new InlineSelector(request.Title, options);

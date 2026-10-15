@@ -1,6 +1,7 @@
 namespace OneCode.Infrastructure.Ai;
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 /// <summary>
 /// Rewrites OpenAI-compatible JSON so the official OpenAI .NET SDK can deserialize it.
@@ -200,10 +201,113 @@ internal static partial class OpenAiResponseSanitizer
     [GeneratedRegex(@"""finish_reason""\s*:\s*""(?<value>[^""]*)""")]
     private static partial Regex FinishReasonRegex();
 
+    [GeneratedRegex(@"""content""\s*:\s*""""")]
+    private static partial Regex EmptyContentRegex();
+
     internal static string SanitizePayload(string payload)
     {
         var withArrays = NullArrayRegex().Replace(payload, @"""$1"":[]");
-        return FinishReasonRegex().Replace(withArrays, MapFinishReasonMatch);
+        var withFinishReason = FinishReasonRegex().Replace(withArrays, MapFinishReasonMatch);
+        var withCleanDelta = StripEmptyContentOnReasoningOrToolDelta(withFinishReason);
+        return NormalizeToolCallTypes(withCleanDelta);
+    }
+
+    /// <summary>
+    /// 部分推理模型（如 StepFun step-5-preview）在流式输出 reasoning_content 或 tool_calls 时，
+    /// 每个 SSE delta chunk 都会附带 <c>"content":""</c>；MEAI 流式聚合器会把每个空串 delta
+    /// 累积为一个独立的 <c>TextContent("")</c>，导致下一轮请求体出现数百个连续的
+    /// <c>{"type":"text","text":""}</c>。当 delta 含推理或工具调用且 content 为空串时，
+    /// 将其归一为 <c>"content":null</c>，避免产生空文本块。
+    /// </summary>
+    private static string StripEmptyContentOnReasoningOrToolDelta(string payload)
+    {
+        if (!payload.Contains(@"""delta""", StringComparison.Ordinal)
+            || !payload.Contains(@"""content""", StringComparison.Ordinal)
+            || (!payload.Contains(@"""reasoning_content""", StringComparison.Ordinal)
+                && !payload.Contains(@"""tool_calls""", StringComparison.Ordinal)))
+        {
+            return payload;
+        }
+
+        return EmptyContentRegex().Replace(payload, @"""content"":null");
+    }
+
+    /// <summary>
+    /// 部分 OpenAI 兼容端点在流式 delta 的 tool_calls 里发送空字符串 type；
+    /// 官方 SDK 的 ToChatToolCallKind 只接受 "function"（经 openai-dotnet 源码核实，
+    /// ChatToolCallKind 仅有 Function 一个值），空字符串直接抛 ArgumentOutOfRangeException，
+    /// 中断整条流。缺失或 null 的 type 由 SDK 安全跳过（默认 Function），无需处理。
+    /// 统一归一为 "function"——OneCode 只声明函数工具，不会收到合法的 custom 调用。
+    /// 其余上下文的 type（content part、response_format）不在 tool_calls 数组内，不受影响。
+    /// </summary>
+    internal static string NormalizeToolCallTypes(string payload)
+    {
+        if (!payload.Contains(@"""tool_calls""", StringComparison.Ordinal))
+            return payload;
+
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(payload);
+        }
+        catch (JsonException)
+        {
+            return payload;
+        }
+
+        if (root is null || NormalizeToolCallTypesInNode(root) == 0)
+            return payload;
+
+        return root.ToJsonString();
+    }
+
+    private static int NormalizeToolCallTypesInNode(JsonNode node)
+    {
+        var changes = 0;
+        switch (node)
+        {
+            case JsonObject obj:
+                foreach (var (name, value) in obj)
+                {
+                    if (value is null)
+                        continue;
+
+                    if (name.Equals("tool_calls", StringComparison.Ordinal)
+                        && value is JsonArray calls)
+                    {
+                        foreach (var call in calls)
+                            if (call is JsonObject callObj)
+                                changes += NormalizeToolCallType(callObj);
+                    }
+
+                    changes += NormalizeToolCallTypesInNode(value);
+                }
+                break;
+
+            case JsonArray array:
+                foreach (var item in array)
+                    if (item is not null)
+                        changes += NormalizeToolCallTypesInNode(item);
+                break;
+        }
+
+        return changes;
+    }
+
+    /// <summary>仅改写空字符串 type；缺失/null 的 type 由 SDK 安全处理，不触碰。</summary>
+    /// <returns>实际改写的 tool_call 元素个数（0 或 1）。</returns>
+    private static int NormalizeToolCallType(JsonObject call)
+    {
+        if (call.TryGetPropertyValue("type", out var type)
+            && type is JsonValue value
+            && value.TryGetValue<string>(out var s)
+            && s.Length == 0)
+        {
+            call["type"] = "function";
+            return 1;
+        }
+
+        return 0;
     }
 
     internal static string SanitizeSseLine(string line)

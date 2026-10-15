@@ -256,7 +256,8 @@ public sealed class MessageFlowRenderer
                 case TextBlock tb when !string.IsNullOrEmpty(tb.Text):
                     // Route assistant text through the Markdown renderer so
                     // code blocks, headings, lists, and tables render properly.
-                    RenderMarkdownBlock(lines, tb.Text);
+                    // 回放路径与流式路径同样剥掉回复起点的模型前导缩进。
+                    RenderMarkdownBlock(lines, MessageFlowRenderer.TrimReplyLeadingWhitespace(tb.Text));
                     break;
                 case ToolUseBlock tub:
                     lines.Add(MakeToolLine(tub.Name, null, null));
@@ -286,6 +287,16 @@ public sealed class MessageFlowRenderer
             return;
 
         RenderMarkdownBlock(lines, text);
+    }
+
+    /// <summary>
+    /// 去掉一段回复文本开头的空格/制表符。部分模型在 reasoning/text 交错的
+    /// 流式输出里会给文本段带上大段前导缩进，原样渲染会让整段看起来居中。
+    /// 只处理回复开头——正文与代码块内部的缩进是有语义的，不动。
+    /// </summary>
+    public static string TrimReplyLeadingWhitespace(string text)
+    {
+        return text.TrimStart(' ', '\t');
     }
 
     /// <summary>
@@ -459,8 +470,9 @@ public sealed class MessageFlowRenderer
 
     /// <summary>Makes a tool-call inline row: ▸ Name  args   ✓/✗/◈
     /// Uses a right-pointing triangle (▸) — clickable to expand/collapse tool details.
-    /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度截断 args 段，防止长参数溢出视口被裁切。</summary>
-    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null, int maxWidth = 0)
+    /// <paramref name="maxWidth"/> &gt; 0 时按显示宽度截断 args 段，防止长参数溢出视口被裁切。
+    /// <paramref name="liveProgress"/> 非空时写入 tag，展开运行中的子代理行可见实时统计。</summary>
+    internal static FormattedLine MakeToolLine(string name, string? args, bool? ok, string? duration = null, string? result = null, string? agentName = null, int maxWidth = 0, string? detailArgs = null, TuiSubagentProgress? liveProgress = null)
     {
         List<LineSegment> segments = [
             new($"{Indent}", TuiPalette.BgPrimary),
@@ -505,7 +517,9 @@ public sealed class MessageFlowRenderer
             segments.Add(new(suffix, TuiPalette.Success));
         else if (ok is false)
             segments.Add(new(suffix, TuiPalette.Error));
-        var tag = new ToolLineTag(name, args, result, IsExpanded: false);
+        // detailArgs 为空串时抑制详情行（live 进度行的标题即进度文本，重复展示为
+        // "Args: ..." 反而误导）；null 时沿用 args（工具启动/完成行的既有语义）。
+        var tag = new ToolLineTag(name, detailArgs ?? args, result, IsExpanded: false, LiveProgress: liveProgress);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }
 

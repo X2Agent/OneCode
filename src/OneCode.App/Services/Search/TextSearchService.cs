@@ -30,6 +30,14 @@ public sealed class TextSearchService(
     /// default for the file-skills regexes.
     /// </remarks>
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// 单行最大字符列宽（与 ripgrep <c>--max-columns 500</c> 对齐）。
+    /// 正常源码行通常 &lt;200 字符（100% 零信息损失），单行巨型文件（如数 MB 的 <c>.jsonl</c> 或 <c>.min.js</c>）
+    /// 超出该列宽时截取匹配窗口并附截断提示，防止单次 Grep 吐出数十 MB 撑爆上下文。
+    /// </summary>
+    public const int MaxLineColumns = 500;
+    private const string LineTruncatedSuffix = " ... [line truncated, use Read with offset/limit]";
     public async Task<IReadOnlyList<string>> SearchAsync(TextSearchRequest request, CancellationToken ct = default)
     {
         var contextBefore = request.ContextBefore;
@@ -54,6 +62,12 @@ public sealed class TextSearchService(
         int contextBefore, int contextAfter, CancellationToken ct)
     {
         var workspaceRoot = request.WorkspaceRoot ?? request.SearchPath;
+        var isWithinWorkspace = PathBoundary.IsWithinDirectory(request.SearchPath, workspaceRoot);
+        var effectiveRoot = isWithinWorkspace
+            ? workspaceRoot
+            : (File.Exists(request.SearchPath)
+                ? (Path.GetDirectoryName(request.SearchPath) ?? request.SearchPath)
+                : request.SearchPath);
         var args = new List<string>
         {
             "--hidden",
@@ -61,6 +75,7 @@ public sealed class TextSearchService(
             "--ignore-file-case-insensitive", // 与 C# fallback 的 OrdinalIgnoreCase 匹配对齐
             "--glob-case-insensitive",        // 与 FileIgnore 的大小写不敏感匹配对齐
             "--max-columns", "500",
+            "--max-columns-preview",
         };
 
         // 内置排除规则由 OneCode 统一生成 rg glob 参数（与 FileIgnore / C# fallback 同一份清单），
@@ -117,9 +132,14 @@ public sealed class TextSearchService(
             { args.Add("--glob"); args.Add($"!{eg}"); }
         }
 
-        args.Add(request.SearchPath);
+        // 当搜索目标位于工作区外的附加目录（如 ~/.onecode/events）时，以该目录为 rg 工作目录并传相对路径，
+        // 避免绝对路径中的祖先目录名（如 ~/.onecode）误触发 `--glob !**/.onecode/**`。
+        var rgTarget = isWithinWorkspace
+            ? request.SearchPath
+            : (File.Exists(request.SearchPath) ? Path.GetFileName(request.SearchPath) : ".");
+        args.Add(rgTarget);
 
-        var result = await processRunner.ExecuteAsync("rg", args.ToArray(), workspaceRoot, ct: ct);
+        var result = await processRunner.ExecuteAsync("rg", args.ToArray(), effectiveRoot, ct: ct);
         if (result is null)
             return [];
 
@@ -133,7 +153,7 @@ public sealed class TextSearchService(
         }
 
         var lines = result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        return lines.Select(line => NormalizeRgPath(line, request.SearchPath, workspaceRoot)).ToList();
+        return lines.Select(line => NormalizeRgPath(line, request.SearchPath, effectiveRoot)).ToList();
     }
 
     /// <summary>
@@ -144,6 +164,8 @@ public sealed class TextSearchService(
     private static string NormalizeRgPath(string line, string searchPath, string workspaceRoot)
     {
         if (string.IsNullOrEmpty(line)) return line;
+        if (line.StartsWith("./", StringComparison.Ordinal) || line.StartsWith(".\\", StringComparison.Ordinal))
+            line = line[2..];
         var sep = Path.DirectorySeparatorChar;
 
         // 若 searchPath 是具体文件，剥掉其父目录前缀，保留单文件名称
@@ -218,21 +240,26 @@ public sealed class TextSearchService(
             : request.ExcludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         var workspaceRoot = request.WorkspaceRoot ?? request.SearchPath;
-        List<string> files;
         var isSingleFile = File.Exists(request.SearchPath);
+        var effectiveRoot = PathBoundary.IsWithinDirectory(request.SearchPath, workspaceRoot)
+            ? workspaceRoot
+            : (isSingleFile
+                ? (Path.GetDirectoryName(request.SearchPath) ?? request.SearchPath)
+                : request.SearchPath);
+        List<string> files;
 
         if (isSingleFile)
         {
             // 单文件搜索：直接检查 ignore 规则，无需且不能调用 FindFiles 目录枚举
-            var relToWs = GetRelativePath(request.SearchPath, workspaceRoot);
+            var relToWs = GetRelativePath(request.SearchPath, effectiveRoot);
             if (ignore.IsIgnored(relToWs))
                 return [];
             files = [request.SearchPath];
         }
         else
         {
-            files = fileSystem.FindFiles(request.SearchPath, request.Glob, DefaultExcludes)
-                .Where(file => !ignore.IsIgnored(GetRelativePath(file, workspaceRoot)))
+            files = fileSystem.FindFiles(request.SearchPath, request.Glob, DefaultExcludes, request.AdditionalDirectories)
+                .Where(file => !ignore.IsIgnored(GetRelativePath(file, effectiveRoot)))
                 .ToList();
         }
 
@@ -289,7 +316,12 @@ public sealed class TextSearchService(
                     await foreach (var line in File.ReadLinesAsync(file, ct).ConfigureAwait(false))
                     {
                         lineIndex++;
-                        if (regex.IsMatch(line)) results.Add($"{relativePath}:{lineIndex}:{line}");
+                        var match = regex.Match(line);
+                        if (match.Success)
+                        {
+                            var formattedLine = TruncateLongLine(line, match.Index);
+                            results.Add($"{relativePath}:{lineIndex}:{formattedLine}");
+                        }
                     }
                 }
                 else
@@ -334,7 +366,7 @@ public sealed class TextSearchService(
             var matchText = m.Value;
             var newlineIdx = matchText.IndexOf('\n');
             var snippet = newlineIdx >= 0 ? matchText[..newlineIdx] + "..." : matchText;
-            results.Add($"{relativePath}:{lineNum}:{snippet}");
+            results.Add($"{relativePath}:{lineNum}:{TruncateLongLine(snippet, 0)}");
         }
         return results;
     }
@@ -344,18 +376,19 @@ public sealed class TextSearchService(
         CancellationToken ct)
     {
         var allLines = await File.ReadAllLinesAsync(file, ct).ConfigureAwait(false);
-        var matchLineNums = new HashSet<int>();
+        var matchLineNums = new Dictionary<int, int>();
 
         for (var i = 0; i < allLines.Length; i++)
         {
-            if (regex.IsMatch(allLines[i]))
-                matchLineNums.Add(i);
+            var match = regex.Match(allLines[i]);
+            if (match.Success)
+                matchLineNums[i] = match.Index;
         }
 
         List<string> results = [];
         if (matchLineNums.Count == 0) return results;
 
-        var ranges = BuildContextRanges(matchLineNums, contextBefore, contextAfter, allLines.Length);
+        var ranges = BuildContextRanges(matchLineNums.Keys, contextBefore, contextAfter, allLines.Length);
 
         var firstGroup = true;
         foreach (var (start, end) in ranges)
@@ -366,15 +399,29 @@ public sealed class TextSearchService(
             for (var i = start; i <= end; i++)
             {
                 var lineNum = i + 1;
-                var sep = matchLineNums.Contains(i) ? ":" : "-";
-                results.Add($"{relativePath}{sep}{lineNum}{sep}{allLines[i]}");
+                var isMatch = matchLineNums.TryGetValue(i, out var matchIdx);
+                var sep = isMatch ? ":" : "-";
+                var formattedLine = TruncateLongLine(allLines[i], isMatch ? matchIdx : 0);
+                results.Add($"{relativePath}{sep}{lineNum}{sep}{formattedLine}");
             }
         }
         return results;
     }
 
+    internal static string TruncateLongLine(string line, int matchIndex = 0)
+    {
+        if (string.IsNullOrEmpty(line) || line.Length <= MaxLineColumns)
+            return line;
+
+        var halfWindow = MaxLineColumns / 2;
+        var start = Math.Clamp(matchIndex - halfWindow, 0, Math.Max(0, line.Length - MaxLineColumns));
+        var length = Math.Min(MaxLineColumns, line.Length - start);
+        var prefix = start > 0 ? "..." : string.Empty;
+        return $"{prefix}{line.Substring(start, length)}{LineTruncatedSuffix}";
+    }
+
     private static List<(int Start, int End)> BuildContextRanges(
-        HashSet<int> matchLines, int before, int after, int totalLines)
+        IEnumerable<int> matchLines, int before, int after, int totalLines)
     {
         var ranges = matchLines
             .Select(m => (Start: Math.Max(0, m - before), End: Math.Min(totalLines - 1, m + after)))

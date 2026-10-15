@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -90,6 +91,19 @@ public sealed record MainAgentRunOptions
     /// <summary>Stable conversation identity for all runtime state and persistence.</summary>
     public SessionId? ConversationId { get; init; }
 
+    /// <summary>
+    /// Approved-plan 执行世代的历史播种边界（受控 Build run 专用）。
+    /// null = 全量转录播种（交互路径）；非 null 时历史 provider 保留 Plan 阶段的只读检索结果，
+    /// 仅剥离边界之前的 <c>SubmitPlan</c> 工具调用对。
+    /// </summary>
+    public HistorySeedBoundary? HistorySeedBoundary { get; init; }
+
+    /// <summary>
+    /// 预置进会话待办清单的计划步骤（受控 Build run 专用）。清单为空时才写入，续跑保留已有进度；
+    /// 步骤进度的唯一事实源是 agent 自己的待办清单。
+    /// </summary>
+    public IReadOnlyList<OneCode.Core.Build.BuildPlanTask>? SeedTodoTasks { get; init; }
+
     /// <summary>Stable identity for tool-batch evidence produced by this agent run.</summary>
     public string? AgentRunId { get; init; }
 
@@ -116,6 +130,19 @@ public sealed record MainAgentRunOptions
     /// hook 结果不影响审批流程（无阻断语义）。
     /// </summary>
     public Func<string, CancellationToken, Task>? OnPermissionPrompt { get; init; }
+
+    /// <summary>
+    /// 预算 70%/90% 预警回调（参数：级别、超出基线的已消耗量、预算上限）。MainAgentRunner
+    /// 交互路径默认实现为向事件流写 <c>BudgetWarningEvent</c>；无人值守路径不设置。
+    /// </summary>
+    public Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning { get; init; }
+
+    /// <summary>
+    /// 预算 100% 消耗时的用户询问回调（交互模式）。返回 AllowOnce=追加预算继续 /
+    /// AllowAlways=收尾总结 / Deny=直接停止。无人值守路径（SuppressToolApproval）保持
+    /// null → BudgetGuard 硬停短路。
+    /// </summary>
+    public Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded { get; init; }
 }
 
 /// <summary>
@@ -137,6 +164,8 @@ public sealed record MainAgentRunResult(
     OneCode.Core.Build.BuildValidationStatus FinalValidationStatus = OneCode.Core.Build.BuildValidationStatus.Skipped,
     IReadOnlyList<string>? ModifiedFiles = null,
     string? ValidationFailureSummary = null,
-    IReadOnlyList<CompletedToolBatch>? CompletedToolBatches = null);
+    IReadOnlyList<CompletedToolBatch>? CompletedToolBatches = null,
+    // 工具调用总数（run.json metrics.toolCalls 的数据源；默认 0 保持既有调用方兼容）。
+    int ToolCallCount = 0);
 
 

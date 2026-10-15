@@ -203,6 +203,34 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
+    public void RenderBuildDeliveryCard_OmitsSummaryFieldToAvoidDuplicatingAssistantMessage()
+    {
+        var longSummary = "已完成，交付文件：**`E:\\OneCode\\.dev-workspace\\sun-yuchen-timeline.html`**（46KB 单文件）";
+        var result = new OneCode.Core.Build.BuildRunResult(
+            new OneCode.Core.Build.BuildRunId("br-summary"),
+            OneCode.Core.Build.BuildRunState.Completed,
+            OneCode.Core.Workflows.RunTerminalReason.Completed,
+            longSummary,
+            ["sun-yuchen-timeline.html"],
+            [],
+            [],
+            [],
+            [],
+            null,
+            true,
+            false,
+            OneCode.Core.Build.BuildRunMetrics.Empty);
+
+        var lines = ChatBlockRenderers.RenderBuildDeliveryCard(result, viewWidth: 50);
+
+        lines.Should().Contain(line => line.FullText.Contains("Files       1"));
+        lines.Should().NotContain(line => line.FullText.Contains("Summary"),
+            "the assistant's final markdown summary is already rendered above the delivery card");
+        lines.Should().NotContain(line => line.FullText.Contains("sun-yuchen-timeline.html"),
+            "raw markdown summary text must not be duplicated or truncated inside the receipt card");
+    }
+
+    [Fact]
     public void InlineSelector_UsesSharedInformationRequestCardHeader()
     {
         var lines = InlineSelector.RenderAsLines(
@@ -271,11 +299,54 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderPlanCard_DoneStepShowsCircledNumber()
+    public void RenderPlanCard_DoneStepShowsCheckmarkAndSuccessColor()
     {
         var lines = ChatBlockRenderers.RenderPlanCard("Plan",
-            new[] { new PlanStep("X", Status: PlanStepStatus.Done) });
-        lines.Should().Contain(l => l.FullText.Contains("①"));
+            [new PlanStep("X", Status: PlanStepStatus.Done, Content: "description")]);
+        var stepLine = lines.First(l => l.FullText.Contains("①"));
+        stepLine.FullText.Should().Contain($"{TuiGlyphs.Complete} ①");
+        stepLine.Color.Should().Be(TuiPalette.Success,
+            "completed steps must be visually distinct from the muted gray step description below");
+    }
+
+    [Fact]
+    public void RenderPlanCard_IncludeHeaderFalse_OmitsTitleLines()
+    {
+        // 侧边栏固定标题行（SidebarViewBase）已渲染一次标题；对话流卡片内再渲染一遍
+        // 就是标题重复（历史缺陷：标题出现两次）。嵌入侧边栏时传 includeHeader:false。
+        var withHeader = ChatBlockRenderers.RenderPlanCard(
+            "我的计划", [new PlanStep("步骤一")], includeHeader: true);
+        var withoutHeader = ChatBlockRenderers.RenderPlanCard(
+            "我的计划", [new PlanStep("步骤一")], includeHeader: false);
+
+        withHeader.Should().Contain(l => l.FullText.Contains("我的计划"));
+        withoutHeader.Should().Contain(l => l.FullText.Contains("步骤一"),
+            "includeHeader 只隐藏标题，计划内容必须照常渲染");
+        withoutHeader.Should().NotContain(l => l.FullText.Contains("我的计划"),
+            "嵌入侧边栏时标题只保留固定标题行那一处");
+    }
+
+    [Fact]
+    public void RenderPlanCard_LongDocumentPath_WrapsAsSingleEntryWithContinuationIndent()
+    {
+        // 侧栏宽度有限，计划文档路径（>60 列）必然换行。回归守卫：换行续行只缩进，
+        // 不重复「计划文档」前缀——重复前缀会让一条路径被误读为多个计划文档。
+        var path = @"C:\Users\mayue\.onecode\plans\a0e7142e2f9a41bb8cbe36c62e45e6f\6f9ca8872c1e4b0f\revision-0001.md";
+        var lines = ChatBlockRenderers.RenderPlanCard(
+            "Plan", [], viewWidth: 30, documentPath: path);
+
+        lines.Count(l => l.FullText.Contains("计划文档")).Should().Be(1,
+            "one document path must render as exactly one prefixed entry");
+        var entry = lines.First(l => l.FullText.Contains("计划文档"));
+        var continuation = lines.SkipWhile(l => !ReferenceEquals(l, entry))
+            .Skip(1)
+            .TakeWhile(l => l.FullText.StartsWith(' '))
+            .ToList();
+        continuation.Should().NotBeEmpty("the long path must continue on indented lines");
+        continuation.Should().OnlyContain(l => !l.FullText.Contains("计划文档"),
+            "continuation lines must be indented, not re-prefixed");
+        string.Concat(entry.FullText.Trim() + string.Concat(continuation.Select(l => l.FullText.Trim())))
+            .Should().Contain("revision-0001.md", "the full path must survive wrapping");
     }
 
     [Fact]
@@ -284,6 +355,7 @@ public sealed class ChatBlockRenderersTests
         var lines = ChatBlockRenderers.RenderPlanCard("Plan",
             new[] { new PlanStep("X", Status: PlanStepStatus.Current) });
         var stepLine = lines.First(l => l.FullText.Contains("①"));
+        stepLine.FullText.Should().Contain($"{TuiGlyphs.InProgress} ①");
         stepLine.Color.Should().Be(TuiPalette.Accent);
     }
 

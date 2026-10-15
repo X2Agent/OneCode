@@ -3,13 +3,6 @@ namespace OneCode.Core.Domain;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Models;
 
-public enum ThinkingMode
-{
-    Disabled,
-    Enabled,
-    Adaptive,
-}
-
 public enum EffortLevel
 {
     Low,
@@ -47,18 +40,6 @@ public static class EffortThinking
         };
 
         return maxAllowed.HasValue ? Math.Min(budget, maxAllowed.Value) : budget;
-    }
-
-    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
-    public static bool ShouldEnableThinking(ThinkingMode mode, EffortLevel effort)
-    {
-        return mode switch
-        {
-            ThinkingMode.Disabled => false,
-            ThinkingMode.Enabled => true,
-            ThinkingMode.Adaptive => effort >= EffortLevel.Medium,
-            _ => false,
-        };
     }
 
     /// <summary>

@@ -174,13 +174,43 @@ public sealed partial class MessageListView
         if (existing > 0)
             _lines.RemoveRange(lineIdx + 1, existing);
 
+        const int MaxStreamingThinkingPreviewLines = 4; // Cap live reasoning preview height so long thoughts don't push the viewport off-screen
+
         var maxContentWidth = Math.Max(20, ContentWidth - ConversationRenderer.ContentIndent - 2);
-        List<LineEntry> details = [];
+        List<string> wrappedLines = [];
         foreach (var line in expanded.Content
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Split('\n'))
         {
             foreach (var w in TextWidthHelper.WordWrapByWidth(line, maxContentWidth))
+                wrappedLines.Add(w);
+        }
+
+        var isLiveStreamingPreview = _streamingPreviewStart >= 0 && lineIdx >= _streamingPreviewStart;
+        List<LineEntry> details = [];
+        if (isLiveStreamingPreview && wrappedLines.Count > MaxStreamingThinkingPreviewLines)
+        {
+            var hiddenCount = wrappedLines.Count - MaxStreamingThinkingPreviewLines;
+            details.Add(new LineEntry(
+                $"{ConversationRenderer.Indent}  \u2026 (+{hiddenCount} lines)",
+                TuiPalette.FgMuted,
+                null,
+                null,
+                new ThinkingDetailLineTag()));
+
+            for (var i = wrappedLines.Count - MaxStreamingThinkingPreviewLines; i < wrappedLines.Count; i++)
+            {
+                details.Add(new LineEntry(
+                    $"{ConversationRenderer.Indent}  {wrappedLines[i]}",
+                    TuiPalette.FgSecondary,
+                    null,
+                    null,
+                    new ThinkingDetailLineTag()));
+            }
+        }
+        else
+        {
+            foreach (var w in wrappedLines)
             {
                 details.Add(new LineEntry(
                     $"{ConversationRenderer.Indent}  {w}",
@@ -190,6 +220,7 @@ public sealed partial class MessageListView
                     new ThinkingDetailLineTag()));
             }
         }
+
         details.Add(new LineEntry(
             "",
             TuiPalette.FgMuted,

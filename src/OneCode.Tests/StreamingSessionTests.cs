@@ -102,13 +102,50 @@ public sealed class StreamingSessionTests
 
         var events = DigestAll(sut, first, second);
 
-        // Totals are replaced (not summed) — mirrors the runner's cumulative usage semantics.
+        // Totals are replaced (not summed) within the same turn — mirrors the runner's cumulative usage semantics.
         events.OfType<UsageUpdateEvent>().Should().HaveCount(2);
         sut.TotalInputTokens.Should().Be(700);
         sut.FinalUsage.InputTokens.Should().Be(700);
         sut.FinalUsage.OutputTokens.Should().Be(300);
         sut.FinalUsage.CacheReadTokens.Should().Be(40);
         sut.FinalUsage.CacheWriteTokens.Should().Be(7);
+    }
+
+    [Fact]
+    public void Digest_MultiTurnToolLoop_AccumulatesUsageAcrossTurns_AndDetectsUnwrappedStringErrors()
+    {
+        var sut = CreateSut();
+
+        var events = DigestAll(
+            sut,
+            new AgentResponseUpdate
+            {
+                Contents =
+                {
+                    new FunctionCallContent("call_1", "WebSearch", new Dictionary<string, object?> { ["query"] = "october news" }),
+                    new UsageContent(new UsageDetails { InputTokenCount = 20_000, OutputTokenCount = 500, CachedInputTokenCount = 15_000 }),
+                }
+            },
+            new AgentResponseUpdate
+            {
+                Contents = { new FunctionResultContent("call_1", """{"Content":"WebSearch error: all providers failed","IsError":true}""") }
+            },
+            new AgentResponseUpdate
+            {
+                Contents =
+                {
+                    new TextContent("Summary ready."),
+                    new UsageContent(new UsageDetails { InputTokenCount = 22_000, OutputTokenCount = 60, CachedInputTokenCount = 18_000 }),
+                }
+            });
+
+        var toolDone = events.OfType<ToolDoneEvent>().Single();
+        toolDone.IsError.Should().BeTrue("unwrapped string JSON envelope with IsError=true must surface as error in ToolDoneEvent");
+
+        sut.FinalUsage.InputTokens.Should().Be(42_000);
+        sut.FinalUsage.OutputTokens.Should().Be(560, "earlier turn output tokens must not be overwritten by the final turn");
+        sut.FinalUsage.CacheReadTokens.Should().Be(33_000);
+        sut.LastTurnInputTokens.Should().Be(22_000, "LastTurnInputTokens tracks the latest turn's context window watermark");
     }
 
     [Fact]
@@ -127,15 +164,22 @@ public sealed class StreamingSessionTests
             .Which.TurnNumber.Should().Be(1, "continuation text after the first text stays in the same turn");
         sut.TurnCount.Should().Be(1);
         sut.FinalText.Should().Be("first turn still turn 1");
+        sut.LastTurnText.Should().Be("first turn still turn 1");
 
         var secondTurn = DigestAll(
             sut,
             new AgentResponseUpdate { Contents = { new FunctionCallContent("call_t2", "Read", null) } },
             new AgentResponseUpdate { Contents = { new FunctionResultContent("call_t2", "ok") } },
-            new AgentResponseUpdate { Contents = { new TextContent("second turn") } });
+            new AgentResponseUpdate { Contents = { new TextContent("    \n  second turn") } });
 
         secondTurn.OfType<TurnStartedEvent>().Should().ContainSingle().Which.TurnNumber.Should().Be(2);
+        secondTurn.OfType<TextDeltaEvent>().Should().ContainSingle().Which.Text.Should().Be("second turn",
+            "leading whitespace emitted after reasoning at turn start must be stripped");
         sut.TurnCount.Should().Be(2);
+        sut.FinalText.Should().Be("first turn still turn 1\n\nsecond turn",
+            "turns must be separated by paragraph break instead of glued together");
+        sut.LastTurnText.Should().Be("second turn",
+            "LastTurnText must contain only the final turn's text without earlier turn narration");
     }
 
     [Fact]
@@ -152,6 +196,74 @@ public sealed class StreamingSessionTests
             .Which.Text.Should().Be("pondering...");
         sut.TurnCount.Should().Be(0, "thinking content alone must not start a turn");
         sut.CompleteTurnIfStarted().Should().BeNull();
+    }
+
+    [Fact]
+    public void Digest_CumulativeReasoningUpdates_EmitOnlyIncrements()
+    {
+        // 部分提供方/MAF 重放会把"到目前为止的完整 reasoning"随每个 update 重发；
+        // TUI 对 ThinkingDeltaEvent 逐条追加，不去重就会呈现前缀式增长
+        //（"Now" → "Now I have a good" → …）。
+        var sut = CreateSut();
+
+        var events = DigestAll(sut,
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("Now") } },
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("Now I have a good") } },
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("Now I have a good picture. Let me check") } });
+
+        var deltas = events.OfType<ThinkingDeltaEvent>().Select(e => e.Text).ToList();
+        string.Concat(deltas).Should().Be("Now I have a good picture. Let me check",
+            "cumulative reasoning must collapse to true increments so the TUI assembles each character exactly once");
+        deltas.Should().HaveCount(3, "one increment per update");
+        sut.TurnCount.Should().Be(0, "reasoning dedup must not affect turn state");
+    }
+
+    [Fact]
+    public void Digest_ReplayedReasoningAfterToolResult_DeduplicatesToSingleEmission()
+    {
+        // MAF turn-history 重放：turn 边界后原样重发上一轮的 reasoning/tool 内容。
+        // tool 事件按 CallId 去重，reasoning 也必须同样去重。
+        var sut = CreateSut();
+        var reasoning = new TextReasoningContent("Now I have a good picture. Let me check the results.");
+        var fcc = new FunctionCallContent("call_r1", "WebSearch", null);
+        var frc = new FunctionResultContent("call_r1", "[]");
+        var turn = new AgentResponseUpdate { Contents = { reasoning, fcc, frc } };
+
+        DigestAll(sut, turn);
+        var replayEvents = DigestAll(sut, turn);
+
+        replayEvents.OfType<ThinkingDeltaEvent>().Should().BeEmpty("replayed reasoning must not be re-emitted");
+        replayEvents.OfType<ToolStartEvent>().Should().BeEmpty("tool replay is deduped by CallId");
+    }
+
+    [Fact]
+    public void Digest_ReplayedOlderReasoningPrefix_SkipsWithoutStateChange()
+    {
+        var sut = CreateSut();
+
+        DigestAll(sut,
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("first part") } },
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("first part second part") } });
+        var events = DigestAll(sut, new AgentResponseUpdate
+        {
+            Contents = { new TextReasoningContent("first part") }
+        });
+
+        events.OfType<ThinkingDeltaEvent>().Should().BeEmpty("an older-prefix replay is stale content");
+    }
+
+    [Fact]
+    public void Digest_DisjointReasoningDeltas_PassThroughUnchanged()
+    {
+        // 真正的逐块 delta（互不重叠）必须原样透传，不能被前缀逻辑误伤。
+        var sut = CreateSut();
+
+        var events = DigestAll(sut,
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("chunk one ") } },
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("chunk two") } });
+
+        events.OfType<ThinkingDeltaEvent>().Select(e => e.Text)
+            .Should().Equal("chunk one ", "chunk two");
     }
 
     [Fact]
@@ -254,5 +366,40 @@ public sealed class StreamingSessionTests
         completed.Should().NotBeNull();
         completed!.TurnNumber.Should().Be(1);
         completed.HadToolCalls.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Digest_SubagentProgressUpdate_ProjectsToSubagentProgressEvent()
+    {
+        // fork 经旁路通道写入的原始信封必须原样投影为流内事件，不被 MAF 分支吞掉。
+        var sut = CreateSut();
+
+        var events = DigestAll(sut, new SubagentProgressUpdate(
+            "f1", "Explore", SubagentProgressPhase.Running,
+            ToolCallCount: 5, TurnCount: 2, CurrentToolName: "WebSearch", ElapsedMs: 1234));
+
+        var projected = events.Should().ContainSingle(e => e is SubagentProgressEvent)
+            .Subject as SubagentProgressEvent;
+        projected!.ForkId.Should().Be("f1");
+        projected.AgentName.Should().Be("Explore");
+        projected.Phase.Should().Be(SubagentProgressPhase.Running);
+        projected.ToolCallCount.Should().Be(5);
+        projected.TurnCount.Should().Be(2);
+        projected.CurrentToolName.Should().Be("WebSearch");
+        projected.ElapsedMs.Should().Be(1234);
+    }
+
+    [Fact]
+    public void Digest_SubagentProgressPhaseTransition_PreservesPhaseDiscrimination()
+    {
+        // Started/Completed/Failed 是徽标配对计数的依据——Phase 在投影中不得丢失或折叠。
+        var sut = CreateSut();
+
+        var events = DigestAll(sut,
+            new SubagentProgressUpdate("f1", "Explore", SubagentProgressPhase.Started),
+            new SubagentProgressUpdate("f1", "Explore", SubagentProgressPhase.Completed, TurnCount: 3));
+
+        events.Select(e => ((SubagentProgressEvent)e).Phase)
+            .Should().Equal(SubagentProgressPhase.Started, SubagentProgressPhase.Completed);
     }
 }

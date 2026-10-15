@@ -19,7 +19,9 @@ public sealed record ApprovePlanCommand(
     PlanWorkflowId PlanId,
     int Revision,
     long ExpectedWorkflowVersion,
-    string ApprovedBy);
+    string ApprovedBy,
+    string OriginalRequest = "",
+    IReadOnlyList<string>? Clarifications = null);
 
 public sealed record RejectPlanCommand(
     string CommandId,
@@ -109,6 +111,15 @@ public sealed record BuildRunStartedEvent(
     long FencingToken = 0)
     : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
+/// <summary>BuildRun 以 Completed 终态收口（run 正常结束且最终验证通过）：计划工作流据此完成。</summary>
+public sealed record BuildRunSucceededEvent(
+    SessionId SessionId,
+    PlanWorkflowId PlanId,
+    string RunId,
+    DateTimeOffset OccurredAt,
+    long FencingToken = 0)
+    : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
+
 public sealed record BuildRunFailedEvent(
     SessionId SessionId,
     PlanWorkflowId PlanId,
@@ -119,35 +130,5 @@ public sealed record BuildRunFailedEvent(
     long FencingToken = 0)
     : PlanAgentRunEvent(SessionId, PlanId, RunId, OccurredAt, FencingToken);
 
-public sealed record UpdatePlanStepCommand(
-    string CommandId,
-    SessionId SessionId,
-    PlanWorkflowId PlanId,
-    string RunId,
-    string StepId,
-    PlanStepExecutionStatus Status,
-    string? Evidence,
-    string? Error,
-    long FencingToken = 0);
-
-public sealed record CompletePlanExecutionCommand(
-    string CommandId,
-    SessionId SessionId,
-    PlanWorkflowId PlanId,
-    string RunId,
-    string Summary,
-    long FencingToken = 0);
-
-public sealed record CompletePlanVerificationCommand(
-    string CommandId,
-    SessionId SessionId,
-    PlanWorkflowId PlanId,
-    string RunId,
-    bool Passed,
-    IReadOnlyList<string> Evidence,
-    string Summary,
-    long FencingToken = 0);
-
-public sealed record PlanRevisionResult(PlanWorkflow Workflow, PlanRevision Revision);
 public sealed record PlanSubmissionResult(PlanWorkflow Workflow, PlanRevision Revision);
 public sealed record PlanTransitionResult(PlanWorkflow Workflow, bool IsDuplicateCommand = false);

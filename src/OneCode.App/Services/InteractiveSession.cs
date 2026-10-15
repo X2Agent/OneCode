@@ -21,6 +21,5 @@ public sealed record InteractiveSession(
     string SystemPrompt,
     ISessionManager SessionManager,
     WorkingModeController ModeController,
-    string? SshHost,
     IReadOnlyList<SlashCommandEntry> SlashCommands,
     string HarnessPrompt);

@@ -26,13 +26,10 @@ public enum PlanCardPhase
     /// <summary>Build Run 正在执行批准的结构化步骤。</summary>
     Executing,
 
-    /// <summary>Build 工作已结束，正在验证验收条件。</summary>
-    Verifying,
-
-    /// <summary>全部步骤和验证门禁已通过。</summary>
+    /// <summary>Build Run 正常结束且最终验证通过。</summary>
     Completed,
 
-    /// <summary>工作流执行或验证失败。</summary>
+    /// <summary>工作流执行失败。</summary>
     Failed,
 
     /// <summary>工作流已取消。</summary>

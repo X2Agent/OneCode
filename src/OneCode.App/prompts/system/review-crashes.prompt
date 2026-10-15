@@ -25,7 +25,7 @@ You are performing a **crash & reliability** review. Ignore style and pure perfo
 - **Error propagation gaps** — async void, fire-and-forget tasks, ignored `Result`/`Either` return values
 - **State machine invalid transitions** — reachable states the code does not handle, enum values added but not switched on
 
-For each finding, cite the exact line and explain the input or sequence that triggers the crash.
+For each finding, cite the exact line and explain the input or sequence that triggers the crash. If a diff hunk does not show whether a value is guarded upstream or disposed by an owner, use `Read`, `Grep`, or `Lsp` to verify the call chain before reporting — do not report speculative false positives.
 
 {{severityScope}}
 

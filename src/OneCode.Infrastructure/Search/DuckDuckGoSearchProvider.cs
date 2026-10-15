@@ -112,22 +112,53 @@ public sealed class DuckDuckGoSearchProvider(IHttpClientFactory httpClientFactor
     }
 
     /// <summary>
-    /// 从当前元素开始向后续兄弟节点查找最近的 <c>result__snippet</c>；
-    /// 遇到下一个 <c>result__a</c> 时停止，避免把后续结果的摘要误关联到当前链接。
+    /// 查找当前链接对应的 <c>result__snippet</c>：
+    /// 1. 优先在单条结果的父级容器（<c>.result__body</c> / <c>.result</c> / <c>.results_links</c> / <c>.web-result</c>）内查找，
+    ///    适配 DDG 真实 DOM（<c>a.result__a</c> 嵌套在 <c>h2.result__title</c> 内，而 <c>.result__snippet</c> 位于外层 <c>.result__body</c> 下）；
+    /// 2. 回退到从当前元素（或其标题父节点）向后续兄弟节点线性扫描，遇到下一个 <c>result__a</c> 时立即停止，防止跨结果串扰。
     /// </summary>
     internal static IElement? FindNextSnippet(IElement start)
     {
-        var sibling = start.NextElementSibling;
+        var container = start.Closest(".result__body, .result, .results_links, .web-result");
+        if (container is not null && container.QuerySelectorAll("a.result__a").Length == 1)
+        {
+            var containerSnippet = container.QuerySelector(".result__snippet");
+            if (containerSnippet is not null)
+                return containerSnippet;
+        }
+
+        var directSibling = ScanFollowingSiblingsForSnippet(start.NextElementSibling);
+        if (directSibling is not null)
+            return directSibling;
+
+        if (start.ParentElement is { } parent
+            && (parent.ClassList.Contains("result__title")
+                || parent.TagName.Equals("H2", StringComparison.OrdinalIgnoreCase)
+                || parent.TagName.Equals("H3", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ScanFollowingSiblingsForSnippet(parent.NextElementSibling);
+        }
+
+        return null;
+    }
+
+    private static IElement? ScanFollowingSiblingsForSnippet(IElement? sibling)
+    {
         while (sibling is not null)
         {
             if (sibling.ClassList.Contains("result__snippet"))
                 return sibling;
 
-            if (sibling.TagName.Equals("A", StringComparison.OrdinalIgnoreCase) &&
-                sibling.ClassList.Contains("result__a"))
+            if ((sibling.TagName.Equals("A", StringComparison.OrdinalIgnoreCase)
+                    && sibling.ClassList.Contains("result__a"))
+                || sibling.QuerySelector("a.result__a") is not null)
             {
                 return null;
             }
+
+            var nestedSnippet = sibling.QuerySelector(".result__snippet");
+            if (nestedSnippet is not null)
+                return nestedSnippet;
 
             sibling = sibling.NextElementSibling;
         }
@@ -138,7 +169,18 @@ public sealed class DuckDuckGoSearchProvider(IHttpClientFactory httpClientFactor
     /// <summary>把 DDG 的 <c>/l/?uddg=</c> 跳转链接还原为真实目标 URL。</summary>
     internal static string ResolveRedirect(string href)
     {
-        if (!Uri.TryCreate(href, UriKind.Absolute, out var uri))
+        if (string.IsNullOrWhiteSpace(href))
+            return href;
+
+        // DDG HTML 常返回协议相对链接（//duckduckgo.com/l/?uddg=...）；
+        // 在 Windows 上 Uri.TryCreate 会把 // 开头解析为 file:// UNC 路径导致 Query 丢失。
+        var normalized = href.StartsWith("//", StringComparison.Ordinal)
+            ? "https:" + href
+            : href.StartsWith("/l/", StringComparison.OrdinalIgnoreCase)
+                ? "https://duckduckgo.com" + href
+                : href;
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
             return href;
 
         if (!uri.Host.Contains("duckduckgo.com", StringComparison.OrdinalIgnoreCase))

@@ -26,7 +26,7 @@
 这次"升级"必然**再次**被服务端以 `Length` 截断，于是白白烧掉 `RecoveryLimit = 3` 次恢复机会：
 升级 → 仍 Length → 进 continuation 循环 → 再 3 次失败 → 返回半截响应。用户看到的是"小模型答一半就停"。
 
-同时 `MainAgentRunner.BuildChatOptions`（`src/OneCode.App/Services/Agent/MainAgentRunner.cs:346`）的缺省值 `?? 4096`
+同时 `MainAgentRunner.BuildChatOptions`（`src/OneCode.App/Services/Agent/MainAgentRunner.cs`）的缺省值 `?? 65_536`（`EscalatedZeroOutputRetryMaxTokens`）
 与 `ModelContextDefaults.ResolveOutputReservation(window, 8_192)`（`src/OneCode.Core/Models/ModelContextDefaults.cs`）是两套独立规则，
 后者才是 `docs/compact-thresholds.md` 承诺的"窗口 1/4 收敛"规则。`TokenBudget`（`src/OneCode.App/Services/Compact/TokenBudget.cs:52-61`）
 还各自复制了一份 Ollama 判定 + 收敛逻辑。
@@ -206,7 +206,7 @@ dotnet test src/OneCode.slnx --filter "FullyQualifiedName~ProviderWireContract|F
    - 统计本次历史中由修复合成的 result 数量；超过常量 `MaxReplayedToolCallRepairs`（建议 3）时**不修**、
      直接让校验抛异常——脏历史无限增殖说明会话已不可信。常量与理由写进注释。
 3. **仅在确有必要时**在 `src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs`（安装顺序 321–448，
-   参考 `PromptTooLongRecoveryRunMiddleware` 的 350–352 位次）加一个 function-level 中间件把修复文本回灌给模型；
+   参考 run 级观测中间件 `BudgetGuard` 的装配位次）加一个 function-level 中间件把修复文本回灌给模型；
    如果合成 result 本身已足够（预期如此），**不加**——避免无用中间件。以第 1 步的端到端测试结果决定。
 4. **不留兼容层**：不新增"跳过脏 tool-call"的开关或配置项。
 

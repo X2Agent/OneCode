@@ -14,6 +14,33 @@ internal sealed class StreamingToolTracker
     // 最近一次完成并入组的工具键——组只在"相邻同类"时延续，异名工具完成即断开。
     private string? _lastGroupKey;
 
+    // 活跃子代理 fork 行：agentName → 行状态。Agent 工具调用期间接收
+    // SubagentProgress 更新，原位重渲头行 + 实时活动行；工具完成即注销。
+    private readonly Dictionary<string, SubagentLineState> _subagentLines = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 一条活跃子代理进度行的登记状态：头行索引 + 折叠行目标文案（"Explore · 描述"，
+    /// 进度刷新时原样保留）+ 实时活动行索引（-1 = 尚未插入）+ 最新进度快照
+    /// （头行 tag 携带，展开时显示实时统计）。
+    /// </summary>
+    internal sealed record SubagentLineState(int LineIndex, string HeaderTarget)
+    {
+        public int LineIndex { get; set; } = LineIndex;
+        public int ActivityLineIndex { get; set; } = -1;
+        public TuiSubagentProgress? LatestProgress { get; set; }
+    }
+
+    /// <summary>登记一条活跃子代理进度行（按代理名索引，同名覆盖——同名并发 fork 极少见）。</summary>
+    public void RegisterSubagentLine(string agentName, int lineIndex, string headerTarget)
+        => _subagentLines[agentName] = new SubagentLineState(lineIndex, headerTarget);
+
+    /// <summary>查找活跃子代理进度行；不存在返回 false。</summary>
+    public bool TryGetSubagentLine(string agentName, out SubagentLineState state)
+        => _subagentLines.TryGetValue(agentName, out state!);
+
+    /// <summary>注销子代理进度行（Agent 工具调用完成时调用）。</summary>
+    public void RemoveSubagentLine(string agentName) => _subagentLines.Remove(agentName);
+
     /// <summary>注册一个工具调用的开始，记录行索引和开始时间戳。</summary>
     /// <param name="toolId">工具调用 ID。</param>
     /// <param name="lineIndex">在 _streamingStatusLines 中的行索引。</param>
@@ -114,6 +141,15 @@ internal sealed class StreamingToolTracker
             if (group.LineIndex >= fromIndex)
                 group.LineIndex += delta;
         }
+
+        foreach (var key in _subagentLines.Keys.ToList())
+        {
+            var state = _subagentLines[key];
+            if (state.LineIndex >= fromIndex)
+                state.LineIndex += delta;
+            if (state.ActivityLineIndex >= fromIndex)
+                state.ActivityLineIndex += delta;
+        }
     }
 
     /// <summary>清空所有挂起项与活跃组（用于 ContinueStreaming 重置轮次——组不跨轮延续）。</summary>
@@ -122,6 +158,7 @@ internal sealed class StreamingToolTracker
         _pendingToolLines.Clear();
         _groups.Clear();
         _lastGroupKey = null;
+        _subagentLines.Clear();
     }
 
     /// <summary>完全重置（用于 BeginStreaming/EndStreaming）。</summary>
@@ -131,6 +168,7 @@ internal sealed class StreamingToolTracker
         _seenToolIds.Clear();
         _groups.Clear();
         _lastGroupKey = null;
+        _subagentLines.Clear();
     }
 
     private sealed class ToolGroupState(int lineIndex, List<(string? Args, string? Result, long StartTick, bool IsError)> members)

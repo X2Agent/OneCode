@@ -15,7 +15,13 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner) : IChatClient
 {
     private readonly IChatClient _inner = inner;
     private const int RecoveryLimit = 3;
-    private const int EscalatedMaxTokens = 65_536;
+
+    /// <summary>
+    /// 输出预算耗尽时的升级值。推理模型可能把 4K 级默认输出预算全部耗在 reasoning 上
+    /// （finishReason=length 且零文本零工具调用），65536 是产出可见内容所需的量级。
+    /// 主 Agent 的默认输出上限与零输出重试共用此单一事实源。
+    /// </summary>
+    public const int EscalatedMaxTokens = 65_536;
     private const string RecoveryPrompt =
         """
         Output token limit hit. Resume directly — no apology, no recap. Continue from exactly where you left off.

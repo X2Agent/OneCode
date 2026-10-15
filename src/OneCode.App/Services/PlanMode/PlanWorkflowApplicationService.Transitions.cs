@@ -1,3 +1,4 @@
+using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.PlanMode;
 
@@ -41,13 +42,7 @@ public sealed partial class PlanWorkflowApplicationService
         {
             PlanCardDecision.Approve => new DecisionOutcome(
                 (await ApproveAsync(
-                    new ApprovePlanCommand(
-                        commandId,
-                        workflow.SessionId,
-                        workflow.Id,
-                        workflow.SubmittedRevision!.Value,
-                        workflow.Version,
-                        "interactive-user"),
+                    BuildApproveCommand(session, workflow, commandId),
                     ct).ConfigureAwait(false)).Workflow),
             PlanCardDecision.Reject => new DecisionOutcome(
                 (await RejectAsync(
@@ -72,5 +67,28 @@ public sealed partial class PlanWorkflowApplicationService
                     ct).ConfigureAwait(false)).Workflow),
             _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown plan card decision."),
         };
+    }
+
+    /// <summary>批准命令：审批瞬间把规划阶段的用户原始诉求与澄清问答冻结进快照，随计划一起交给执行轮。</summary>
+    private static ApprovePlanCommand BuildApproveCommand(
+        InteractiveSession session,
+        PlanWorkflow workflow,
+        string commandId)
+    {
+        var windowStart = session.SessionManager.GetConversation(workflow.SessionId) is { } conversation
+            ? HistorySeedBoundary.ReadValidated(conversation)?.MessageIndex ?? 0
+            : 0;
+        var handoff = PlanHandoffExtractor.Extract(
+            session.SessionManager.GetChatHistory(workflow.SessionId),
+            windowStart);
+        return new ApprovePlanCommand(
+            commandId,
+            workflow.SessionId,
+            workflow.Id,
+            workflow.SubmittedRevision!.Value,
+            workflow.Version,
+            "interactive-user",
+            handoff.OriginalRequest,
+            handoff.Clarifications);
     }
 }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Exec;
+using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Loop;
@@ -36,7 +37,8 @@ public sealed class IterativeLoopService(
     IShellExecutor shellExecutor,
     IVerificationProvider? verificationProvider,
     IToolCatalog toolCatalog,
-    IWorkingDirectoryAccessor workingDirectoryAccessor)
+    IWorkingDirectoryAccessor workingDirectoryAccessor,
+    IPromptManager promptManager)
     : IIterativeLoopService
 {
     /// <summary>per-run 状态登记在 <see cref="LoopContext.AdditionalProperties"/> 上的键。</summary>
@@ -63,11 +65,16 @@ public sealed class IterativeLoopService(
         using var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
         var changeVersion = transaction.CaptureChangeVersion();
 
+        var harnessPrompt = await promptManager.GetPromptAsync(PromptComposer.HarnessPromptName, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"Harness prompt '{PromptComposer.HarnessPromptName}' not found in any IPromptManager store.");
+
         var inner = await mainAgentRunner.BuildAsAIAgentAsync(
             new MainAgentRunOptions
             {
                 ModelId = modelId,
                 SystemPrompt = systemPrompt,
+                HarnessInstructions = harnessPrompt,
                 // 循环是自主执行体：不挂交互审批 broker——否则首轮 pending approval 就会让
                 // LoopAgent 停下，整个循环空转。权限政策仍由 PermissionChecker 强制执行，
                 // 调用方已被 LoopCommand 门在自主权限模式上。

@@ -49,74 +49,49 @@ public sealed class PlanWorkflowFencingTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateStepAsync_WithClaimedToken_PersistsFenced()
+    public async Task BuildRunSucceededEvent_WithClaimedToken_CompletesWorkflowFenced()
     {
         var (store, service, workflow) = await CreateExecutingAsync();
         var claimed = await service.ClaimExecutionAsync(
             workflow.SessionId, workflow.Id, expectedVersion: workflow.Version,
             TestContext.Current.CancellationToken);
 
-        var result = await service.UpdateStepAsync(new UpdatePlanStepCommand(
-            "update-1",
-            workflow.SessionId,
-            workflow.Id,
-            RunId,
-            "step-1",
-            PlanStepExecutionStatus.InProgress,
-            Evidence: null,
-            Error: null,
-            claimed.WorkflowFencingToken!.Value),
+        await service.HandleRunEventAsync(
+            new BuildRunSucceededEvent(
+                workflow.SessionId, workflow.Id, RunId, DateTimeOffset.UtcNow, claimed.WorkflowFencingToken!.Value),
             TestContext.Current.CancellationToken);
 
-        result.Workflow.StepExecutions.Single(step => step.StepId == "step-1").Status
-            .Should().Be(PlanStepExecutionStatus.InProgress);
         var reloaded = await store.LoadAsync(workflow.SessionId, TestContext.Current.CancellationToken);
-        reloaded!.Workflow.StepExecutions.Single(step => step.StepId == "step-1").Status
-            .Should().Be(PlanStepExecutionStatus.InProgress);
+        reloaded!.Workflow.State.Should().Be(PlanWorkflowState.Completed);
+        reloaded.Workflow.ActiveRunId.Should().BeNull("收口后不再有活跃 run");
         reloaded.Workflow.WorkflowFencingToken.Should().Be(claimed.WorkflowFencingToken);
     }
 
     [Fact]
-    public async Task UpdateStepAsync_WithoutToken_AfterClaim_FailsClosed()
+    public async Task RunEvent_WithoutToken_AfterClaim_FailsClosed()
     {
         var (store, service, workflow) = await CreateExecutingAsync();
         var claimed = await service.ClaimExecutionAsync(
             workflow.SessionId, workflow.Id, expectedVersion: workflow.Version,
             TestContext.Current.CancellationToken);
 
-        var act = () => service.UpdateStepAsync(new UpdatePlanStepCommand(
-            "update-no-token",
-            workflow.SessionId,
-            workflow.Id,
-            RunId,
-            "step-1",
-            PlanStepExecutionStatus.InProgress,
-            Evidence: null,
-            Error: null),
+        var act = () => service.HandleRunEventAsync(
+            new BuildRunSucceededEvent(workflow.SessionId, workflow.Id, RunId, DateTimeOffset.UtcNow),
             TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<PlanConcurrencyException>();
         var reloaded = await store.LoadAsync(workflow.SessionId, TestContext.Current.CancellationToken);
         reloaded!.Workflow.Version.Should().Be(claimed.Version);
-        reloaded.Workflow.StepExecutions.Single(step => step.StepId == "step-1").Status
-            .Should().Be(PlanStepExecutionStatus.Pending);
+        reloaded.Workflow.State.Should().Be(PlanWorkflowState.Executing);
     }
 
     [Fact]
-    public async Task Unclaimed_ExecutionWrite_WithToken_FailsClosed()
+    public async Task Unclaimed_RunEvent_WithToken_FailsClosed()
     {
         var (_, service, workflow) = await CreateExecutingAsync();
 
-        var act = () => service.UpdateStepAsync(new UpdatePlanStepCommand(
-            "update-token-before-claim",
-            workflow.SessionId,
-            workflow.Id,
-            RunId,
-            "step-1",
-            PlanStepExecutionStatus.InProgress,
-            Evidence: null,
-            Error: null,
-            FencingToken: 12345),
+        var act = () => service.HandleRunEventAsync(
+            new BuildRunSucceededEvent(workflow.SessionId, workflow.Id, RunId, DateTimeOffset.UtcNow, 12345),
             TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<PlanConcurrencyException>();
@@ -138,21 +113,13 @@ public sealed class PlanWorkflowFencingTests : IDisposable
             expectedVersion: claimed.Version,
             TestContext.Current.CancellationToken);
 
-        var act = () => service.UpdateStepAsync(new UpdatePlanStepCommand(
-            "update-stale",
-            workflow.SessionId,
-            workflow.Id,
-            RunId,
-            "step-1",
-            PlanStepExecutionStatus.InProgress,
-            Evidence: null,
-            Error: null,
-            claimed.WorkflowFencingToken.Value),
+        var act = () => service.HandleRunEventAsync(
+            new BuildRunSucceededEvent(
+                workflow.SessionId, workflow.Id, RunId, DateTimeOffset.UtcNow, claimed.WorkflowFencingToken.Value),
             TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<PlanConcurrencyException>();
     }
-
     [Fact]
     public async Task CancelAsync_AdoptsClaimedToken_PersistsDuringClaim()
     {
@@ -212,15 +179,6 @@ public sealed class PlanWorkflowFencingTests : IDisposable
             ActiveRunId = RunId,
             ActiveRunKind = PlanRunKind.Build,
             ApprovedSnapshot = CreateSnapshot(),
-            StepExecutions =
-            [
-                new PlanStepExecution
-                {
-                    StepId = "step-1",
-                    Status = PlanStepExecutionStatus.Pending,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                },
-            ],
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         var aggregate = new PlanAggregate(workflow, [CreateRevision(workflow)]);
@@ -244,15 +202,6 @@ public sealed class PlanWorkflowFencingTests : IDisposable
             ActiveRunId = null,
             ActiveRunKind = PlanRunKind.Build,
             ApprovedSnapshot = CreateSnapshot(),
-            StepExecutions =
-            [
-                new PlanStepExecution
-                {
-                    StepId = "step-1",
-                    Status = PlanStepExecutionStatus.Pending,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                },
-            ],
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         var aggregate = new PlanAggregate(workflow, [CreateRevision(workflow)]);

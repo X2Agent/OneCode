@@ -23,8 +23,7 @@ public sealed class LocalAgentFileStore(
     IWorkingDirectoryAccessor wd,
     ILogger<LocalAgentFileStore>? logger = null)
 {
-    private readonly string _workingDirectory = wd.WorkingDirectory;
-    private readonly IReadOnlyList<string>? _additionalDirectories = wd.AdditionalDirectories;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
     private readonly ILogger<LocalAgentFileStore>? _logger = logger;
 
     /// <summary>
@@ -34,9 +33,10 @@ public sealed class LocalAgentFileStore(
     public IReadOnlyList<string> FindFiles(
         string directory,
         string? patterns = null,
-        string[]? excludeDirs = null)
+        string[]? excludeDirs = null,
+        IReadOnlyList<string>? extraAllowedDirs = null)
     {
-        var resolved = ResolvePath(directory);
+        var resolved = ResolvePath(directory, extraAllowedDirs);
         if (!Directory.Exists(resolved))
             return [];
 
@@ -79,36 +79,45 @@ public sealed class LocalAgentFileStore(
     /// Resolves a path (relative or absolute) against the working directory and validates
     /// it is within an allowed directory.
     /// </summary>
-    private string ResolvePath(string path)
+    private string ResolvePath(string path, IReadOnlyList<string>? extraAllowedDirs = null)
     {
+        var workingDirectory = _wd.WorkingDirectory;
         var expanded = PathsHelper.ExpandHome(path);
 
         var resolved = Path.IsPathRooted(expanded)
             ? Path.GetFullPath(expanded)
-            : Path.GetFullPath(Path.Combine(_workingDirectory, expanded));
+            : Path.GetFullPath(Path.Combine(workingDirectory, expanded));
 
-        if (PathBoundary.IsWithinDirectory(resolved, _workingDirectory))
+        if (PathBoundary.IsWithinDirectory(resolved, workingDirectory))
             return resolved;
 
-        if (_additionalDirectories is not null)
-        {
-            foreach (var dir in _additionalDirectories)
-            {
-                if (string.IsNullOrWhiteSpace(dir))
-                    continue;
-                try
-                {
-                    if (PathBoundary.IsWithinDirectory(resolved, dir))
-                        return resolved;
-                }
-                catch (ArgumentException) { /* skip invalid dir entries */ }
-                catch (NotSupportedException) { /* skip invalid dir entries */ }
-            }
-        }
+        if (IsWithinAny(resolved, _wd.AdditionalDirectories) || IsWithinAny(resolved, extraAllowedDirs))
+            return resolved;
 
         _logger?.LogWarning("Path '{Path}' is outside the working directory and additional directories", path);
         throw new UnauthorizedAccessException(
             $"Path '{path}' is outside the working directory. " +
             "Use /add-dir to grant access to additional directories.");
+    }
+
+    private static bool IsWithinAny(string resolvedPath, IReadOnlyList<string>? allowedDirs)
+    {
+        if (allowedDirs is null)
+            return false;
+
+        foreach (var dir in allowedDirs)
+        {
+            if (string.IsNullOrWhiteSpace(dir))
+                continue;
+            try
+            {
+                if (PathBoundary.IsWithinDirectory(resolvedPath, dir))
+                    return true;
+            }
+            catch (ArgumentException) { /* skip invalid dir entries */ }
+            catch (NotSupportedException) { /* skip invalid dir entries */ }
+        }
+
+        return false;
     }
 }

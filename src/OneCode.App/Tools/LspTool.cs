@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using OneCode.App.Services.Lsp;
+using OneCode.App.Services.Search;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Text;
@@ -13,23 +14,41 @@ namespace OneCode.App.Tools;
 /// rename (with prepare), formatting, signature help, workspace command execution,
 /// and workspace-wide symbol search.
 /// Server routing is automatic by file extension when the server parameter is omitted.
+/// Symbol-level convenience: workspaceSymbol falls back to the local code index when no LSP
+/// server answers, and references accepts a bare symbol name (locates the declaration first,
+/// then falls back to word-boundary text search) — see the <c>LspTool.Symbols.cs</c> partial.
 /// </summary>
-public sealed class LspTool(ILspServerManager serverManager, LanguagePackRegistry packRegistry, ILogger<LspTool>? logger = null)
+public sealed partial class LspTool(
+    ILspServerManager serverManager,
+    LanguagePackRegistry packRegistry,
+    ICodeIndexService indexService,
+    ITextSearchService textSearch,
+    IWorkingDirectoryAccessor wd,
+    ILogger<LspTool>? logger = null)
 {
     private readonly ILspServerManager _serverManager = serverManager;
     private readonly LanguagePackRegistry _packRegistry = packRegistry;
+    private readonly ICodeIndexService _indexService = indexService;
+    private readonly ITextSearchService _textSearch = textSearch;
+    private readonly IWorkingDirectoryAccessor _wd = wd;
     private readonly ILogger<LspTool>? _logger = logger;
 
     [Description("Perform Language Server Protocol operations: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol.")]
     public async Task<ToolResult> ExecuteLspAsync(
         [Description("LSP action: definition, declaration, typeDefinition, implementation, references, hover, documentHighlight, diagnostics, symbols, completion, codeAction, codeActionResolve, rename, prepareRename, formatting, signatureHelp, callHierarchy, typeHierarchy, executeCommand, workspaceSymbol")] string action,
-        [Description("File path (required for all actions except workspaceSymbol, executeCommand, and hierarchy sub-actions)")] string file = "",
+        [Description("File path (required for all actions except workspaceSymbol, executeCommand, symbol-based references, and hierarchy sub-actions)")] string file = "",
         [Description("Line number (1-based, required for position-based actions)")] int line = 1,
         [Description("Column number (1-based, required for position-based actions)")] int column = 1,
         [Description("LSP server name (optional, auto-resolved by file extension if omitted)")] string? server = null,
         [Description("New name for rename action")] string? newName = null,
         [Description("Query string for workspaceSymbol; JSON CodeAction for codeActionResolve; command name for executeCommand; 'incoming'/'outgoing' for callHierarchy; 'subtypes'/'supertypes' for typeHierarchy")] string? query = null,
         [Description("JSON-serialized arguments array for executeCommand (optional)")] string? arguments = null,
+        [Description("Symbol name for symbol-based references: locates the declaration via LSP workspaceSymbol (falling back to the code index) then returns all references; falls back to word-boundary text search when LSP is unavailable")] string? symbol = null,
+        [Description("Directory or file scope (defaults to working directory); used by symbol-based references and workspaceSymbol path filtering")] string? path = null,
+        [Description("Glob pattern to filter files for symbol-based references (e.g. *.cs,*.tsx)")] string? glob = null,
+        [Description("Glob patterns to exclude for symbol-based references (comma-separated, e.g. *.Tests,**/bin/**)")] string? exclude_glob = null,
+        [Description("If true (default), symbol-based references wrap the symbol in word-boundary anchors. Set false to find substring matches.")] bool exact_word = true,
+        [Description("Maximum number of symbol-based reference results to return (default 200)")] int max_results = 200,
         CancellationToken ct = default)
     {
         // workspaceSymbol is workspace-scoped: needs no file, requires a query string.
@@ -37,8 +56,8 @@ public sealed class LspTool(ILspServerManager serverManager, LanguagePackRegistr
         {
             if (string.IsNullOrWhiteSpace(query))
                 return ToolResult.Error("workspaceSymbol requires the 'query' parameter.");
-            var wsResult = await ExecuteWorkspaceSymbolAsync(query, ct).ConfigureAwait(false);
-            return ToolResult.JsonSuccess(wsResult);
+            var wsResult = await ExecuteWorkspaceSymbolAsync(query, path, ct).ConfigureAwait(false);
+            return wsResult;
         }
 
         // executeCommand is workspace-scoped: needs no file, requires a command name in 'query'.
@@ -68,6 +87,16 @@ public sealed class LspTool(ILspServerManager serverManager, LanguagePackRegistr
             {
                 return ToolResult.Error($"LSP {action} failed: {ex.Message}");
             }
+        }
+
+        // references 支持按符号名调用：只给 symbol 不给 file 时，先经 LSP 定位声明再查引用，
+        // LSP 不可用/失败时退回词边界文本搜索（实现见 LspTool.Symbols.cs）。
+        if (action.ToLowerInvariant() == "references" && string.IsNullOrWhiteSpace(file))
+        {
+            if (string.IsNullOrWhiteSpace(symbol))
+                return ToolResult.Error("Parameter 'file' (or 'symbol' for symbol-based search) is required for the references action.");
+            return await ExecuteReferencesBySymbolAsync(
+                symbol, path, glob, exclude_glob, exact_word, max_results, ct).ConfigureAwait(false);
         }
 
         if (string.IsNullOrWhiteSpace(file))
@@ -121,48 +150,15 @@ public sealed class LspTool(ILspServerManager serverManager, LanguagePackRegistr
 
             return ToolResult.JsonSuccess(result);
         }
+        catch (OperationCanceledException)
+        {
+            // 调用方取消必须穿透，不能被吞成"服务器失败"错误结果。
+            throw;
+        }
         catch (Exception ex)
         {
             return ToolResult.Error($"LSP {action} failed: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Execute workspace/symbol on every running server and merge results.
-    /// Returns a unified list of SymbolInformation objects across all servers,
-    /// which lets the agent find symbols project-wide without knowing which
-    /// language server owns them.
-    /// </summary>
-    private async Task<object> ExecuteWorkspaceSymbolAsync(string query, CancellationToken ct)
-    {
-        var status = _serverManager.GetStatus();
-        if (status.Count == 0)
-            return new { symbols = Array.Empty<object>() };
-
-        var @params = JsonSerializer.SerializeToElement(new { query });
-        List<JsonElement> merged = [];
-        List<string> errors = [];
-
-        foreach (var s in status)
-        {
-            if (!s.IsInitialized) continue;
-            try
-            {
-                var result = await _serverManager.SendRequestAsync(s.Name, "workspace/symbol", @params, ct).ConfigureAwait(false);
-                if (result is { } el && el.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in el.EnumerateArray())
-                        merged.Add(item.Clone());
-                }
-            }
-            catch (Exception ex)
-            {
-                // One server failing should not abort the whole query — collect and continue.
-                errors.Add($"{s.Name}: {ex.Message}");
-            }
-        }
-
-        return new { symbols = merged, errors = errors.Count == 0 ? null : errors };
     }
 
     private async Task<object> GetDefinitionAsync(string server, string uri, int line, int column, CancellationToken ct)

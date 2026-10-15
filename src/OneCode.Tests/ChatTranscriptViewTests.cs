@@ -1,4 +1,7 @@
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using OneCode.App.Query;
 using OneCode.App.Tui;
 using Terminal.Gui.App;
 
@@ -33,6 +36,42 @@ public sealed class ChatTranscriptViewTests
         string.Join('\n', lines).Should().Contain("Tool 'Write' denied by user.");
         string.Join('\n', lines).Should().Contain("I can still");
         string.Join('\n', lines).Should().Contain("explain what to do next.");
+    }
+
+    [Fact]
+    public void AddBuildDeliveryCard_DuringStreaming_CommitsAssistantReplyBeforeCardWithoutInterleavedBlankLines()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        var delivery = new OneCode.Core.Build.BuildRunResult(
+            new OneCode.Core.Build.BuildRunId("br-card"),
+            OneCode.Core.Build.BuildRunState.Completed,
+            OneCode.Core.Workflows.RunTerminalReason.Completed,
+            "Final delivery summary.",
+            ["index.html"],
+            [],
+            [],
+            [],
+            [],
+            null,
+            true,
+            false,
+            OneCode.Core.Build.BuildRunMetrics.Empty);
+
+        view.BeginStreaming();
+        view.AppendStreamingToken("Final assistant markdown reply.");
+        view.AddBuildDeliveryCard(delivery);
+        view.EndStreaming();
+
+        var lines = view.MessageView.RenderedLines;
+        var replyIndex = lines.ToList().FindIndex(l => l.Contains("Final assistant markdown reply."));
+        var headerIndex = lines.ToList().FindIndex(l => l.Contains("BUILD DELIVERY"));
+        var runRowIndex = lines.ToList().FindIndex(l => l.Contains("Run") && l.Contains("br-card"));
+        var filesRowIndex = lines.ToList().FindIndex(l => l.Contains("Files"));
+
+        replyIndex.Should().BeGreaterThanOrEqualTo(0);
+        headerIndex.Should().BeGreaterThan(replyIndex, "delivery card must appear after the final assistant reply");
+        runRowIndex.Should().Be(headerIndex + 1, "card rows must not have blank lines injected between them");
+        filesRowIndex.Should().Be(runRowIndex + 1, "card rows must be contiguous");
     }
 
     [Fact]
@@ -467,6 +506,121 @@ public sealed class ChatTranscriptViewTests
         text.Should().Contain("GOAL");
         text.Should().NotContain("PLAN");
         text.Should().Contain("streaming");
+    }
+
+    [Fact]
+    public void SubagentToolStart_RealAgentArgumentOrder_RegistersLiveProgressLine()
+    {
+        // 真实 ToolStart 参数序：prompt 在最前（长指令），agent 其后——通用 JSON 截断
+        // 会把 agent 挤出 100 字符窗口，实时进度行注册不上（卡片冻结在原始 JSON 的根源）。
+        // 摘要通道（AgentEventDigester）必须收窄为 agent + description 紧凑 JSON。
+        var longPrompt = new string('调', 150);
+        var fcc = new FunctionCallContent(
+            callId: "call_agent_1",
+            name: "Agent",
+            arguments: new Dictionary<string, object?>
+            {
+                ["prompt"] = longPrompt,
+                ["agent"] = "Explore",
+                ["description"] = "调研近半月新闻",
+                ["maxTurns"] = 8,
+            });
+        var summary = AgentEventDigester.ExtractToolInputSummary(fcc, NullLogger.Instance);
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AddToolStart("Agent", summary, "call_agent_1");
+        view.UpdateSubagentProgress(new TuiSubagentProgress(
+            ForkId: "fork-1",
+            AgentName: "Explore",
+            OneCode.App.Query.SubagentProgressPhase.Running,
+            ToolCallCount: 5,
+            TurnCount: 2,
+            CurrentToolName: "WebSearch",
+            ElapsedMs: 23_000));
+
+        var text = string.Join('\n', view.MessageView.RenderedLines);
+        text.Should().Contain("Explore");
+        text.Should().Contain("调研近半月新闻", "头行须展示 description 而非原始 JSON");
+        text.Should().NotContain(new string('调', 100), "原始 prompt 不得出现在流式卡片");
+        text.Should().Contain("运行中", "活动行须展示阶段前缀（与展开详情同一格式化源）");
+        text.Should().Contain("5 次工具调用", "活动行须展示实时工具计数");
+        text.Should().Contain("turn 2", "活动行须展示实时轮次");
+        text.Should().Contain("WebSearch", "活动行须展示当前工具");
+        text.Should().Contain("23.0s", "活动行须展示已耗时");
+    }
+
+    [Fact]
+    public void SubagentProgress_CompletedPhase_RemovesActivityLine()
+    {
+        // 完成/失败清掉实时活动行：折叠行由 AddToolDone 按结果重写，活动行残留会与
+        // 完成行互相矛盾（一边"运行中"一边"完成"）。
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        view.BeginStreaming();
+        view.AddToolStart("Agent", """{"agent":"Explore","description":"调研"}""", "call_agent_2");
+        view.UpdateSubagentProgress(new TuiSubagentProgress(
+            ForkId: "fork-2",
+            AgentName: "Explore",
+            OneCode.App.Query.SubagentProgressPhase.Running,
+            ToolCallCount: 3,
+            ElapsedMs: 5_000));
+        view.UpdateSubagentProgress(new TuiSubagentProgress(
+            ForkId: "fork-2",
+            AgentName: "Explore",
+            OneCode.App.Query.SubagentProgressPhase.Completed));
+
+        var text = string.Join('\n', view.MessageView.RenderedLines);
+        text.Should().NotContain("3 次工具调用", "完成后活动行必须移除");
+        text.Should().Contain("Explore", "头行保留，等待 AddToolDone 重写折叠行");
+    }
+
+    [Fact]
+    public void AddToolStart_DuringThinking_ImmediatelyCollapsesThinkingBlock()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AddThinking("Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6");
+
+        var duringThinking = string.Join('\n', view.MessageView.RenderedLines);
+        duringThinking.Should().Contain("Thinking");
+        duringThinking.Should().Contain("(+2 lines)", "live streaming thinking preview caps at 4 lines");
+
+        view.AddToolStart("WebSearch", """{"query":"onecode"}""", toolId: "call_ws_1");
+
+        var duringTool = string.Join('\n', view.MessageView.RenderedLines);
+        duringTool.Should().Contain("Thought for", "starting a tool must immediately collapse thinking");
+        duringTool.Should().NotContain("Thinking");
+        duringTool.Should().Contain("WebSearch");
+    }
+
+    [Fact]
+    public void ConsecutiveFailedTools_GroupIntoSingleRowWithoutDuplicateErrorNotices()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        for (var i = 1; i <= 3; i++)
+        {
+            var id = $"call_ws_{i}";
+            view.AddToolStart("WebSearch", $"{{\"query\":\"q{i}\"}}", toolId: id);
+            view.AddToolDone(
+                "WebSearch",
+                isError: true,
+                toolInput: $"{{\"query\":\"q{i}\"}}",
+                result: "[ERROR] WebSearch error: all providers are in cooldown.\nSecond line of detail.",
+                toolId: id);
+        }
+        view.EndStreaming();
+
+        var lines = view.MessageView.RenderedLines.Where(static l => !string.IsNullOrWhiteSpace(l)).ToList();
+        lines.Should().ContainSingle(l => l.Contains("WebSearch", StringComparison.Ordinal),
+            "consecutive failed calls of the same tool must fold into a single grouped row");
+        var groupedLine = lines.Single(l => l.Contains("WebSearch", StringComparison.Ordinal));
+        groupedLine.Should().Contain("×3");
+        groupedLine.Should().Contain("失败 ×3");
+        lines.Should().NotContain(l => l.Contains("Second line of detail", StringComparison.Ordinal),
+            "multi-line error details must stay collapsed until expanded");
     }
 
     private static int CountOccurrences(string haystack, string needle)

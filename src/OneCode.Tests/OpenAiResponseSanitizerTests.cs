@@ -161,4 +161,118 @@ public sealed class OpenAiResponseSanitizerTests
         OpenAiResponseSanitizer.TryExtractUpstreamError(body, out _, out _, out _)
             .Should().BeFalse();
     }
+
+    // OpenAI 兼容端点在流式 delta 的 tool_calls 里发送空 type 时，
+    // 官方 SDK 的 ToChatToolCallKind 抛 ArgumentOutOfRangeException 中断整条流——
+    // 消毒层必须把空/缺失 type 归一为合法值（真实故障形态，见用户上报堆栈）。
+    [Fact]
+    public void SanitizePayload_StreamDeltaToolCallEmptyType_RewritesToFunction()
+    {
+        const string payload =
+            """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"","id":"call_1","function":{"name":"Read","arguments":"{}"}}]}}]}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizePayload(payload);
+
+        sanitized.Should().Contain(@"""type"":""function""");
+        sanitized.Should().Contain(@"""id"":""call_1""");
+        sanitized.Should().Contain(@"""name"":""Read""");
+        sanitized.Should().NotContain(@"""type"":""""");
+    }
+
+    // SDK 对缺失 type 的 tool_call 是安全跳过的（默认 Function），消毒层不得越权补写。
+    [Fact]
+    public void SanitizePayload_ToolCallMissingType_IsLeftUnchanged()
+    {
+        const string payload =
+            """{"delta":{"tool_calls":[{"index":0,"id":"call_2","function":{"name":"Edit","arguments":"{}"}}]}}""";
+
+        OpenAiResponseSanitizer.SanitizePayload(payload).Should().Be(payload);
+    }
+
+    // SDK 不支持 custom 工具调用（ChatToolCallKind 仅有 Function）——空 type 一律归一为
+    // "function" 保持流存活，而不是映射成 SDK 同样拒绝的 "custom"。
+    [Fact]
+    public void SanitizePayload_EmptyTypeWithCustomField_StillRewritesToFunction()
+    {
+        const string payload =
+            """{"delta":{"tool_calls":[{"index":0,"type":"","custom":{"input":"ls -la"}}]}}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizePayload(payload);
+
+        sanitized.Should().Contain(@"""type"":""function""");
+        sanitized.Should().Contain(@"""input"":""ls -la""");
+    }
+
+    [Fact]
+    public void SanitizePayload_NonStreamingMessageToolCallEmptyType_RewritesToFunction()
+    {
+        const string payload =
+            """{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"c","type":"","function":{"name":"Grep","arguments":"{}"}}]}}]}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizePayload(payload);
+
+        sanitized.Should().Contain(@"""type"":""function""");
+    }
+
+    [Fact]
+    public void SanitizePayload_ValidToolCallType_IsLeftUnchanged()
+    {
+        const string payload =
+            """{"delta":{"tool_calls":[{"index":0,"type":"function","function":{"name":"Read","arguments":"{}"}}]}}""";
+
+        OpenAiResponseSanitizer.SanitizePayload(payload).Should().Be(payload);
+    }
+
+    [Fact]
+    public void SanitizePayload_NonToolCallTypeFields_AreUntouched()
+    {
+        const string payload =
+            """{"response_format":{"type":"json_object"},"choices":[{"delta":{"content":[{"type":"text","text":"hi"}]}}]}""";
+
+        // 无 tool_calls 字段：不得触碰其他上下文的 type（content part、response_format）。
+        OpenAiResponseSanitizer.SanitizePayload(payload).Should().Be(payload);
+    }
+
+    [Theory]
+    [InlineData("""{"tool_calls": broken""")]
+    public void SanitizePayload_UnnormalizableToolCallPayload_ReturnsUnchanged(string payload)
+    {
+        OpenAiResponseSanitizer.SanitizePayload(payload).Should().Be(payload);
+    }
+
+    [Fact]
+    public void SanitizePayload_BareEmptyTypeWithoutKindFields_DefaultsToFunction()
+    {
+        const string payload = """{"delta":{"tool_calls":[{"index":0,"type":""}]}}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizePayload(payload);
+
+        sanitized.Should().Contain(@"""type"":""function""");
+    }
+
+    [Fact]
+    public void SanitizeSseLine_ToolCallEmptyType_RewritesAndKeepsPrefix()
+    {
+        const string line =
+            """data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"","id":"c","function":{"name":"Read","arguments":""}}]}}]}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizeSseLine(line);
+
+        sanitized.Should().StartWith("data: ");
+        sanitized.Should().Contain(@"""type"":""function""");
+        sanitized.Should().NotContain(@"""type"":""""");
+    }
+
+    [Fact]
+    public void SanitizeSseLine_ReasoningDeltaWithEmptyContent_NormalizesContentToNull()
+    {
+        const string line =
+            """data: {"choices":[{"index":0,"delta":{"content":"","reasoning_content":"step 1"}}]}""";
+
+        var sanitized = OpenAiResponseSanitizer.SanitizeSseLine(line);
+
+        sanitized.Should().Contain(@"""content"":null");
+        sanitized.Should().Contain(@"""reasoning_content"":""step 1""");
+        sanitized.Should().NotContain(@"""content"":""""");
+    }
 }

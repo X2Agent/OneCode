@@ -95,8 +95,6 @@ public static partial class ChatBlockRenderers
             FormattedLine.Plain($"  Incomplete  {incompleteTasks}", incompleteTasks == 0 ? TuiPalette.Success : TuiPalette.Warning),
             FormattedLine.Plain($"  Transaction {commitLabel}", result.TransactionCommitted ? TuiPalette.Success : TuiPalette.Warning),
         ];
-        if (!string.IsNullOrWhiteSpace(result.Summary))
-            AddWrappedField(lines, "Summary", result.Summary, viewWidth, TuiPalette.FgPrimary);
         if (result.KnownRisks.Count > 0)
         {
             lines.Add(FormattedLine.Plain($"  Known risks {result.KnownRisks.Count}", TuiPalette.Warning));
@@ -104,28 +102,6 @@ public static partial class ChatBlockRenderers
                 AddWrappedDetail(lines, risk, viewWidth, TuiPalette.FgPrimary);
         }
         return FitToWidth(lines, viewWidth);
-    }
-
-    private static void AddWrappedField(
-        ICollection<FormattedLine> lines,
-        string label,
-        string value,
-        int viewWidth,
-        Color color)
-    {
-        var prefix = $"  {label,-11}";
-        var available = Math.Max(8, viewWidth - TextWidthHelper.GetDisplayWidth(prefix));
-        var wrapped = TextWidthHelper.WordWrapByWidth(value, available);
-        if (wrapped.Count == 0)
-        {
-            lines.Add(FormattedLine.Plain(prefix, color));
-            return;
-        }
-
-        lines.Add(FormattedLine.Plain(prefix + wrapped[0], color));
-        var continuation = new string(' ', prefix.Length);
-        foreach (var line in wrapped.Skip(1))
-            lines.Add(FormattedLine.Plain(continuation + line, color));
     }
 
     private static void AddWrappedDetail(
@@ -167,24 +143,35 @@ public static partial class ChatBlockRenderers
         IReadOnlyList<PlanStep> steps,
         int viewWidth = 80,
         string? markdown = null,
-        string? documentPath = null)
+        string? documentPath = null,
+        bool includeHeader = true)
     {
-        var headerPrefix = "  \U0001f4cb  ";
-        var titleBudget = Math.Max(8, viewWidth - TextWidthHelper.GetDisplayWidth(headerPrefix) - 1);
-        var displayTitle = TextWidthHelper.GetDisplayWidth(title) > titleBudget
-            ? TextWidthHelper.TruncateByWidth(title, titleBudget)
-            : title;
-        List<FormattedLine> list = [
-            FormattedLine.Plain("", TuiPalette.BgPrimary),
-            FormattedLine.WithBackground($"{headerPrefix}{displayTitle}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader),
-            FormattedLine.Plain("", TuiPalette.BgPrimary),
-        ];
+        List<FormattedLine> list = [];
+        if (includeHeader)
+        {
+            var headerPrefix = "  \U0001f4cb  ";
+            var titleBudget = Math.Max(8, viewWidth - TextWidthHelper.GetDisplayWidth(headerPrefix) - 1);
+            var displayTitle = TextWidthHelper.GetDisplayWidth(title) > titleBudget
+                ? TextWidthHelper.TruncateByWidth(title, titleBudget)
+                : title;
+            list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+            list.Add(FormattedLine.WithBackground($"{headerPrefix}{displayTitle}", TuiPalette.ModePlanFg, TuiPalette.BgTerminalHeader));
+            list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+        }
         if (!string.IsNullOrWhiteSpace(documentPath))
         {
             const string pathPrefix = "  📄 计划文档: ";
-            var available = Math.Max(20, viewWidth - TextWidthHelper.GetDisplayWidth(pathPrefix));
-            foreach (var line in TextWidthHelper.WordWrapByWidth(documentPath, available))
-                list.Add(FormattedLine.Plain(pathPrefix + line, TuiPalette.FgMuted));
+            var prefixWidth = TextWidthHelper.GetDisplayWidth(pathPrefix);
+            var available = Math.Max(20, viewWidth - prefixWidth);
+            var wrapped = TextWidthHelper.WordWrapByWidth(documentPath, available);
+            for (var i = 0; i < wrapped.Count; i++)
+            {
+                // 续行只缩进不重复前缀：重复前缀会让一条换行的路径看起来像多个计划文档。
+                var text = i == 0
+                    ? pathPrefix + wrapped[i]
+                    : new string(' ', prefixWidth) + wrapped[i];
+                list.Add(FormattedLine.Plain(text, TuiPalette.FgMuted));
+            }
             list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
         }
         // 完整计划全文渲染，让用户在 LLM 迭代计划时即可审阅；执行阶段不传 markdown 保持精简。
@@ -211,20 +198,20 @@ public static partial class ChatBlockRenderers
         {
             var s = steps[i];
             var num = i < CircledNumbers.Length ? CircledNumbers[i] : $"({i + 1})";
-            var lc = s.Status switch
+            var (stepPrefix, lc) = s.Status switch
             {
-                PlanStepStatus.Done => TuiPalette.FgMuted,
-                PlanStepStatus.Current => TuiPalette.Accent,
-                _ => TuiPalette.FgPrimary,
+                PlanStepStatus.Done => ($"{TuiGlyphs.Complete} {num}", TuiPalette.Success),
+                PlanStepStatus.Current => ($"{TuiGlyphs.InProgress} {num}", TuiPalette.Accent),
+                _ => (num, TuiPalette.FgPrimary),
             };
             if (string.IsNullOrWhiteSpace(s.Assignee))
             {
                 // 无归属标签的步骤行同样按显示宽度截断——长步骤名直出会溢出视口。
-                var plainBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(num) - 1);
+                var plainBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(stepPrefix) - 1);
                 var plainLabel = TextWidthHelper.GetDisplayWidth(s.Label) > plainBudget
                     ? TextWidthHelper.TruncateByWidth(s.Label, plainBudget)
                     : s.Label;
-                list.Add(FormattedLine.Plain($"  {num} {plainLabel}", lc));
+                list.Add(FormattedLine.Plain($"  {stepPrefix} {plainLabel}", lc));
             }
             else
             {
@@ -232,11 +219,11 @@ public static partial class ChatBlockRenderers
                 var tagWidth = TextWidthHelper.GetDisplayWidth(assigneeTag);
                 // 标签预算：总宽 - 缩进/序号/间隔 - 归属标签。超长标签按显示宽度
                 // 截断；pad 用显示宽度计算——旧实现用 .Length，CJK 行会错位溢出。
-                var labelBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(num) - 1 - 2 - tagWidth);
+                var labelBudget = Math.Max(8, viewWidth - 2 - TextWidthHelper.GetDisplayWidth(stepPrefix) - 1 - 2 - tagWidth);
                 var label = TextWidthHelper.GetDisplayWidth(s.Label) > labelBudget
                     ? TextWidthHelper.TruncateByWidth(s.Label, labelBudget)
                     : s.Label;
-                var leftPart = $"  {num} {label}";
+                var leftPart = $"  {stepPrefix} {label}";
                 var padLen = Math.Max(1, viewWidth - TextWidthHelper.GetDisplayWidth(leftPart) - tagWidth - 2);
                 list.Add(FormattedLine.FromSegments(new[]
                 {

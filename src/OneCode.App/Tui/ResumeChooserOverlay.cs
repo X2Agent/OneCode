@@ -92,9 +92,17 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
 /// <summary>Display entry for a resumable session.</summary>
 public sealed record SessionEntry(string Id, string Title, string Model, string Mode, int MessageCount, DateTimeOffset LastActivity)
 {
-    // 标题列按 26 字符截断（超长加省略号），防止把后面的时间列挤出 overlay 可视宽度。
-    public string DisplayText =>
-        $"{TruncateTitle(),-26} {Model,-18} {Mode,-6} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
+    /// <summary>标题列宽度（显示列数）：CJK 标题按字符数截断会占双倍宽度，把时间列挤出 overlay。</summary>
+    private const int TitleColumnWidth = 26;
 
-    private string TruncateTitle() => Title.Length <= 26 ? Title : Title[..25] + "…";
+    public string DisplayText =>
+        $"{TruncateTitle()} {Model,-18} {Mode,-6} {MessageCount,4} 条  {LastActivity:MM-dd HH:mm}";
+
+    private string TruncateTitle()
+    {
+        var truncated = TextWidthHelper.TruncateByWidth(Title, TitleColumnWidth);
+        // 格式化对齐按字符数计——按显示宽度右补齐到固定列数，CJK 每字符占 2 列才不会错位。
+        var padding = Math.Max(0, TitleColumnWidth - TextWidthHelper.GetDisplayWidth(truncated));
+        return truncated + new string(' ', padding);
+    }
 }

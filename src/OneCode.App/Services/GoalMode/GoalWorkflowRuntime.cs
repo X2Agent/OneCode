@@ -11,8 +11,7 @@ namespace OneCode.App.Services.GoalMode;
 public sealed record GoalWorkflowRuntimeContext(
     GoalRunOptions Options,
     ChannelWriter<TuiEvent> EventWriter,
-    Func<EditTransaction> TransactionFactory,
-    OneCode.Core.Workflows.IOperationLedger? Ledger = null);
+    Func<EditTransaction> TransactionFactory);
 
 public interface IGoalWorkflowRuntimeFactory
 {
@@ -25,7 +24,6 @@ internal sealed class GoalWorkflowRuntimeFactory(
     IGoalRunStore goalRunStore,
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
-    OneCode.Core.Workflows.IOperationLedger? operationLedger = null,
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntimeFactory
 {
     public IGoalWorkflowRuntime Create(GoalWorkflowRuntimeContext context)
@@ -35,7 +33,7 @@ internal sealed class GoalWorkflowRuntimeFactory(
             goalRunStore,
             workspaceService,
             completionService,
-            context with { Ledger = context.Ledger ?? operationLedger },
+            context,
             logger);
 }
 
@@ -228,22 +226,9 @@ internal sealed class GoalWorkflowRuntime(
             sharedTransactionOwned: false);
 
         using var transaction = context.TransactionFactory();
-        // S-04: 持久化 Operation Ledger——新世代前回滚本 Run 上一世代残留，开启本 step 的事务。
-        var ledger = context.Ledger;
-        var stepOperationId = $"goal/{run.Id}/step/{step.Id}/fence/{_fencingToken}";
-        if (ledger is not null)
-        {
-            await FencedLedgerTransaction.BeginAsync(
-                ledger,
-                $"goal/{run.Id}",
-                stepOperationId,
-                _fencingToken,
-                transaction,
-                ct).ConfigureAwait(false);
-        }
 
         SubGoalExecution execution;
-        // A2：回执是否已持久化（RecordStepAsync 成功或由 ledger 重入确认）。已记录后
+        // A2：回执是否已持久化（RecordStepAsync 成功或重入确认）。已记录后
         // 取消/异常路径不得回滚文件，否则回执=Completed 而工作树已还原，永久分叉。
         var receiptRecorded = false;
         try
@@ -253,10 +238,6 @@ internal sealed class GoalWorkflowRuntime(
                 WorkingDirectory = run.Workspace?.IsolatedPath
                     ?? throw new InvalidOperationException("GoalRun has no isolated workspace."),
                 SharedTransaction = transaction,
-                // DAG fork 的写入 intent 挂到同一 run 账本：fork 崩溃不再留下无法回滚的孤儿写入。
-                ForkLedgerScope = ledger is null
-                    ? null
-                    : new ForkLedgerScope(ledger, $"goal/{run.Id}", stepOperationId, _fencingToken),
             };
             execution = await subGoalExecutor.ExecuteSubGoalWithLoopStreamingAsync(
                 currentGoal,
@@ -276,17 +257,6 @@ internal sealed class GoalWorkflowRuntime(
             if (isDagStep && execution.Status != GoalStatus.Completed)
                 execution = execution with { Evaluation = $"{execution.Evaluation} [partial-committed]" };
             var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
-            // S-04 修订：ledger 提交必须先于 git 回执提交——「回执存在 ⇒ ledger 已提交」是不变式。
-            // 若回执先落而 ledger 仍 Active，崩溃后新世代的 ReconcileRunAsync 会按 before-content
-            // 回滚文件，而回执回放却把该步判 Completed——回执与工作树永久分叉。
-            if (ledger is not null)
-            {
-                await ledger.CommitTransactionAsync(
-                    stepOperationId,
-                    _fencingToken,
-                    $"goal-step:{run.Id}:{step.Id}:{_fencingToken}",
-                    ct).ConfigureAwait(false);
-            }
             GoalStepReceipt receipt;
             try
             {
@@ -370,7 +340,7 @@ internal sealed class GoalWorkflowRuntime(
         }
         catch (OperationCanceledException)
         {
-            // A2：回执已记录（或已从 ledger 确认）时不得回滚——该步已是持久提交，
+            // A2：回执已记录（或重入确认）时不得回滚——该步已是持久提交，
             // 回滚会造成「回执=Completed 而工作树已还原」的永久分叉。
             if (!receiptRecorded)
                 SafeRollback(transaction);

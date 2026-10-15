@@ -7,20 +7,19 @@ using OneCode.Core.PlanMode;
 namespace OneCode.App.Services.Context;
 
 /// <summary>
-/// Injects the immutable approved-plan snapshot while its Build run is active.
-/// The persisted workflow is the only source; mutable legacy plan files are never read.
-///
-/// Turn count is tracked per-conversation to prevent cross-conversation contamination.
+/// 批准计划的 Build run 活跃期间，每轮注入完整的 PLAN→BUILD 交接上下文（用户原始诉求 + 澄清问答 +
+/// 不可变计划快照 + 执行规则）。持久化的工作流快照是唯一来源，可变的旧计划文件永不读取。
 /// </summary>
+/// <remarks>
+/// 每轮全量注入而非首轮注入后只留「继续」短句：注入消息是 provider 的临时上下文、不进历史，
+/// 压缩 / 恢复 / 续跑之后模型的历史里不会有计划全文；短句刷新只在计划恰好留在近窗口时才成立。
+/// 计划应是自包含的短文档，每轮重复的成本可控，换来跨压缩与崩溃恢复的一致性。
+/// </remarks>
 public sealed class PlanExecutionContextProvider(
     IPlanWorkflowApplicationService workflowService,
     IPermissionModeProvider modeProvider)
     : ReadOnlyAIContextProviderBase
 {
-    private const int FullPlanRefreshInterval = 5;
-
-    private readonly ConcurrentDictionary<SessionId, PlanExecutionCacheEntry> _cache = new();
-
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken ct)
@@ -33,69 +32,14 @@ public sealed class PlanExecutionContextProvider(
 
         var workflow = await workflowService.GetAsync(sessionId, ct).ConfigureAwait(false);
         if (workflow?.ApprovedSnapshot is not { } snapshot
-            || workflow.State is not (PlanWorkflowState.StartingExecution
-                or PlanWorkflowState.Executing
-                or PlanWorkflowState.Verifying))
+            || workflow.State is not (PlanWorkflowState.StartingExecution or PlanWorkflowState.Executing))
         {
-            ResetTurnCount(sessionId);
             return new AIContext();
-        }
-
-        var key = $"{snapshot.PlanId}:{snapshot.Revision}:{snapshot.ContentHash}";
-        var entry = _cache.AddOrUpdate(
-            sessionId,
-            _ => new PlanExecutionCacheEntry(key, snapshot, 1),
-            (_, current) => string.Equals(current.PlanKey, key, StringComparison.Ordinal)
-                ? current with { TurnCount = current.TurnCount + 1 }
-                : new PlanExecutionCacheEntry(key, snapshot, 1));
-        var currentTurn = entry.TurnCount;
-        var approved = entry.Snapshot;
-        if (currentTurn == 1 || currentTurn % FullPlanRefreshInterval == 0)
-        {
-            return new AIContext
-            {
-                Messages =
-                [
-                    new ChatMessage(ChatRole.System, BuildFullContext(approved)),
-                ],
-            };
         }
 
         return new AIContext
         {
-            Messages =
-            [
-                new ChatMessage(ChatRole.System,
-                    $"[Approved Plan {approved.PlanId} r{approved.Revision} · {approved.ContentHash[..Math.Min(12, approved.ContentHash.Length)]} · Turn {currentTurn}] " +
-                    PlanExecutionProtocol.ContinueLine),
-            ],
+            Messages = [new ChatMessage(ChatRole.System, PlanExecutionProtocol.BuildHandoffContext(snapshot))],
         };
-    }
-
-    public void ResetTurnCount(SessionId conversationId)
-        => _cache.TryRemove(conversationId, out _);
-
-    private sealed record PlanExecutionCacheEntry(
-        string PlanKey,
-        ApprovedPlanSnapshot Snapshot,
-        int TurnCount);
-
-    private static string BuildFullContext(ApprovedPlanSnapshot snapshot)
-    {
-        var steps = string.Join("\n", snapshot.Steps.Select(step =>
-            $"- {step.Id}: {step.Title}\n  {step.Description}\n  Acceptance: {string.Join("; ", step.AcceptanceCriteria)}"));
-        return $"""
-            ## IMMUTABLE APPROVED PLAN
-            Plan: {snapshot.PlanId}
-            Revision: {snapshot.Revision}
-            Content hash: {snapshot.ContentHash}
-
-            {snapshot.Markdown}
-
-            ## STRUCTURED STEPS
-            {steps}
-
-            {PlanExecutionProtocol.ContextProtocolLine}
-            """;
     }
 }

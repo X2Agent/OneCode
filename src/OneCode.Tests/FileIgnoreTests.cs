@@ -265,6 +265,9 @@ public sealed class FileIgnoreTests
     [InlineData("src/node_modules/package.json")]
     [InlineData(".git/config")]
     [InlineData("src/.git/config")]
+    [InlineData(".onecode/agent-file-memory/session/memories.md")]
+    [InlineData(".onecode/cache/webfetch/46aad0f13b2d1907.md")]
+    [InlineData(".onecode/plans/current.md")]
     [InlineData("bin/Debug/app.exe")]
     [InlineData("obj/Debug/app.dll")]
     [InlineData(".vscode/settings.json")]
@@ -351,6 +354,7 @@ public sealed class FileIgnoreTests
         // 被排除的目录和文件模式不应出现在匹配结果中
         matcher.Match("node_modules/package.json").HasMatches.Should().BeFalse("node_modules 应被 exclude 排除");
         matcher.Match(".git/config").HasMatches.Should().BeFalse(".git 应被 exclude 排除");
+        matcher.Match(".onecode/agent-file-memory/session/memories.md").HasMatches.Should().BeFalse(".onecode 应被 exclude 排除");
         matcher.Match("bin/Debug/app.exe").HasMatches.Should().BeFalse("bin 应被 exclude 排除");
         matcher.Match("obj/Debug/app.dll").HasMatches.Should().BeFalse("obj 应被 exclude 排除");
         matcher.Match("logs/app.log").HasMatches.Should().BeFalse("*.log 应被 exclude 排除");

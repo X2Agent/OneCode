@@ -11,40 +11,42 @@ namespace OneCode.App.Tui;
 /// </summary>
 public static class WelcomeRenderer
 {
-    // Block-char letters — 5 rows, mixed-case block font.
-    // Uppercase O/C: full 5-row height. Lowercase n/e/o: 3 rows bottom-aligned.
-    // d has a right-side ascender spanning all 5 rows.
+    // Block-char letters — 7 rows, uniform 4-column cells with 1-column gutters.
+    // Uppercase O/C: full 7-row height. Lowercase n/e/o: 5 rows bottom-aligned
+    // (x-height zone rows 2-6). d has a right-side ascender spanning all 7 rows.
+    // '#' = filled cell (replaced with TuiGlyphs.BlockFull), ' ' = empty cell.
     private static readonly string[][] LogoLetters =
     {
         // O — 4w
-        new[] { "████", "█  █", "█  █", "█  █", "████" },
-        // n — 3w (lowercase, rows 2-4)
-        new[] { "   ", "   ", "███", "█ █", "█ █" },
-        // e — 4w (lowercase, rows 2-4)
-        new[] { "    ", "    ", "████", "█   ", "████" },
+        new[] { "####", "#  #", "#  #", "#  #", "#  #", "#  #", "####" },
+        // n — 4w (lowercase, rows 2-6)
+        new[] { "    ", "    ", "####", "#  #", "#  #", "#  #", "#  #" },
+        // e — 4w (lowercase, rows 2-6, crossbar on row 4)
+        new[] { "    ", "    ", "####", "#  #", "####", "#   ", "####" },
         // C — 4w
-        new[] { "████", "█   ", "█   ", "█   ", "████" },
-        // o — 3w (lowercase, rows 2-4)
-        new[] { "   ", "   ", "███", "█ █", "███" },
+        new[] { "####", "#   ", "#   ", "#   ", "#   ", "#   ", "####" },
+        // o — 4w (lowercase, rows 2-6)
+        new[] { "    ", "    ", "####", "#  #", "#  #", "#  #", "####" },
         // d — 4w (lowercase, ascender + body)
-        new[] { "   █", "   █", "████", "█  █", "████" },
-        // e — 4w (lowercase, rows 2-4)
-        new[] { "    ", "    ", "████", "█   ", "████" },
+        new[] { "   #", "   #", "####", "#  #", "#  #", "#  #", "####" },
+        // e — 4w (lowercase, rows 2-6, crossbar on row 4)
+        new[] { "    ", "    ", "####", "#  #", "####", "#   ", "####" },
     };
 
     private static readonly string[] PixelLogo = BuildLogo();
 
     private static string[] BuildLogo()
     {
-        var rows = new string[5];
-        for (var r = 0; r < 5; r++)
+        var rows = LogoLetters[0].Length;
+        var lines = new string[rows];
+        for (var r = 0; r < rows; r++)
         {
             var parts = new List<string>(LogoLetters.Length);
             foreach (var letter in LogoLetters)
-                parts.Add(letter[r]);
-            rows[r] = string.Join(" ", parts);
+                parts.Add(letter[r].Replace('#', TuiGlyphs.BlockFull[0]));
+            lines[r] = string.Join(" ", parts);
         }
-        return rows;
+        return lines;
     }
 
     /// <summary>Render the welcome block for the given viewport.</summary>
@@ -87,7 +89,6 @@ public static class WelcomeRenderer
 
         RenderTipLine(
         [
-            ("Alt+1/2/4 ", "直达模式"),
             ("/keybindings ", "快捷键面板"),
         ]);
 

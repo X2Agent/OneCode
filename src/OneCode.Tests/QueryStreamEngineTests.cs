@@ -1,5 +1,5 @@
+
 using OneCode.Core.Config;
-using System.Collections.Immutable;
 using System.Threading.Channels;
 using OneCode.App.Query;
 using OneCode.App.Services;
@@ -9,33 +9,25 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
-using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Build;
-using OneCode.Core.Workflows;
-using OneCode.Core.Coordinator;
 using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
-using OneCode.Core.PlanMode;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
-using OneCode.Core.Tasks;
 using OneCode.Infrastructure.Api;
-using OneCode.Infrastructure.Build;
-using OneCode.Infrastructure.Workflows;
 using OneCode.Tests.TestSupport;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-
 namespace OneCode.Tests;
 
-public sealed class QueryStreamEngineTests
+public sealed partial class QueryStreamEngineTests
 {
     /// <summary>受控执行请求的预置计划固定样本（内容不参与断言）。</summary>
     private static BuildPlan PrescribedPlan()
@@ -45,7 +37,6 @@ public sealed class QueryStreamEngineTests
             ["dotnet test"],
             [],
             []);
-
     [Fact]
     public async Task StreamQueryAsync_PreCancelledToken_StopsWithoutStreaming()
     {
@@ -69,6 +60,49 @@ public sealed class QueryStreamEngineTests
         // passes even if cancellation logic is broken (empty events either way).
         threwOperationCanceled.Should().BeTrue("pre-cancelled token should trigger OperationCanceledException");
         events.OfType<TextDeltaEvent>().Should().BeEmpty("no text should be emitted when cancelled upfront");
+    }
+
+    [Fact]
+    public async Task StreamQueryAsync_FirstQueryRunStart_PopulatesCacheSafeParamsBeforeForkCanRead()
+    {
+        // AgentTool 在会话首个查询期间发起 fork 时读取 ICacheSafeParamsProvider.Current；
+        // 旧实现仅在查询完成后的 FinalizeAsync 才写入 → 首轮 fork 拿到 null →
+        // ForkedAgentRunner.FilterChildTools 得到空工具表（子代理报"没有 WebSearch"）。
+        // 捕获时机 = runner 被调用（StartRun）时刻，即 fork 发起时刻的可见性。
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        var webSearchTool = AIFunctionFactory.Create(() => "results", name: "WebSearch");
+
+        QueryStreamEngine engine = null!;
+        CacheSafeParams? seenByFork = null;
+        var runner = Substitute.For<IMainAgentRunner>();
+        runner.RunStreamingAsync(
+                Arg.Any<MainAgentRunOptions>(),
+                Arg.Do<ChannelWriter<object>>(writer =>
+                {
+                    seenByFork = engine.Current;
+                    writer.Complete();
+                }),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MainAgentRunResult(
+                Text: null, TotalInputTokens: 0, TotalOutputTokens: 0, TurnCount: 0)));
+
+        engine = CreateSutWithDependencies(
+            runner,
+            sessionManager,
+            Substitute.For<IBuildRunCoordinator>(),
+            extraTools: [webSearchTool],
+            registerExtraToolMetadata: reg => reg.Register(new ToolMetadata { Name = "WebSearch", Risk = ToolRisk.ReadOnly }));
+
+        await CollectEventsAsync(engine);
+
+        seenByFork.Should().NotBeNull(
+            "a fork issued during the first query reads Current at run start; it must be populated before StartRun");
+        // 测试配置默认开启 NextPromptSuggester，SystemPrompt 会被追加引导段——按前缀断言。
+        seenByFork.SystemPrompt.Should().StartWith("sys");
+        seenByFork.ModelId.Should().Be("model1");
+        seenByFork.Tools.Should().NotBeNull("an empty tool list is what starved the sub-agent of WebSearch");
+        seenByFork.Tools.Should().Contain(t => t.Name == "WebSearch");
     }
 
     [Fact]
@@ -347,414 +381,93 @@ public sealed class QueryStreamEngineTests
     }
 
     [Fact]
-    public async Task StreamWorkflowRunAsync_DurableBuildAttempt_CompletesThroughSharedHost()
+    public async Task StreamWorkflowRunAsync_RecordedSeedBoundary_FlowsIntoRunOptions()
     {
-        var root = Path.Combine(Path.GetTempPath(), "onecode-chat-durable-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            var conversation = new Conversation
-            {
-                Id = SessionId.NewId(),
-                WorkingDirectory = root,
-            };
-            var sessionManager = Substitute.For<ISessionManager>();
-            sessionManager.ForegroundConversation.Returns(conversation);
-            sessionManager.WorkingDirectory.Returns(root);
-            var buildStore = new JsonBuildRunStore(Path.Combine(root, "build-runs"));
-            var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
-            fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult("fingerprint-durable"));
-            var taskService = new TaskService();
-            var coordinator = new BuildRunCoordinator(
-                buildStore,
-                fingerprint,
-                new RequirementAssessmentService(),
-                new BuildStateTransitionService(),
-                new BuildTaskLinker(taskService),
-                Substitute.For<ILogger<BuildRunCoordinator>>());
-            var registry = new JsonWorkflowRunRegistry(Path.Combine(root, "workflow-runs"));
-            var durableHost = new DurableWorkflowHost(
-                registry,
-                new WorkflowCheckpointStoreFactory(Path.Combine(root, "checkpoints")),
-                new WorkflowEventAdapter(),
-                NullLogger<DurableWorkflowHost>.Instance);
-            var attemptHost = new ControlledBuildAttemptHost(
-                durableHost,
-                new ControlledBuildAttemptWorkflowCompiler(),
-                buildStore,
-                registry,
-                coordinator);
-            // 批准执行要求 step 证据经 UpdatePlanStep 提交（BuildProtocolBlock 协议）——
-            // seed 一个 Executing 态 PlanWorkflow 并把真工具注册进目录，stub agent 据此提交。
-            var runId = "durable-build-run";
-            var planStore = new PlanAggregateStore(Path.Combine(root, "plan-aggregates"));
-            var workflowService = new PlanWorkflowApplicationService(planStore);
-            var now = DateTimeOffset.UtcNow;
-            var workflow = PlanWorkflow.Create(conversation.Id) with
-            {
-                State = PlanWorkflowState.Executing,
-                Version = 1,
-                LatestRevision = 1,
-                SubmittedRevision = 1,
-                ApprovedRevision = 1,
-                ExecutionRequestId = "durable",
-                ActiveRunId = runId,
-                ActiveRunKind = PlanRunKind.Build,
-                ApprovedSnapshot = new ApprovedPlanSnapshot
-                {
-                    PlanId = default,
-                    SessionId = conversation.Id,
-                    Revision = 1,
-                    Title = "Durable plan",
-                    Markdown = "# Durable plan",
-                    Steps = [new PlanStepDefinition
-                    {
-                        Id = "t1",
-                        Title = "Fix Foo.cs",
-                        Description = "Fix and verify",
-                        Files = [],
-                        AcceptanceCriteria = ["FooTests passes"],
-                        DependsOn = [],
-                        Risk = PlanStepRisk.Low,
-                    }],
-                    ContentHash = "sha256-durable",
-                    ApprovedBy = "user",
-                    ApprovedAt = now,
-                },
-                StepExecutions = [new PlanStepExecution
-                {
-                    StepId = "t1",
-                    Status = PlanStepExecutionStatus.InProgress,
-                    UpdatedAt = now,
-                }],
-                UpdatedAt = now,
-            };
-            await planStore.SaveAsync(
-                new PlanAggregate(workflow, [new PlanRevision
-                {
-                    PlanId = workflow.Id,
-                    SessionId = conversation.Id,
-                    Revision = 1,
-                    Title = "Durable plan",
-                    Markdown = "# Durable plan",
-                    Steps = workflow.ApprovedSnapshot!.Steps,
-                    Risks = [],
-                    Assumptions = [],
-                    ContentHash = "sha256-durable",
-                    Status = PlanRevisionStatus.Approved,
-                    CreatedAt = now,
-                }]),
-                -1,
-                TestContext.Current.CancellationToken);
-            var planExecutionTool = new PlanExecutionTool(
-                workflowService,
-                new PlanCardPublisher(new OrchestrationEventBus()),
-                new BuildTaskLinker(taskService));
-            var updateStepTool = AIFunctionFactory.Create(
-                planExecutionTool.UpdatePlanStepAsync, name: PlanToolNames.UpdateStep);
-            var runner = Substitute.For<IMainAgentRunner>();
-            runner.RunStreamingAsync(
-                    Arg.Any<MainAgentRunOptions>(),
-                    Arg.Any<ChannelWriter<object>>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(async callInfo =>
-                {
-                    var options = callInfo.ArgAt<MainAgentRunOptions>(0);
-                    var writer = callInfo.ArgAt<ChannelWriter<object>>(1);
-                    // 按 BuildProtocolBlock 协议提交 step 证据（ambient 上下文已由
-                    // attempt 运行时重建，工具能定位会话与 run）。
-                    var updateStep = options.Tools!.OfType<AIFunction>()
-                        .Single(t => t.Name == PlanToolNames.UpdateStep);
-                    await updateStep.InvokeAsync(new AIFunctionArguments
-                    {
-                        ["stepId"] = "t1",
-                        ["status"] = "completed",
-                        ["evidence"] = "Foo.cs fixed; FooTests passed.",
-                    }, TestContext.Current.CancellationToken);
-                    await writer.WriteAsync(
-                        new AgentResponseUpdate { Contents = { new TextContent("durable complete") } },
-                        TestContext.Current.CancellationToken);
-                    if (options.BeforeFinalValidation is not null)
-                        await options.BeforeFinalValidation(TestContext.Current.CancellationToken);
-                    writer.TryComplete();
-                    return new MainAgentRunResult(
-                        Text: null,
-                        TotalInputTokens: 11,
-                        TotalOutputTokens: 7,
-                        TurnCount: 1,
-                        TerminalReason: RunTerminalReason.Completed,
-                        FinalValidationStatus: BuildValidationStatus.Passed);
-                });
-            var clarifier = Substitute.For<IClarificationInteractionService>();
-            clarifier.AskAsync(
-                    Arg.Any<string>(),
-                    Arg.Any<IReadOnlyList<string>>(),
-                    Arg.Any<bool>(),
-                    Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult(new ClarificationInteractionResult("确认执行", false)));
-            var capabilities = new ToolCapabilitySet
-            {
-                AllowedToolNames = new[] { "ReadFile", "Write", "Edit", PlanToolNames.UpdateStep }.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
-                AllowedCategories = ToolCategory.FileWrite,
-                MaximumRisk = ToolRisk.Destructive,
-                AllowDynamicActivation = true,
-                AllowSubAgents = true,
-            };
-            var capabilityResolver = Substitute.For<IToolCapabilityResolver>();
-            capabilityResolver.Resolve(Arg.Any<WorkingMode>()).Returns(capabilities);
-            var sut = CreateSutWithDependencies(
-                runner,
-                sessionManager,
-                coordinator,
-                attemptHost,
-                buildStore,
-                clarifier,
-                capabilityResolver,
-                extraTools: [updateStepTool]);
-            var request = new WorkflowRunRequest(
-                runId,
-                conversation.Id,
-                "Fix Foo.cs line 42 and run FooTests.",
-                "system",
-                "model1",
-                WorkingMode.Build,
-                root,
-                PrescribedPlan());
-
-            var events = new List<QueryEvent>();
-            await foreach (var evt in sut.StreamWorkflowRunAsync(
-                request,
-                TestContext.Current.CancellationToken))
-            {
-                events.Add(evt);
-            }
-
-            var persisted = await buildStore.LoadAsync(conversation.Id, TestContext.Current.CancellationToken);
-            persisted!.State.Should().Be(BuildRunState.Completed, because: persisted.FailureSummary);
-            persisted.WorkflowFencingToken.Should().BeGreaterThan(0);
-            persisted.Metrics.TurnsCompleted.Should().Be(1);
-            persisted.ApprovedToolPolicy.Should().NotBeNull();
-            persisted.PlanApprovalSource.Should().Be("plan-mode-approval");
-            events.OfType<BuildRunStateEvent>().Select(item => item.State).Should().ContainInOrder(
-                BuildRunState.Planning,
-                BuildRunState.Planned,
-                BuildRunState.Implementing,
-                BuildRunState.Verifying,
-                BuildRunState.Accepting,
-                BuildRunState.Completed);
-            events.OfType<TextDeltaEvent>().Should().ContainSingle().Which.Text.Should().Be("durable complete");
-            events.OfType<BuildRunCompletedEvent>().Should().ContainSingle();
-            events.OfType<DoneEvent>().Should().ContainSingle().Which.TerminalReason
-                .Should().Be(RunTerminalReason.Completed);
-            await runner.Received(1).RunStreamingAsync(
-                Arg.Any<MainAgentRunOptions>(),
-                Arg.Any<ChannelWriter<object>>(),
-                Arg.Any<CancellationToken>());
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task StreamWorkflowRunAsync_ResumedTerminalBuildRun_DoesNotStartAgent()
-    {
+        var sessionId = SessionId.NewId();
         var conversation = new Conversation
         {
-            Id = SessionId.NewId(),
+            Id = sessionId,
+            Name = "boundary",
             WorkingDirectory = Path.GetTempPath(),
+            Model = "model",
         };
+        HistorySeedBoundary.RecordForExecution(conversation, "req-1", messageCount: 5);
         var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.ForegroundConversation.Returns(conversation);
-        sessionManager.WorkingDirectory.Returns(conversation.WorkingDirectory);
-        var coordinator = Substitute.For<IBuildRunCoordinator>();
-        var now = DateTimeOffset.UtcNow;
-        var completed = new BuildRun
-        {
-            Id = BuildRunId.New(),
-            ConversationId = conversation.Id,
-            State = BuildRunState.Completed,
-            TerminalReason = RunTerminalReason.Completed,
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        coordinator.BeginOrResumeAsync(
-                conversation.Id,
-                Arg.Any<string>(),
-                conversation.WorkingDirectory,
-                Arg.Any<CancellationToken>(),
-                Arg.Any<Action<BuildRun>?>(),
-                Arg.Any<BuildPlan?>())
-            .Returns(completed);
+        sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        sessionManager.GetConversation(sessionId).Returns(conversation);
         var runner = Substitute.For<IMainAgentRunner>();
-        var sut = CreateSutWithDependencies(runner, sessionManager, coordinator);
+        MainAgentRunOptions? capturedOptions = null;
+        runner.RunStreamingAsync(
+                Arg.Do<MainAgentRunOptions>(options => capturedOptions = options),
+                Arg.Do<ChannelWriter<object>>(writer => writer.Complete()),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MainAgentRunResult(
+                Text: null, TotalInputTokens: 0, TotalOutputTokens: 0, TurnCount: 0)));
+        var sut = CreateSutWithDependencies(
+            runner,
+            sessionManager,
+            Substitute.For<IBuildRunCoordinator>());
         var request = new WorkflowRunRequest(
-            "build-recovery",
-            conversation.Id,
-            "resume",
-            "sys",
-            "model1",
-            WorkingMode.Build,
-            conversation.WorkingDirectory,
-            PrescribedPlan());
-
-        var events = new List<QueryEvent>();
-        await foreach (var evt in sut.StreamWorkflowRunAsync(
-            request,
-            TestContext.Current.CancellationToken))
-        {
-            events.Add(evt);
-        }
-
-        events.OfType<BuildRunCompletedEvent>().Should().ContainSingle();
-        events.OfType<DoneEvent>().Should().ContainSingle()
-            .Which.TerminalReason.Should().Be(RunTerminalReason.Completed);
-        await runner.DidNotReceive().RunStreamingAsync(
-            Arg.Any<MainAgentRunOptions>(),
-            Arg.Any<ChannelWriter<object>>(),
-            Arg.Any<CancellationToken>());
-    }
-
-        [Fact]
-    public async Task StreamWorkflowRunAsync_MissingPrescribedPlan_FailsWithoutStartingAgent()
-    {
-        // 受控执行恒由上层批准的预置计划驱动（WorkflowRunRequest.PrescribedBuildPlan
-        // 必填不变量）——缺失即拒绝，不启动 agent。
-        var conversation = new Conversation
-        {
-            Id = SessionId.NewId(),
-            WorkingDirectory = Path.GetTempPath(),
-        };
-        var sessionManager = Substitute.For<ISessionManager>();
-        sessionManager.ForegroundConversation.Returns(conversation);
-        sessionManager.WorkingDirectory.Returns(conversation.WorkingDirectory);
-        var runner = Substitute.For<IMainAgentRunner>();
-        var sut = CreateSutWithDependencies(runner, sessionManager, Substitute.For<IBuildRunCoordinator>());
-        var request = new WorkflowRunRequest(
-            "missing-prescribed-plan",
-            conversation.Id,
+            "plan-run-boundary",
+            sessionId,
             "execute",
             "system",
             "model",
-            WorkingMode.Build,
+            WorkingMode.Plan,
             Path.GetTempPath(),
-            null!);
+            PrescribedPlan());
 
-        var act = async () =>
-        {
-            await foreach (var _ in sut.StreamWorkflowRunAsync(request, TestContext.Current.CancellationToken))
-            {
-            }
-        };
+        await foreach (var _ in sut.StreamWorkflowRunAsync(request, TestContext.Current.CancellationToken)) { }
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*prescribed plan*");
-        await runner.DidNotReceive().RunStreamingAsync(
-            Arg.Any<MainAgentRunOptions>(),
-            Arg.Any<ChannelWriter<object>>(),
-            Arg.Any<CancellationToken>());
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.HistorySeedBoundary.Should().Be(new HistorySeedBoundary("req-1", 0, 5),
+            "the recorded boundary must reach the run options so the history provider seeds after it");
     }
 
-    /// <summary>
-    /// Plan-mode interactive run bridge: SubmitPlan (executed inside the agent run)
-    /// persists FinalizingPlanRun; when the run stream completes, the engine must
-    /// transition the workflow to AwaitingApproval and publish it — this is the
-    /// event that pops the approval InlineSelector in the TUI.
-    /// </summary>
     [Fact]
-    public async Task StreamQueryAsync_PlanRunWithSubmittedPlan_TransitionsToAwaitingApprovalOnCompletion()
+    public async Task StreamWorkflowRunAsync_EpochDriftedBoundary_FallsBackToFullSeed()
     {
-        var root = Path.Combine(Path.GetTempPath(), "onecode-plan-bridge-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
+        var sessionId = SessionId.NewId();
+        var conversation = new Conversation
         {
-            var store = new PlanAggregateStore(root);
-            var workflowService = new PlanWorkflowApplicationService(store);
-            var bus = new OrchestrationEventBus();
-            var publisher = new PlanCardPublisher(bus);
-            var publishedStates = new List<PlanWorkflowState>();
-            bus.Subscribe(evt =>
-            {
-                if (evt is OrchestrationEvent.PlanProjectionChanged changed)
-                    publishedStates.Add(changed.Workflow.State);
-            });
+            Id = sessionId,
+            Name = "boundary-drifted",
+            WorkingDirectory = Path.GetTempPath(),
+            Model = "model",
+        };
+        HistorySeedBoundary.RecordForExecution(conversation, "req-1", messageCount: 5);
+        // 边界记录后发生 compact/clear：结构变更让边界失效，执行轮回退全量播种
+        conversation.Metadata[MafSessionInvalidator.HistoryEpochKey] = 1;
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        sessionManager.GetConversation(sessionId).Returns(conversation);
+        var runner = Substitute.For<IMainAgentRunner>();
+        MainAgentRunOptions? capturedOptions = null;
+        runner.RunStreamingAsync(
+                Arg.Do<MainAgentRunOptions>(options => capturedOptions = options),
+                Arg.Do<ChannelWriter<object>>(writer => writer.Complete()),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MainAgentRunResult(
+                Text: null, TotalInputTokens: 0, TotalOutputTokens: 0, TurnCount: 0)));
+        var sut = CreateSutWithDependencies(
+            runner,
+            sessionManager,
+            Substitute.For<IBuildRunCoordinator>());
+        var request = new WorkflowRunRequest(
+            "plan-run-boundary-drifted",
+            sessionId,
+            "execute",
+            "system",
+            "model",
+            WorkingMode.Plan,
+            Path.GetTempPath(),
+            PrescribedPlan());
 
-            var conversation = new Conversation { Id = SessionId.NewId(), WorkingDirectory = root };
-            var sessionManager = Substitute.For<ISessionManager>();
-            sessionManager.ForegroundConversation.Returns(conversation);
-            sessionManager.WorkingDirectory.Returns(root);
-            sessionManager.GetChatHistory(conversation.Id).Returns(new List<ChatMessage>());
+        await foreach (var _ in sut.StreamWorkflowRunAsync(request, TestContext.Current.CancellationToken)) { }
 
-            var planMode = Substitute.For<IPlanModeService>();
-            planMode.IsInPlanMode.Returns(true);
-            var createPlanTool = new CreatePlanTool(planMode, publisher, sessionManager, workflowService, store);
-
-            string? capturedRunId = null;
-            bool? submitFailed = null;
-            var runner = Substitute.For<IMainAgentRunner>();
-            runner.RunStreamingAsync(
-                    Arg.Any<MainAgentRunOptions>(),
-                    Arg.Do<ChannelWriter<object>>(writer =>
-                    {
-                        writer.TryWrite(new AgentResponseUpdate { Contents = { new TextContent("计划卡片已就绪") } });
-                        writer.Complete();
-                    }),
-                    Arg.Any<CancellationToken>())
-                .Returns(async _ =>
-                {
-                    // Simulate the LLM calling SubmitPlan inside the agent run —
-                    // OneCodeAgentRunContext.CurrentRunId must be set by the engine here.
-                    capturedRunId = OneCodeAgentRunContext.CurrentRunId;
-                    var result = await createPlanTool.SubmitPlanAsync(CreatePlanBridgeMarkdown(), [CreatePlanBridgeStep()]);
-                    submitFailed = result.IsError;
-                    return new MainAgentRunResult(Text: "done", TotalInputTokens: 0, TotalOutputTokens: 0, TurnCount: 1);
-                });
-
-            var toolMetadata = new ToolMetadataRegistry();
-            var toolCatalog = new ToolCatalog(new Lazy<List<AIFunction>>(() => []), toolMetadata, mcpConnectionManager: null);
-            var configManager = TestConfigManager.Create();
-            configManager.Current.Returns(ConfigSnapshot.FromEffective(new AppSettings()));
-            var sut = new QueryStreamEngine(
-                Substitute.For<ILogger<QueryStreamEngine>>(),
-                runner,
-                toolCatalog,
-                Substitute.For<IHookExecutionService>(),
-                new ChatSessionDependencies(
-                    sessionManager,
-                    new SessionToolSetManager(toolCatalog, toolMetadata),
-                    new ToolCapabilityResolver(toolCatalog),
-                    configManager,
-                    PlanWorkflow: workflowService,
-                    PlanCardPublisher: publisher),
-                new ChatObservabilityDependencies(
-                    Substitute.For<ITokenUsageTracker>(),
-                    new TokenBreakdownEstimator(TestSupport.TestTokenEstimators.Default),
-                    Substitute.For<INotifierService>()));
-
-            await foreach (var _ in sut.StreamQueryAsync(
-                "请规划重构方案", "system", "model1",
-                ct: TestContext.Current.CancellationToken,
-                workingMode: WorkingMode.Plan))
-            {
-            }
-
-            capturedRunId.Should().NotBeNull("SubmitPlan must execute inside the engine's activation context");
-            submitFailed.Should().BeFalse("SubmitPlan should succeed in plan mode with a valid plan");
-
-            var workflow = await workflowService.GetAsync(conversation.Id, TestContext.Current.CancellationToken);
-            workflow!.State.Should().Be(PlanWorkflowState.AwaitingApproval,
-                "run completion must open approval (FinalizingPlanRun → AwaitingApproval)");
-            publishedStates.Should().Contain(PlanWorkflowState.AwaitingApproval,
-                "the AwaitingApproval workflow must be published so the TUI pops the approval selector");
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.HistorySeedBoundary.Should().BeNull(
+            "a boundary recorded before a structural history change must not truncate the seed");
     }
 
     private static string CreatePlanBridgeMarkdown() =>
@@ -793,11 +506,12 @@ public sealed class QueryStreamEngineTests
         IBuildRunCoordinator coordinator,
         ControlledBuildAttemptHost? controlledBuildAttemptHost = null,
         IBuildRunStore? buildRunStore = null,
-        IClarificationInteractionService? clarificationInteraction = null,
         IToolCapabilityResolver? capabilityResolver = null,
-        IReadOnlyList<AIFunction>? extraTools = null)
+        IReadOnlyList<AIFunction>? extraTools = null,
+        Action<ToolMetadataRegistry>? registerExtraToolMetadata = null)
     {
         var toolMetadata = new ToolMetadataRegistry();
+        registerExtraToolMetadata?.Invoke(toolMetadata);
         var toolCatalog = new ToolCatalog(
             new Lazy<List<AIFunction>>(() => extraTools?.ToList() ?? []),
             toolMetadata,
@@ -816,8 +530,7 @@ public sealed class QueryStreamEngineTests
                 configManager,
                 BuildRunCoordinator: coordinator,
                 ControlledBuildAttemptHost: controlledBuildAttemptHost,
-                BuildRunStore: buildRunStore,
-                ClarificationInteraction: clarificationInteraction),
+                BuildRunStore: buildRunStore),
             new ChatObservabilityDependencies(
                 Substitute.For<ITokenUsageTracker>(),
                 new TokenBreakdownEstimator(TestSupport.TestTokenEstimators.Default),
@@ -888,7 +601,6 @@ public sealed class QueryStreamEngineTests
             modelManager: modelManager,
             modeProvider: modeProvider,
             promptManager: promptManager,
-            planModeService: Substitute.For<IPlanModeService>(),
             planWorkflowService: Substitute.For<IPlanWorkflowApplicationService>());
         var mainAgentRunner = new MainAgentRunner(
             new AgentContextPipeline(sharedBuilder, mainContextBuilder),
@@ -921,3 +633,8 @@ public sealed class QueryStreamEngineTests
                 Substitute.For<INotifierService>()));
     }
 }
+
+
+
+
+

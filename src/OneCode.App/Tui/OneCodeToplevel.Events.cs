@@ -1,5 +1,3 @@
-
-
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Tui;
@@ -28,6 +26,39 @@ public sealed partial class OneCodeToplevel
 
         switch (evt)
         {
+            case TuiSubagentProgress progress:
+                // Agent 工具活动行 live 文案（无活跃行时静默）。
+                _shell.Transcript.UpdateSubagentProgress(progress);
+                // 状态栏 agents 徽标：Started +1，Completed/Failed -1；Running 不动
+                //（同一 fork 的 Running 事件会重复到达，按生命周期配对增减）。
+                _activeSubagentCount = progress.Phase switch
+                {
+                    OneCode.App.Query.SubagentProgressPhase.Started => _activeSubagentCount + 1,
+                    OneCode.App.Query.SubagentProgressPhase.Completed or OneCode.App.Query.SubagentProgressPhase.Failed
+                        => Math.Max(0, _activeSubagentCount - 1),
+                    _ => _activeSubagentCount,
+                };
+                _shell.AgentStatusBar.SetSubagentCount(_activeSubagentCount);
+                // 状态栏活动文案跟随子代理实时进度——否则与主代理工具并行派工时，
+                // "执行 LS" 这类启动瞬间的快照会在子代理整个运行期间挂住不动。
+                // 工具调用次数/turn/耗时由转录区子代理活动行展示，此处只留代理名+当前工具，
+                // 避免重复且不触发 ActivityMaxWidth 截断把当前工具名挤掉。
+                if (progress.Phase is OneCode.App.Query.SubagentProgressPhase.Started
+                    or OneCode.App.Query.SubagentProgressPhase.Running)
+                {
+                    var currentTool = string.IsNullOrWhiteSpace(progress.CurrentToolName)
+                        ? "运行中"
+                        : progress.CurrentToolName;
+                    _shell.AgentStatusBar.SetActivity(
+                        $"[{progress.AgentName}] · {currentTool}");
+                }
+                else if (_activeSubagentCount == 0)
+                {
+                    // 子代理全部收尾、主代理尚未产生新活动事件——回到中性等待文案。
+                    _shell.AgentStatusBar.SetActivity("处理中");
+                }
+                break;
+
             case TuiToolDone { Name: var name, IsError: var err, Result: var result, ToolInput: var toolInput, ToolId: var toolId }:
                 _shell.Transcript.AddToolDone(name, err, toolInput, result ?? string.Empty, toolId);
                 // Shell 工具（Bash/PowerShell）展示前 3 行输出预览
@@ -58,6 +89,15 @@ public sealed partial class OneCodeToplevel
                 _shell.SetAgentBusy(true);
                 break;
 
+            case TuiWorkflowRunEnded:
+                // 与 TuiWorkflowRunStarted 配对：Build run 收尾（成功/失败/异常）复位忙碌
+                // 与流式状态—— dispatcher 侧的 TuiDone 之外还需要这一步，异常路径没有 TuiDone。
+                _shell.Transcript.EndStreaming();
+                _shell.ChatInput.SetBusy(false);
+                _shell.SetAgentBusy(false);
+                _shell.FocusChatInput();
+                break;
+
             case TuiDone { InputTokens: var inp, OutputTokens: var out_, TerminalReason: var reason, TurnsCompleted: var tc, CacheReadTokens: var cr, CacheWriteTokens: var cw, TransactionRolledBack: var rolledBack, ValidationFailureSummary: var validationSummary }:
                 // InputTokens 是 API 返回的本次请求完整上下文快照（含缓存命中部分，见
                 // UsageDetails.InputTokenCount 契约），不是增量。多轮间直接覆盖即可，
@@ -70,6 +110,11 @@ public sealed partial class OneCodeToplevel
                 _lastRoundInputTokens = _inputTokens;
                 _shell.SessionContextBar.SetTokens(_inputTokens, _outputTokens);
                 _shell.SessionContextBar.SetContextUsage(_maxContextTokens, _lastRoundInputTokens);
+
+                // run 收尾清零 agents 徽标：后台 fork 的终态事件在父 channel 关闭后
+                // 无法到达（TryWrite 安全 no-op），不重置会残留幽灵计数。
+                _activeSubagentCount = 0;
+                _shell.AgentStatusBar.SetSubagentCount(0);
 
                 // Render terminal reason distinctly
                 switch (reason)
@@ -84,7 +129,9 @@ public sealed partial class OneCodeToplevel
                         _shell.Transcript.AddSystem($"(cancelled after {tc} turns)");
                         break;
                     case RunTerminalReason.ValidationFailed:
-                        _shell.Transcript.AddSystem($"(validation failed — file changes rolled back)");
+                        _shell.Transcript.AddSystem(rolledBack
+                            ? "(validation failed — file changes rolled back)"
+                            : "(validation failed — file changes kept for your review)");
                         if (!string.IsNullOrEmpty(validationSummary))
                             _shell.Transcript.AddSystem(validationSummary!);
                         break;

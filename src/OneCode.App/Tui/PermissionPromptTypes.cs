@@ -3,12 +3,7 @@ namespace OneCode.App.Tui;
 public sealed record PermissionPromptRequest(
     string Title,
     string Message,
-    bool AllowApprovals = true,
-    /// <summary>
-    /// 是否提供「本次对话全部允许」升级档。Main 路径为 true；
-    /// 工作流审批桥为 false（策略固定于发起运行的工作模式，桥只做单次批准）。
-    /// </summary>
-    bool AllowSessionEscalation = true);
+    bool AllowApprovals = true);
 
 public sealed record PermissionPromptResult(PermissionPromptDecision Decision);
 

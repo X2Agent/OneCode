@@ -69,8 +69,8 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
-        // 输入 + 输出 = 1.5M + 1M（缓存读取计入输入，不重复相加）
-        tracker.GetTotalTokens().Should().Be(2_500_000);
+        // 可计费口径：(1.5M−0.5M 非缓存输入) + 1M 输出 + 0.2M 缓存写入 + 0.5M×10% 缓存读 = 2.25M
+        tracker.GetTotalTokens().Should().Be(2_250_000);
     }
 
     [Fact]
@@ -83,8 +83,8 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
-        // CacheWrite 独立提取，不并入输入/输出：总 token = 1M
-        tracker.GetTotalTokens().Should().Be(1_000_000);
+        // 可计费口径：1M 输入 + 1M 缓存写入 = 2M
+        tracker.GetTotalTokens().Should().Be(2_000_000);
     }
 
     [Fact]
@@ -163,8 +163,43 @@ public sealed class UsageTrackingRunMiddlewareTests
             results.Add(update);
 
         results.Should().HaveCount(3);
-        // 输入 1.2M（含 0.2M 缓存读取）+ 输出 0.5M = 1.7M
-        tracker.GetTotalTokens().Should().Be(1_700_000);
+        // 可计费口径：非缓存输入 1M + 输出 0.5M + 缓存写入 0.1M + 缓存读 0.2M×10% = 1.62M
+        tracker.GetTotalTokens().Should().Be(1_620_000);
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_MultiTurnAcrossToolResults_AccumulatesAllTurns()
+    {
+        var tracker = CreateTracker();
+        var turn1CallAndUsage = new AgentResponseUpdate
+        {
+            Contents =
+            {
+                new FunctionCallContent("call-1", "Read", null),
+                new UsageContent(CreateUsage(input: 500_000, output: 200_000)),
+            }
+        };
+        var turn1Result = new AgentResponseUpdate
+        {
+            Contents = { new FunctionResultContent("call-1", "ok") }
+        };
+        var turn2TextAndUsage = new AgentResponseUpdate
+        {
+            Contents =
+            {
+                new TextContent("Done"),
+                new UsageContent(CreateUsage(input: 600_000, output: 100_000)),
+            }
+        };
+
+        var stubAgent = new StubAgent(new[] { turn1CallAndUsage, turn1Result, turn2TextAndUsage }.ToAsyncEnumerable());
+        var (_, runStreamingFunc) = UsageTrackingRunMiddleware.Create(tracker, "claude-sonnet-4", null);
+
+        await foreach (var _ in runStreamingFunc([], null, null, stubAgent, TestContext.Current.CancellationToken))
+        { }
+
+        // Turn 1 (500K + 200K) + Turn 2 (600K + 100K) = 1.4M
+        tracker.GetTotalTokens().Should().Be(1_400_000);
     }
 
     [Fact]

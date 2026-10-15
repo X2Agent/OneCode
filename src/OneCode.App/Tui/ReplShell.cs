@@ -42,6 +42,7 @@ public sealed record ReplShellInputSources(
     IReadOnlyList<SlashCommandEntry> SlashCommands,
     Func<IReadOnlyCollection<string>> ToolNameProvider,
     Func<IReadOnlyList<string>>? HistoryProvider = null,
+    Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? SessionCandidatesProvider = null,
     Func<bool>? GetShowThinking = null);
 
 public sealed partial class ReplShell : View
@@ -107,7 +108,8 @@ public sealed partial class ReplShell : View
             _keyResolver,
             _keyContextManager,
             _clipboard,
-            inputSources.HistoryProvider);
+            inputSources.HistoryProvider,
+            inputSources.SessionCandidatesProvider);
 
         CanFocus = true;
         TabStop = TabBehavior.NoStop;
@@ -254,6 +256,7 @@ public sealed partial class ReplShell : View
             return;
         _planSidebar.Visible = visible;
         ApplySidebarLayout();
+        RefreshTodoStrip();
         // 对话列宽度变化：旧换行不再匹配新视口，请求按新宽度整体重渲。
         _transcript.RequestContentRerender();
     }
@@ -409,6 +412,10 @@ public sealed partial class ReplShell : View
     /// <summary>Refreshes the conversation layout and re-clamps open overlays.</summary>
     public void RefreshLayout()
     {
+        // 侧边栏宽度随终端自适应：未手动调过时按比例默认值跟随新窗口宽度，
+        // 手动调过则只按新上限 clamp（见 SidebarViewBase.OnTerminalResized）。
+        var sidebarWidthChanged = _planSidebar.Visible && _planSidebar.OnTerminalResized(Viewport.Width);
+
         // Input / status bars use AnchorEnd — geometry is static (Dim/Pos),
         // but Terminal.Gui needs a layout nudge after maximize/restore to
         // recompute the anchored positions.
@@ -416,6 +423,11 @@ public sealed partial class ReplShell : View
         _agentStatusBar.SetNeedsLayout();
         _sessionContextBar.SetNeedsLayout();
         ApplySidebarLayout();
+        if (sidebarWidthChanged)
+        {
+            // 宽度变了：旧换行不再匹配新列数，重渲侧边栏内容（对话列由下方统一重渲）。
+            RenderActivePlanCard();
+        }
 
         // ChatTranscriptView detects resize on draw; nudge so welcome re-wraps to the new width.
         _transcript.NotifyLayoutChanged();

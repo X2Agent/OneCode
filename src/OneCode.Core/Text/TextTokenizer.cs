@@ -4,17 +4,15 @@ using System.Text.RegularExpressions;
 namespace OneCode.Core.Text;
 
 /// <summary>
-/// 统一的检索分词器：拉丁词按大小写边界切分并去复数后缀，CJK 按二字滑窗切分。
+/// 统一的文本分词器：拉丁词按大小写边界切分并去复数后缀，CJK 按二字滑窗切分。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 记忆检索（<c>MemoryService</c>）与工具检索（<see cref="Tools.ToolRetrievalIndex"/>）共用同一规则。
-/// 两条检索路径若各写一套分词，同一个中文查询会得到互相矛盾的召回结果——
-/// 中文没有空格分隔，按 <c>\p{L}</c> 取连续串会把整句当成一个 token，任何子串查询都命中不了。
+/// 供工具检索（<see cref="Tools.ToolRetrievalIndex"/>）与手动记忆语义化 Key 生成共用。
+/// 中文没有空格分隔，按 <c>\p{L}</c> 取连续串会把整句当成一个 token，因此采用二字滑窗切分。
 /// </para>
 /// <para>
-/// 本方法只做分词，不做停用词过滤：调用方按各自政策过滤（工具索引只对 Hint 字段过滤，
-/// 记忆检索对所有 token 过滤），过滤后取集合与过滤前取集合结果一致。
+/// 本方法只做分词，不做停用词过滤：由调用方按各自策略去重或过滤。
 /// </para>
 /// </remarks>
 public static partial class TextTokenizer

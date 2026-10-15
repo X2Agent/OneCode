@@ -246,7 +246,6 @@ public sealed class AggregateApprovalGateTests : IDisposable
             "system",
             sessionManager,
             new WorkingModeController(),
-            SshHost: null,
             SlashCommands: [],
             HarnessPrompt: "harness");
 

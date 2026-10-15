@@ -1,52 +1,39 @@
-using OneCode.App.Session;
-using OneCode.Core.Config;
-using OneCode.Core.Domain;
-using OneCode.Core.Session;
+using System.Diagnostics;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.AutoDream;
-using OneCode.App.Tools;
+using OneCode.App.Session;
+using OneCode.Core.Config;
+using OneCode.Core.Domain;
 using OneCode.Core.Memory;
+using OneCode.Core.Tools;
 using OneCode.Core.Models;
 using OneCode.Core.Prompt;
-using OneCode.Core.Tools;
-using System.Diagnostics;
 
 namespace OneCode.Tests;
 
 /// <summary>
-/// Tests for AutoDream project-awareness: state file isolation and session scanning
-/// filtered by the current working directory.
+/// Tests for AutoDream project-awareness: state file isolation, current in-memory conversation
+/// turn extraction filtered by working directory, and consolidation timestamp retry semantics.
 /// </summary>
-/// <remarks>
-/// 会话文件通过真实 <see cref="FileSessionEventStore"/> 写出（而非手搓 JSON），
-/// 以保证测试覆盖「存储写入路径 ↔ 扫描读取路径」的目录与格式契约。
-/// 历史教训：旧测试自建 <c>sessions/</c> 目录并手写 header，
-/// 掩盖了「扫描目录与真实事件目录不一致」的 BUG（规则见
-/// <c>src/OneCode.Tests/AGENTS.md</c>「契约测试：让写入路径与读取路径互相验证」）。
-/// </remarks>
 public sealed class AutoDreamProjectAwarenessTests : IDisposable
 {
     private readonly string _tempDir;
-    private readonly string _userHome;
     private readonly string _globalConfigDir;
-    private readonly string _eventsDir;
     private readonly string _projectA;
     private readonly string _projectB;
     private readonly IWorkingDirectoryAccessor _wdAccessor;
+    private readonly ISessionManager _sessionManager;
+    private readonly IChatClient _chatClient;
+    private readonly IModelManager _modelManager;
+    private readonly PromptManager _promptManager;
     private readonly AutoDreamService _service;
-    private readonly FileSessionEventStore _eventStore;
 
     public AutoDreamProjectAwarenessTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"AutoDream_{Guid.NewGuid():N}");
-        // _userHome 模拟用户主目录（~），_globalConfigDir 模拟配置文件目录（~/.onecode）。
-        // 生产环境：FileSessionEventStore 接收 ~，内部拼 .onecode/events；
-        // AutoDreamService 接收 ~/.onecode，扫描器拼 events。两者殊途同归。
-        _userHome = Path.Combine(_tempDir, "home");
-        _globalConfigDir = Path.Combine(_userHome, ".onecode");
-        _eventsDir = Path.Combine(_globalConfigDir, "events");
+        _globalConfigDir = Path.Combine(_tempDir, "home", ".onecode");
         _projectA = Path.Combine(_tempDir, "projectA");
         _projectB = Path.Combine(_tempDir, "projectB");
         Directory.CreateDirectory(_projectA);
@@ -55,14 +42,28 @@ public sealed class AutoDreamProjectAwarenessTests : IDisposable
         _wdAccessor = Substitute.For<IWorkingDirectoryAccessor>();
         _wdAccessor.WorkingDirectory.Returns(_projectA);
 
-        // 真实事件存储：basePath = 用户主目录（生产为 PathsHelper.UserHome）。
-        _eventStore = new FileSessionEventStore(_userHome);
+        _sessionManager = Substitute.For<ISessionManager>();
+        _chatClient = Substitute.For<IChatClient>();
+        _modelManager = Substitute.For<IModelManager>();
+        _modelManager.GetFastModel().Returns(new ModelInfo("fast-model", "openai", "fast-model", 4096, null, 128_000));
+
+        _promptManager = new PromptManager();
+        _promptManager.RegisterTemplate(new PromptTemplate(
+            "system/autodream-consolidation",
+            "Project={{project_root}}\nSince={{since}}\nWM={{working_memory_section}}\nConv={{current_conversation_section}}"));
+
+        var configManager = Substitute.For<IConfigManager>();
+        configManager.GetSetting("autodream.enabled", true).Returns(true);
 
         _service = new AutoDreamService(
             NullLogger<AutoDreamService>.Instance,
             NullLoggerFactory.Instance,
-            agent: new AutoDreamAgentDependencies(Substitute.For<IChatClient>(), new ToolCatalog(new Lazy<List<Microsoft.Extensions.AI.AIFunction>>(() => []), new ToolMetadataRegistry(), null), Substitute.For<IModelManager>(), new PromptManager()),
-            storage: new AutoDreamStorageDependencies(Substitute.For<IMemoryEntryStore>(), Substitute.For<IConfigManager>(), _wdAccessor),
+            agent: new AutoDreamAgentDependencies(_chatClient, _modelManager, _promptManager),
+            storage: new AutoDreamStorageDependencies(
+                Substitute.For<IMemoryEntryStore>(),
+                configManager,
+                _wdAccessor,
+                _sessionManager),
             globalConfigDirOverride: _globalConfigDir);
     }
 
@@ -117,156 +118,147 @@ public sealed class AutoDreamProjectAwarenessTests : IDisposable
     [Fact]
     public void StateFiles_AreIsolatedBetweenProjects()
     {
-        // Project A sets a consolidation time
         _wdAccessor.WorkingDirectory.Returns(_projectA);
         var timeA = DateTimeOffset.UtcNow;
         _service.SetLastConsolidatedAt(timeA);
 
-        // Project B has its own independent state
         _wdAccessor.WorkingDirectory.Returns(_projectB);
         var timeB = timeA.AddHours(12);
         _service.SetLastConsolidatedAt(timeB);
 
-        // Project A's state should be unchanged
         _wdAccessor.WorkingDirectory.Returns(_projectA);
         var readA = _service.GetLastConsolidatedAt();
         readA.Should().BeCloseTo(timeA, TimeSpan.FromSeconds(1), "projectA state should be isolated from projectB");
 
-        // Project B's state should be its own
         _wdAccessor.WorkingDirectory.Returns(_projectB);
         var readB = _service.GetLastConsolidatedAt();
         readB.Should().BeCloseTo(timeB, TimeSpan.FromSeconds(1), "projectB should have its own state");
     }
 
-    // Session scanning
+    // Current conversation delta & turn extraction
 
     [Fact]
-    public async Task CountNewSessionsSince_FiltersByProjectWorkingDirectory()
+    public void HasCurrentConversationDeltaSince_FiltersByProjectWorkingDirectory()
     {
-        var since = DateTimeOffset.UtcNow.AddHours(-1);
-
-        // Create 3 sessions for projectA, 2 for projectB
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectB);
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectB);
+        var since = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var convA = CreateConversation(_projectA, since.AddMinutes(2), "user question", "assistant answer");
+        _sessionManager.ForegroundConversation.Returns(convA);
 
         _wdAccessor.WorkingDirectory.Returns(_projectA);
-        var countA = _service.CountNewSessionsSince(since);
-        countA.Should().Be(3, "only projectA sessions should be counted");
+        _service.HasCurrentConversationDeltaSince(since).Should().BeTrue(
+            "active conversation for projectA has turns newer than since");
 
         _wdAccessor.WorkingDirectory.Returns(_projectB);
-        var countB = _service.CountNewSessionsSince(since);
-        countB.Should().Be(2, "only projectB sessions should be counted");
+        _service.HasCurrentConversationDeltaSince(since).Should().BeFalse(
+            "conversation belonging to projectA must not trigger consolidation for projectB");
     }
 
     [Fact]
-    public async Task CountNewSessionsSince_UsesJsonlExtension_NotJson()
-    {
-        var since = DateTimeOffset.UtcNow.AddHours(-1);
-
-        // Create a .jsonl session file (correct extension)
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-
-        // Also create a .json file (wrong extension, should be ignored)
-        var jsonFile = Path.Combine(_eventsDir, $"{Guid.NewGuid()}.json");
-        await File.WriteAllTextAsync(jsonFile, "{}");
-
-        _wdAccessor.WorkingDirectory.Returns(_projectA);
-        var count = _service.CountNewSessionsSince(since);
-
-        count.Should().Be(1, "only .jsonl files should be matched, not .json");
-    }
-
-    [Fact]
-    public async Task CountNewSessionsSince_Returns0_WhenWorkingDirIsNull()
-    {
-        _wdAccessor.WorkingDirectory.Returns((string)null!);
-
-        var count = _service.CountNewSessionsSince(DateTimeOffset.MinValue);
-
-        count.Should().Be(0, "should return 0 when workingDirectory is not available");
-    }
-
-    [Fact]
-    public async Task CountNewSessionsSince_OnlyCountsSessionsAfterSince()
+    public void HasCurrentConversationDeltaSince_OnlyDetectsMessagesAfterSince()
     {
         var oldTime = DateTimeOffset.UtcNow.AddHours(-2);
         var since = DateTimeOffset.UtcNow.AddHours(-1);
+        var conv = CreateConversation(_projectA, oldTime, "old question", "old answer");
+        _sessionManager.ForegroundConversation.Returns(conv);
 
-        // Create an "old" session (before `since`)
-        var oldFile = await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-        File.SetLastWriteTimeUtc(oldFile, oldTime.UtcDateTime);
+        _service.HasCurrentConversationDeltaSince(since).Should().BeFalse(
+            "messages older than since must not trigger incremental consolidation");
 
-        // Create a "new" session (after `since`)
-        await CreateSessionFileAsync(Guid.NewGuid(), _projectA);
-
-        _wdAccessor.WorkingDirectory.Returns(_projectA);
-        var count = _service.CountNewSessionsSince(since);
-
-        count.Should().Be(1, "only sessions modified after `since` should be counted");
+        conv.Messages.Add(new UserMessage("u-new", "new question", DateTimeOffset.UtcNow));
+        _service.HasCurrentConversationDeltaSince(since).Should().BeTrue(
+            "new user message after since must trigger incremental consolidation");
     }
 
     [Fact]
-    public async Task IsSessionForProject_MatchesWorkingDirectory()
+    public void CollectCurrentConversationTurnsSince_ExtractsBothUserAndAssistantTurns_AndHandlesTrailingSlash()
     {
-        var sessionId = Guid.NewGuid();
-        var file = await CreateSessionFileAsync(sessionId, _projectA);
+        var since = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var conv = CreateConversation(
+            _projectA,
+            since.AddMinutes(1),
+            userText: "wrong build command was used",
+            assistantText: "Use dotnet build src/OneCode.slnx instead");
+        _sessionManager.ForegroundConversation.Returns(conv);
 
-        var result = _service.IsSessionForProject(file, _projectA);
+        _wdAccessor.WorkingDirectory.Returns(_projectA + Path.DirectorySeparatorChar);
+        var turns = _service.CollectCurrentConversationTurnsSince(since);
 
-        result.Should().BeTrue();
+        turns.Should().Equal(
+            "User: wrong build command was used",
+            "Assistant: Use dotnet build src/OneCode.slnx instead");
     }
 
     [Fact]
-    public async Task IsSessionForProject_RejectsNonMatchingProject()
+    public async Task TryConsolidateAsync_WhenOutputIsNotValidJsonArray_DoesNotUpdateLastConsolidatedAt()
     {
-        var sessionId = Guid.NewGuid();
-        var file = await CreateSessionFileAsync(sessionId, _projectA);
+        var ct = TestContext.Current.CancellationToken;
+        var initialSince = DateTimeOffset.UtcNow.AddHours(-1);
+        _service.SetLastConsolidatedAt(initialSince);
 
-        var result = _service.IsSessionForProject(file, _projectB);
+        var conv = CreateConversation(_projectA, DateTimeOffset.UtcNow, "fix build", "done");
+        _sessionManager.ForegroundConversation.Returns(conv);
 
-        result.Should().BeFalse("session for projectA should not match projectB");
+        _chatClient
+            .GetResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "I could not find any JSON array to output.")));
+
+        var succeeded = await _service.TryConsolidateAsync(force: false, ct);
+
+        succeeded.Should().BeFalse("invalid non-JSON output must be treated as a failed consolidation");
+        _service.GetLastConsolidatedAt().Should().BeCloseTo(
+            initialSince,
+            TimeSpan.FromSeconds(1),
+            "last_consolidated_at must not advance when output parsing fails so the next task completion retries");
     }
 
     [Fact]
-    public async Task IsSessionForProject_HandlesTrailingSlashDifference()
+    public async Task TryConsolidateAsync_WhenOutputIsValidEmptyJsonArray_UpdatesLastConsolidatedAt()
     {
-        var sessionId = Guid.NewGuid();
-        var file = await CreateSessionFileAsync(sessionId, _projectA);
+        var ct = TestContext.Current.CancellationToken;
+        var initialSince = DateTimeOffset.UtcNow.AddHours(-1);
+        _service.SetLastConsolidatedAt(initialSince);
 
-        // projectA with trailing separator
-        var result = _service.IsSessionForProject(file, _projectA + Path.DirectorySeparatorChar);
+        var conv = CreateConversation(_projectA, DateTimeOffset.UtcNow, "hello", "world");
+        _sessionManager.ForegroundConversation.Returns(conv);
 
-        result.Should().BeTrue("trailing slash should be normalized for comparison");
+        _chatClient
+            .GetResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "[]")));
+
+        var succeeded = await _service.TryConsolidateAsync(force: false, ct);
+
+        succeeded.Should().BeTrue("a valid empty JSON array [] means consolidation succeeded with zero changes");
+        _service.GetLastConsolidatedAt().Should().BeAfter(
+            initialSince.AddMinutes(30),
+            "last_consolidated_at must advance after a valid [] consolidation response");
     }
 
-    // Helpers
-
-    /// <summary>
-    /// 通过真实 <see cref="FileSessionEventStore"/> 写入一个会话的 <c>SessionStarted</c> 事件，
-    /// 返回落盘的事件文件路径。
-    /// </summary>
-    /// <remarks>
-    /// 使用生产写入路径而非手写 JSON，使测试同时约束「目录名」与「事件信封格式
-    /// （<c>payload.working_directory</c>）」两项契约。
-    /// </remarks>
-    private async Task<string> CreateSessionFileAsync(Guid sessionId, string workingDirectory)
+    private static Conversation CreateConversation(
+        string workingDirectory,
+        DateTimeOffset messageTime,
+        string userText,
+        string assistantText)
     {
         var conversation = new Conversation
         {
-            Id = new SessionId(sessionId.ToString()),
-            Name = $"test-{sessionId:N}",
+            Id = SessionId.NewId(),
+            Name = "test-session",
             WorkingDirectory = workingDirectory,
             Model = "test-model",
-            CreatedAt = DateTimeOffset.UtcNow,
-            LastActivityAt = DateTimeOffset.UtcNow,
+            CreatedAt = messageTime,
+            LastActivityAt = messageTime,
         };
-
-        var events = ConversationEventMapper.ToEvents(conversation);
-        await _eventStore.AppendAsync(events);
-
-        return Path.Combine(_eventsDir, $"{sessionId}.jsonl");
+        conversation.Messages.Add(new UserMessage(Guid.NewGuid().ToString("N"), userText, messageTime));
+        conversation.Messages.Add(new AssistantMessage(
+            Guid.NewGuid().ToString("N"),
+            [new TextBlock(assistantText)],
+            messageTime));
+        return conversation;
     }
 }

@@ -114,4 +114,45 @@ public sealed class MessageRendererTests
         view.TotalLines.Should().BeLessThan(narrowLineCount);
         string.Concat(view.RenderedLines.Skip(1).Select(line => line.Trim())).Should().Be(content);
     }
+
+    [Fact]
+    public void BuildToolDetailLines_RunningSubagent_ShowsArgsAndLiveStats()
+    {
+        // 运行中的子代理行：Args（代理名 · 描述）+ 实时统计都可见，不再落到兜底文案。
+        var tag = new ToolLineTag(
+            "Agent",
+            "Explore · 检索USDD脱锚与SunPerp",
+            null,
+            IsExpanded: true,
+            LiveProgress: new TuiSubagentProgress(
+                ForkId: "fork-1",
+                AgentName: "Explore",
+                OneCode.App.Query.SubagentProgressPhase.Running,
+                ToolCallCount: 21,
+                TurnCount: 21,
+                CurrentToolName: "websearch",
+                ElapsedMs: 95_100));
+
+        var text = string.Join("\n", MessageRenderer.BuildToolDetailLines(tag, 80).Select(line => line.Text));
+
+        text.Should().Contain("检索USDD脱锚与SunPerp", "运行中展开必须能看到任务目标");
+        text.Should().Contain("运行中");
+        text.Should().Contain("turn 21");
+        text.Should().Contain("21 次工具调用");
+        text.Should().Contain("websearch");
+        text.Should().Contain("95.1s");
+        text.Should().NotContain("(no details available)");
+    }
+
+    [Fact]
+    public void BuildToolDetailLines_EmptyRunningTag_StillFallsBackToNoDetails()
+    {
+        // 兜底文案保留：三无行（无 Args/Result/LiveProgress）仍显示占位提示，
+        // 防止渲染层为空时静默产出零行。
+        var tag = new ToolLineTag("Agent", null, null, IsExpanded: true);
+
+        var text = string.Join("\n", MessageRenderer.BuildToolDetailLines(tag, 80).Select(line => line.Text));
+
+        text.Should().Contain("(no details available)");
+    }
 }

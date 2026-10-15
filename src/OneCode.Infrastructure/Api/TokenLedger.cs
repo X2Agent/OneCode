@@ -13,7 +13,9 @@ public sealed class TokenLedger : ITokenLedger
     private readonly ConcurrentDictionary<SessionId, SessionTokenUsage> _sessionUsage = new();
 
     public void RecordUsage(UsageRecord record) =>
-        Interlocked.Add(ref _totalTokens, (long)record.InputTokens + record.OutputTokens);
+        // 预算熔断按可计费口径累计（缓存读 10% 折算）——InputTokens 含缓存命中，
+        // 全额累计会让长会话的重复上下文计费把预算打穿（见 UsageMath remarks）。
+        Interlocked.Add(ref _totalTokens, UsageMath.BillableTokens(record));
 
     public void RecordUsage(SessionId sessionId, UsageRecord record)
     {

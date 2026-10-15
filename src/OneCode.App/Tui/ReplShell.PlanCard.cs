@@ -105,21 +105,7 @@ public sealed partial class ReplShell
         if (_activePlan is not { } plan)
             return;
 
-        // 待修改态保持冻结标题；其余阶段叠加 Phase 状态后缀。
-        var displayTitle = plan.IsPendingRevision
-            ? plan.Title
-            : plan.Phase switch
-            {
-                PlanCardPhase.Finalizing => $"{plan.Title} · 正在确认",
-                PlanCardPhase.PendingApproval => $"{plan.Title} · 等待审批",
-                PlanCardPhase.StartingExecution => $"{plan.Title} · 准备执行",
-                PlanCardPhase.Executing => $"{plan.Title} · 正在执行",
-                PlanCardPhase.Verifying => $"{plan.Title} · 正在验证",
-                PlanCardPhase.Completed => $"{plan.Title} · 已完成",
-                PlanCardPhase.Failed => $"{plan.Title} · 执行失败",
-                PlanCardPhase.Cancelled => $"{plan.Title} · 已取消",
-                _ => plan.Title,
-            };
+        var displayTitle = FormatPlanHeaderTitle(plan, _planSidebar.CurrentWidth);
         // 侧边栏内容按当前面板宽度（可拖动调整）换行渲染；只含计划内容，
         // 辅助性说明由 LLM 在对话流中提供。
         var lines = ChatBlockRenderers.RenderPlanCard(
@@ -127,8 +113,49 @@ public sealed partial class ReplShell
             plan.Steps,
             _planSidebar.CurrentWidth - 2,
             markdown: plan.Markdown,
-            documentPath: plan.DocumentPath);
+            documentPath: plan.DocumentPath,
+            // 侧边栏顶部已由 SidebarViewBase 绘制固定标题行，内容里不再重复标题。
+            includeHeader: false);
         _planSidebar.Update(lines, displayTitle);
+        // 横条是否还需要列出步骤待办取决于计划阶段与侧边栏可见性，两者在此一并变化。
+        RefreshTodoStrip();
+    }
+
+    /// <summary>
+    /// 组装侧边栏顶部标题并按可用列宽优先保留阶段状态后缀（如 <c> · 已完成</c>）。
+    /// 长标题若直接拼接状态后再交由 <see cref="SidebarViewBase"/> 从右截断，会把阶段状态裁成 <c> · …</c>。
+    /// </summary>
+    internal static string FormatPlanHeaderTitle(PlanCardState plan, int sidebarWidth)
+    {
+        if (plan.IsPendingRevision)
+            return plan.Title;
+
+        var suffix = plan.Phase switch
+        {
+            PlanCardPhase.Finalizing => " · 正在确认",
+            PlanCardPhase.PendingApproval => " · 等待审批",
+            PlanCardPhase.StartingExecution => " · 准备执行",
+            PlanCardPhase.Executing => " · 正在执行",
+            PlanCardPhase.Completed => " · 已完成",
+            PlanCardPhase.Failed => " · 执行失败",
+            PlanCardPhase.Cancelled => " · 已取消",
+            _ => string.Empty,
+        };
+        if (suffix.Length == 0)
+            return plan.Title;
+
+        // SidebarViewBase 标题行前缀 " 📋 " 占 4 列，右侧留 1 列边距，共 5 列固定开销。
+        const int headerChromeColumns = 5;
+        var availableWidth = sidebarWidth - headerChromeColumns;
+        var suffixWidth = TextWidthHelper.GetDisplayWidth(suffix);
+        var titleBudget = availableWidth - suffixWidth;
+        if (titleBudget <= 1)
+            return $"{plan.Title}{suffix}";
+
+        var truncatedTitle = TextWidthHelper.GetDisplayWidth(plan.Title) > titleBudget
+            ? TextWidthHelper.TruncateByWidth(plan.Title, titleBudget)
+            : plan.Title;
+        return $"{truncatedTitle}{suffix}";
     }
 
     /// <summary>Clears the plan and hides the sidebar.</summary>
@@ -137,5 +164,6 @@ public sealed partial class ReplShell
         _activePlan = null;
         _planSidebar.ClearContent();
         SetPlanSidebarVisible(false);
+        RefreshTodoStrip();
     }
 }

@@ -162,7 +162,6 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
                     validationCommands = run.Plan.ValidationCommands.ToArray(),
                     risks = run.Plan.Risks.Order(StringComparer.Ordinal).ToArray(),
                     nonGoals = run.Plan.NonGoals.Order(StringComparer.Ordinal).ToArray(),
-                    run.Plan.RequireExplicitTaskCompletion,
                 },
             scope = run.Scope is null
                 ? null

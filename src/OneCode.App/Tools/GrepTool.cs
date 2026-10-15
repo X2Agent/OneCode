@@ -63,7 +63,8 @@ public sealed class GrepTool
                 OutputMode: om,
                 ContextBefore: contextSymmetric ?? (B ?? 0),
                 ContextAfter: contextSymmetric ?? (A ?? 0),
-                WorkspaceRoot: _wd.WorkingDirectory);
+                WorkspaceRoot: _wd.WorkingDirectory,
+                AdditionalDirectories: _wd.AdditionalDirectories);
 
             results = [.. await _textSearch.SearchAsync(request, ct).ConfigureAwait(false)];
         }
@@ -107,6 +108,7 @@ public sealed class GrepTool
             return $"Found {totalMatches} matches across {items.Count} files{truncNote}\n" + string.Join("\n", items);
         }
         if (items.Count == 0) return "No matches found";
-        return string.Join("\n", items) + (appliedLimit.HasValue ? $"\n[Truncated: showing {appliedLimit} of {totalCount} results. Use offset to page.]" : "");
+        var safeItems = items.Select(static item => TextSearchService.TruncateLongLine(item)).ToList();
+        return string.Join("\n", safeItems) + (appliedLimit.HasValue ? $"\n[Truncated: showing {appliedLimit} of {totalCount} results. Use offset to page.]" : "");
     }
 }

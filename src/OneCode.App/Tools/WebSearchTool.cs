@@ -23,6 +23,10 @@ public sealed class WebSearchTool(
 {
     private const int MaxResults = 8;
 
+    // 单条搜索摘要的内联长度上限：保证最多 8 条结果可以完整内联返回（~3–5 KB），
+    // 模型无需额外发起 Read 工具往返即可浏览全部候选。
+    public const int MaxSnippetChars = 600;
+
     private readonly IConfigManager _config = config;
     private readonly ILogger<WebSearchTool> _logger = logger;
     private readonly IReadOnlyList<IWebSearchProvider> _apiProviders = apiProviders.ToArray();
@@ -31,28 +35,34 @@ public sealed class WebSearchTool(
     /// <summary>
     /// 缓存键前缀。缓存的是提供方返回的**原始**结果，不含域过滤：
     /// 域条件属于单次调用的过滤参数，把它编进键会让同一 query 因白名单变化而反复回源，
-    /// 且旧实现把已过滤结果当缓存值，放宽域条件时会永远拿不到被滤掉的候选。
+    /// 缓存已过滤结果则会使后续放宽域条件时拿不到此前被滤掉的候选。
     /// </summary>
     private const string CacheKeyPrefix = "websearch:";
+    private const string CooldownKeyPrefix = "websearch:cooldown:";
 
     // 同 query 结果缓存：10 分钟内重复搜索直接命中，节省 API 配额（Tavily 1000 次/月）。
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
-    // 单条缓存上限：限制无同步字典的旧实现遗留的无界增长风险。
+    // 提供方级故障冷却：配额耗尽/鉴权失败冷却 5 分钟，反爬挑战冷却 1 分钟，防止并发批次盲目重锤已挂提供方。
+    private static readonly TimeSpan QuotaOrAuthCooldownTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan AntiBotCooldownTtl = TimeSpan.FromMinutes(1);
+
+    // 单条缓存尺寸权重，配合共享 IMemoryCache 的 SizeLimit 控制缓存容量。
     private const int CacheEntrySize = 1;
 
     [Description("Search the web for current information, returning a list of results with title, URL, and snippet. " +
                  "Use this to find up-to-date information beyond your knowledge cutoff (e.g. latest library versions, recent API changes, current events). " +
                  "Providers: Tavily API and DuckDuckGo HTML are tried in failover order (primary via the webSearchProvider setting; the other is the fallback — a provider without a configured Tavily key is skipped automatically). " +
                  "Domain filtering: allowed_domains restricts results to the listed domains (whitelist); blocked_domains excludes them (blacklist). Both accept bare hostnames (www. prefix is stripped automatically). " +
-                 "Result limit: maximum 8 results per call. " +
+                 "Result limit: maximum 8 results per call (each snippet capped at 600 chars). " +
                  "Query length: must be at least 2 characters. " +
                  "Tip: for reading a specific known URL, use WebFetch instead; for general research, use WebSearch first then WebFetch on the most relevant results. " +
                  "On total failure the error includes a hint — fall back to BrowserFetch (built-in playwright MCP) or WebFetch on a known URL instead of retrying the same query.")]
     public async Task<ToolResult> SearchAsync(
-        [Description("The search query. Must be at least 2 characters. Use specific terms for better results; avoid overly broad queries like 'javascript'.")] string query,
-        [Description("Whitelist: only include results from these domains. Example: ['docs.microsoft.com', 'github.com']. www. is stripped automatically. Omit for no whitelist.")] string[]? allowed_domains = null,
-        [Description("Blacklist: exclude results from these domains. Example: ['w3schools.com', 'pinterest.com']. www. is stripped automatically. Omit for no blacklist.")] string[]? blocked_domains = null,
+        [Description("The search query. Must be at least 2 characters. Use specific terms for better results; avoid overly broad queries like 'javascript'. " +
+                     "The current date is in your system context — when the user asks about recent/upcoming events, anchor the query on the CURRENT year and month (e.g. \"最近\" means the current month), never on dates remembered from training data.")] string query,
+        [Description("Whitelist: only include results from these domains. Example: [\"docs.microsoft.com\", \"github.com\"]. www. is stripped automatically. Omit for no whitelist.")] string[]? allowed_domains = null,
+        [Description("Blacklist: exclude results from these domains. Example: [\"w3schools.com\", \"pinterest.com\"]. www. is stripped automatically. Omit for no blacklist.")] string[]? blocked_domains = null,
         CancellationToken ct = default)
     {
         if (query.Length < 2)
@@ -64,21 +74,31 @@ public sealed class WebSearchTool(
         // Narrowing and then widening a whitelist must both see the same candidate set.
         if (TryGetCached(query, out var cached))
         {
+            var filteredCached = FilterDomains(cached.Hits, allowed_domains, blocked_domains);
             return ToolResult.JsonSuccess(new
             {
                 provider = cached.Provider,
                 query,
-                results = FilterDomains(cached.Hits, allowed_domains, blocked_domains).Select(ToDto).ToList(),
+                results = filteredCached.Select(ToDto).ToList(),
+                resultCount = filteredCached.Count,
                 durationSeconds = (DateTimeOffset.UtcNow - startTime).TotalSeconds,
                 cached = true,
             });
         }
 
         List<string> failures = [];
+        var attemptedLiveCall = false;
         foreach (var (providerName, attempt) in BuildChain(_config.Current.Effective, query))
         {
             ct.ThrowIfCancellationRequested();
 
+            if (TryGetProviderCooldown(providerName, out var cooldownCategory))
+            {
+                failures.Add($"{providerName}: {cooldownCategory}");
+                continue;
+            }
+
+            attemptedLiveCall = true;
             try
             {
                 var hits = await attempt(ct).ConfigureAwait(false);
@@ -89,11 +109,13 @@ public sealed class WebSearchTool(
                     throw new InvalidOperationException("returned no results (possible anti-bot challenge or no matches).");
 
                 CacheResults(query, hits, providerName);
+                var filtered = FilterDomains(hits, allowed_domains, blocked_domains);
                 return ToolResult.JsonSuccess(new
                 {
                     provider = providerName,
                     query,
-                    results = FilterDomains(hits, allowed_domains, blocked_domains).Select(ToDto).ToList(),
+                    results = filtered.Select(ToDto).ToList(),
+                    resultCount = filtered.Count,
                     durationSeconds = (DateTimeOffset.UtcNow - startTime).TotalSeconds,
                 });
             }
@@ -116,16 +138,24 @@ public sealed class WebSearchTool(
                 // The query text and the provider's raw error are deliberately not logged: both can
                 // carry user content or credentials echoed back by the service.
                 _logger.LogWarning(ex, "WebSearch failed via {Provider}, trying next provider", providerName);
-                failures.Add($"{providerName}: {ClassifyFailure(ex)}");
+                var category = ClassifyFailure(ex);
+                if (TryGetCooldownDuration(ex, out var cooldownTtl))
+                    SetProviderCooldown(providerName, category, cooldownTtl);
+                failures.Add($"{providerName}: {category}");
             }
         }
 
-        // 全部提供方失败：降级引导（决策权归模型），指向 BrowserFetch 而非重复重试。
+        // 全部提供方失败：明确要求模型停止继续调用 WebSearch，直接使用已有上下文继续任务。
         var detail = string.Join("; ", failures);
-        _logger.LogWarning("WebSearch failed on all {Count} provider(s)", failures.Count);
-        return ToolResult.Error($"WebSearch error: all providers failed. {detail}\n\n" +
-            "Hint: do not retry the same query repeatedly; rephrase once, use WebFetch on a known URL, " +
-            "or use BrowserFetch (built-in playwright MCP browser tools) for interactive rendering.");
+        var cooldownNotice = !attemptedLiveCall && failures.Count > 0
+            ? " All configured search providers are currently in cooldown (circuit breaker active); changing or simplifying the query will NOT bypass cooldown."
+            : string.Empty;
+        _logger.LogWarning("WebSearch failed on all {Count} provider(s) (liveAttempt={AttemptedLiveCall})", failures.Count, attemptedLiveCall);
+        return ToolResult.Error(
+            $"WebSearch error: all providers failed. {detail}{cooldownNotice}\n\n" +
+            "Hint: search providers are currently unavailable. Do NOT retry WebSearch or rephrase the query; " +
+            "continue the task using the information already in context, or use WebFetch on a specific known URL.",
+            suggestedNextAction: "Stop calling WebSearch in this turn; use WebFetch on known URLs or proceed with existing context.");
     }
 
     /// <summary>
@@ -133,11 +163,7 @@ public sealed class WebSearchTool(
     /// 主提供方失败（或未配置 Key）时自动回退备选提供方；
     /// 无 Tavily Key 时 Tavily 环节被跳过（未注册 IWebSearchProvider 亦跳过，便于测试）。
     /// </summary>
-    /// <remarks>
-    /// 两个提供方都实现同一个 <see cref="IWebSearchProvider"/>，包括 DuckDuckGo——
-    /// 它以前内联在本工具里，导致工具同时承担「提供方适配」与「故障转移编排」两件事。
-    /// </remarks>
-    private IEnumerable<(string Name, Func<CancellationToken, Task<IReadOnlyList<SearchHit>>> Attempt)> BuildChain(
+    private IEnumerable<(string Name, Func<CancellationToken, Task<IReadOnlyList<WebSearchResult>>> Attempt)> BuildChain(
         AppSettings settings, string query)
     {
         var tavily = FindProvider("tavily");
@@ -152,10 +178,7 @@ public sealed class WebSearchTool(
             if (provider is not { IsConfigured: true })
                 continue;
 
-            yield return (provider.Name, async token =>
-                (await provider.SearchAsync(query, MaxResults, token).ConfigureAwait(false))
-                    .Select(hit => new SearchHit(hit.Title, hit.Url, hit.Snippet))
-                    .ToList());
+            yield return (provider.Name, token => provider.SearchAsync(query, MaxResults, token));
         }
     }
 
@@ -165,7 +188,12 @@ public sealed class WebSearchTool(
     private static IEnumerable<string> PrimaryFirst(string primary) =>
         primary == "tavily" ? (string[])["tavily", "duckduckgo"] : (string[])["duckduckgo", "tavily"];
 
-    private static object ToDto(SearchHit hit) => new { title = hit.Title, url = hit.Url, snippet = hit.Snippet };
+    private static object ToDto(WebSearchResult hit) => new
+    {
+        title = hit.Title,
+        url = hit.Url,
+        snippet = hit.Snippet is { Length: > MaxSnippetChars } s ? s[..MaxSnippetChars] + "…" : hit.Snippet,
+    };
 
     /// <summary>
     /// Reads the <b>unfiltered</b> provider results for a query.
@@ -175,10 +203,10 @@ public sealed class WebSearchTool(
     /// parameters, not a property of the search. Keying on them meant a narrower whitelist populated
     /// the cache with a pruned candidate set that a later wider query could never recover.
     /// </remarks>
-    private bool TryGetCached(string query, out (string Provider, IReadOnlyList<SearchHit> Hits) entry)
+    private bool TryGetCached(string query, out (string Provider, IReadOnlyList<WebSearchResult> Hits) entry)
     {
         if (_cache.TryGetValue(CacheKeyPrefix + query, out var cached)
-            && cached is (string Provider, IReadOnlyList<SearchHit> Hits))
+            && cached is (string Provider, IReadOnlyList<WebSearchResult> Hits))
         {
             entry = (Provider, Hits);
             return true;
@@ -188,7 +216,7 @@ public sealed class WebSearchTool(
         return false;
     }
 
-    private void CacheResults(string query, IReadOnlyList<SearchHit> hits, string providerName) =>
+    private void CacheResults(string query, IReadOnlyList<WebSearchResult> hits, string providerName) =>
         _cache.Set(
             CacheKeyPrefix + query,
             (providerName, hits),
@@ -199,6 +227,64 @@ public sealed class WebSearchTool(
                 Size = CacheEntrySize,
             });
 
+    private bool TryGetProviderCooldown(string providerName, out string category)
+    {
+        if (_cache.TryGetValue(CooldownKeyPrefix + providerName, out var cached)
+            && cached is string reason)
+        {
+            category = reason;
+            return true;
+        }
+
+        category = string.Empty;
+        return false;
+    }
+
+    private void SetProviderCooldown(string providerName, string category, TimeSpan ttl) =>
+        _cache.Set(
+            CooldownKeyPrefix + providerName,
+            category,
+            new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = ttl,
+                Size = CacheEntrySize,
+            });
+
+    private static bool TryGetCooldownDuration(Exception ex, out TimeSpan ttl)
+    {
+        if (ex is HttpRequestException { StatusCode: { } status })
+        {
+            var code = (int)status;
+            if (code is 401 or 403 or 429 or 432)
+            {
+                ttl = QuotaOrAuthCooldownTtl;
+                return true;
+            }
+        }
+
+        if (ex is InvalidOperationException)
+        {
+            var msg = ex.Message;
+            if (msg.Contains("HTTP 401", StringComparison.Ordinal)
+                || msg.Contains("HTTP 403", StringComparison.Ordinal)
+                || msg.Contains("HTTP 429", StringComparison.Ordinal)
+                || msg.Contains("HTTP 432", StringComparison.Ordinal))
+            {
+                ttl = QuotaOrAuthCooldownTtl;
+                return true;
+            }
+
+            if (msg.Contains("HTTP 202", StringComparison.Ordinal))
+            {
+                ttl = AntiBotCooldownTtl;
+                return true;
+            }
+        }
+
+        ttl = default;
+        return false;
+    }
+
     /// <summary>
     /// Maps a provider failure to a stable category. The provider's raw message is not surfaced:
     /// it can echo the query, request headers or credentials, and the model only needs to know
@@ -206,14 +292,12 @@ public sealed class WebSearchTool(
     /// </summary>
     private static string ClassifyFailure(Exception ex) => ex switch
     {
-        HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests } => "rate limited",
+        HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests or (System.Net.HttpStatusCode)432 } => "rate limited",
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden } => "authentication failed",
         HttpRequestException => "network error",
         InvalidOperationException => "no usable results",
         _ => "failed",
     };
-
-    private sealed record SearchHit(string Title, string Url, string? Snippet);
 
     /// <summary>
     /// Applies the per-call domain conditions and caps the result count.
@@ -222,8 +306,8 @@ public sealed class WebSearchTool(
     /// Applied on every call rather than at cache time: the cache holds unfiltered provider output, so a
     /// narrowed whitelist must not be able to permanently prune the candidate set.
     /// </remarks>
-    private static IReadOnlyList<SearchHit> FilterDomains(
-        IEnumerable<SearchHit> hits,
+    private static IReadOnlyList<WebSearchResult> FilterDomains(
+        IEnumerable<WebSearchResult> hits,
         string[]? allowedDomains,
         string[]? blockedDomains)
     {

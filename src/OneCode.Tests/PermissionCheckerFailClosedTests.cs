@@ -190,6 +190,45 @@ public sealed class PermissionCheckerFailClosedTests
             "unknown permission mode must fall back to Default (Ask), not Allow (fail-open)");
     }
 
+    [Fact]
+    public async Task Invoke_RunSealed_RejectsEveryToolAndNeverExecutesIt()
+    {
+        var sealedFlag = false;
+        var middleware = PermissionAndLimitMiddleware.Create(
+            new AgentPipelineOptions
+            {
+                WorkingDirectory = Path.GetTempPath(),
+                IsRunSealed = () => sealedFlag,
+                RunSealedMessage = "run is sealed",
+            },
+            new AgentPipelineMetrics());
+        var executed = 0;
+        async Task<ToolResult?> Invoke(string toolName)
+        {
+            var context = CreateContext(toolName);
+            var result = await middleware(
+                null!,
+                context,
+                (_, _) =>
+                {
+                    executed++;
+                    return new ValueTask<object?>("ok");
+                },
+                TestContext.Current.CancellationToken);
+            return result as ToolResult;
+        }
+
+        (await Invoke("Read")).Should().BeNull("封条落下前工具照常执行");
+        sealedFlag = true;
+        var read = await Invoke("Read");
+        var resubmit = await Invoke("SubmitPlan");
+
+        read!.IsError.Should().BeTrue();
+        read.Content.Should().Contain("run is sealed");
+        resubmit!.Content.Should().Contain("run is sealed", "封条对任何工具一视同仁，包括重复的 SubmitPlan");
+        executed.Should().Be(1, "封口后的调用一次都不得到达工具本体");
+    }
+
     private static YoloClassifier CreateYoloClassifier()
     {
         var ruleStore = new YoloRuleStore(logger: null);

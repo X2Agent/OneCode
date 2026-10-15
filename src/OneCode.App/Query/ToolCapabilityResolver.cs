@@ -4,6 +4,9 @@ namespace OneCode.App.Query;
 
 public interface IToolCapabilityResolver
 {
+    /// <summary>
+    /// Resolves the tool visibility boundary for <paramref name="mode"/>.
+    /// </summary>
     ToolCapabilitySet Resolve(WorkingMode mode);
 }
 

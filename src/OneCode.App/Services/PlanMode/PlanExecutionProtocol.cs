@@ -1,57 +1,66 @@
-using OneCode.App.Tools;
+using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
 
 /// <summary>
-/// Plan 执行协议文本的单一真相源，供 <see cref="PlanAgentRunDispatcher"/>（首跑指令）
-/// 与 <see cref="OneCode.App.Services.Context.PlanExecutionContextProvider"/>（续跑上下文）共用。
-/// 协议文本与工作流状态机强耦合（步骤全部终态后自动进入 Verifying、
-/// <see cref="PlanToolNames.CompleteVerification"/> 的 fail-closed 语义），属机器契约
-/// 而非可调优 prompt——按 App/AGENTS.md 不纳入 prompts/ 文件化覆盖体系，集中于此防漂移。
+/// 批准计划执行轮的指令文本单一真相源：首跑触发语、每轮注入的交接上下文、收尾纠偏提示。
+/// 文本与「步骤进度 = agent 待办清单」的机制强耦合（待办标题带步骤 id 前缀、<c>todos_complete</c> 勾选），
+/// 属机器契约而非可调优 prompt——按 App/AGENTS.md 不纳入 prompts/ 文件化覆盖体系，集中于此防漂移。
 /// </summary>
 public static class PlanExecutionProtocol
 {
-    /// <summary>常规执行指令：按依赖顺序从持久化步骤状态续跑。</summary>
-    public const string ExecutionDirective =
-        "Execute steps in dependency order. Resume from the persisted step states; do not repeat completed steps.";
+    /// <summary>
+    /// 工具边界句。计划阶段历史里反复出现 SubmitPlan 调用（plan.prompt 强约束模型提交计划），
+    /// 本 run 的工具面不挂载它（PlanExclusive）——模型回放历史调用会浪费一轮往返。
+    /// 事先声明边界，事前掐掉这类调用。
+    /// </summary>
+    public const string SubmitPlanUnavailableLine =
+        "SubmitPlan is NOT available in this run — the plan is already approved; never call it.";
 
-    /// <summary>Verifying 态恢复指令：只允许补验证，不得改动实现步骤。</summary>
-    public const string VerifyingRecoveryDirective =
-        $"The persisted workflow is already in Verifying. Do not modify implementation steps. " +
-        $"Run only the required build/tests/checks and call {PlanToolNames.CompleteVerification} with concrete evidence.";
+    private const string ExecutionRules =
+        "Execute this approved snapshot in dependency order. Where the plan and earlier chat wording " +
+        "conflict, the plan wins; the user's original request is the source for any constraint the plan omits. " +
+        "Your todo list is already pre-seeded with one item per plan step (titled \"{stepId}: …\"): do NOT call " +
+        "todos_add to duplicate plan steps — work directly against the pre-seeded items and call todos_complete " +
+        "on each step as soon as its deliverable is written and verified (you may call todos_complete in parallel " +
+        "with the next step's first tool call, or complete multiple step IDs at once if a single change satisfies them; " +
+        "never complete a step on intent alone). Reuse the findings and tool results already gathered during Plan mode " +
+        "instead of re-running redundant searches, and write target deliverables directly without creating unrequested " +
+        "scratch files. When all steps are complete, reply with a concise summary of what was delivered. " +
+        SubmitPlanUnavailableLine;
 
-    /// <summary>执行上下文（Turn 1 全量刷新）结尾的协议句。</summary>
-    public const string ContextProtocolLine =
-        $"Execute exactly this approved snapshot. Use {PlanToolNames.UpdateStep} for progress; " +
-        "verification starts automatically once all steps are terminal, then call " +
-        $"{PlanToolNames.CompleteVerification} with concrete evidence. " +
-        ChecklistOwnershipLine;
+    /// <summary>首跑用户消息：只做触发，计划全文与用户原始诉求由每轮注入的交接上下文携带（单一副本）。</summary>
+    public static string BuildTriggerInstruction(ApprovedPlanSnapshot snapshot) =>
+        $"Execute approved plan {snapshot.PlanId} revision {snapshot.Revision} now. " +
+        "The full plan and the user's original request are in the system context.";
 
     /// <summary>
-    /// 清单分工句。批准计划步骤是本 run 唯一的权威执行跟踪器；<c>todos_*</c>
-    /// （Harness TodoProvider，每轮注入清单消息）只是模型自有 checklist，仅用于
-    /// 单步内部的可选拆解。没有这句存在两种失败模式：模型把计划步骤镜像进
-    /// <c>todos_*</c>（双重记账、两处漂移），或只用 <c>todos_*</c> 跟踪而漏报
-    /// 步骤状态（执行结束未推进工作流，触发 <c>ExecutionClosureMissing</c>）。
+    /// 交接上下文：计划正文只写「做什么」——用户原话、规划阶段的澄清问答与修订反馈随快照冻结并在每轮注入，
+    /// 确保跨上下文压缩或进程恢复时硬约束不丢失。
     /// </summary>
-    public const string ChecklistOwnershipLine =
-        "The approved plan steps tracked through the plan execution tools are the authoritative " +
-        "checklist for this run; the todos_* tools are only for your own optional breakdown of " +
-        "work inside a single step.";
+    public static string BuildHandoffContext(ApprovedPlanSnapshot snapshot)
+    {
+        var sections = new List<string>();
+        if (!string.IsNullOrWhiteSpace(snapshot.OriginalRequest))
+            sections.Add($"## USER'S ORIGINAL REQUEST\n{snapshot.OriginalRequest}");
+        if (snapshot.Clarifications.Count > 0)
+        {
+            sections.Add("## CLARIFICATIONS AND FEEDBACK DURING PLANNING\n"
+                + string.Join("\n", snapshot.Clarifications.Select(line => $"- {line}")));
+        }
 
-    /// <summary>执行上下文（Turn 2+ 续跑）短句。</summary>
-    public const string ContinueLine =
-        "Continue executing the immutable approved snapshot. Persist step progress and " +
-        "verification evidence through the plan execution tools.";
+        var steps = string.Join("\n", snapshot.Steps.Select(step =>
+            $"- {step.Id}: {step.Title}\n  {step.Description}\n  Acceptance: {string.Join("; ", step.AcceptanceCriteria)}"));
+        sections.Add($"""
+            ## IMMUTABLE APPROVED PLAN
+            Plan: {snapshot.PlanId} · Revision: {snapshot.Revision} · Content hash: {snapshot.ContentHash}
 
-    /// <summary>首跑指令的 Required workflow protocol 块（四条协议，绑定本次 run id）。</summary>
-    public static string BuildProtocolBlock(string runId) => $"""
-        ## Required workflow protocol
-        Active run id: {runId}
-        1. Call {PlanToolNames.UpdateStep} for every state change. Completed steps require concrete evidence.
-        2. When all steps are completed or explicitly skipped, the workflow automatically enters Verifying.
-        3. Run the required build/tests/checks, then call {PlanToolNames.CompleteVerification} with command output as evidence.
-        4. Do not claim completion unless {PlanToolNames.CompleteVerification} returns a completed workflow.
-        5. {ChecklistOwnershipLine}
-        """;
+            {snapshot.Markdown}
+
+            ## STRUCTURED STEPS
+            {steps}
+            """);
+        sections.Add($"## EXECUTION RULES\n{ExecutionRules}");
+        return string.Join("\n\n", sections);
+    }
 }

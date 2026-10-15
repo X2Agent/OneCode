@@ -1,130 +1,51 @@
-using NSubstitute;
 using OneCode.App.Tui;
-using OneCode.Core.Build;
-using Terminal.Gui.App;
 
 namespace OneCode.Tests;
 
+/// <summary>
+/// Unit tests for <see cref="TranscriptEventPresenter"/> — 覆盖 Agent 工具结果的
+/// 发言块提取契约（后台信封反面场景是守卫重点：无 result 文本时不得渲染发言块）。
+/// TryPresent 的完整路由依赖 Terminal.Gui 视图，归集成路径。
+/// </summary>
 public sealed class TranscriptEventPresenterTests
 {
     [Fact]
-    public void TryPresent_TranscriptEvent_ProjectsIntoTranscript()
+    public void TryExtractAgentSpeech_SyncSuccessEnvelope_ExtractsAgentNameAndResult()
     {
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
+        const string raw = """{"agent":"Explore","conversationId":"abc","result":"findings line 1\nline 2","turnsCompleted":3,"maxTurnsReached":false,"toolCalls":12}""";
 
-        transcript.BeginStreaming();
+        var ok = TranscriptEventPresenter.TryExtractAgentSpeech(raw, out var agentName, out var speech);
 
-        presenter.TryPresent(new TuiThinkingDelta("Inspecting the request.")).Should().BeTrue();
-        presenter.TryPresent(new TuiTextDelta("Done.")).Should().BeTrue();
-        presenter.TryPresent(new TuiFileChange("Feature.cs", ["new line"], ["old line"])).Should().BeTrue();
-
-        transcript.EndStreaming();
-        var text = string.Join('\n', transcript.MessageView.RenderedLines);
-
-        text.Should().Contain("Thought for");
-        text.Should().Contain("Done.");
-        text.Should().Contain("Feature.cs");
-        text.Should().Contain("+new line");
-        text.Should().Contain("-old line");
+        ok.Should().BeTrue();
+        agentName.Should().Be("Explore");
+        speech.Should().Be("findings line 1\nline 2");
     }
 
     [Fact]
-    public void TryPresent_CrossRegionEvent_ReturnsFalse()
+    public void TryExtractAgentSpeech_BackgroundEnvelope_ReturnsFalse()
     {
-        var presenter = new TranscriptEventPresenter(
-            new ChatTranscriptView(CreateImmediateApp()));
+        // 守卫：后台模式信封 {background:true, taskId, ...} 无 result 文本——
+        // 渲染发言块会把空内容平铺到对话流，必须跳过。
+        const string raw = """{"background":true,"taskId":"t-1","agent":"Explore","status":"started"}""";
 
-        presenter.TryPresent(new TuiDone(1, 2)).Should().BeFalse();
+        TranscriptEventPresenter.TryExtractAgentSpeech(raw, out _, out _)
+            .Should().BeFalse("background forks have no result text yet — no speech block may be rendered");
     }
 
     [Fact]
-    public void TryPresent_BuildRunState_IgnoresNonIncreasingSequence()
+    public void TryExtractAgentSpeech_NullOrEmptyResultText_ReturnsFalse()
     {
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
-        var runId = new BuildRunId("br-test");
+        const string raw = """{"agent":"Explore","conversationId":"abc","result":null,"turnsCompleted":1,"maxTurnsReached":false}""";
 
-        transcript.BeginStreaming();
-        presenter.TryPresent(CreateBuildState(runId, BuildRunState.Implementing, sequence: 2));
-        presenter.TryPresent(CreateBuildState(runId, BuildRunState.Verifying, sequence: 2));
-
-        var unchanged = string.Join('\n', transcript.MessageView.RenderedLines);
-        unchanged.Should().Contain("正在执行任务");
-        unchanged.Should().NotContain("正在运行验证");
-
-        presenter.TryPresent(CreateBuildState(runId, BuildRunState.Verifying, sequence: 3));
-
-        var updated = string.Join('\n', transcript.MessageView.RenderedLines);
-        updated.Should().Contain("正在运行验证");
-        updated.Should().NotContain("正在执行任务");
+        TranscriptEventPresenter.TryExtractAgentSpeech(raw, out _, out _).Should().BeFalse();
     }
 
-    [Fact]
-    public void Reset_AllowsReplayedBuildRunSequence()
+    [Theory]
+    [InlineData("")]
+    [InlineData("plain error text, not json")]
+    [InlineData("{\"not valid json")]
+    public void TryExtractAgentSpeech_NonEnvelopeInput_ReturnsFalse(string? raw)
     {
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
-        var runId = new BuildRunId("br-resume");
-
-        transcript.BeginStreaming();
-        presenter.TryPresent(CreateBuildState(runId, BuildRunState.Verifying, sequence: 5));
-        presenter.Reset();
-        presenter.TryPresent(CreateBuildState(runId, BuildRunState.Implementing, sequence: 1));
-
-        var text = string.Join('\n', transcript.MessageView.RenderedLines);
-        text.Should().Contain("正在执行任务");
-        text.Should().NotContain("正在运行验证");
-    }
-
-    [Fact]
-    public void TryPresent_GoalPlan_RendersNumberedStepList()
-    {
-        // P1：Goal 分解结果渲染为编号清单（一次性块），执行前用户可见计划。
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
-
-        transcript.BeginStreaming();
-        presenter.TryPresent(new TuiGoalPlan(["实现解析器", "补充单测"])).Should().BeTrue();
-        transcript.EndStreaming();
-
-        var text = string.Join('\n', transcript.MessageView.RenderedLines);
-        text.Should().Contain("已分解为 2 个子目标");
-        text.Should().Contain("1. 实现解析器");
-        text.Should().Contain("2. 补充单测");
-    }
-
-    [Fact]
-    public void TryPresent_GoalResult_RendersSummaryCard()
-    {
-        // P1：TuiGoalResult 不再被静默吞掉——渲染步骤结论 + 验证摘要。
-        var transcript = new ChatTranscriptView(CreateImmediateApp());
-        var presenter = new TranscriptEventPresenter(transcript);
-
-        transcript.BeginStreaming();
-        presenter.TryPresent(new TuiGoalResult(
-            Completed: 2, Failed: 1, Skipped: 0, Total: 3, Committed: true,
-            CompletedGoals: ["a", "b"], FailedGoals: ["c"], SkippedGoals: [],
-            ValidationSummary: "[PASS] build: ok\n[FAIL] test: 1 failed")).Should().BeTrue();
-        transcript.EndStreaming();
-
-        var text = string.Join('\n', transcript.MessageView.RenderedLines);
-        text.Should().Contain("✓ 完成 2 · ✗ 失败 1 · ○ 跳过 0");
-        text.Should().Contain("[PASS] build: ok");
-        text.Should().Contain("[FAIL] test: 1 failed");
-    }
-
-    private static TuiBuildRunState CreateBuildState(
-        BuildRunId runId,
-        BuildRunState state,
-        long sequence) =>
-        new(runId, state, sequence, []);
-
-    private static IApplication CreateImmediateApp()
-    {
-        var app = Substitute.For<IApplication>();
-        app.Invoke(Arg.Do<Action>(action => action()));
-        app.AddTimeout(Arg.Any<TimeSpan>(), Arg.Any<Func<bool>>()).Returns(true);
-        return app;
+        TranscriptEventPresenter.TryExtractAgentSpeech(raw, out _, out _).Should().BeFalse();
     }
 }

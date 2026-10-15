@@ -10,13 +10,19 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
     private readonly ToolBatchCollector _toolBatches = new(agentRunId);
     private readonly Dictionary<string, string> _toolNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _observedToolEvents = new(StringComparer.Ordinal);
+    private int _committedInputTokens;
+    private int _committedOutputTokens;
+    private int _currentTurnInputTokens;
+    private int _currentTurnOutputTokens;
+    private string? _currentUsageResponseId;
+    private bool _usageTurnBoundaryPending;
     private bool _pendingTurnBoundary;
     private bool _turnStarted;
 
     public int TurnCount { get; private set; }
     public int ToolCallCount { get; private set; }
-    public int InputTokens { get; private set; }
-    public int OutputTokens { get; private set; }
+    public int InputTokens => _committedInputTokens + _currentTurnInputTokens;
+    public int OutputTokens => _committedOutputTokens + _currentTurnOutputTokens;
     public ChatFinishReason? FinishReason { get; private set; }
     public bool BudgetExceeded { get; private set; }
     public IReadOnlyList<CompletedToolBatch> CompletedToolBatches => _toolBatches.CompletedBatches;
@@ -83,6 +89,8 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
             isError,
             isError ? ToolResultCompletion.Failed : ToolResultCompletion.Succeeded);
         _pendingTurnBoundary = true;
+        if (_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0)
+            _usageTurnBoundaryPending = true;
     }
 
     private void ObserveUsage(AgentResponseUpdate update)
@@ -90,8 +98,27 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
         var details = update.Contents?.OfType<UsageContent>().FirstOrDefault()?.Details;
         if (details is null)
             return;
-        InputTokens = SafeInt(details.InputTokenCount);
-        OutputTokens = SafeInt(details.OutputTokenCount);
+        var input = SafeInt(details.InputTokenCount);
+        var output = SafeInt(details.OutputTokenCount);
+        if (input == 0 && output == 0)
+            return;
+
+        var isNewResponseId = !string.IsNullOrEmpty(update.ResponseId)
+            && !string.IsNullOrEmpty(_currentUsageResponseId)
+            && !string.Equals(update.ResponseId, _currentUsageResponseId, StringComparison.Ordinal);
+
+        if ((_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0)
+            && (_usageTurnBoundaryPending || isNewResponseId))
+        {
+            _committedInputTokens += _currentTurnInputTokens;
+            _committedOutputTokens += _currentTurnOutputTokens;
+            _usageTurnBoundaryPending = false;
+        }
+
+        _currentTurnInputTokens = input;
+        _currentTurnOutputTokens = output;
+        if (!string.IsNullOrEmpty(update.ResponseId))
+            _currentUsageResponseId = update.ResponseId;
     }
 
     private static string? Serialize(object? value)
@@ -115,16 +142,27 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
             return result switch
             {
                 Exception ex => (true, ex.Message),
-                string text => (false, text),
+                string text => DisplayJsonSerializer.TryUnwrapEnvelope(text, out var strIsError, out var innerText)
+                    ? (strIsError, innerText)
+                    : (strIsError, text),
                 ToolResult toolResult => (toolResult.IsError, ToolResultSerializer.Serialize(toolResult)),
                 null => (false, null),
-                _ => (false, Truncate(JsonSerializer.Serialize(result, JsonOptions), 500)),
+                _ => SerializeArbitraryResult(result),
             };
         }
         catch (NotSupportedException)
         {
             return (false, null);
         }
+    }
+
+    private static (bool IsError, string? Value) SerializeArbitraryResult(object result)
+    {
+        var json = JsonSerializer.Serialize(result, JsonOptions);
+        if (DisplayJsonSerializer.TryUnwrapEnvelope(json, out var isError, out var inner))
+            return (isError, Truncate(inner, 500));
+
+        return (isError, Truncate(json, 500));
     }
 
     private static int SafeInt(long? value)

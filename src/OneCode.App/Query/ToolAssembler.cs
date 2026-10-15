@@ -67,13 +67,15 @@ internal sealed class ToolAssembler(
         // Anthropic/OpenAI 等云端 provider 始终全量（prompt caching 更高效）；
         // provider == "ollama" 始终过滤（工具定义 token 开销对小窗口影响显著）；
         // 未知 provider 才按 ollamaContextWindow 阈值决定（≥ 32K 全量）。
-        var contextWindow = _configManager.Current.Effective.OllamaContextWindow;
-        var needsFiltering = ModelCapabilities.RequiresToolFiltering(provider, contextWindow);
+        var ollamaContextWindow = _configManager.Current.Effective.OllamaContextWindow;
+        var needsFiltering = ModelCapabilities.RequiresToolFiltering(provider, ollamaContextWindow);
 
         if (!needsFiltering)
         {
-            _logger.LogDebug("Assembled {Total} tools (full catalog for provider={Provider}, contextWindow={ContextWindow})",
-                allTools.Count, provider ?? "default", contextWindow);
+            // 不打印 ollamaContextWindow：它是 Ollama 本地窗口配置，对云端 provider 与过滤决策无关，
+            // 日志里出现只会被误读成当前模型的上下文窗口。
+            _logger.LogDebug("Assembled {Total} tools (full catalog for provider={Provider})",
+                allTools.Count, provider ?? "default");
             return allTools;
         }
 
@@ -102,11 +104,15 @@ internal sealed class ToolAssembler(
         _configManager.Current.Effective.MaxTurns;
 
     /// <summary>
-    /// 从 <see cref="AppSettings.MaxBudgetTokens"/> 动态解析预算上限。
+    /// 从 <see cref="AppSettings.MaxBudgetTokens"/> 动态解析预算上限（可计费口径）。
     /// 支持运行时通过 /config 命令修改 maxBudgetTokens 后立即生效。
+    /// null = 不设限；配置 <c>maxBudgetTokens: 0</c> 显式表示不设限，同样归一化为 null（负值视为无效配置，按不设限处理）。
     /// </summary>
-    public long? ResolveMaxBudgetTokens() =>
-        _configManager.Current.Effective.MaxBudgetTokens;
+    public long? ResolveMaxBudgetTokens()
+    {
+        var configured = _configManager.Current.Effective.MaxBudgetTokens;
+        return configured > 0 ? configured : null;
+    }
 
     /// <summary>
     /// Snapshots the tool capabilities for the current working mode as the plan-approval tool policy.

@@ -262,8 +262,7 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
                 tasks,
                 ["dotnet test"],
                 ["regression"],
-                ["unrelated refactor"],
-                RequireExplicitTaskCompletion: true),
+                ["unrelated refactor"]),
             CreatedAt = now,
             UpdatedAt = now,
         };

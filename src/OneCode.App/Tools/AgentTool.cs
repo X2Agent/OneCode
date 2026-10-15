@@ -47,6 +47,7 @@ public sealed class AgentTool(
                      "or a custom agent name defined in .onecode/agents/*.md (project) / ~/.onecode/agents/*.md (user).")] string agent = "general-purpose",
         [Description("Short one-line description of the subtask, shown in task tracking UI. Not shown to the sub-agent.")] string? description = null,
         [Description("When true, the agent runs as a background task and returns a taskId immediately instead of blocking. Use Task tool (action='output') to poll for results and (action='stop') to cancel.")] bool runInBackground = false,
+        [Description("Optional turn limit for the sub-agent (model round-trips). Can only LOWER the limit below the configured ceiling (agent frontmatter / settings); omit to use the configured default.")] int? maxTurns = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -56,14 +57,22 @@ public sealed class AgentTool(
         if (resolutionError is not null)
             return ToolResult.Error(resolutionError);
 
+        // 引擎侧已在 run 开始前写入 CacheSafe 快照（QueryStreamEngine.StreamCoreAsync），
+        // 这里仍可能为 null 的残留场景（未过引擎的宿主路径）值得留痕——空工具表会让
+        // 子代理静默失去全部父级工具，日志是唯一线索。
+        if (cacheSafeParams.Current is null)
+            logger?.LogWarning("Agent fork '{Agent}' started without parent CacheSafeParams; child tool filtering will yield an empty tool list", agent);
+
         var agentRequest = new AgentRunRequest(
             Prompt: prompt,
             Agent: agent,
             Description: description,
+            MaxTurns: maxTurns,
             CacheSafeParams: cacheSafeParams.Current,
             ParentCapabilities: ToolActivationContext.CurrentCapabilities,
             Instructions: definition?.Instructions,
-            AllowedToolNames: definition?.AllowedTools);
+            AllowedToolNames: definition?.AllowedTools,
+            MaxTurnsCeiling: definition?.MaxTurns);
 
         if (runInBackground)
         {
@@ -150,9 +159,15 @@ public sealed class AgentTool(
             {
                 agent = result.Agent,
                 conversationId = result.ConversationId,
-                result = result.Output,
+                // partial 结果必须显式标注：输出只覆盖已完成的调研/改动，
+                // 不标注会让父代理把半成品当作最终产出直接交付。措辞只陈述事实，
+                // 不暗示"续派"——重复派工同一任务会重跑同样的检索并再次撞上限。
+                result = result.MaxTurnsReached
+                    ? $"[PARTIAL] The sub-agent stopped at its turn/time budget. Findings so far (use them; do not re-dispatch the same task):\n{result.Output}"
+                    : result.Output,
                 turnsCompleted = result.TurnsCompleted,
                 maxTurnsReached = result.MaxTurnsReached,
+                toolCalls = result.ToolCallCount,
             }));
         }
         catch (OperationCanceledException)

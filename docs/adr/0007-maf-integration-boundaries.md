@@ -40,7 +40,7 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 |---|---|---|
 | Todo | Harness `TodoProvider`（`todos_*`），按 profile 启用 | 宿主执行记录（Worker 状态、后台任务、Build 依赖）仍归 `ITaskService` / `BuildTaskLinker`；`TaskTool` 只保留 get/list/stop/output，不再提供普通清单的 create/update |
 | AgentMode | 宿主模式 + Main `ModeInstructionProvider` | 不恢复 LLM `mode_set` 形成双状态；子代理由角色/profile 约束 |
-| FileMemory | Harness `FileMemoryProvider`（`file_memory_*`），store 根绑定项目 | 仅 Main 启用；Worker/Explore/Plan 关闭（只读 Agent 不应有写面）。长期 MEMORY.md + `TextSearchProvider` 仍是治理后的知识，两者分目录共存 |
+| FileMemory | Harness `FileMemoryProvider`（`file_memory_*`），store 根绑定项目 | 仅 Main 启用；Worker/Explore/Plan 关闭（只读 Agent 不应有写面）。长期 MEMORY.md + `MemoryContextProvider` 仍是治理后的知识，两者分目录共存 |
 | AgentSkills | 官方 `AgentSkillsProviderBuilder` + 文件/内联/MCP/runner | 双入口共用 `SkillDiscovery` 的发现规则；runner 有超时/输出上限/进程树清理；宿主通过 `AgentContextProviderLease` 释放每 run 的 provider |
 | WebSearch | 产品 AIFunction 搜索后端链（Tavily + DuckDuckGo 两个 `IWebSearchProvider`） | 关闭默认 hosted tool；两个提供方的适配都在 Infrastructure |
 | Compaction | Harness 策略入口（`HarnessAgentOptions.CompactionStrategy`） | 产品提供策略（比例、formatter、摘要守卫、prompt），Harness 挂载唯一 provider；不再双挂 |
@@ -293,5 +293,5 @@ OpenAI `reasoning_effort`；Ollama 顶层 `think` + `options.num_ctx`）与 `Thi
   `FileMemoryProfilePolicyTests.cs`、`AgentContextProviderLeaseTests.cs`、
   `GuardedSummarizationCompactionStrategyTests.cs`、`CompactionBudgetValidatorTests.cs`、
   `MafSessionInvalidatorTests.cs`、`AgentSessionPersistenceEpochSnapshotTests.cs`、
-  `MemoryRecallEvaluationTests.cs`、`TextTokenizerTests.cs`、`MemoryBudgetTests.cs`、
+  `MemoryContextProviderTests.cs`、`TextTokenizerTests.cs`、`MemoryBudgetTests.cs`、
   `DuckDuckGoSearchProviderTests.cs`、`SkillDiscoveryRuleTests.cs`

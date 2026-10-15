@@ -350,20 +350,22 @@ public sealed class PathTraversalTests
         }
     }
 
-    // FindReferencesTool — uses IWorkingDirectoryAccessor
+    // LspTool — symbol-based references（uses IWorkingDirectoryAccessor）
 
     [Fact]
-    public async Task FindReferencesTool_TraversalPath_ReturnsError()
+    public async Task LspTool_ReferencesBySymbol_TraversalPath_ReturnsError()
     {
         var projectDir = Path.Combine(_tempDir, "project");
         var processRunner = Substitute.For<IProcessRunner>();
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
         var fs = new LocalAgentFileStore(wd);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
+        var manager = Substitute.For<OneCode.Core.Lsp.ILspServerManager>();
+        manager.GetStatus().Returns(new List<OneCode.Core.Lsp.LspServerStatus>());
+        var tool = new LspTool(manager, null!, null!, new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), wd);
         try
         {
-            var result = await tool.FindAsync("MySymbol", path: "../../outside", ct: TestContext.Current.CancellationToken);
+            var result = await tool.ExecuteLspAsync("references", symbol: "MySymbol", path: "../../outside", ct: TestContext.Current.CancellationToken);
 
             AssertRejected(result);
         }
@@ -374,7 +376,7 @@ public sealed class PathTraversalTests
     }
 
     [Fact]
-    public async Task FindReferencesTool_AbsolutePathOutsideWorkingDir_ReturnsError()
+    public async Task LspTool_ReferencesBySymbol_AbsolutePathOutsideWorkingDir_ReturnsError()
     {
         var projectDir = Path.Combine(_tempDir, "project");
         var outsideDir = Path.Combine(_tempDir, "outside");
@@ -382,10 +384,12 @@ public sealed class PathTraversalTests
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
         var fs = new LocalAgentFileStore(wd);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
+        var manager = Substitute.For<OneCode.Core.Lsp.ILspServerManager>();
+        manager.GetStatus().Returns(new List<OneCode.Core.Lsp.LspServerStatus>());
+        var tool = new LspTool(manager, null!, null!, new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), wd);
         try
         {
-            var result = await tool.FindAsync("MySymbol", path: outsideDir, ct: TestContext.Current.CancellationToken);
+            var result = await tool.ExecuteLspAsync("references", symbol: "MySymbol", path: outsideDir, ct: TestContext.Current.CancellationToken);
 
             AssertRejected(result);
             // Native/ripgrep search must NOT have been invoked
@@ -399,7 +403,7 @@ public sealed class PathTraversalTests
     }
 
     [Fact]
-    public async Task FindReferencesTool_InsideWorkingDir_DoesNotReturnTraversalError()
+    public async Task LspTool_ReferencesBySymbol_InsideWorkingDir_DoesNotReturnTraversalError()
     {
         var projectDir = Path.Combine(_tempDir, "project");
         await File.WriteAllTextAsync(Path.Combine(projectDir, "subdir", "file.cs"), "MySymbol()", TestContext.Current.CancellationToken);
@@ -409,11 +413,13 @@ public sealed class PathTraversalTests
         var wd = Substitute.For<IWorkingDirectoryAccessor>();
         wd.WorkingDirectory.Returns(projectDir);
         var fs = new LocalAgentFileStore(wd);
-        var tool = new FindReferencesTool(new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), fs, wd, null!, null!, null!);
+        var manager = Substitute.For<OneCode.Core.Lsp.ILspServerManager>();
+        manager.GetStatus().Returns(new List<OneCode.Core.Lsp.LspServerStatus>());
+        var tool = new LspTool(manager, null!, null!, new TextSearchService(processRunner, fs, NullLogger<TextSearchService>.Instance), wd);
         try
         {
             // Search in "subdir" (strictly inside working dir) to avoid "." edge case
-            var result = await tool.FindAsync("MySymbol", path: "subdir", ct: TestContext.Current.CancellationToken);
+            var result = await tool.ExecuteLspAsync("references", symbol: "MySymbol", path: "subdir", ct: TestContext.Current.CancellationToken);
 
             result.Content.Should().NotStartWith("Error:");
             result.Content.Should().Contain("file.cs");

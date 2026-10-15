@@ -26,7 +26,7 @@ public enum AgentCapability
     /// <summary>Skill discovery / progressive loading (<c>SKILL.md</c>, bundled skills, MCP skills).</summary>
     Skills,
 
-    /// <summary>On-demand memory recall via the <c>search_memories</c> tool over <c>MEMORY.md</c>.</summary>
+    /// <summary>Curated persistent memory injection over <c>MEMORY.md</c> via <c>MemoryContextProvider</c>.</summary>
     MemorySearch,
 
     /// <summary>

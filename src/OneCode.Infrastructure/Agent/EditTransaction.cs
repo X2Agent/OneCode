@@ -14,25 +14,6 @@ public sealed class EditTransaction(ILogger<EditTransaction>? logger = null) : I
     private long _changeVersion;
     private bool _committed;
     private bool _rollbackOnDispose = true;
-    private TransactionPersistenceContext? _persistence;
-
-    /// <summary>
-    /// Durable Operation Ledger binding (S-04). When set, the edit pipeline records every file
-    /// intent (path + pre-write content) into the ledger before the write; a crash mid-transaction
-    /// can then be rolled back from the persisted receipt on resume.
-    /// </summary>
-    public TransactionPersistenceContext? Persistence => _persistence;
-
-    /// <summary>Binds this transaction to a durable Operation Ledger receipt (S-04).</summary>
-    public void PersistTo(OneCode.Core.Workflows.IOperationLedger ledger, string operationId, long fencingToken)
-    {
-        ArgumentNullException.ThrowIfNull(ledger);
-        if (string.IsNullOrWhiteSpace(operationId))
-            throw new ArgumentException("OperationId is required.", nameof(operationId));
-        if (fencingToken <= 0)
-            throw new ArgumentOutOfRangeException(nameof(fencingToken));
-        _persistence = new TransactionPersistenceContext(ledger, operationId, fencingToken);
-    }
 
     public int SnapshotCount
     {

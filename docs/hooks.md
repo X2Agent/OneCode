@@ -198,7 +198,7 @@ OneCode 运行时
 | `HookMiddleware`（Infrastructure） | `pre_tool_call` / `post_tool_call`（MAF 函数调用管道） |
 
 > **不再由 Hook 覆盖的产品能力**（保留宿主实现，非拦截点）：会话启动/结束（`SessionManager`）、
-> Stop 纠偏与预算终结（`QueryStreamEngine`）、上下文压缩（`CompactService` / `PromptTooLongRecoveryRunMiddleware`）、
+> Stop 纠偏与预算终结（`QueryStreamEngine`）、上下文压缩（`CompactService`）、
 > Goal 编排（`GoalDecomposer`）、权限审批通知（`ApprovalBroker`）、异常分类告警（可观测性平面）。
 > 这些路径在 `hooks.json` 中写旧事件名会得到明确诊断，不会被静默忽略。
 

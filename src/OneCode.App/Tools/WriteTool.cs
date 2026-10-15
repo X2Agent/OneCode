@@ -84,7 +84,7 @@ public sealed class WriteTool(ILspNotifier notifier, IWorkingDirectoryAccessor w
             await FileEncodingHelper.WriteWithEncodingAsync(fullPath, finalContent, encoding, ct);
 
             var message = await FileWritePipeline.CompleteWriteAsync(
-                fullPath, finalContent, _notifier,
+                fullPath, _notifier,
                 $"Successfully wrote {finalContent.Length} characters to {fullPath}", ct).ConfigureAwait(false);
             return ToolResult.Success(message);
         }

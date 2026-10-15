@@ -1,11 +1,11 @@
 using OneCode.Core.Mcp;
 using OneCode.Core.Config;
-using OneCode.Core.Permissions;
 using System.Text;
 using OneCode.App.Commands;
 using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
 using OneCode.Core.PlanMode;
+using OneCode.App.Services.PlanMode;
 
 namespace OneCode.App.Services;
 
@@ -48,10 +48,23 @@ public sealed class TuiHostConfigurator(
         {
             var toplevel = new OneCodeToplevel(ctx, app);
 
-            // 绑定 EmitEvent 到 OneCodeToplevel.DispatchEvent
-            // emitEventBinder 是一个委托，它接收一个 Action<TuiEvent> 并将其存储
-            // 这里我们传入 toplevel.DispatchEvent 方法，让 UserQuestionService 可以通过 EmitEvent 调用它
-            emitEventBinder(toplevel.DispatchEvent);
+            // 绑定 EmitEvent 到 OneCodeToplevel.DispatchEvent。
+            // EmitEvent 的调用方（Plan 派发器、UserQuestionService 等）运行在后台线程，
+            // 而 DispatchEvent 直接触碰 Terminal.Gui 视图树，必须经 app.Invoke 编组回 UI 线程，
+            // 否则 Terminal.Gui 抛出 "Call from invalid thread."。
+            // TUI 退出后 run 收尾线程仍可能发射事件（如 TuiWorkflowRunEnded），此时吞掉编组
+            // 异常并记日志，避免 catch/finally 中的二次抛出掩盖原始错误。
+            emitEventBinder(evt =>
+            {
+                try
+                {
+                    app.Invoke(() => toplevel.DispatchEvent(evt));
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Dropped TUI event {EventType} because the TUI host is no longer running", evt.GetType().Name);
+                }
+            });
 
             // Dynamic command refresh callback
             // Pushed into ChatInputView whenever skills or MCP servers change.
@@ -103,7 +116,8 @@ public sealed class TuiHostConfigurator(
     /// <summary>
     /// Subscribes the todo-strip projection: <c>TodoProjectionService</c> publishes
     /// Harness <c>TodoProvider</c> session snapshots onto the unified
-    /// <c>OrchestrationEventBus</c> after each agent run. Same marshalling
+    /// <c>OrchestrationEventBus</c> at run start, whenever a todos_* mutation tool completes,
+    /// and at run end. Same marshalling
     /// contract as the plan card (handler runs on the emitting thread;
     /// <see cref="OneCodeToplevel.ShowTodos"/> moves rendering to the UI thread).
     /// An empty snapshot hides the strip.
@@ -160,11 +174,23 @@ public sealed class TuiHostConfigurator(
     /// </summary>
     private void WirePlanCard(OneCodeToplevel toplevel, InteractiveSession session, IApplication app)
     {
+        // 步骤进度的唯一事实源是 agent 待办清单：待办投影一变化就用最近一次工作流重绘卡片。
+        PlanWorkflow? shownWorkflow = null;
+        IReadOnlyList<TodoListItem> todos = [];
         overlay.OrchestrationEvents.Subscribe(evt =>
         {
-            if (evt is not OrchestrationEvent.PlanProjectionChanged { Workflow: var workflow })
-                return;
-            _ = ProjectAndShowPlanAsync(workflow, toplevel, app);
+            switch (evt)
+            {
+                case OrchestrationEvent.PlanProjectionChanged { Workflow: var workflow }:
+                    shownWorkflow = workflow;
+                    _ = ProjectAndShowPlanAsync(workflow, todos, toplevel, app);
+                    break;
+                case OrchestrationEvent.TodoProjectionChanged { Items: var items }:
+                    todos = items;
+                    if (shownWorkflow is { State: PlanWorkflowState.Executing } executing)
+                        _ = ProjectAndShowPlanAsync(executing, todos, toplevel, app);
+                    break;
+            }
         });
 
         toplevel.PlanDecisionReceived += decision =>
@@ -173,6 +199,7 @@ public sealed class TuiHostConfigurator(
 
     private async Task ProjectAndShowPlanAsync(
         PlanWorkflow workflow,
+        IReadOnlyList<TodoListItem> todos,
         OneCodeToplevel toplevel,
         IApplication app)
     {
@@ -185,7 +212,7 @@ public sealed class TuiHostConfigurator(
             var revision = await ResolveDisplayedRevisionAsync(workflow).ConfigureAwait(false);
             var markdown = revision?.Markdown ?? workflow.ApprovedSnapshot?.Markdown;
             var definitions = revision?.Steps ?? workflow.ApprovedSnapshot?.Steps;
-            var steps = ProjectSteps(workflow, definitions);
+            var steps = PlanStepProjector.Project(workflow, definitions, todos);
             var title = revision?.Title
                 ?? (markdown is not null ? ExtractPlanTitle(markdown) : "实施计划");
             // 计划 markdown 投影的持久化路径——显示在卡片上让用户能找到 plan 文档。
@@ -253,7 +280,6 @@ public sealed class TuiHostConfigurator(
         PlanWorkflowState.AwaitingApproval => PlanCardPhase.PendingApproval,
         PlanWorkflowState.StartingExecution => PlanCardPhase.StartingExecution,
         PlanWorkflowState.Executing => PlanCardPhase.Executing,
-        PlanWorkflowState.Verifying => PlanCardPhase.Verifying,
         PlanWorkflowState.Completed => PlanCardPhase.Completed,
         PlanWorkflowState.Failed => PlanCardPhase.Failed,
         PlanWorkflowState.Cancelled => PlanCardPhase.Cancelled,
@@ -267,28 +293,6 @@ public sealed class TuiHostConfigurator(
             .FirstOrDefault(line => line.StartsWith("#", StringComparison.Ordinal))?
             .TrimStart('#', ' ');
         return string.IsNullOrWhiteSpace(title) ? "实施计划" : title;
-    }
-
-    private static IReadOnlyList<PlanStep> ProjectSteps(
-        PlanWorkflow workflow,
-        IReadOnlyList<PlanStepDefinition>? definitions)
-    {
-        if (definitions is not { Count: > 0 })
-            return [new PlanStep("正在整理计划步骤", null, null, PlanStepStatus.Current)];
-
-        var executions = workflow.StepExecutions.ToDictionary(step => step.StepId, StringComparer.Ordinal);
-        return definitions.Select(step =>
-        {
-            var status = executions.TryGetValue(step.Id, out var execution)
-                ? execution.Status switch
-                {
-                    PlanStepExecutionStatus.InProgress => PlanStepStatus.Current,
-                    PlanStepExecutionStatus.Completed or PlanStepExecutionStatus.Skipped => PlanStepStatus.Done,
-                    _ => PlanStepStatus.Pending,
-                }
-                : PlanStepStatus.Pending;
-            return new PlanStep(step.Title, step.Description, null, status);
-        }).ToArray();
     }
 
     /// <summary>
@@ -366,13 +370,7 @@ public sealed class TuiHostConfigurator(
         toplevel.ConfigureSettingsModal(
             showSettingsOverlayAsync: async token =>
             {
-                var currentAppState = appStateAccessor.Current;
                 var snapshot = configManager.Current;
-                var settings = snapshot.Effective;
-
-                var currentModelId = currentAppState.MainLoopModel
-                    ?? settings.Model
-                    ?? string.Empty;
                 pendingSettings = await OverlayLaunchers.ShowSettingsOverlayAsync(
                     toplevel.PushOverlay,
                     toplevel.PopTopOverlay,

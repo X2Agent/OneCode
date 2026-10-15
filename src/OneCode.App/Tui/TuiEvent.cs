@@ -75,6 +75,13 @@ public sealed record TuiWorkflowRunStarted(
     int Revision,
     string ContentHash) : TuiEvent;
 
+/// <summary>
+/// 已批准计划的 Build run 结束（成功、失败或异常收尾）。与 <see cref="TuiWorkflowRunStarted"/>
+/// 配对：Started 把 TUI 置为忙碌（BeginStreaming / SetBusy），Ended 负责复位——
+/// 缺少 Ended 时 run 结束后界面会一直停留在"等待模型响应"。
+/// </summary>
+public sealed record TuiWorkflowRunEnded(string PlanId) : TuiEvent;
+
 public sealed record TuiBuildRunState(
     OneCode.Core.Build.BuildRunId RunId,
     OneCode.Core.Build.BuildRunState State,
@@ -115,6 +122,20 @@ public sealed record TuiTurnCompleted(int TurnNumber, bool HadToolCalls) : TuiEv
 
 /// <summary>单个 agent 的消息输出（子代理 DAG / Goal 工作流产生）。</summary>
 public sealed record TuiAgentMessage(string AgentName, string? AgentColor, string Content) : TuiEvent;
+
+/// <summary>
+/// 子代理实时进度 — fork 的 Agent 工具活动行 live 文案与状态栏 agents 徽标的数据源。
+/// Phase 为 Started/Running 时徽标 +1、Completed/Failed 时 -1（TUI 消费侧维护计数，
+/// 本映射保持纯投影）。
+/// </summary>
+public sealed record TuiSubagentProgress(
+    string ForkId,
+    string AgentName,
+    OneCode.App.Query.SubagentProgressPhase Phase,
+    int ToolCallCount = 0,
+    int TurnCount = 0,
+    string? CurrentToolName = null,
+    long ElapsedMs = 0) : TuiEvent;
 
 /// <summary>Plan/Goal 共用的轻量进度投影；主对话只渲染当前用户可理解阶段。</summary>
 public sealed record TuiModeProgress(
@@ -203,6 +224,15 @@ public sealed record TuiGoalBudgetWarning(
     int TotalAttempts,
     long TotalTokens,
     TimeSpan? Elapsed) : TuiEvent;
+
+/// <summary>
+/// 预算警告（全模式通用）— 可计费消耗（超出基线）跨越 70%（Early/黄）或 90%（Late/橙）
+/// 阈值时由 BudgetGuard 经事件流发布，TUI 渲染预警横幅。
+/// </summary>
+public sealed record TuiBudgetWarning(
+    OneCode.Core.Goals.GoalBudgetWarningLevel Level,
+    long UsedTokens,
+    long LimitTokens) : TuiEvent;
 
 /// <summary>
 /// 通用 TUI 系统提示（非错误、非助手输出）——例如 Goal 启动前的脏工作树说明。

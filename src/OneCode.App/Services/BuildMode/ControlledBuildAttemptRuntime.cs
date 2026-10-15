@@ -3,7 +3,6 @@ using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
 using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.BuildMode;
 
@@ -13,11 +12,14 @@ public sealed record ControlledBuildAttemptContext(
     ChannelWriter<object> EventWriter,
     Func<EditTransaction> TransactionFactory,
     Func<BuildRun, object> BuildStateEventFactory,
-    OneCode.Core.Workflows.IOperationLedger? Ledger = null);
+    ILogger? Logger = null);
 
 /// <summary>
 /// Runs MainAgentRunner inside one fenced Build attempt. Product transitions remain delegated to
 /// IBuildRunCoordinator; the runtime owns only the process-local EditTransaction lifecycle.
+/// 文件处置规则（受控 attempt 的有意例外）：只有用户显式取消才回滚；
+/// 校验/记账失败、轮数或预算耗尽、异常一律解除自动回滚保留产物——几十轮的产物
+/// 不因机器记账问题被整体丢弃。产物落盘后工作树即事实源，善后（回滚/保留）交用户以 git 处置。
 /// </summary>
 public sealed class ControlledBuildAttemptRuntime(
     IMainAgentRunner mainAgentRunner,
@@ -47,22 +49,19 @@ public sealed class ControlledBuildAttemptRuntime(
         }
 
         using var transaction = context.TransactionFactory();
+        var artifactsPreserved = false;
+
+        // 保留产物：解除 dispose 自动回滚。产物留在工作树，善后（保留/回滚）由用户以 git 处置。
+        void PreserveArtifacts()
+        {
+            if (artifactsPreserved)
+                return;
+            artifactsPreserved = true;
+            transaction.PreserveForManualReconciliation();
+        }
+
         var approvedNames = approvedPolicy.ToolNames;
         var approvedSet = approvedNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // S-04: 持久化 Operation Ledger。新世代开始前回滚本 Run 上一世代遗留的未提交文件副作用，
-        // 然后开启本 attempt 的持久化事务；每次文件编辑的 intent 由 EditTransactionMiddleware 落盘。
-        var ledger = context.Ledger;
-        if (ledger is not null)
-        {
-            await FencedLedgerTransaction.BeginAsync(
-                ledger,
-                $"build/{input.BuildRunId}",
-                input.OperationId,
-                fencingToken,
-                transaction,
-                ct).ConfigureAwait(false);
-        }
 
         var options = context.Options with
         {
@@ -75,12 +74,19 @@ public sealed class ControlledBuildAttemptRuntime(
             ToolCapabilities = ControlledBuildAttemptWorkflowCompiler.ApprovedPolicyCapabilities(
                 claimed,
                 context.Options.ToolCapabilities),
+            // 待办与文件记忆工具只读写 agent 自己的会话状态且是步骤进度/暂存笔记的载体，
+            // 不在产品工具目录里，必须显式放行，否则模型无法勾选步骤或读取自身会话记忆。
             IsToolAllowed = toolName =>
-                approvedSet.Contains(toolName) || ToolNames.ReadOnlyTools.Contains(toolName),
+                approvedSet.Contains(toolName)
+                || ToolNames.ReadOnlyTools.Contains(toolName)
+                || HarnessProviderTools.Names.Contains(toolName),
+            SeedTodoTasks = claimed.Plan?.Tasks,
             PermissionRules = new Dictionary<string, PermissionRuleGroup>(StringComparer.Ordinal)
             {
                 ["build-approved-policy"] = new PermissionRuleGroup(
                     AlwaysAllow: approvedNames
+                        .Concat(HarnessProviderTools.Names)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
                         .Order(StringComparer.OrdinalIgnoreCase)
                         .Select(toolName => new PermissionRule(toolName))
                         .ToArray()),
@@ -101,19 +107,23 @@ public sealed class ControlledBuildAttemptRuntime(
 
         MainAgentRunResult result;
         // 受控 attempt 经 durable workflow 调度执行，流枚举链上设置的 ambient AsyncLocal
-        // 上下文（QueryStreamHelpers.WithActivationContextAsync）不保证延续到本层——
-        // agent 执行前显式重建，否则 plan 执行工具（UpdatePlanStep 等）定位不到会话，
-        // 以 "Plan execution requires an explicit agent run conversation." 失败。
+        // 上下文不保证延续到本层（AsyncLocal 变更不跨 async iterator 的 yield 边界存续）——
+        // agent 执行前显式重建，否则依赖会话定位的工具无法解析当前会话。
         var previousConversationId = ToolActivationContext.CurrentConversationId;
         var previousRunId = OneCodeAgentRunContext.CurrentRunId;
         var previousBuildRunId = OneCodeAgentRunContext.CurrentBuildRunId;
         var previousCapabilities = ToolActivationContext.CurrentCapabilities;
+        var previousSubagentWriter = OneCodeAgentRunContext.SubagentEventWriter;
         try
         {
             ToolActivationContext.CurrentConversationId = context.Options.ConversationId?.ToString();
             OneCodeAgentRunContext.CurrentRunId = context.Options.AgentRunId;
             OneCodeAgentRunContext.CurrentBuildRunId = input.BuildRunId.ToString();
             ToolActivationContext.CurrentCapabilities = context.Options.ToolCapabilities;
+            // 子代理进度旁路与 CurrentBuildRunId 同一模式重建：EventWriter 即 QueryStreamEngine
+            // 的 TUI 事件通道，fork 的 AgentTool 经此上报实时进度；不重建则受控 attempt 内
+            // 读到 null，进度静默丢失（TUI 状态栏停在"执行 xx"）。
+            OneCodeAgentRunContext.SubagentEventWriter = context.EventWriter;
             result = await mainAgentRunner.RunStreamingAsync(
                 options,
                 new NonCompletingChannelWriter(context.EventWriter),
@@ -141,7 +151,7 @@ public sealed class ControlledBuildAttemptRuntime(
         }
         catch (Exception ex)
         {
-            transaction.Rollback();
+            PreserveArtifacts();
             var failed = await coordinator.CompleteAsync(
                 input.BuildRunId,
                 new MainAgentRunResult(
@@ -150,7 +160,7 @@ public sealed class ControlledBuildAttemptRuntime(
                     TotalOutputTokens: 0,
                     TurnCount: 0,
                     TerminalReason: RunTerminalReason.AgentException,
-                    TransactionRolledBack: true,
+                    TransactionRolledBack: false,
                     FinalValidationStatus: BuildValidationStatus.Cancelled,
                     ValidationFailureSummary: ex.Message),
                 CancellationToken.None,
@@ -166,20 +176,23 @@ public sealed class ControlledBuildAttemptRuntime(
             OneCodeAgentRunContext.CurrentRunId = previousRunId;
             OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
             ToolActivationContext.CurrentCapabilities = previousCapabilities;
+            OneCodeAgentRunContext.SubagentEventWriter = previousSubagentWriter;
         }
 
         var terminalReason = result.TerminalReason == RunTerminalReason.Completed
             && result.TurnCount >= options.MaxTurns
                 ? RunTerminalReason.TurnLimitReached
                 : result.TerminalReason;
-        if (terminalReason != RunTerminalReason.Completed)
+        if (terminalReason == RunTerminalReason.Cancelled)
             transaction.Rollback();
+        else if (terminalReason != RunTerminalReason.Completed)
+            PreserveArtifacts();
 
         var completedResult = result with
         {
             TerminalReason = terminalReason,
             TransactionCommitted = false,
-            TransactionRolledBack = terminalReason != RunTerminalReason.Completed,
+            TransactionRolledBack = terminalReason == RunTerminalReason.Cancelled,
             ModifiedFiles = result.ModifiedFiles ?? transaction.GetModifiedFiles(),
         };
         var buildRun = await coordinator.CompleteAsync(
@@ -187,6 +200,25 @@ public sealed class ControlledBuildAttemptRuntime(
             completedResult,
             ct,
             fencingToken).ConfigureAwait(false);
+
+        // CompleteAsync 的失败收口（验证/归属对账失败转 Blocked 等）发生在 completedResult 构造之后：
+        // 此时事务仍带 dispose 自动回滚，必须显式解除，否则 dispose 会静默删掉已落盘的正式产物
+        // （历史事故）。只有 Cancelled 才回滚，并保证落盘标记与文件状态一致。
+        if (buildRun.State == BuildRunState.Cancelled)
+        {
+            if (!buildRun.TransactionRolledBack)
+            {
+                transaction.Rollback();
+                buildRun = buildRun with { TransactionRolledBack = true };
+                await buildRunStore.SaveFencedAsync(buildRun, buildRun.Version, fencingToken, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        else if (buildRun.State != BuildRunState.Accepting)
+        {
+            PreserveArtifacts();
+        }
+
         await context.EventWriter.WriteAsync(
             context.BuildStateEventFactory(buildRun),
             ct).ConfigureAwait(false);
@@ -199,21 +231,10 @@ public sealed class ControlledBuildAttemptRuntime(
                 fencingToken).ConfigureAwait(false);
             if (buildRun.State == BuildRunState.Completed)
             {
-                // S-04: 先持久化提交（ledger receipt），再内存提交——若在两者之间崩溃，
-                // ledger 已标记 committed，恢复时不会回滚这批已确认写入。
-                if (ledger is not null)
-                {
-                    await ledger.CommitTransactionAsync(
-                        input.OperationId,
-                        fencingToken,
-                        $"build-attempt:{input.BuildRunId}:{input.Attempt}:{terminalReason}",
-                        ct).ConfigureAwait(false);
-                }
-
                 transaction.Commit();
             }
             else if (buildRun.State == BuildRunState.Blocked)
-                transaction.PreserveForManualReconciliation();
+                PreserveArtifacts();
             await context.EventWriter.WriteAsync(
             context.BuildStateEventFactory(buildRun),
             ct).ConfigureAwait(false);
@@ -222,7 +243,7 @@ public sealed class ControlledBuildAttemptRuntime(
         return completedResult with
         {
             TransactionCommitted = buildRun.State == BuildRunState.Completed,
-            TransactionRolledBack = buildRun.State is not (BuildRunState.Completed or BuildRunState.Blocked),
+            TransactionRolledBack = buildRun.State == BuildRunState.Cancelled,
         };
     }
 

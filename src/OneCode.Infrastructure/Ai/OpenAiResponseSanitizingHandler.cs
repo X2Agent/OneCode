@@ -6,6 +6,9 @@ namespace OneCode.Infrastructure.Ai;
 /// <list type="bullet">
 /// <item><c>tool_calls</c> / <c>annotations</c> sent as <c>null</c> instead of <c>[]</c></item>
 /// <item><c>finish_reason</c> sent as <c>""</c> or a vendor alias instead of an official enum value</item>
+/// <item>streaming <c>tool_calls[].type</c> sent as <c>""</c> — the official SDK's
+/// <c>ToChatToolCallKind</c> accepts only "function" and throws <see cref="ArgumentOutOfRangeException"/>
+/// on any other value, killing the whole stream (missing/null type is safely skipped by the SDK)</item>
 /// <item>gateways (OpenRouter) masking upstream provider errors as generic bodies
 /// (<c>429 "Provider returned error"</c>) — the real cause lives in <c>error.metadata</c>
 /// and is folded into <see cref="UpstreamProviderErrorException"/> with the

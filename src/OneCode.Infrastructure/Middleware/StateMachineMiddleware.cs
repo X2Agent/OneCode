@@ -46,7 +46,7 @@ public static class StateMachineMiddleware
             if (ShouldBlockTool(stateBag.GetCurrentState(), toolName))
             {
                 stateBag.GetOrInitializeToolExecutionContext().Guidance = GuidanceKind.TaskRecovery;
-                return "[STATE MACHINE] Agent is blocked. Waiting for user intervention. Use AskUserQuestion or AskUserQuestions to request guidance.";
+                return "[STATE MACHINE] Agent is blocked. Waiting for user intervention. Use AskUserQuestion to request guidance.";
             }
 
             // User-question tools are the recovery escape hatch: they must execute while Blocked,
@@ -77,8 +77,7 @@ public static class StateMachineMiddleware
     }
 
     internal static bool IsUserInterventionTool(string? toolName)
-        => string.Equals(toolName, "AskUserQuestion", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(toolName, "AskUserQuestions", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(toolName, "AskUserQuestion", StringComparison.OrdinalIgnoreCase);
 
     internal static bool ShouldBlockTool(AgentState state, string? toolName)
         => state == AgentState.Blocked && !IsUserInterventionTool(toolName);

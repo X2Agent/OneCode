@@ -17,9 +17,9 @@ public sealed class ReadTool
     private const int MaxReadLimit = 2000;
 
     private readonly IWorkingDirectoryAccessor _wd;
-    private readonly SshRemoteService _ssh;
+    private readonly SshRemoteService? _ssh;
 
-    public ReadTool(IWorkingDirectoryAccessor wd, SshRemoteService ssh)
+    public ReadTool(IWorkingDirectoryAccessor wd, SshRemoteService? ssh = null)
         => (_wd, _ssh) = (wd, ssh);
 
     [Description("Read a text file from the local filesystem, returning content with line numbers. " +

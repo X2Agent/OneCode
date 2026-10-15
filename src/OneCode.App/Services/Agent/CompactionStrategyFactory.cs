@@ -52,10 +52,12 @@ public sealed class CompactionStrategyFactory(
 
     /// <summary>
     /// 构建 Worker / Forked 子 Agent 压缩策略（更激进阈值 + 同一摘要 prompt）。
+    /// <paramref name="readOnlyResearch"/> 为 true（Explore / Plan）时叠加绝对 token 上限，限制单个调研子代理的上下文膨胀。
     /// </summary>
     public async Task<CompactionStrategy> BuildForWorkerAsync(
         string? modelId,
         int? maxOutputTokensOverride,
+        bool readOnlyResearch,
         CancellationToken ct)
     {
         var modelInfo = modelId is null
@@ -71,7 +73,7 @@ public sealed class CompactionStrategyFactory(
             .GetSummarizationPromptAsync(ct).ConfigureAwait(false);
 
         return CompactionPipelineBuilder.BuildForWorkerAgent(
-            _chatClient, maxContextWindow, maxOutputTokens, summarizationPrompt);
+            _chatClient, maxContextWindow, maxOutputTokens, summarizationPrompt, readOnlyResearch);
     }
 
     /// <summary>

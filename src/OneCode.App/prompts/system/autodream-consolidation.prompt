@@ -1,8 +1,7 @@
 You are performing an automatic memory consolidation (AutoDream).
 
 Project root: {{project_root}}
-
-Since the last consolidation at {{since}}, there have been {{session_count}} new sessions for this project.
+Last consolidated at: {{since}}
 
 ## Working memory (primary source)
 
@@ -12,20 +11,28 @@ source, because they already reflect what the agent judged worth writing down.
 
 {{working_memory_section}}
 
+## Current conversation turns
+
+Below are the condensed `User` and `Assistant` turns from the active conversation in this project:
+
+{{current_conversation_section}}
+
 ## Task
 
-1. Review the working-memory artefacts above. For each, decide whether it contains durable knowledge:
-   a fact about the project, a convention, a lesson from a failure, or a user correction.
-2. Verify anything that looks load-bearing against the session events for **this project** in the global
-   session directory (~/.onecode/events/*.jsonl). Each file is JSONL: one session event per line. The
-   session metadata event (`"type": "session_started"` or `"type": "session_snapshot"`) carries the
-   project path at `payload.working_directory` — only review sessions whose value matches
-   `{{project_root}}` (use Grep to filter). User turns are `"type": "user_message"`, assistant turns are
-   `"type": "assistant_message"`. Use Read/Glob/Grep tools.
-3. Promote only what survives verification. A note the agent wrote is a **candidate**, not confirmed
-   knowledge: never promote an unverified inference to a `user`-scope preference.
-4. Output **incremental changes** as a JSON array. Each change is either an "upsert" (add or update) or
-   a "delete" (remove an outdated entry).
+1. Review the working-memory artefacts and current conversation turns above. For each,
+   decide whether it contains durable knowledge: a fact about the project, a convention, a lesson from
+   a failure, or a user correction.
+2. Compare candidate findings against the **existing memories** already injected in your context
+   (`## Memory`):
+   - If an existing memory covers the same topic, **reuse its exact `key`** to update it in-place rather
+     than inventing a duplicate key.
+   - If you are merging multiple fragmented keys or renaming a key into a cleaner canonical key, list
+     the old keys in `"supersedes": ["old-key-1", "old-key-2"]` so the host atomically removes them.
+   - If an existing memory was contradicted or obsoleted by recent work, emit a `"delete"` action for it.
+   - Never attempt to modify or delete entries under `### Manual entries` (`manual:*`).
+3. Promote only what is verified. Never promote an unverified inference to a `user`-scope preference.
+4. Output **incremental changes** as a JSON array. Each change is either an `"upsert"` (add or update) or
+   a `"delete"` (remove an outdated entry).
 
 ## Scope
 
@@ -50,7 +57,8 @@ Schema (one object per change):
     "scope": "user" | "project",
     "key": "{category}:{short-stable-kebab-case-id}",
     "value": "concise consolidated description",
-    "ttlHours": 720
+    "ttlHours": 720,
+    "supersedes": ["optional-old-key-to-remove"]
   },
   {
     "action": "delete",
@@ -65,44 +73,9 @@ Schema (one object per change):
   {
     "action": "upsert",
     "scope": "project",
-    "key": "fact:build-command",
-    "value": "Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.",
-    "ttlHours": 2160
-  },
-  {
-    "action": "upsert",
-    "scope": "project",
-    "key": "fact:test-framework",
-    "value": "xunit, not nunit. Fast path: `dotnet test --filter Category=Unit`. Slow/integration tests gated by Category=Slow.",
-    "ttlHours": 2160
-  },
-  {
-    "action": "upsert",
-    "scope": "project",
-    "key": "convention:error-handling",
-    "value": "Domain layer uses Result<T> pattern, never throws. Infrastructure layer throws, App layer catches and wraps into Result. Do not add try/catch in Domain.",
-    "ttlHours": 2160
-  },
-  {
-    "action": "upsert",
-    "scope": "project",
-    "key": "lesson:mock-httpcontext",
-    "value": "Mocking IHttpContextAccessor with Moq fails silently in integration tests — the HttpContext returns null at runtime. Use TestHost with a real HttpContext instead. Cost: 2h debugging on 2024-03-15.",
+    "key": "lesson:test-isolation-cwd",
+    "value": "Tests that call Directory.SetCurrentDirectory race when run in parallel; mark them with [Collection(nameof(CurrentDirectoryCollection))] to serialize execution.",
     "ttlHours": 720
-  },
-  {
-    "action": "upsert",
-    "scope": "user",
-    "key": "correction:dotnet-version",
-    "value": "User corrected: this project targets net10.0, not net8.0. The assistant assumed net8.0 from global.json, but the actual TFM in csproj files is net10.0. Always check csproj <TargetFramework>, not global.json alone.",
-    "ttlHours": 1440
-  },
-  {
-    "action": "upsert",
-    "scope": "user",
-    "key": "correction:commit-style",
-    "value": "User prefers conventional commits (feat:/fix:/refactor:) with a short imperative subject under 72 chars. Do not use descriptive prose commits like 'updated the auth module'.",
-    "ttlHours": 2160
   },
   {
     "action": "delete",
@@ -137,10 +110,11 @@ Schema (one object per change):
 - Output a "delete" action when a previously-extracted memory is no longer accurate or relevant (e.g., a build command changed, a gotcha was fixed, a convention was abandoned).
 - Use the exact same key that was used for the original "upsert".
 
-### Deduplication
+### Deduplication and capacity discipline
 
-- Merge redundant items across sessions into a single "upsert" with the richest value.
-- If two lessons describe the same gotcha, merge them — keep the one with more root-cause detail.
+- Each scope (`user` and `project`) has a strict cap of **50 entries**. Keep the memory store high-signal and compact.
+- Merge redundant items across sessions into a single `"upsert"` with the richest value, and list replaced keys in `"supersedes"`.
+- If two lessons describe the same gotcha, merge them — keep the one with more root-cause detail and supersede the other.
 - If a correction repeats across sessions, it confirms the memory is actively useful — update the value to reflect the latest wording, keep the key.
 
 ### TTL guidance by category

@@ -55,8 +55,8 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
     /// <summary>Read-only sub-agent tool whitelist (matches ToolCatalog registration names).</summary>
     public static IReadOnlyList<string> ReadOnlyAgentTools { get; } =
     [
-        "Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch",
-        "ToolSearch", "FindReferences", "SymbolSearch",
+        "Read", "Grep", "Glob", "LS", "Git", "WebFetch", "WebSearch",
+        "ToolSearch", "Lsp",
     ];
 
     /// <summary>Every capability any profile can hold. Profiles are expressed as subtractions from this.</summary>
@@ -109,6 +109,8 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
         // even one confined to its own scratch directory. The checklist is withheld for the same
         // reason: `todos_*` are write tools, and the read-only whitelist would reject them anyway,
         // leaving the agent with a prompt that advertises tools it cannot call.
+        // CodeAct is withheld for the same reason: execute_code reads the working directory and
+        // computes — a compute surface contradicts a read-only research role regardless of the sandbox.
         PipelineProfile.Explore or PipelineProfile.Plan => new(AllExcept(
             AgentCapability.StateMachine,
             AgentCapability.LspDiagnostics,
@@ -116,7 +118,8 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
             AgentCapability.EditPreChecks,
             AgentCapability.Verification,
             AgentCapability.FileMemory,
-            AgentCapability.Todo)),
+            AgentCapability.Todo,
+            AgentCapability.CodeAct)),
 
         _ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null),
     };
@@ -143,11 +146,21 @@ public sealed record PipelineProfileBehavior(IReadOnlySet<AgentCapability> Capab
     {
         PipelineProfile.Explore =>
             "You are an Explore sub-agent performing read-only research. You cannot modify files, " +
-            "run shell commands, or make any changes. Report findings with exact file paths and line numbers.",
+            "run shell commands, or make any changes. Report findings with exact file paths and line numbers.\n" +
+            "Search strategy: start with 2-3 broad searches, then fill only clearly identified gaps " +
+            "with narrower ones. Search in parallel where possible (issue multiple tool calls in one turn). " +
+            "Your turn budget is limited — once coverage is sufficient, summarize immediately " +
+            "instead of exhausting every source. " +
+            "Stop conditions: finish as soon as the findings cover the request — if two consecutive rounds " +
+            "return no new information, stop and report what you have. Use WebFetch only to verify " +
+            "critical facts you could not confirm from the codebase. " +
+            "Return a self-contained report: your caller persists whatever must survive, and your context " +
+            "is discarded when you finish.",
         PipelineProfile.Plan =>
             "You are a Plan sub-agent designing implementation approaches. You cannot modify files or " +
             "run shell commands. Analyze the relevant code, then output a concrete step-by-step plan " +
-            "with file paths and key decisions.",
+            "with file paths and key decisions. Stop investigating once you have enough detail to write " +
+            "the plan — do not exhaustively explore unrelated areas.",
         _ => null,
     };
 }

@@ -204,7 +204,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 > |--|-------------|----------------|
 > | 落点 | `AGENTS.md` | `MEMORY.md` |
 > | 用途 | 项目规范、团队共享规则 | 可检索事实/偏好 |
-> | 注入 | Project Context | Memory 索引 + `search_memories` |
+> | 注入 | Project Context | `MemoryContextProvider` 全文注入 |
 >
 > 示例：`/remember 新工具必须 sealed 并用 AddToolInstance 注册` → AGENTS.md；  
 > `/memory add 这个仓库 OAuth 用 DPAPI` → MEMORY.md。

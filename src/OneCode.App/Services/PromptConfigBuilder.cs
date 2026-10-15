@@ -1,6 +1,5 @@
 using OneCode.Core.Config;
 using OneCode.App.Services.Context;
-using OneCode.Core.Memory;
 using OneCode.Core.Models;
 using System.Text;
 
@@ -8,7 +7,6 @@ namespace OneCode.App.Services;
 
 public sealed class PromptConfigBuilder(
     IConfigManager configManager,
-    IMemoryService memoryService,
     ContextBuilder contextBuilder,
     PromptComposer promptComposer,
     ToolMetadataRegistry toolMetadataRegistry)
@@ -21,10 +19,9 @@ public sealed class PromptConfigBuilder(
     public Task<string> BuildDefaultPromptContentAsync(
         string systemContext,
         string userContext,
-        string? memorySection,
         string? availableTools,
         CancellationToken ct) =>
-        promptComposer.RenderMainBodyAsync(systemContext, userContext, memorySection, availableTools, ct);
+        promptComposer.RenderMainBodyAsync(systemContext, userContext, availableTools, ct);
 
     /// <summary>
     /// Loads the shared harness fragment (<c>system/harness</c>) for the paths that hand it to
@@ -51,16 +48,11 @@ public sealed class PromptConfigBuilder(
     /// this builder does not return a conversation runner.
     /// </summary>
     /// <remarks>
-    /// Memory strategy: the system prompt only includes the MEMORY.md entrypoint index so the LLM
-    /// knows what's available. Detailed topic retrieval is handled on-demand by the
-    /// <c>search_memories</c> tool (MAF TextSearchProvider).
-    /// Memory and user context are injected once via default.prompt placeholders — do not append again.
+    /// Persistent memory (<c>MEMORY.md</c>) is injected dynamically per run via
+    /// <c>MemoryContextProvider</c> (<c>AIContext.Instructions</c>) rather than static template substitution.
     /// </remarks>
     public async Task<string> BuildSystemPromptAsync(CancellationToken ct)
     {
-        var memorySection = await memoryService
-            .LoadMemoryPromptAsync(ct).ConfigureAwait(false);
-
         var systemContext = await contextBuilder.BuildSystemContextAsync(
             Environment.CurrentDirectory, ct).ConfigureAwait(false);
         var additionalDirs = configManager.GetSetting<string[]>("allowedDirectories");
@@ -77,7 +69,7 @@ public sealed class PromptConfigBuilder(
         var availableTools = isFiltered ? BuildAvailableToolsList() : string.Empty;
 
         return await BuildDefaultPromptContentAsync(
-            systemContext, userContext, memorySection, availableTools, ct).ConfigureAwait(false);
+            systemContext, userContext, availableTools, ct).ConfigureAwait(false);
     }
 
     /// <summary>

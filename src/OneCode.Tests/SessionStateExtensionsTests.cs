@@ -68,8 +68,6 @@ public class SessionStateExtensionsTests
     [Theory]
     [InlineData("AskUserQuestion")]
     [InlineData("askuserquestion")]
-    [InlineData("AskUserQuestions")]
-    [InlineData("askuserquestions")]
     public void StateMachineBlocked_AllowsUserInterventionTool(string toolName)
     {
         StateMachineMiddleware.ShouldBlockTool(AgentState.Blocked, toolName).Should().BeFalse();
@@ -86,7 +84,6 @@ public class SessionStateExtensionsTests
 
     [Theory]
     [InlineData("AskUserQuestion")]
-    [InlineData("AskUserQuestions")]
     public void StateMachineTransition_BlockedUserAnswer_UnblocksSession(string toolName)
     {
         var bag = NewStateBag();

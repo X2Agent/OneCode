@@ -153,7 +153,7 @@ public sealed class DesignInitCommand(
     private static Dictionary<string, string> BuildVariables(DesignInitContext ctx)
     {
         var urlSection = !string.IsNullOrWhiteSpace(ctx.Url)
-            ? BuildCloneInstruction(ctx.Url)
+            ? $"## Target Website (clone mode)\nURL: {ctx.Url}\n\n"
             : "## Target Website\n(not specified - use project introspection mode)\n\n";
 
         var existingSection = !string.IsNullOrWhiteSpace(ctx.ExistingDesignMd)
@@ -171,21 +171,6 @@ public sealed class DesignInitCommand(
             ["forceOverwrite"] = ctx.ForceOverwrite.ToString(CultureInfo.InvariantCulture).ToLowerInvariant(),
             ["outputPath"] = Path.GetRelativePath(ctx.WorkingDirectory, ctx.OutputPath).Replace('\\', '/'),
         };
-    }
-
-    private static string BuildCloneInstruction(string url)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("## Target Website (clone mode)");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"URL: {url}");
-        sb.AppendLine();
-        sb.AppendLine("The user wants to CLONE the visual design of this website.");
-        sb.AppendLine("Playwright MCP is connected, so use these browser tools:");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"  (1) browser_navigate with url \"{url}\",");
-        sb.AppendLine("      (2) browser_take_screenshot with fullPage true (no url param),");
-        sb.AppendLine("      (3) browser_evaluate with a function that returns computed CSS variables.");
-        sb.AppendLine();
-        return sb.ToString();
     }
 
     private string ScanFrontendFiles(string cwd)

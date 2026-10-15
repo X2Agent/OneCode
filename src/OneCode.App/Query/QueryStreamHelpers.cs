@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
-using System.Runtime.CompilerServices;
 
 namespace OneCode.App.Query;
 
@@ -86,36 +85,5 @@ internal static class QueryStreamHelpers
         }
 
         return new ChatMessage(ChatRole.User, contents);
-    }
-
-    /// <summary>
-    /// Sets the ambient activation context around a deferred stream so ToolSearch/动态激活
-    /// only sees the current run's capability boundary, restoring previous values in finally —
-    /// cancellation, error yield-break and consumer abandonment all skip the success tail.
-    /// </summary>
-    public static async IAsyncEnumerable<QueryEvent> WithActivationContextAsync(
-        string? sessionKey,
-        ToolCapabilitySet capabilities,
-        string runId,
-        Func<IAsyncEnumerable<QueryEvent>> streamFactory,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        var previousConversationId = ToolActivationContext.CurrentConversationId;
-        var previousCapabilities = ToolActivationContext.CurrentCapabilities;
-        var previousRunId = OneCodeAgentRunContext.CurrentRunId;
-        ToolActivationContext.CurrentConversationId = sessionKey;
-        ToolActivationContext.CurrentCapabilities = capabilities;
-        OneCodeAgentRunContext.CurrentRunId = runId;
-        try
-        {
-            await foreach (var item in streamFactory().ConfigureAwait(false))
-                yield return item;
-        }
-        finally
-        {
-            OneCodeAgentRunContext.CurrentRunId = previousRunId;
-            ToolActivationContext.CurrentCapabilities = previousCapabilities;
-            ToolActivationContext.CurrentConversationId = previousConversationId;
-        }
     }
 }

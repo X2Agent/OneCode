@@ -160,9 +160,7 @@ public sealed class ConfigManagerTests : IDisposable
         File.WriteAllText(UserSettingsPath, """
             {
               "autodream": {
-                "enabled": false,
-                "minHours": 12,
-                "minSessions": 4
+                "enabled": false
               },
               "goal": {
                 "maxSubGoalAttempts": 7,
@@ -179,15 +177,14 @@ public sealed class ConfigManagerTests : IDisposable
         sut.Current.Effective.Get<long>("goal.maxTotalTokens").Should().Be(150_000L);
 
         var result = await sut.ApplyAsync(
-            ConfigPatch.Set(ConfigScope.User, "autodream.minHours", 8),
+            ConfigPatch.Set(ConfigScope.User, "autodream.enabled", true),
             TestContext.Current.CancellationToken);
 
         result.Saved.Should().BeTrue();
         using var document = JsonDocument.Parse(File.ReadAllText(UserSettingsPath));
         document.RootElement.TryGetProperty("autodream", out var autoDream).Should().BeTrue();
-        autoDream.GetProperty("enabled").GetBoolean().Should().BeFalse();
-        autoDream.GetProperty("minHours").GetInt32().Should().Be(8);
-        document.RootElement.TryGetProperty("autodream.minHours", out _).Should().BeFalse();
+        autoDream.GetProperty("enabled").GetBoolean().Should().BeTrue();
+        document.RootElement.TryGetProperty("autodream.enabled", out _).Should().BeFalse();
         document.RootElement.GetProperty("goal").GetProperty("maxSubGoalAttempts").GetInt32().Should().Be(7);
     }
 
@@ -229,12 +226,10 @@ public sealed class ConfigManagerTests : IDisposable
     public void EnvironmentValues_AreConvertedUsingDescriptorTypes()
     {
         SetEnvironment("ONECODE_AUTODREAM", "false");
-        SetEnvironment("ONECODE_AUTODREAM_MIN_HOURS", "9");
 
         using var sut = new ConfigManager(_userDir, _projectDir);
 
         sut.Current.Effective.Get("autodream.enabled", true).Should().BeFalse();
-        sut.Current.Effective.Get("autodream.minHours", 0).Should().Be(9);
     }
 
     [Fact]

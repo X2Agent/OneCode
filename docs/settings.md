@@ -48,7 +48,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 类型 | 配置项 | 语义 |
 |---|---|---|
 | 立即生效 | `showThinking`、`trustedDirectories`、`allowedDirectories`、`hasTrustAccepted` | 保存后立即更新当前进程 |
-| 下次操作生效 | `model`、`fastModel`、`permissionMode`、思考参数、`maxTurns`、`maxBudgetTokens`、`webSearchProvider`、通知、`autodream.*`、`goal.*` | 不影响正在执行的请求，下一次操作读取新快照 |
+| 下次操作生效 | `model`、`fastModel`、`permissionMode`、思考参数、`maxTurns`、`maxBudgetTokens`、`webSearchProvider`、通知、`autodream.*`、`goal.*`、`agents.*` | 不影响正在执行的请求，下一次操作读取新快照 |
 | 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow`、`streamIdleTimeoutSeconds`、`streamMaxRetries` | `IChatClient` 构造时固化，重启后应用 |
 
 ---
@@ -108,14 +108,28 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 > 手写在交互启动时会被 `WorkingModeBridge.SyncInitialState` 覆盖为 BUILD 默认档，因此只应作为派生结果出现。
 > **会话级一次性配置请用 `/permissions <mode> --session`**（别名 `--once`；只设运行时覆盖、不写本键），
 > 例如 `/permissions bypass --session` 仅在本次对话全放行；`plan` / `goalAuto`
-> 不是 `/permissions` 的合法参数（那是工作模式，用 Tab / Alt+1 / Alt+2 / Alt+4 切换）。
+> 不是 `/permissions` 的合法参数（那是工作模式，用 Tab 切换）。
 
 ### 会话约束（Conversation）
 
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `maxTurns` | `int` | `100` | 单次会话最大对话轮数 |
-| `maxBudgetTokens` | `long` | `5000000` | 进程级最大 token 预算（输入 + 输出），达到后预算熔断短路后续 LLM 调用 |
+| `maxBudgetTokens` | `long` | `5000000` | 预算熔断上限（可计费 token，达到后短路后续 LLM 调用）。`0` = 不设限。计量口径与模式语义见下节 |
+
+**`maxBudgetTokens` 的计量口径与模式语义**
+
+- **计量口径（可计费 token）**：`可计费 = 非缓存输入 + 输出 + 缓存写入 + 缓存读 × 10%`。
+  缓存读是对同一段上下文的重复计费（真实价格约为非缓存输入的一折），按全额累计会让长会话
+  每轮请求把整个上下文重算一遍而误触熔断；按 10% 折算既贴近真实成本，又保留对失控循环
+  （纯缓存命中打转）的检测能力。`/cost` 与状态栏展示的仍是原始四维计数，仅熔断判断用可计费口径。
+- **模式语义**：BUILD 模式按 run 独立计量——run 启动时对当前累计做快照，预算只衡量本次计划
+  执行的增量消耗（Plan 阶段的调研不占用 Build 的额度）；PLAN / GOAL 模式维持会话级累计。
+- **调整方法**：`settings.json`（项目级 / 用户级）或运行时 `/config`（下一次 run 生效）；
+  设为 `0` 关闭预算熔断。
+- **分级行为**：70% / 90% 时在对话流发布黄 / 橙预警横幅；100% 时交互模式弹窗询问
+  （追加预算继续 / 收尾总结 / 直接停止），无人值守路径（GOAL 编排、cron 任务、后台子代理）
+  硬停短路并以 `BudgetExceeded` 正常收口，不抛异常。
 
 ### 功能开关（Features）
 
@@ -195,24 +209,53 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 }
 ```
 
+### 子代理预算（Agents）
+
+派工出去的子代理（`Agent` / `ParallelAgents`）有轮数与墙钟两道预算，避免简单调研跑满几十轮：
+
+| 键 | 类型 | 默认值 | 作用 |
+|---|---|---|---|
+| `agents.defaults.maxTurns` | `int` | `0` | 子代理轮数上限（按模型往返计，同轮并行工具调用不重复计数）。**`0` = 自动**：只读 profile（`Explore` / `Plan`）用 15，通用（`general-purpose` / 自定义）用 50 |
+| `agents.defaults.timeoutMinutes` | `int` | `10` | 子代理墙钟超时（分钟），到时走收尾总结并以 partial 结果返回。**≤0 表示不限制** |
+
+**上限分层**（高优先级在前，只在一个地方解析）：
+
+1. 派工时的可选 `maxTurns` 工具参数——**只能收窄**，不能抬高下面各层给出的上限
+2. 自定义代理 frontmatter 的 `max_turns`（`.onecode/agents/*.md`）
+3. 本节 `agents.defaults.maxTurns`
+4. profile 内置默认（只读 15 / 通用 50）
+
+到达轮数上限时不会硬杀：子代理会补一次禁用工具的收尾调用，总结已完成工作与剩余事项；
+墙钟超时则直接以无输出的 partial 收场。结果标记 `[PARTIAL]` 返回父代理，父代理应直接使用已有发现而非重复派发。轮次预算另有 **80% 收尾提醒**：子代理跑满
+八成轮数时先收到一条"开始收尾"的注入提醒（见 [docs/sub-agents.md](sub-agents.md)），多数失控
+循环在此自然收敛，轮数上限只作最后兜底。工具调用另有安全上限（轮数上限的倍数），
+用于拦截单轮内并行的失控工具循环。
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "maxTurns": 40,
+      "timeoutMinutes": 15
+    }
+  }
+}
+```
+
 ### AutoDream（后台记忆整合）
 
-AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `settings.json` 中配置：
+AutoDream **默认开启**，在 `BUILD` 模式任务正常完成时通过零 Token 增量快检触发。如需关闭，可在 `settings.json` 中配置：
 
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `autodream.enabled` | `bool` | `true` | 是否启用 AutoDream。设为 `false` 关闭 |
-| `autodream.minHours` | `int` | `6` | 时间门控：距上次整合的最小间隔小时数 |
-| `autodream.minSessions` | `int` | `3` | 会话门控：触发整合所需的最小新会话数 |
 
 **示例：**
 
 ```json
 {
   "autodream": {
-    "enabled": true,
-    "minHours": 12,
-    "minSessions": 3
+    "enabled": true
   }
 }
 ```
@@ -238,8 +281,6 @@ AutoDream **默认开启**，开箱即用。如需调整门控阈值，可在 `s
 | `ONECODE_WEB_SEARCH_PROVIDER` | `webSearchProvider` |
 | `TAVILY_API_KEY` | `webSearchApiKeys.tavily` |
 | `ONECODE_AUTODREAM` | `autodream.enabled` |
-| `ONECODE_AUTODREAM_MIN_HOURS` | `autodream.minHours` |
-| `ONECODE_AUTODREAM_MIN_SESSIONS` | `autodream.minSessions` |
 | `ONECODE_REMOTE` | `true` 时强制关闭 AutoDream（远程模式） |
 
 > 环境变量由 `ConfigManager` 映射到配置键并标记来源为 `Environment`。环境变量作用域只读，任何保存操作都不会将其值持久化到 `settings.json`。
@@ -357,6 +398,8 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `ollamaContextWindow` | `ConfigKeys.OllamaContextWindow` | `AppSettings.OllamaContextWindow` |
 | `streamIdleTimeoutSeconds` | `ConfigKeys.StreamIdleTimeoutSeconds` | `AppSettings.StreamIdleTimeoutSeconds` |
 | `streamMaxRetries` | `ConfigKeys.StreamMaxRetries` | `AppSettings.StreamMaxRetries` |
+| `agents.defaults.maxTurns` | `ConfigKeys.AgentsDefaultMaxTurns` | `ForkedAgentRunner`（子代理默认最大轮次；未配置时按角色回退 `Session.SubAgentMaxTurns*` 常量） |
+| `agents.defaults.timeoutMinutes` | `ConfigKeys.AgentsDefaultTimeoutMinutes` | `ForkedAgentRunner`（子代理超时分钟数；内置默认 `Session.SubAgentTimeoutMinutesDefault` = 10） |
 | `autodream.*` | —（字面量） | `AutoDreamService` |
 | `goal.*` | `ConfigKeys.GoalMax*` | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService`、`LoopCommand` 调用） |
 | `loop.maxIterations` | `ConfigKeys.LoopMaxIterations` | `ModeBudgetSettings.FromSettings`（`/loop`）；可经 `settings.json`、`/config set`、`/loop --max` 设置，超上限由 `ModeBudgetSettings.MaxLoopIterationsUpperBound` 夹取 |

@@ -1,13 +1,10 @@
-using System.Security.Cryptography;
-using System.Text;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;
 
 /// <summary>
-/// <see cref="PlanWorkflowApplicationService"/> 的持久化与实体构造辅助
-/// （起拆分为 partial：本文件承载统一持久化出口、聚合加载
-/// 与 revision/snapshot 构造，与状态机转换面分离）。
+/// <see cref="PlanWorkflowApplicationService"/> 的持久化与实体构造辅助：
+/// 承载统一持久化出口、聚合加载与 revision/snapshot 构造。
 /// </summary>
 public sealed partial class PlanWorkflowApplicationService
 {
@@ -87,7 +84,7 @@ public sealed partial class PlanWorkflowApplicationService
             Steps = steps,
             Risks = risks,
             Assumptions = assumptions,
-            ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(markdown))).ToLowerInvariant(),
+            ContentHash = PlanContentHash.Of(markdown),
             Status = status,
             CreatedAt = DateTimeOffset.UtcNow,
         };
@@ -106,16 +103,16 @@ public sealed partial class PlanWorkflowApplicationService
             UpdatedAt = occurredAt,
         };
 
-    private static PlanRevisionResult DuplicateRevisionResult(PlanAggregate aggregate)
+    private static PlanSubmissionResult DuplicateRevisionResult(PlanAggregate aggregate)
     {
         var revisionNumber = aggregate.Workflow.LastProcessedRevision
             ?? throw new PlanTransitionException("Duplicate revision command is missing its persisted revision reference.");
         var revision = aggregate.FindRevision(revisionNumber)
             ?? throw new PlanTransitionException($"Duplicate revision {revisionNumber} is missing from the Plan aggregate.");
-        return new PlanRevisionResult(aggregate.Workflow, revision);
+        return new PlanSubmissionResult(aggregate.Workflow, revision);
     }
 
-    private static ApprovedPlanSnapshot FreezeApprovedSnapshot(PlanRevision revision, string approvedBy)
+    private static ApprovedPlanSnapshot FreezeApprovedSnapshot(PlanRevision revision, ApprovePlanCommand command)
         => new()
         {
             PlanId = revision.PlanId,
@@ -124,10 +121,10 @@ public sealed partial class PlanWorkflowApplicationService
             Title = revision.Title,
             Markdown = revision.Markdown,
             Steps = revision.Steps,
+            OriginalRequest = command.OriginalRequest,
+            Clarifications = command.Clarifications ?? [],
             ContentHash = revision.ContentHash,
-            ApprovedBy = approvedBy,
+            ApprovedBy = command.ApprovedBy,
             ApprovedAt = DateTimeOffset.UtcNow,
         };
-
-    private static Task<T> ExecuteAsync<T>(Func<Task<T>> action) => action();
 }

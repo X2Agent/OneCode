@@ -165,11 +165,12 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         Action<OrchestrationEvent> evidenceSink,
         CancellationToken ct)
     {
-        // Load sub-goal execution system prompt from IPromptManager (three-layer store:
-        // project > user > built-in). Throws if missing — prompts/system/goal-subgoal.prompt
-        // is always shipped via csproj Content copy, so this should never fail in production.
-        var systemPrompt = await _promptManager.GetPromptAsync("system/goal-subgoal", ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Mode prompt 'system/goal-subgoal' not found in any IPromptManager store.");
+        // Load the shared harness fragment from IPromptManager (three-layer store:
+        // project > user > built-in). Mode-specific Goal instructions are injected once per turn
+        // by ModeInstructionProvider under WorkingMode.Goal (system/goal.prompt).
+        var harnessPrompt = await _promptManager.GetPromptAsync(PromptComposer.HarnessPromptName, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"Harness prompt '{PromptComposer.HarnessPromptName}' not found in any IPromptManager store.");
 
         // 按子目标 requiredTools 裁剪工具集。
         // null/空/"*" → 全量工具集；否则按名称过滤。
@@ -177,13 +178,8 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
 
         return new MainAgentRunOptions
         {
-            SystemPrompt = systemPrompt,
-            // No product harness fragment: system/goal-subgoal.prompt is self-contained (it ships its
-            // own prompt-injection defense) and was never composed with the shared fragment. Suppression
-            // rather than null so MAF does not inject DefaultInstructions on top of it — the §4.6
-            // migration must not change prompt text as a side effect, and pre-migration the defaults
-            // were suppressed.
-            HarnessInstructions = OneCodeHarnessDefaults.SuppressFrameworkDefaults,
+            SystemPrompt = null,
+            HarnessInstructions = harnessPrompt,
             UserPrompt = userPrompt,
             ModelId = options.ModelId,
             WorkingDirectory = options.WorkingDirectory,

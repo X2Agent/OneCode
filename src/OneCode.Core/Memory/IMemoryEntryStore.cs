@@ -26,8 +26,7 @@ namespace OneCode.Core.Memory;
 /// <b>Expiry</b>: <see cref="LoadAsync"/> filters out
 /// expired entries (<see cref="MemoryEntry.IsExpired"/>). <see cref="LoadAllAsync"/>
 /// includes them (for management commands). <see cref="PruneAsync"/> physically removes
-/// expired entries and enforces capacity limits (usage-ranked eviction, see
-/// <see cref="PruneAsync"/>).
+/// expired entries and enforces capacity limits.
 /// </para>
 /// </remarks>
 public interface IMemoryEntryStore
@@ -59,38 +58,13 @@ public interface IMemoryEntryStore
     Task<bool> RemoveAsync(MemoryScope scope, string key, CancellationToken ct = default);
 
     /// <summary>
-    /// Records usage feedback for the specified entries: increments
-    /// <see cref="MemoryEntry.HitCount"/> and stamps <see cref="MemoryEntry.LastHitAt"/>.
-    /// </summary>
-    /// <param name="scope">User (global) or Project (current working directory).</param>
-    /// <param name="keys">
-    /// Keys that were actually recalled. Unknown keys are ignored (not an error) so callers can
-    /// pass a whole result set without pre-filtering.
-    /// </param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <remarks>
-    /// <para>
-    /// <b>Contract — <see cref="MemoryEntry.UpdatedAt"/> must NOT be touched.</b> Usage is not a
-    /// content change; bumping the timestamp would let a frequently-recalled entry masquerade as
-    /// "fresh" and escape the <see cref="MemoryEntry.UpdatedAt"/> tie-break in
-    /// <see cref="PruneAsync"/>. The same applies to <see cref="MemoryEntry.CreatedAt"/> and
-    /// <see cref="MemoryEntry.ExpiresAt"/>.
-    /// </para>
-    /// <para>
-    /// Callers treat this as best-effort: a failure here must not fail the tool call that produced
-    /// the hits, so implementations should not throw for I/O problems.
-    /// </para>
-    /// </remarks>
-    Task RecordHitsAsync(MemoryScope scope, IReadOnlyList<string> keys, CancellationToken ct = default);
-
-    /// <summary>
     /// Clears all entries for the given scope (deletes the backing store for that scope).
     /// </summary>
     Task ClearAsync(MemoryScope scope, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes all expired entries and enforces the capacity limit by evicting the least valuable
-    /// entries (retention order below).
+    /// Removes all expired entries and enforces the capacity limit by evicting the oldest
+    /// non-manual entries first.
     /// </summary>
     /// <param name="scope">User (global) or Project (current working directory).</param>
     /// <param name="ct">Cancellation token.</param>
@@ -100,10 +74,7 @@ public interface IMemoryEntryStore
     /// <list type="number">
     /// <item><see cref="MemoryEntry.Source"/> <c>manual</c> entries are <b>exempt</b> — they express
     ///   explicit user intent and are never evicted automatically.</item>
-    /// <item>Everything else by <see cref="MemoryEntry.HitCount"/> ascending — never-recalled
-    ///   entries go before well-used ones.</item>
-    /// <item>Ties broken by <see cref="MemoryEntry.UpdatedAt"/> ascending — the oldest goes first.
-    ///   This is why <see cref="RecordHitsAsync"/> must not bump that timestamp.</item>
+    /// <item>Everything else by <see cref="MemoryEntry.UpdatedAt"/> ascending — the oldest goes first.</item>
     /// </list>
     /// </remarks>
     Task<int> PruneAsync(MemoryScope scope, CancellationToken ct = default);

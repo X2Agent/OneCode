@@ -12,9 +12,9 @@ namespace OneCode.App.Services.Agent;
 /// <para><b>为什么读快照而不是投影工具事件</b>：<c>todos_*</c> 的 add/complete/remove
 /// 都带幂等语义（重复 complete 返回 0、删除不存在的 id 返回 0），从
 /// ToolStart/ToolDone 增量重建状态必须自行复刻这套语义，漏一个事件就永久漂移。
-/// provider 的 <c>GetAllTodosAsync</c> 是权威全量源，代价是刷新粒度为"轮"——
-/// MAF 的 agent 循环在一次 RunStreamingAsync 内跑完整个工具批次，轮间刷新对
-/// 交互式 TUI 足够；工具执行中间的实时刷新需要另做评估（增量重建风险见上）。</para>
+/// provider 的 <c>GetAllTodosAsync</c> 是权威全量源。发布时机由 <c>MainAgentRunner</c> 决定：
+/// run 开始、每个 todos_* 变更工具完成时（<c>TodoMutationObserver</c>）、run 结束——
+/// 触发点只负责「何时重读快照」，状态本身始终来自 provider，不做增量重建。</para>
 /// <para><b>解析路径</b>：<c>agent.GetService&lt;TodoProvider&gt;()</c> 依赖 MAF 契约——
 /// 每个 <c>DelegatingAIAgent</c> 装饰器都把 GetService 向被包装 agent 转发，
 /// 直到 <c>ChatClientAgent</c> 从其 <c>AIContextProviders</c> 中解析

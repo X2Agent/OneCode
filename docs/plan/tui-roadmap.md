@@ -31,7 +31,7 @@
 
 ### 3.1 现状（2026-09-30 grep 实测）
 
-`using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 目录之外共 **23 个文件**。有利事实：`Terminal.Gui` 包依赖本身封闭在
+`using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 目录之外共 **24 个文件**。有利事实：`Terminal.Gui` 包依赖本身封闭在
 `Tui/` 目录内（唯一例外 `Services/TuiHostConfigurator.cs`）；`IConversationRunner` 流式契约 public（`Query/IConversationRunner.cs`，
 `QueryStreamEngine.StreamQueryAsync` 实现）；QueryEvent 事件体系（16 种，`Query/QueryEventTypes.cs`）UI 无关；
 会话事件溯源全局存储（`Session/FileSessionEventStore.cs` 挂 `PathsHelper.UserHome`）；Automation 的 `CronJobExecutor`

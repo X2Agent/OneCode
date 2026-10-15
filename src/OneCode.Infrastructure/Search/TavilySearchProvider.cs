@@ -25,6 +25,9 @@ public sealed class TavilySearchProvider(IHttpClientFactory httpClientFactory, I
 {
     private const string SearchDepth = "basic";
 
+    // Tavily 使用自定义状态码 432 表示套餐/月度配额耗尽（与标准 429 限流并列）。
+    private const int HttpStatusQuotaExceeded = 432;
+
     /// <inheritdoc />
     public string Name => "tavily";
 
@@ -51,9 +54,9 @@ public sealed class TavilySearchProvider(IHttpClientFactory httpClientFactory, I
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new InvalidOperationException(
                 $"Tavily rejected the API key (HTTP {(int)response.StatusCode}). Verify TAVILY_API_KEY / webSearchApiKeys.tavily.");
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        if (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode == HttpStatusQuotaExceeded)
             throw new InvalidOperationException(
-                "Tavily quota exceeded (HTTP 429). Wait or check https://app.tavily.com for usage.");
+                $"Tavily quota exceeded (HTTP {(int)response.StatusCode}). Wait or check https://app.tavily.com for usage.");
 
         response.EnsureSuccessStatusCode();
 

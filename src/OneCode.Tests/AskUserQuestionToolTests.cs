@@ -1,4 +1,3 @@
-using System.Text.Json;
 using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Tools;
@@ -22,14 +21,14 @@ public sealed class AskUserQuestionToolTests
     {
         var tool = new AskUserQuestionTool(userQuestionService: null!);
 
-        var result = await tool.AskAsync("Use EF Core or Dapper?", ["EF Core", "Dapper"]);
+        var result = await tool.AskAsync(questions: [new AskQuestionInput("Use EF Core or Dapper?", Options: ["EF Core", "Dapper"])]);
 
         result.IsError.Should().BeTrue();
         result.Content.Should().Contain("no interactive terminal");
         result.Content.Should().Contain("Use EF Core or Dapper?");
         // 关键防回归：不能出现伪装成用户答案的固定字符串
         result.Content.Should().NotContain("Answer: (no interactive terminal available)");
-        result.SuggestedNextAction.Should().Be("Choose a reasonable default or skip the step that required user input.",
+        result.SuggestedNextAction.Should().Be("Choose reasonable defaults or skip the step that required user input.",
             "headless 错误的后续动作必须是安全默认/跳过，而不是把错误当答案");
     }
 
@@ -40,11 +39,39 @@ public sealed class AskUserQuestionToolTests
         // "Answer: (no interactive terminal available)" 这类伪装成用户答案的 Success。
         var tool = new AskUserQuestionTool(userQuestionService: null!);
 
-        var result = await tool.AskAsync("Proceed?");
+        var result = await tool.AskAsync(questions: [new AskQuestionInput("Proceed?")]);
 
         result.IsError.Should().BeTrue();
         // 错误内容里不应出现 "Answer:" 前缀（那是真实回答才有的格式）
         result.Content.Should().NotContain("Answer:");
+    }
+
+    // AskUserQuestionTool: 参数校验
+
+    [Fact]
+    public async Task AskAsync_NoQuestions_ReturnsError()
+    {
+        var tool = new AskUserQuestionTool(userQuestionService: null!);
+
+        var result = await tool.AskAsync();
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("no questions provided");
+    }
+
+    [Fact]
+    public async Task AskAsync_MultipleQuestions_MissingId_ReturnsError()
+    {
+        var svc = Substitute.For<IUserQuestionService>();
+        var tool = new AskUserQuestionTool(svc);
+
+        var result = await tool.AskAsync(
+            "向导",
+            [new AskQuestionInput("第一题", Id: "first"), new AskQuestionInput("第二题")]);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("'id' and 'question'");
+        await svc.DidNotReceiveWithAnyArgs().AskMultipleAsync(default!, default!, default);
     }
 
     // AskUserQuestionTool: 服务返回 null（用户取消 / TUI 不可用）
@@ -57,7 +84,7 @@ public sealed class AskUserQuestionToolTests
             .Returns((string?)null);
         var tool = new AskUserQuestionTool(svc);
 
-        var result = await tool.AskAsync("Pick one", ["A", "B"]);
+        var result = await tool.AskAsync(questions: [new AskQuestionInput("Pick one", Options: ["A", "B"])]);
 
         result.IsError.Should().BeTrue();
         result.Content.Should().Contain("did not provide an answer");
@@ -73,7 +100,7 @@ public sealed class AskUserQuestionToolTests
             .Returns("EF Core");
         var tool = new AskUserQuestionTool(svc);
 
-        var result = await tool.AskAsync("Which ORM?", ["EF Core", "Dapper"]);
+        var result = await tool.AskAsync(questions: [new AskQuestionInput("Which ORM?", Options: ["EF Core", "Dapper"])]);
 
         result.IsError.Should().BeFalse();
         result.Content.Should().Contain("Question: Which ORM?");
@@ -81,7 +108,7 @@ public sealed class AskUserQuestionToolTests
     }
 
     [Fact]
-    public async Task AskAsync_PassesQuestionAndOptionsToService()
+    public async Task AskAsync_SingleQuestion_PassesQuestionAndOptionsToService()
     {
         string? capturedQuestion = null;
         IReadOnlyList<string>? capturedOptions = null;
@@ -93,19 +120,36 @@ public sealed class AskUserQuestionToolTests
             .Returns("ok");
         var tool = new AskUserQuestionTool(svc);
 
-        await tool.AskAsync("the question", ["o1", "o2"]);
+        await tool.AskAsync(questions: [new AskQuestionInput("the question", Options: ["o1", "o2"])]);
 
         capturedQuestion.Should().Be("the question");
         capturedOptions.Should().BeEquivalentTo(["o1", "o2"]);
     }
 
     [Fact]
-    public async Task AskMultipleAsync_PassesRelatedQuestionsAsSingleWizardRequest()
+    public async Task AskAsync_SingleQuestion_IgnoresTitle_GoesToSimpleDialog()
     {
+        var svc = Substitute.For<IUserQuestionService>();
+        svc.AskAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+            .Returns("ok");
+        var tool = new AskUserQuestionTool(svc);
+
+        var result = await tool.AskAsync("向导标题", [new AskQuestionInput("唯一一题", Id: "only")]);
+
+        result.IsError.Should().BeFalse();
+        await svc.DidNotReceiveWithAnyArgs().AskMultipleAsync(default!, default!, default);
+    }
+
+    // AskUserQuestionTool: 向导（2+ 题）
+
+    [Fact]
+    public async Task AskAsync_MultipleQuestions_PassesRelatedQuestionsAsSingleWizardRequest()
+    {
+        string? capturedTitle = null;
         IReadOnlyList<WizardQuestion>? capturedQuestions = null;
         var svc = Substitute.For<IUserQuestionService>();
         svc.AskMultipleAsync(
-                "规划前确认",
+                Arg.Do<string>(t => capturedTitle = t),
                 Arg.Do<IReadOnlyList<WizardQuestion>>(items => capturedQuestions = items),
                 Arg.Any<CancellationToken>())
             .Returns(new WizardResult(new Dictionary<string, string>
@@ -114,17 +158,33 @@ public sealed class AskUserQuestionToolTests
                 ["validation"] = "dotnet test",
             }));
         var tool = new AskUserQuestionTool(svc);
-        using var scopeQuestion = JsonDocument.Parse("""{"id":"scope","question":"目标模块？"}""");
-        using var validationQuestion = JsonDocument.Parse("""{"id":"validation","question":"验收命令？"}""");
 
-        var result = await tool.AskMultipleAsync(
+        var result = await tool.AskAsync(
             "规划前确认",
-            [scopeQuestion.RootElement, validationQuestion.RootElement]);
+            [new AskQuestionInput("目标模块？", Id: "scope"), new AskQuestionInput("验收命令？", Id: "validation")]);
 
         result.IsError.Should().BeFalse();
+        capturedTitle.Should().Be("规划前确认");
         capturedQuestions.Should().HaveCount(2);
         capturedQuestions!.Select(item => item.Id).Should().Equal("scope", "validation");
         await svc.DidNotReceiveWithAnyArgs().AskAsync(default!, default, default);
+    }
+
+    [Fact]
+    public async Task AskAsync_MultipleQuestions_WizardCancelled_ReturnsError()
+    {
+        var svc = Substitute.For<IUserQuestionService>();
+        svc.AskMultipleAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<WizardQuestion>>(), Arg.Any<CancellationToken>())
+            .Returns(WizardResult.Cancelled);
+        var tool = new AskUserQuestionTool(svc);
+
+        var result = await tool.AskAsync(
+            "规划前确认",
+            [new AskQuestionInput("一", Id: "a"), new AskQuestionInput("二", Id: "b")]);
+
+        result.IsError.Should().BeTrue();
+        result.Content.Should().Contain("cancelled by user");
+        result.Content.Should().NotContain("Answers:");
     }
 
     // UserQuestionService: TuiInteractionBridge 未设置 EmitEvent 时返回 null
@@ -187,31 +247,9 @@ public sealed class AskUserQuestionToolTests
         var svc = new UserQuestionService(bridge);
         var tool = new AskUserQuestionTool(svc);
 
-        var result = await tool.AskAsync("any question?");
+        var result = await tool.AskAsync(questions: [new AskQuestionInput("any question?")]);
 
         result.IsError.Should().BeTrue();
         result.Content.Should().Contain("did not provide an answer");
     }
-
-    // helpers
-
-    private static TuiContext CreateMinimalTuiContext(Action<TuiEvent>? emitEvent)
-    {
-        return new TuiContext(
-            new TuiQueryServices(
-                StreamQuery: (_, _, _) => AsyncEnumerable.Empty<TuiEvent>(),
-                CreateSession: _ => Task.CompletedTask,
-                ExecuteCommand: (_, _) => Task.FromResult<string?>(null)),
-            new TuiSessionServices(),
-            new TuiDiagnosticServices(),
-            new TuiRuntimeServices(
-                GetModel: () => "test",
-                ModelCatalog: new ModelCatalogStore(),
-                EmitEvent: emitEvent),
-            new TuiLaunchOptions(
-                Version: "test",
-                ExternalCancellation: TestContext.Current.CancellationToken,
-                SlashCommands: []));
-    }
-
 }

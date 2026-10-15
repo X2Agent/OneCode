@@ -39,7 +39,10 @@ public sealed class WebFetchToolJsHintTests
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Constants.HttpClientNames.WebFetch).Returns(httpClient);
 
-        return new WebFetchTool(factory, new MemoryCache(new MemoryCacheOptions()), NullLogger<WebFetchTool>.Instance);
+        return new WebFetchTool(
+            factory,
+            new MemoryCache(new MemoryCacheOptions()),
+            NullLogger<WebFetchTool>.Instance);
     }
 
     private sealed class FixedHtmlHandler(string html) : HttpMessageHandler

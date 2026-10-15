@@ -25,7 +25,7 @@ public sealed class ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner
 
         sb.AppendLine(CultureInfo.InvariantCulture, $"Operating System: {GetOsDescription()}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"Working Directory: {workingDirectory}");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"Current Time: {DateTimeOffset.Now:yyyy/MM/dd HH:mm:ss} ({TimeZoneInfo.Local.DisplayName}, UTC{(TimeZoneInfo.Local.BaseUtcOffset >= TimeSpan.Zero ? "+" : "")}{TimeZoneInfo.Local.BaseUtcOffset:hh\\:mm})");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Current Date: {DateTimeOffset.Now:yyyy-MM-dd} ({TimeZoneInfo.Local.DisplayName}, UTC{(TimeZoneInfo.Local.BaseUtcOffset >= TimeSpan.Zero ? "+" : "")}{TimeZoneInfo.Local.BaseUtcOffset:hh\\:mm})");
 
         try
         {
@@ -36,7 +36,7 @@ public sealed class ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner
                 if (!string.IsNullOrWhiteSpace(status.Branch))
                     gitParts.Add($"Branch: {status.Branch.Trim()}");
                 if (status.IsDirty)
-                    gitParts.Add($"Dirty: {status.UncommitedChanges} uncommitted changes, {status.UntrackedFiles} untracked files");
+                    gitParts.Add("Dirty: true");
                 if (!string.IsNullOrWhiteSpace(status.RemoteUrl))
                     gitParts.Add($"Remote: {status.RemoteUrl.Trim()}");
 
@@ -64,7 +64,7 @@ public sealed class ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner
         }
 
         sb.AppendLine(CultureInfo.InvariantCulture, $"Platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux" : "Unknown")}");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"Shell: {Environment.GetEnvironmentVariable("SHELL") ?? "cmd.exe"}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Shell: {Environment.GetEnvironmentVariable("SHELL") ?? (OperatingSystem.IsWindows() ? "pwsh" : "sh")}");
 
         var result = sb.ToString();
         if (result.Length > MaxSystemContextChars)
@@ -239,7 +239,7 @@ public sealed class ContextBuilder(GitInfo gitInfo, IProcessRunner processRunner
             {
                 "log",
                 $"--max-count={MaxRecentCommits}",
-                "--pretty=format:%h %s (%cr)",
+                "--pretty=format:%h %s (%cs)",
             };
 
             var result = await _processRunner.ExecuteWithArgumentListAsync(

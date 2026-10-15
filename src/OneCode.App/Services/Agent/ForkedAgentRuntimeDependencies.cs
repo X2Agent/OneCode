@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.Core.Config;
 using OneCode.Core.Models;
 
 namespace OneCode.App.Services.Agent;
@@ -10,4 +11,5 @@ public sealed record ForkedAgentRuntimeDependencies(
     IWorkingDirectoryAccessor WorkingDirectory,
     ToolMetadataRegistry ToolMetadata,
     CompactionStrategyFactory CompactionBuilder,
-    ISessionIdProvider SessionIds);
+    ISessionIdProvider SessionIds,
+    IConfigManager ConfigManager);

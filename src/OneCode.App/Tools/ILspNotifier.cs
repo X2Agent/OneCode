@@ -2,8 +2,8 @@ namespace OneCode.App.Tools;
 
 /// <summary>
 /// Notifies an editor host that a file changed on disk.
-/// The production DI registers <see cref="OneCode.App.Services.Lsp.LspNotifier"/>; <see cref="NoOpLspNotifier"/>
-/// is available for tests and environments without an LSP server.
+/// The production DI registers <see cref="OneCode.App.Services.Lsp.LspNotifier"/>; tests use a no-op
+/// implementation for environments without an LSP server.
 /// </summary>
 public interface ILspNotifier
 {
@@ -31,27 +31,6 @@ public interface ILspNotifier
     Task<string?> GetDiagnosticsSummaryAsync(string fullPath, CancellationToken ct = default);
 }
 
-public sealed class NoOpLspNotifier : ILspNotifier
-{
-    public static readonly NoOpLspNotifier Instance = new();
-
-    private NoOpLspNotifier()
-    {
-    }
-
-    public Task NotifyFileUpdatedAsync(string fullPath, CancellationToken ct = default)
-        => Task.CompletedTask;
-
-    public Task NotifyFileClosedAsync(string fullPath, CancellationToken ct = default)
-        => Task.CompletedTask;
-
-    public Task NotifyDirectoryDeletedAsync(string directoryPath, CancellationToken ct = default)
-        => Task.CompletedTask;
-
-    public Task<string?> GetDiagnosticsSummaryAsync(string fullPath, CancellationToken ct = default)
-        => Task.FromResult<string?>(null);
-}
-
 /// <summary>
 /// Post-write pipeline shared by EditTool and WriteTool.
 /// Handles LSP notification → diagnostics collection.
@@ -60,7 +39,6 @@ public static class FileWritePipeline
 {
     public static async Task<string> CompleteWriteAsync(
         string fullPath,
-        string content,
         ILspNotifier notifier,
         string successMessage,
         CancellationToken ct)
