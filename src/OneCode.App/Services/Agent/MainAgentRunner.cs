@@ -267,6 +267,7 @@ public partial class MainAgentRunner(
 
                     // 首次 attempt 的 pipeline 租约就地释放，让位给重建的 pipeline（finally 只释放最后一个）。
                     pipeline?.ContextProviderLease?.Dispose();
+                    todoMutations = new TodoMutationObserver();
                     pipeline = (await BuildAgentPipelineAsync(
                         runOptions with { MaxOutputTokens = EscalatedZeroOutputRetryMaxTokens },
                         transaction,

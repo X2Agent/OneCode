@@ -13,6 +13,6 @@ public interface IAutoDreamService
     /// <summary>
     /// 手动触发一次记忆整合（由 <c>/memory autodream trigger</c> 调用）。
     /// </summary>
-    /// <param name="force">为 <see langword="true"/> 时跳过增量快检，强制运行整合 Agent。</param>
-    void Trigger(bool force = false);
+    /// <param name="force">为 <see langword="true"/> 时跳过候选非空快检，强制运行整合 Agent。</param>
+    void Trigger(bool force = true);
 }

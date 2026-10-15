@@ -55,6 +55,7 @@ public static class MafSessionInvalidator
     [
         "PipelineCompactionStrategy",
         nameof(InMemoryChatHistoryProvider),
+        Agent.TranscriptChatHistoryProvider.StateKey,
         LegacyCompactionStateKey,
     ];
 

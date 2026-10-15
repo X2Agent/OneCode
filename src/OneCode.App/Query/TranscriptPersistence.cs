@@ -54,4 +54,42 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
             _logger.LogWarning(ex, "Failed to persist assistant transcript for session {SessionId}", request.SessionId);
         }
     }
+
+    /// <summary>
+    /// 把新封口的工具批次立即持久化（逐批落盘）：长 run 中途被杀只丢尚未封口的当前批次，
+    /// 而不是整个 run 的工具历史。appender 按 batchId 幂等去重，与 run 收尾的整批投递不冲突。
+    /// 持久化失败不中断 run：收尾的 <see cref="PersistAsync"/> 会重试剩余批次。
+    /// </summary>
+    /// <returns>更新后的已持久化批次数。</returns>
+    public async Task<int> PersistSealedBatchesAsync(
+        QueryStreamRequest request,
+        StreamingSession session,
+        int persistedBatchCount,
+        CancellationToken ct)
+    {
+        var batches = session.ToolBatchCollector.CompletedBatches;
+        if (request.ConversationId is not { } conversationId
+            || ct.IsCancellationRequested
+            || batches.Count <= persistedBatchCount)
+            return persistedBatchCount;
+
+        try
+        {
+            await _sessionManager.AppendCompletedToolBatchesAsync(
+                    conversationId,
+                    batches.Skip(persistedBatchCount).ToList(),
+                    ct)
+                .ConfigureAwait(false);
+            return batches.Count;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist sealed tool batches for run {RunId}", request.AgentRunId);
+            return persistedBatchCount;
+        }
+    }
 }

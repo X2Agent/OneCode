@@ -86,7 +86,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 ### 3.2 AutoDream 任务级整合
 
 - **触发时机**：仅当 `BUILD` 模式（含普通交互式 `BUILD` 与 `PLAN` 批准后转入的受控 `BUILD`）在 `QueryStreamEngine.FinalizeAsync` 正常完成且未回滚时触发（`PLAN` 与 `GOAL` 模式不触发）；另支持 `/memory autodream trigger` 手动强制触发。
-- **零 Token 增量快检**：先在 C# 层检查自 `last_consolidated_at` 以来是否有新增 working-memory 笔记或当前内存会话中的新对话轮次，无增量直接跳过。
+- **零 Token 候选快检**：先在 C# 层检查当前内存会话是否存在有效对话轮次或存在 working-memory 笔记，无候选直接跳过。
 - **数据源与单轮无工具整理**：基于 `{工作目录}/.onecode/agent-file-memory/` 工作记忆笔记、当前内存会话（`ISessionManager.ForegroundConversation`）的 `User` / `Assistant` 对话轮次以及 `MemoryContextProvider` 注入的当前 `MEMORY.md`，执行单次无工具 LLM 整理。
 
 详见 [后台服务文档 - AutoDream 记忆整合](./background-services.md#5-autodream-记忆整合)。
@@ -125,7 +125,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 |--------|--------|---------|
 | 结构化条目记忆 | 用户级（全局） | `~/.onecode/memory/MEMORY.md` |
 | 结构化条目记忆 | 项目级 | `{cwd}/.onecode/memory/MEMORY.md` |
-| AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（`autodream.lock`、`last_consolidated_at`） |
+| AutoDream 状态 | 项目级 | `{cwd}/.onecode/memory/`（`autodream.lock`） |
 | 会话工作记忆（AutoDream 首选数据源） | 项目级 | `{工作目录}/.onecode/agent-file-memory/`（随会话工作目录解析，见 `FileMemoryStorePaths`） |
 
 ---

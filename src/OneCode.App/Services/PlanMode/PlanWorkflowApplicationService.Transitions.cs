@@ -76,11 +76,12 @@ public sealed partial class PlanWorkflowApplicationService
         string commandId)
     {
         var windowStart = session.SessionManager.GetConversation(workflow.SessionId) is { } conversation
-            ? HistorySeedBoundary.ReadValidated(conversation)?.MessageIndex ?? 0
+            ? HistorySeedBoundary.ReadValidatedForHandoff(conversation, workflow.ExecutionRequestId)?.MessageIndex ?? 0
             : 0;
         var handoff = PlanHandoffExtractor.Extract(
             session.SessionManager.GetChatHistory(workflow.SessionId),
-            windowStart);
+            windowStart,
+            workflow.Id.ToString());
         return new ApprovePlanCommand(
             commandId,
             workflow.SessionId,

@@ -59,8 +59,21 @@ public sealed class GitTool(
         if (!string.IsNullOrWhiteSpace(refName) && !IsValidToken(refName))
             return ToolResult.Error($"Invalid ref '{refName}': must be a non-empty ref not starting with '-'.");
 
-        if (!string.IsNullOrWhiteSpace(path) && !IsValidToken(path))
-            return ToolResult.Error($"Invalid path '{path}': must be a relative path not starting with '-'.");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            if (!IsValidToken(path))
+                return ToolResult.Error($"Invalid path '{path}': must be a relative path not starting with '-'.");
+
+            var baseDir = string.IsNullOrWhiteSpace(workingDirectory.WorkingDirectory)
+                ? Environment.CurrentDirectory
+                : workingDirectory.WorkingDirectory;
+            var resolved = Infrastructure.PathsHelper.SafeResolve(
+                path.Trim(),
+                baseDir,
+                workingDirectory.AdditionalDirectories);
+            if (!resolved.IsSuccess)
+                return ToolResult.Error(resolved.Error ?? $"Invalid path '{path}'.");
+        }
 
         var arguments = normalizedAction switch
         {

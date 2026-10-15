@@ -124,7 +124,11 @@ public sealed partial class LspTool(
 
         try
         {
-            var uri = LspUriHelper.BuildFileUri(Path.GetFullPath(file));
+            var resolvedFile = ResolveWorkspacePath(file);
+            if (!resolvedFile.IsSuccess)
+                return ToolResult.Error(resolvedFile.Error ?? "Path resolution failed.");
+
+            var uri = LspUriHelper.BuildFileUri(resolvedFile.Value ?? string.Empty);
             var result = action.ToLowerInvariant() switch
             {
                 "definition" => await GetDefinitionAsync(targetServer, uri, line, column, ct).ConfigureAwait(false),

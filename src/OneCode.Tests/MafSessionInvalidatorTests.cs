@@ -22,6 +22,7 @@ public sealed class MafSessionInvalidatorTests
               "stateBag": {
                 "PipelineCompactionStrategy": { "messagegroups": [] },
                 "InMemoryChatHistoryProvider": { "messages": [] },
+                "onecode.transcriptHistory": { "messages": [{ "role": "user", "text": "stale" }] },
                 "TodoProvider": { "todos": [{ "title": "keep me" }] },
                 "FileMemoryProvider": { "workingFolder": "20260101_abc" },
                 "toolApprovalState": { "rules": [] }
@@ -34,6 +35,8 @@ public sealed class MafSessionInvalidatorTests
         var stateBag = ReadStateBag(conversation);
         stateBag.Should().NotContainKey("PipelineCompactionStrategy");
         stateBag.Should().NotContainKey("InMemoryChatHistoryProvider");
+        stateBag.Should().NotContainKey("onecode.transcriptHistory",
+            "TranscriptChatHistoryProvider caches seeded messages under onecode.transcriptHistory and must re-seed after compaction");
         stateBag.Should().ContainKey("TodoProvider", "the todo list is not bound to message positions");
         stateBag.Should().ContainKey("FileMemoryProvider", "the working-memory folder must survive compaction");
         stateBag.Should().ContainKey("toolApprovalState");

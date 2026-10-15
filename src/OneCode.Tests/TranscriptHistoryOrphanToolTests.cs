@@ -316,6 +316,198 @@ public sealed class TranscriptHistoryOrphanToolTests
             .Should().Be(1, "第二轮对话仍应完整保留首轮用户提问");
     }
 
+    /// <summary>
+    /// 模拟主会话同时注入 Todo（User 角色）与 ModeInstruction（System 角色排在末尾）的 AIContextProvider。
+    /// </summary>
+    private sealed class TodoAndModeContextInjectingProvider : AIContextProvider
+    {
+        public const string TodoText = "### Current todo list\n- none yet";
+        public const string ModeText = "You are in BUILD MODE — default full-capability engineering mode.";
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            AIContextProvider.InvokingContext context, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AIContext
+            {
+                Messages =
+                [
+                    new ChatMessage(ChatRole.User, TodoText),
+                    new ChatMessage(ChatRole.System, ModeText),
+                ],
+            });
+    }
+
+    /// <summary>
+    /// 线上 74 轮死循环防回归守护：
+    /// 当主会话同时开启 <c>EnableToolApproval = true</c>（<c>ToolApprovalAgent</c> 自动批准后重新进入
+    /// <c>ChatClientAgent.RunStreamingAsync</c> 导致 <c>AIContextProviders</c> 在每次工具迭代都重新注入）、
+    /// <c>CompactionStrategy</c> 与末尾 <c>System</c> 模式指令时：
+    /// 1. 第 2、3 次模型请求必须包含前序全部 <c>FunctionCallContent</c> 与 <c>FunctionResultContent</c>，
+    ///    绝不能因 <c>CompactionMessageIndex.Update</c> 末尾相等短路而退化为首轮初始消息；
+    /// 2. <c>FunctionInvokingChatClient.ProcessFunctionApprovalResponses</c> 合成的重复 <c>Assistant(FunctionCallContent)</c>
+    ///    必须被去重，每个 <c>callId</c> 的 <c>FunctionCallContent</c> 仅出现一次。
+    /// </summary>
+    [Fact]
+    public async Task ToolApprovalStreamingLoop_WithCompactionAndSystemTailContextProvider_PreservesAllToolCallsAndResultsWithoutShortCircuit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var calls = 0;
+        List<IReadOnlyList<ChatMessage>> requests = [];
+        var client = Substitute.For<IChatClient>();
+        client.GetStreamingResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var snapshot = callInfo.ArgAt<IEnumerable<ChatMessage>>(0).Select(m => m.Clone()).ToList();
+                requests.Add(snapshot);
+                calls++;
+                return StreamUpdatesAsync(calls);
+            });
+
+        static async IAsyncEnumerable<ChatResponseUpdate> StreamUpdatesAsync(int callNumber)
+        {
+            await Task.Yield();
+            if (callNumber == 1)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [
+                    new FunctionCallContent("call-1", "Bash", new Dictionary<string, object?> { ["command"] = "date +%F" }),
+                ]);
+            }
+            else if (callNumber == 2)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [
+                    new FunctionCallContent("call-2", "Write", new Dictionary<string, object?> { ["path"] = "out.txt", ["content"] = "ok" }),
+                ]);
+            }
+            else
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, "created");
+            }
+        }
+
+        var bashTool = new ApprovalRequiredAIFunction(
+            AIFunctionFactory.Create((string command) => "Error: Cannot bind parameter 'Date'.", name: "Bash"));
+        var writeTool = new ApprovalRequiredAIFunction(
+            AIFunctionFactory.Create((string path, string content) => $"Wrote {content.Length} chars to {path}", name: "Write"));
+
+        var provider = new TranscriptChatHistoryProvider(CreateTranscriptReader(), SessionId.NewId());
+        var options = new HarnessAgentOptions
+        {
+            ChatHistoryProvider = provider,
+            AIContextProviders = [new TodoAndModeContextInjectingProvider()],
+            CompactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(client, 128_000, 4_096),
+            DisableToolAutoApproval = false,
+            ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+            {
+                AutoApprovalRules = [static _ => ValueTask.FromResult(true)],
+            },
+            ChatOptions = new ChatOptions
+            {
+                Instructions = "DEFAULT_PROMPT",
+                Tools = [bashTool, writeTool],
+                ToolMode = ChatToolMode.Auto,
+            },
+        };
+        OneCodeHarnessDefaults.ApplyProductOptOuts(options);
+
+        var agent = new HarnessAgent(client, options);
+        var session = await agent.CreateSessionAsync(ct);
+
+        await foreach (var _ in agent.RunStreamingAsync(FirstPrompt, session, cancellationToken: ct))
+        {
+        }
+
+        requests.Should().HaveCount(3, "两次获批工具调用后应在第三次流式模型请求完成收敛");
+        requests[0][^1].Role.Should().Be(ChatRole.User, "首轮请求末尾应为真实用户提问而非 AIContextProvider 注入的 System 消息");
+        requests[0][^1].Text.Should().Be(FirstPrompt);
+
+        var second = requests[1];
+        var secondDump = DumpRequests(second);
+        second[^1].Role.Should().Be(ChatRole.Tool,
+            $"第二次请求末尾必须是刚执行的 Tool 结果，不能被 AIContextProvider 消息垫底。\n实际序列：\n{secondDump}");
+        second.Where(m => m.Role == ChatRole.Assistant)
+            .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+            .Select(c => c.CallId)
+            .Should().Equal(["call-1"],
+                $"第二次请求必须包含且仅包含一次 call-1（审批恢复合成的重复 Assistant 消息须被去重）。\n实际序列：\n{secondDump}");
+        second.Where(m => m.Role == ChatRole.Tool)
+            .SelectMany(m => m.Contents.OfType<FunctionResultContent>())
+            .Select(r => r.CallId)
+            .Should().Equal(["call-1"],
+                $"第二次请求必须包含 call-1 的工具执行结果（绝不能被 CompactionMessageIndex 短路丢弃）。\n实际序列：\n{secondDump}");
+
+        var third = requests[2];
+        var thirdDump = DumpRequests(third);
+        third[^1].Role.Should().Be(ChatRole.Tool);
+        third.Where(m => m.Role == ChatRole.Assistant)
+            .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+            .Select(c => c.CallId)
+            .Should().Equal(["call-1", "call-2"],
+                $"第三次请求必须按序包含前两次获批工具调用且无重复。\n实际序列：\n{thirdDump}");
+        third.Where(m => m.Role == ChatRole.Tool)
+            .SelectMany(m => m.Contents.OfType<FunctionResultContent>())
+            .Select(r => r.CallId)
+            .Should().Equal(["call-1", "call-2"],
+                $"第三次请求必须按序包含前两次工具调用结果。\n实际序列：\n{thirdDump}");
+    }
+
+    /// <summary>
+    /// 跨轮无工具对话（含连续发送相同文本的用户消息）+ CompactionStrategy + AIContextProvider 守护：
+    /// 验证第 1 轮无工具调用直接回复后，第 2 轮与第 3 轮（即使第 3 轮与第 2 轮用户文本同为 "继续"）
+    /// 均不会因末尾消息 ContentEquals 短路而丢弃前序问答或当前提问。
+    /// </summary>
+    [Fact]
+    public async Task MultiTurnWithoutTools_WithCompactionAndContextProviders_PreservesAllTurnsEvenWhenUserRepeatsSameText()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var calls = 0;
+        List<IReadOnlyList<ChatMessage>> requests = [];
+        var client = Substitute.For<IChatClient>();
+        client.GetResponseAsync(
+                Arg.Any<IEnumerable<ChatMessage>>(),
+                Arg.Any<ChatOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var snapshot = callInfo.ArgAt<IEnumerable<ChatMessage>>(0).Select(m => m.Clone()).ToList();
+                requests.Add(snapshot);
+                calls++;
+                return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, $"reply-{calls}")));
+            });
+
+        var provider = new TranscriptChatHistoryProvider(CreateTranscriptReader(), SessionId.NewId());
+        var options = new HarnessAgentOptions
+        {
+            ChatHistoryProvider = provider,
+            AIContextProviders = [new TodoAndModeContextInjectingProvider()],
+            CompactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(client, 128_000, 4_096),
+            ChatOptions = new ChatOptions { Instructions = "DEFAULT_PROMPT" },
+        };
+        OneCodeHarnessDefaults.ApplyProductOptOuts(options);
+
+        var agent = new HarnessAgent(client, options);
+        var session = await agent.CreateSessionAsync(ct);
+
+        await agent.RunAsync(FirstPrompt, session, cancellationToken: ct);
+        await agent.RunAsync("继续", session, cancellationToken: ct);
+        await agent.RunAsync("继续", session, cancellationToken: ct);
+
+        requests.Should().HaveCount(3);
+
+        var turn2Request = requests[1];
+        turn2Request.Select(m => m.Text).Should().ContainInOrder(
+            "SYS", FirstPrompt, "reply-1", TodoAndModeContextInjectingProvider.TodoText, TodoAndModeContextInjectingProvider.ModeText, "继续");
+
+        var turn3Request = requests[2];
+        turn3Request.Select(m => m.Text).Should().ContainInOrder(
+            "SYS", FirstPrompt, "reply-1", "继续", "reply-2", TodoAndModeContextInjectingProvider.TodoText, TodoAndModeContextInjectingProvider.ModeText, "继续");
+        turn3Request.Count(m => m.Role == ChatRole.User && m.Text == "继续").Should().Be(2,
+            "连续两轮发送相同文本 '继续' 时，两条用户消息有独立 MessageId，不得触发 CompactionMessageIndex 末尾相等短路");
+    }
+
     private static string DumpRequests(IReadOnlyList<ChatMessage> messages)
         => string.Join("\n", messages.Select((message, index) =>
             $"  [{index}] {message.Role}: {string.Join("|", message.Contents.Select(c => c.GetType().Name))}"));

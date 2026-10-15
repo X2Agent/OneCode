@@ -71,16 +71,44 @@ public sealed class PlanExecutionContextProviderTests
         }
     }
 
-    [Fact]
-    public async Task ProvideAIContextAsync_NotInAcceptEditsMode_ReturnsEmptyContext()
+    [Theory]
+    [InlineData(PermissionMode.Plan)]
+    [InlineData(PermissionMode.GoalAuto)]
+    public async Task ProvideAIContextAsync_InPlanOrGoalMode_ReturnsEmptyContext(PermissionMode mode)
     {
-        _modeProvider.CurrentMode.Returns(PermissionMode.Plan);
+        _modeProvider.CurrentMode.Returns(mode);
 
         var result = await InvokeAsync(TestContext.Current.CancellationToken);
 
         result.Messages.Should().BeNull();
         await _workflowService.DidNotReceive().GetAsync(
             Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(PermissionMode.Default)]
+    [InlineData(PermissionMode.AcceptEdits)]
+    [InlineData(PermissionMode.BypassPermissions)]
+    [InlineData(PermissionMode.Auto)]
+    [InlineData(PermissionMode.DontAsk)]
+    public async Task ProvideAIContextAsync_InBuildCompatiblePermissionModes_InjectsApprovedPlanHandoff(PermissionMode mode)
+    {
+        _modeProvider.CurrentMode.Returns(mode);
+        _workflowService.GetAsync(_sessionId, Arg.Any<CancellationToken>())
+            .Returns(CreateWorkflow(PlanWorkflowState.Executing));
+        ToolActivationContext.CurrentConversationId = _sessionId.ToString();
+        try
+        {
+            var result = await InvokeAsync(TestContext.Current.CancellationToken);
+
+            result.Messages.Should().ContainSingle()
+                .Which.Text.Should().Contain("# Test plan",
+                    "高级权限档（BypassPermissions/Auto/DontAsk）切入受控 Build 时同样必须注入批准计划全文");
+        }
+        finally
+        {
+            ToolActivationContext.CurrentConversationId = null;
+        }
     }
 
     private async Task<AIContext> InvokeAsync(CancellationToken ct)

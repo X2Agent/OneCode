@@ -113,4 +113,51 @@ public sealed class PlanHandoffExtractorTests
         handoff.OriginalRequest.Should().BeEmpty();
         handoff.Clarifications.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Extract_AfterPriorPlanExecutionTrigger_StartsFromNewPlanUserIntent()
+    {
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, "build feature A"),
+            new(ChatRole.Assistant, [new FunctionCallContent("call-old-q", "AskUserQuestion")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-old-q", "Old Q -> Old A")]),
+            new(ChatRole.User, "Execute approved plan plan-old revision 1 now."),
+            new(ChatRole.Assistant, [new FunctionCallContent("call-exec-q", "AskUserQuestion")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-exec-q", "Exec Q -> Exec A")]),
+            new(ChatRole.Assistant, "feature A completed"),
+            new(ChatRole.User, "now build feature B"),
+            new(ChatRole.Assistant, [new FunctionCallContent("call-new-q", "AskUserQuestion")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-new-q", "New Q -> New A")]),
+        ];
+
+        var handoff = PlanHandoffExtractor.Extract(history, windowStart: 0, currentPlanId: "plan-new");
+
+        handoff.OriginalRequest.Should().Be("now build feature B",
+            "prior plan execution trigger marks the boundary of the earlier generation");
+        handoff.Clarifications.Should().Equal("Q&A: New Q -> New A");
+    }
+
+    [Fact]
+    public void Extract_SamePlanReApproval_PreservesOriginalRequestAndExcludesExecutionTurnQa()
+    {
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, "original task for plan-1"),
+            new(ChatRole.Assistant, [new FunctionCallContent("call-plan-q", "AskUserQuestion")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-plan-q", "DB? -> Postgres")]),
+            new(ChatRole.User, "Execute approved plan plan-1 revision 1 now."),
+            new(ChatRole.Assistant, [new FunctionCallContent("call-exec-q", "AskUserQuestion")]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-exec-q", "Runtime Q -> Runtime A")]),
+            new(ChatRole.User, "Also add retry logic before re-approving"),
+        ];
+
+        var handoff = PlanHandoffExtractor.Extract(history, windowStart: 0, currentPlanId: "plan-1");
+
+        handoff.OriginalRequest.Should().Be("original task for plan-1",
+            "re-approving a revised revision of the same plan must not discard its initial user request");
+        handoff.Clarifications.Should().Equal(
+            "Q&A: DB? -> Postgres",
+            "User follow-up: Also add retry logic before re-approving");
+    }
 }

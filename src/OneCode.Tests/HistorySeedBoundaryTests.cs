@@ -77,6 +77,19 @@ public sealed class HistorySeedBoundaryTests
             "a corrupted boundary must behave like a missing one instead of failing the controlled run");
     }
 
+    [Fact]
+    public void ReadValidatedForHandoff_SameExecutionRequestId_ReturnsNullSoOriginalRequestIsNotTruncated()
+    {
+        var conversation = CreateConversation();
+        HistorySeedBoundary.RecordForExecution(conversation, "req-1", messageCount: 5);
+
+        HistorySeedBoundary.ReadValidatedForHandoff(conversation, "req-1").Should().BeNull(
+            "re-approving a revised revision of the same plan must not use its own first execution boundary as windowStart");
+        HistorySeedBoundary.ReadValidatedForHandoff(conversation, "req-2").Should().Be(
+            new HistorySeedBoundary("req-1", 0, 5),
+            "a new plan workflow in the same session should advance windowStart past the previous plan's boundary");
+    }
+
     private static Conversation CreateConversation() => new()
     {
         Id = SessionId.NewId(),

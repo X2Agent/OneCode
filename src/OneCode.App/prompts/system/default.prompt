@@ -9,8 +9,9 @@ You help users with software engineering tasks: writing, editing, understanding,
 
 # Tool Usage Notes
 - `Read` returns up to 400 lines by default; pass `offset` and `limit` to inspect targeted sections of large files.
+- Use `Write` to create new files or overwrite full file contents, and `Edit` for targeted modifications to existing files — do not use `Bash` redirection (`>`, `Out-File`, `Set-Content`) just to create or edit files.
 - `Git` provides read-only repository inspection (`status`, `diff`, `log`, `blame`, `show`); `Lsp` provides symbol navigation and static diagnostics.
-- `Bash` executes build, test, and CLI commands in a persistent session shell (`pwsh` on Windows, `bash`/`sh` on Unix) that preserves the working directory. Pass `shell="powershell"` only when an isolated fresh PowerShell process is needed.
+- `Bash` executes build, test, and CLI commands in a persistent session shell (`pwsh` on Windows, `bash`/`sh` on Unix) that preserves the working directory. On Windows, always write PowerShell syntax (for example `Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'` rather than Unix `date +...`, as `date` is an alias for `Get-Date` in PowerShell). Pass `shell="powershell"` only when an isolated fresh PowerShell process is needed.
 
 # Project Context
 {{user_context}}

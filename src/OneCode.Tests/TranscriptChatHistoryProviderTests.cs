@@ -191,6 +191,30 @@ public sealed class TranscriptChatHistoryProviderTests
         result[2].Text.Should().Be("execute approved plan");
     }
 
+    [Fact]
+    public async Task InvokingAsync_WithoutSeedBoundary_WhenStripPlanExclusiveToolsTrue_StripsSubmitPlanPair()
+    {
+        var reader = CreateReader(
+        [
+            new ChatMessage(ChatRole.User, "plan-stage question after compact"),
+            new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-submit", "SubmitPlan")]),
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-submit", "Plan submitted")]),
+            new ChatMessage(ChatRole.Assistant, "ready to build"),
+        ]);
+        var provider = new TranscriptChatHistoryProvider(
+            reader, ConversationId, seedBoundary: null, stripPlanExclusiveTools: true);
+
+        var result = (await provider.InvokingAsync(CreateContext(
+            new ChatMessage(ChatRole.User, "execute approved plan")))).ToList();
+
+        result.Should().HaveCount(3,
+            "even when HistorySeedBoundary is invalidated by /compact epoch drift, non-Plan runs must strip SubmitPlan pairs");
+        result.SelectMany(m => m.Contents).OfType<FunctionCallContent>()
+            .Should().NotContain(c => c.Name == "SubmitPlan");
+        result.SelectMany(m => m.Contents).OfType<FunctionResultContent>()
+            .Should().NotContain(r => r.CallId == "call-submit");
+    }
+
     /// <summary>
     /// 流式推理模型产生的空 <see cref="TextContent"/> 块在回写与读取时必须被剔除，
     /// 保留非空文本、推理内容与工具调用，避免请求体出现连续的 <c>{"type":"text","text":""}</c>。
@@ -271,6 +295,76 @@ public sealed class TranscriptChatHistoryProviderTests
 
         var okResult = results.Single(r => r.CallId == "call-ok").Result?.ToString();
         okResult.Should().Be(longSuccess, "successful tool results must be 100% preserved without truncation");
+    }
+
+    /// <summary>
+    /// 单元契约：AIContextProvider 注入的瞬态消息必须锚定在最后一条真实 User 消息紧邻之前（确保首轮末尾是 User、
+    /// 工具迭代末尾是 Tool），且 ToolApprovalAgent 重入时由 FunctionInvokingChatClient 合成的重复 Assistant(tool_call)
+    /// 在读取与回写两侧均须去重。
+    /// </summary>
+    [Fact]
+    public async Task InvokingAsync_AnchorsTurnContextBeforeLatestUserAndDeduplicatesSynthesizedToolCallOnApprovalReentry()
+    {
+        var reader = CreateReader([new ChatMessage(ChatRole.System, "SYS")]);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId);
+        var session = await CreateSessionAsync();
+
+        var userPrompt = new ChatMessage(ChatRole.User, "create file");
+        var todoContext = new ChatMessage(ChatRole.User, "### Current todo list")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "TodoProvider");
+        var modeContext = new ChatMessage(ChatRole.System, "You are in BUILD MODE")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "ModeProvider");
+
+        // Call 1：初始请求携带 User 提问与末尾两条 AIContextProvider 消息
+        var call1Messages = (await provider.InvokingAsync(
+            CreateSessionContext(session, userPrompt, todoContext, modeContext))).ToList();
+
+        call1Messages.Select(m => m.Text).Should().Equal(
+            "SYS", "### Current todo list", "You are in BUILD MODE", "create file");
+        call1Messages[^1].Role.Should().Be(ChatRole.User, "首轮请求末尾必须是真实 User 提问");
+
+        // Call 1 结束回写：持久化 User 提问与模型返回的原始 Assistant(tool_call)
+        var originalAssistantCall = AssistantWithToolCall();
+        await provider.InvokedAsync(CreateInvoked(
+            session,
+            requestMessages: call1Messages.ToArray(),
+            responseMessages: [originalAssistantCall]));
+
+        // Call 2（ToolApprovalAgent 审批重入）：FICC 合成了一条同 CallId 的 Assistant(tool_call) + Tool 结果，
+        // 且 ChatClientAgent 重新追加了两条 AIContextProvider 消息
+        var synthesizedDuplicateAssistant = AssistantWithToolCall();
+        var toolResult = ToolResult();
+        var call2TodoContext = new ChatMessage(ChatRole.User, "### Current todo list")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "TodoProvider");
+        var call2ModeContext = new ChatMessage(ChatRole.System, "You are in BUILD MODE")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "ModeProvider");
+
+        var call2Messages = (await provider.InvokingAsync(
+            CreateSessionContext(session, synthesizedDuplicateAssistant, toolResult, call2TodoContext, call2ModeContext))).ToList();
+
+        call2Messages.Select(m => m.Role).Should().Equal(
+            ChatRole.System,
+            ChatRole.User,
+            ChatRole.System,
+            ChatRole.User,
+            ChatRole.Assistant,
+            ChatRole.Tool);
+        call2Messages[^1].Role.Should().Be(ChatRole.Tool, "审批重入后的工具迭代末尾必须是最新 Tool 结果");
+        call2Messages.Count(m => m.Role == ChatRole.Assistant).Should().Be(1,
+            "FICC 在审批恢复时合成的同 CallId Assistant(tool_call) 必须被去重");
+
+        // Call 2 结束回写后，再次调用也不应累积重复的 Assistant(tool_call)
+        await provider.InvokedAsync(CreateInvoked(
+            session,
+            requestMessages: [synthesizedDuplicateAssistant, toolResult, call2TodoContext, call2ModeContext],
+            responseMessages: [new ChatMessage(ChatRole.Assistant, "final answer")]));
+
+        var nextTurnMessages = (await provider.InvokingAsync(
+            CreateSessionContext(session, new ChatMessage(ChatRole.User, "follow up")))).ToList();
+        nextTurnMessages.Where(m => m.Role == ChatRole.Assistant)
+            .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+            .Select(c => c.CallId)
+            .Should().Equal(["call-1"], "回写侧同样必须过滤重复合成的 Assistant(tool_call)");
     }
 
     private static ISessionChatHistoryReader CreateReader(IReadOnlyList<ChatMessage> history)

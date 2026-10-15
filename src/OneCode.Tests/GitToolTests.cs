@@ -132,6 +132,19 @@ public sealed class GitToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PathTraversalOutsideWorkingDirectory_IsRejected()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var result = await CreateSut().ExecuteAsync("diff", path: "../../outside/secret.txt", ct: ct);
+
+        result.IsError.Should().BeTrue("relative path traversal escaping the workspace must be blocked");
+        result.Content.Should().Contain("outside");
+        await _processRunner.DidNotReceiveWithAnyArgs().ExecuteWithTimeoutAsync(
+            Arg.Any<string>(), Arg.Any<string[]>(), Arg.Any<string?>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RunsInSessionWorkingDirectory_NotStartupCwd()
     {
         var ct = TestContext.Current.CancellationToken;

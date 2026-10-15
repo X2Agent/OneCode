@@ -76,4 +76,18 @@ public sealed class WorkingModeTests
         statusBar.IsBusy.Should().BeTrue();
         statusBar.CurrentActivity.Should().Be("执行 /review");
     }
+
+    [Fact]
+    public void TryParseMode_ParsesStringAndJsonElementAndRejectsUnknown()
+    {
+        WorkingModeController.TryParseMode("plan", out var fromString).Should().BeTrue();
+        fromString.Should().Be(WorkingMode.Plan);
+
+        using var doc = System.Text.Json.JsonDocument.Parse("\"goal\"");
+        WorkingModeController.TryParseMode(doc.RootElement, out var fromJson).Should().BeTrue();
+        fromJson.Should().Be(WorkingMode.Goal);
+
+        WorkingModeController.TryParseMode("unknown-mode", out _).Should().BeFalse();
+        WorkingModeController.TryParseMode(null, out _).Should().BeFalse();
+    }
 }

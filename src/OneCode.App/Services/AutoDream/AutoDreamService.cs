@@ -19,9 +19,9 @@ namespace OneCode.App.Services.AutoDream;
 /// <remarks>
 /// <para>
 /// 当一次 <c>BUILD</c> 任务正常完成且未回滚（或用户执行 <c>/memory autodream trigger</c>）时，
-/// 先在 C# 层进行零 Token 增量快检（自 <c>last_consolidated_at</c> 以来是否有新增 working-memory 笔记
-/// 或当前内存会话的新对话轮次）；存在增量时在后台启动单轮无工具整合 Agent，基于当前对话与当前 <c>MEMORY.md</c>
-/// 将持久事实、约定、排错教训与用户纠正合并写入 <c>MEMORY.md</c>。
+/// 先在 C# 层进行零 Token 候选快检（当前内存会话是否存在有效对话轮次，或存在 working-memory 笔记）；
+/// 存在候选时在后台启动单轮无工具整合 Agent，基于当前对话与已挂载的 <c>MEMORY.md</c>
+/// 将持久事实、约定、排错教训与用户纠正幂等合并写入 <c>MEMORY.md</c>。
 /// </para>
 /// <para>不写入 AGENTS.md——那是人工维护的规范，自动改写会污染它。</para>
 /// </remarks>
@@ -159,17 +159,15 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
             return false;
         }
 
-        var lastConsolidatedAt = GetLastConsolidatedAt();
         var projectRoot = GetCurrentProjectRoot();
-        var hasConversationDelta = _promptBuilder.HasCurrentConversationDelta(lastConsolidatedAt);
-        var hasWorkingMemoryDelta = !string.IsNullOrWhiteSpace(projectRoot)
-            && _workingMemoryScanner.Collect(projectRoot, lastConsolidatedAt, maxArtefacts: 1, ct).Count > 0;
+        var hasConversationTurns = _promptBuilder.HasCurrentConversationTurns();
+        var hasWorkingMemoryArtefacts = !string.IsNullOrWhiteSpace(projectRoot)
+            && _workingMemoryScanner.Collect(projectRoot, maxArtefacts: 1, ct).Count > 0;
 
-        if (!force && !hasConversationDelta && !hasWorkingMemoryDelta)
+        if (!force && !hasConversationTurns && !hasWorkingMemoryArtefacts)
         {
             _logger.LogDebug(
-                "AutoDream incremental gate: no new current-conversation turns or working-memory artefacts since {Last}",
-                lastConsolidatedAt);
+                "AutoDream candidate gate: no active current-conversation turns or working-memory artefacts");
             return false;
         }
 
@@ -185,13 +183,10 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
         try
         {
             _logger.LogInformation(
-                "Starting AutoDream consolidation: conversationDelta={HasConversationDelta}, workingMemoryDelta={HasWorkingMemoryDelta}, force={Force}",
-                hasConversationDelta, hasWorkingMemoryDelta, force);
+                "Starting AutoDream consolidation: conversationTurns={HasConversationTurns}, workingMemory={HasWorkingMemoryArtefacts}, force={Force}",
+                hasConversationTurns, hasWorkingMemoryArtefacts, force);
 
-            var prompt = await _promptBuilder.BuildConsolidationPromptAsync(
-                    lastConsolidatedAt,
-                    includeAllTurns: force,
-                    ct)
+            var prompt = await _promptBuilder.BuildConsolidationPromptAsync(ct)
                 .ConfigureAwait(false);
             var (succeeded, inputTokens, outputTokens, entriesWritten) = await RunConsolidationAgentAsync(prompt, ct)
                 .ConfigureAwait(false);
@@ -199,13 +194,10 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
             if (!succeeded)
             {
                 _logger.LogWarning(
-                    "AutoDream output parsing failed ({Input}+{Output} tokens); lastConsolidatedAt not updated, will retry on next task completion",
+                    "AutoDream output parsing or application failed ({Input}+{Output} tokens)",
                     inputTokens, outputTokens);
                 return false;
             }
-
-            // 仅当 Agent 输出合法 JSON 数组（含 []）且应用成功后才更新时间戳
-            SetLastConsolidatedAt(DateTimeOffset.UtcNow);
 
             _logger.LogInformation(
                 "AutoDream completed: {Input}+{Output} tokens, {Entries} memory entries written",
@@ -219,7 +211,7 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "AutoDream failed; lastConsolidatedAt not updated, will retry on next task completion");
+            _logger.LogError(ex, "AutoDream failed");
             return false;
         }
         finally
@@ -323,25 +315,19 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
             ? string.Equals(v, "true", StringComparison.OrdinalIgnoreCase)
             : defaultValue;
 
-    // 状态持久化
+    // 候选检测与路径工具
 
-    internal DateTimeOffset GetLastConsolidatedAt() => _stateStore.GetLastConsolidatedAt();
+    internal IReadOnlyList<string> CollectCurrentConversationTurns() =>
+        _promptBuilder.CollectCurrentConversationTurns();
 
-    internal void SetLastConsolidatedAt(DateTimeOffset time) => _stateStore.SetLastConsolidatedAt(time);
-
-    internal IReadOnlyList<string> CollectCurrentConversationTurnsSince(DateTimeOffset since, bool includeAllTurns = false) =>
-        _promptBuilder.CollectCurrentConversationTurns(since, includeAllTurns);
-
-    internal bool HasCurrentConversationDeltaSince(DateTimeOffset since) =>
-        _promptBuilder.HasCurrentConversationDelta(since);
-
-    // 路径工具
+    internal bool HasCurrentConversationTurns() =>
+        _promptBuilder.HasCurrentConversationTurns();
 
     private string GetConfigDir() => _globalConfigDir;
 
     /// <summary>
     /// AutoDream 运行时状态文件目录 <c>{cwd}/.onecode/memory/</c>——
-    /// 存放 <c>autodream.lock</c> 与 <c>last_consolidated_at</c>，与 <c>MEMORY.md</c> 同目录。
+    /// 存放跨进程锁 <c>autodream.lock</c>，与 <c>MEMORY.md</c> 同目录。
     /// workingDirectory 为空时回退到全局目录（防御性降级）。
     /// </summary>
     internal string GetProjectStateDir()

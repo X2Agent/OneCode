@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
+using OneCode.Infrastructure.Middleware;
 
 namespace OneCode.App.Query;
 
@@ -85,5 +86,52 @@ internal static class QueryStreamHelpers
         }
 
         return new ChatMessage(ChatRole.User, contents);
+    }
+
+    public static string PromptTooLongHint(Exception runException) =>
+        PromptTooLongDetector.IsPromptTooLong(runException)
+            ? " —— 上下文超出模型窗口，请执行 /compact 压缩会话历史后重试。"
+            : string.Empty;
+
+    public static MainAgentRunOptions BuildAgentRunOptions(
+        QueryStreamRequest request,
+        ToolAssembler toolAssembler)
+        => new()
+        {
+            ModelId = request.ModelId,
+            SystemPrompt = request.SystemPrompt,
+            HarnessInstructions = request.HarnessInstructions,
+            UserPrompt = request.UserPrompt,
+            UserMessage = request.IsMultimodal ? request.LastUserMessage : null,
+            Messages = request.RunInputMessages,
+            WorkingDirectory = request.WorkingDirectory,
+            MaxTurns = toolAssembler.ResolveMaxTurns(),
+            EnableThinking = request.ThinkingBudget > 0,
+            ThinkingBudgetTokens = request.ThinkingBudget ?? 0,
+            Tools = request.LocalTools.Cast<AITool>().ToList(),
+            ToolCapabilities = request.ToolCapabilities,
+            WorkingMode = request.WorkingMode,
+            FileChangeCallback = request.FileChangeCallback,
+            ConversationId = request.ConversationId,
+            AgentRunId = request.AgentRunId,
+            MaxBudgetTokens = toolAssembler.ResolveMaxBudgetTokens(),
+            HistorySeedBoundary = request.HistorySeedBoundary,
+            SeedTodoTasks = request.PrescribedBuildPlan?.Tasks,
+        };
+
+    public static CacheSafeParams CreateCacheSafeParams(
+        QueryStreamRequest request,
+        IReadOnlyList<AIFunction> localTools)
+    {
+        var toolList = localTools.Cast<AITool>().ToList();
+        return new CacheSafeParams
+        {
+            SystemPrompt = request.SystemPrompt,
+            ModelId = request.ModelId,
+            ThinkingBudget = request.ThinkingBudget,
+            Tools = toolList.Count > 0 ? toolList : null,
+            ToolCapabilities = request.ToolCapabilities,
+            Metadata = new Dictionary<string, object?> { ["turn"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
+        };
     }
 }

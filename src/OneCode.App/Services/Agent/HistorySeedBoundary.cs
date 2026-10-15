@@ -54,6 +54,26 @@ public sealed record HistorySeedBoundary(
             : null;
     }
 
+    /// <summary>
+    /// 读取供审批交接（<c>PlanHandoffExtractor</c>）定位规划窗口起点的边界：
+    /// 若边界属于当前工作流自身的上一轮执行世代（同计划修订再审），返回 null 以免截断本计划的原始诉求。
+    /// </summary>
+    public static HistorySeedBoundary? ReadValidatedForHandoff(
+        Conversation conversation,
+        string? currentExecutionRequestId)
+    {
+        if (ReadValidated(conversation) is not { } boundary)
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(currentExecutionRequestId)
+            && string.Equals(boundary.ExecutionRequestId, currentExecutionRequestId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return boundary;
+    }
+
     private static HistorySeedBoundary? TryRead(Conversation conversation)
     {
         if (!conversation.Metadata.TryGetValue(MetadataKey, out var raw))

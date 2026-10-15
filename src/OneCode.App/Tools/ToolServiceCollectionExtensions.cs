@@ -40,7 +40,7 @@ public static class ToolServiceCollectionExtensions
         services.AddSingleton<IToolCapabilityResolver, ToolCapabilityResolver>();
 
         services.AddSingleton<IShellExecutor, OneCodeShellExecutor>();
-        services.AddToolInstance("Bash", (BashTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Bash"), ToolRisk.Dynamic,
+        services.AddToolInstance("Bash", (BashTool tool) => AIFunctionFactory.Create(tool.ExecuteAsync, name: "Bash", description: BashTool.BuildDescription()), ToolRisk.Dynamic,
             aliases: ["shell", "sh", "ps"], concurrency: false,
             searchHint: "execute a shell command (bash or PowerShell via shell parameter)");
         // Read-only git inspection — the only git surface reachable in Plan mode (Bash is excluded there).

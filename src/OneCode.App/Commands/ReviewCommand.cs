@@ -2,12 +2,7 @@ using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
-
 using OneCode.Core.Prompt;
-using OneCode.Infrastructure.Git;
-using System.Text;
-
-using OneCode.Core.Lsp;
 
 namespace OneCode.App.Commands;
 
@@ -210,11 +205,7 @@ public sealed class ReviewCommand(
         if (string.IsNullOrWhiteSpace(diff))
             return CommandResult.Text($"No changes to review ({scopeDescription}).");
 
-        var changedFiles = ParseChangedFilesFromDiff(diff);
-        // blame 只依赖 diff，与下方 git 查询并行启动
-        var blameTask = includeBlame
-            ? TryGatherBlameContextAsync(diff, gitHelper, ct)
-            : Task.FromResult<string?>(null);
+        var changedFiles = ReviewContextHelper.ParseChangedFilesFromDiff(diff);
 
         // Gather context in parallel：独立的 git 查询一批并发
         var branchTask = gitHelper.ReadAsync(["branch", "--show-current"], ct);
@@ -229,6 +220,14 @@ public sealed class ReviewCommand(
             .Where(h => h.Length > 0)
             .ToList() ?? [];
         var repoRoot = (await repoRootTask)?.Trim();
+        var blameTask = includeBlame
+            ? ReviewContextHelper.TryGatherBlameContextAsync(
+                diff,
+                string.IsNullOrWhiteSpace(repoRoot) ? Environment.CurrentDirectory : repoRoot,
+                gitHelper,
+                logger,
+                ct)
+            : Task.FromResult<string?>(null);
 
         // Incremental review: skip already-reviewed commits
         var reviewCache = reviewCacheService.Load(baseRef);
@@ -250,13 +249,14 @@ public sealed class ReviewCommand(
         }
 
         // Try to read AGENTS.md for project-specific review rules（沿变更文件祖先目录分层收集）
-        var agentRules = await TryReadAgentsMdAsync(repoRoot, changedFiles, ct).ConfigureAwait(false);
+        var agentRules = await ReviewContextHelper.TryReadAgentsMdAsync(
+            repoRoot, changedFiles, MaxAgentsMdFiles, MaxAgentsMdChars, logger, ct).ConfigureAwait(false);
 
         // Optionally gather git blame for changed files（与上方 git 查询并行的任务在此收口）
         var blameContext = await blameTask.ConfigureAwait(false);
 
         // Gather LSP diagnostics for changed files (provides static analysis backing)
-        string? lspContext = TryGatherLspDiagnostics(changedFiles, repoRoot);
+        string? lspContext = ReviewContextHelper.TryGatherLspDiagnostics(lspRegistry, changedFiles, repoRoot, logger);
 
         var severityScope = severity switch
         {
@@ -453,249 +453,10 @@ public sealed class ReviewCommand(
         return tasks;
     }
 
-    /// <summary>
-    /// Parse changed files from the diff and fetch git blame --porcelain for each.
-    /// Truncates to 50 blame entries per file to keep the prompt manageable.
-    /// Files are fetched concurrently (capped at 5) and assembled in diff order.
-    /// </summary>
-    private async Task<string?> TryGatherBlameContextAsync(
-        string diff, IGitHelper gitHelper, CancellationToken ct)
-    {
-        try
-        {
-            var changedFiles = ParseChangedFilesFromDiff(diff);
-            if (changedFiles.Count == 0) return null;
+    internal static string CapDiffForPrompt(string diff) =>
+        ReviewContextHelper.CapDiffForPrompt(diff, MaxDiffPromptChars);
 
-            // Cap at 5 files to avoid bloating the prompt
-            var blameResults = await Task.WhenAll(changedFiles.Take(5)
-                .Where(File.Exists)
-                .Select(async file => (File: file, Result: await gitHelper.RunAsync(
-                    ["blame", "--porcelain", file], ct).ConfigureAwait(false))))
-                .ConfigureAwait(false);
-
-            var sb = new StringBuilder();
-            foreach (var (file, result) in blameResults)
-            {
-                if (result is null || string.IsNullOrWhiteSpace(result.Stdout)) continue;
-
-                var entries = GitBlameParser.Parse(result.Stdout, file);
-                sb.AppendLine(CultureInfo.InvariantCulture, $"### {file}");
-                foreach (var entry in entries.Take(50))
-                {
-                    sb.AppendLine(
-                        CultureInfo.InvariantCulture,
-                        $"  L{entry.LineNumber} [{entry.CommitHash[..8]}] {entry.AuthorName} — {entry.Content}");
-                }
-                sb.AppendLine();
-            }
-
-            return sb.Length > 0 ? sb.ToString().TrimEnd() : null;
-        }
-        catch (Exception ex)
-        {
-            if (logger is not null)
-                logger.LogWarning(ex, "ReviewCommand.BuildGitBlameContext failed");
-            else
-                System.Diagnostics.Debug.WriteLine($"ReviewCommand.BuildGitBlameContext failed: {ex.Message}");
-            return null;
-        }
-    }
-
-    private static IReadOnlyList<string> ParseChangedFilesFromDiff(string diff)
-    {
-        List<string> files = [];
-        foreach (var line in diff.Split('\n'))
-        {
-            // diff --git a/foo.cs b/foo.cs
-            if (!line.StartsWith("+++ b/", StringComparison.Ordinal)) continue;
-            var path = line["+++ b/".Length..].Trim();
-            if (!string.IsNullOrWhiteSpace(path) && path != "/dev/null")
-                files.Add(path);
-        }
-        return files;
-    }
-
-    /// <summary>
-    /// 沿变更文件的祖先目录分层收集 AGENTS.md（仓库根 + 变更文件最近的上层目录），
-    /// 让 src/AGENTS.md 这类子目录规范真正进入审查依据。每份截断到
-    /// <see cref="MaxAgentsMdChars"/>，最多取 <see cref="MaxAgentsMdFiles"/> 份（浅层在前）。
-    /// </summary>
-    private async Task<string?> TryReadAgentsMdAsync(
-        string? repoRoot, IReadOnlyList<string> changedFiles, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(repoRoot) || changedFiles.Count == 0) return null;
-        try
-        {
-            var rootPath = Path.GetFullPath(repoRoot);
-            var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var file in changedFiles)
-            {
-                var dir = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(rootPath, file)));
-                while (dir is not null
-                    && dir.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)
-                    && dirs.Add(dir))
-                {
-                    dir = Path.GetDirectoryName(dir);
-                }
-            }
-
-            // 取最深 N 个目录（最贴近变更的规则优先入选），按浅→深输出（通用 → 具体）
-            var selected = dirs
-                .OrderByDescending(d => d.Length)
-                .Take(MaxAgentsMdFiles)
-                .OrderBy(d => d.Length);
-
-            var sections = new List<string>();
-            foreach (var dir in selected)
-            {
-                var path = Path.Combine(dir, "AGENTS.md");
-                if (!File.Exists(path)) continue;
-                var content = (await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)).Trim();
-                if (content.Length == 0) continue;
-                if (content.Length > MaxAgentsMdChars)
-                    content = content[..MaxAgentsMdChars] + "\n…(truncated)";
-                var relative = Path.GetRelativePath(rootPath, path).Replace('\\', '/');
-                sections.Add($"### {relative}\n{content}");
-            }
-
-            return sections.Count > 0 ? string.Join("\n\n", sections) : null;
-        }
-        catch (Exception ex)
-        {
-            if (logger is not null)
-                logger.LogWarning(ex, "ReviewCommand.LoadReviewContext failed for {RepoRoot}", repoRoot);
-            else
-                System.Diagnostics.Debug.WriteLine($"ReviewCommand.LoadReviewContext failed: {ex.Message}");
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Query LspDiagnosticRegistry for diagnostics on changed files.
-    /// Only returns Error/Warning severity — skips Information/Hint to avoid noise.
-    /// Capped at 200 diagnostics max to avoid prompt bloat.
-    /// Matching is exact on normalized absolute paths (diagnostic FilePath comes from
-    /// file:// URIs), replacing the old bidirectional-EndsWith heuristic that could
-    /// cross-match files sharing a basename.
-    /// </summary>
-    private string? TryGatherLspDiagnostics(IReadOnlyList<string> changedFiles, string? repoRoot)
-    {
-        try
-        {
-            if (changedFiles.Count == 0) return null;
-
-            var allDiagnostics = lspRegistry.GetAllDiagnostics();
-            if (allDiagnostics.Count == 0) return null;
-
-            var changedSet = changedFiles
-                .Select(cf => repoRoot is null ? cf : Path.Combine(repoRoot, cf))
-                .Select(NormalizePath)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            // Match diagnostics to changed files, filter to Error/Warning only
-            var relevant = allDiagnostics
-                .Where(d => d.Severity is LspDiagnosticSeverity.Error or LspDiagnosticSeverity.Warning)
-                .Where(d => changedSet.Contains(NormalizePath(d.FilePath)))
-                .Take(200)
-                .ToList();
-
-            if (relevant.Count == 0) return null;
-
-            var sb = new StringBuilder();
-            sb.AppendLine(CultureInfo.InvariantCulture, $"Existing static analysis issues for changed files ({relevant.Count} Error/Warning):");
-            sb.AppendLine();
-
-            var grouped = relevant.GroupBy(d => d.FilePath);
-            foreach (var group in grouped)
-            {
-                var fileName = Path.GetFileName(group.Key);
-                sb.AppendLine(CultureInfo.InvariantCulture, $"### {fileName}");
-                foreach (var d in group.Take(20)) // max 20 per file
-                {
-                    var severity = d.Severity == LspDiagnosticSeverity.Error ? "ERROR" : "WARNING";
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"  [{severity}] {d.Source ?? d.ServerName}: {d.Message}");
-                }
-                sb.AppendLine();
-            }
-
-            return sb.ToString().TrimEnd();
-        }
-        catch (Exception ex)
-        {
-            if (logger is not null)
-                logger.LogWarning(ex, "ReviewCommand: LSP diagnostics aggregation failed");
-            else
-                System.Diagnostics.Debug.WriteLine($"ReviewCommand LSP diagnostics aggregation failed: {ex.Message}");
-            return null; // Non-critical; skip
-        }
-    }
-
-    private static string NormalizePath(string path) =>
-        Path.GetFullPath(path).Replace('\\', '/');
-
-    /// <summary>
-    /// 按整文件截断注入 prompt 的 diff：预算内能装下多少整文件就装多少；
-    /// 单文件即超限时截头保留第一个文件；尾部附省略文件清单与缩小范围提示。
-    /// 预算内返回原文。
-    /// </summary>
-    internal static string CapDiffForPrompt(string diff)
-    {
-        if (diff.Length <= MaxDiffPromptChars) return diff;
-
-        var files = SplitDiffByFile(diff);
-        var builder = new StringBuilder();
-        var budget = MaxDiffPromptChars;
-        var included = 0;
-        foreach (var (_, chunk) in files)
-        {
-            if (chunk.Length > budget) break;
-            builder.Append(chunk);
-            budget -= chunk.Length;
-            included++;
-        }
-
-        if (included == 0 && files.Count > 0)
-        {
-            // 单文件即超限：保留其截断头部，保证评审仍有实质内容
-            builder.Append(files[0].Chunk.AsSpan(0, Math.Min(files[0].Chunk.Length, MaxDiffPromptChars)));
-            included = 1;
-        }
-
-        builder.AppendLine();
-        builder.AppendLine(CultureInfo.InvariantCulture,
-            $"[diff truncated: showing {included} of {files.Count} changed files]");
-        var omitted = files.Skip(included).Select(f => f.FileName).ToList();
-        foreach (var name in omitted.Take(20))
-            builder.AppendLine(CultureInfo.InvariantCulture, $"  - {name}");
-        if (omitted.Count > 20)
-            builder.AppendLine(CultureInfo.InvariantCulture, $"  - … ({omitted.Count - 20} more omitted)");
-        builder.AppendLine("[Narrow the scope: /review --staged | --base <ref> | <file-path>]");
-        return builder.ToString();
-    }
-
-    /// <summary>以 "diff --git " 行为界把 diff 切成 (文件名, 块) 序列。</summary>
-    internal static IReadOnlyList<(string FileName, string Chunk)> SplitDiffByFile(string diff)
-    {
-        var chunks = new List<(string FileName, string Chunk)>();
-        var start = diff.IndexOf("diff --git ", StringComparison.Ordinal);
-        while (start >= 0)
-        {
-            var next = diff.IndexOf("diff --git ", start + 1, StringComparison.Ordinal);
-            var chunk = next < 0 ? diff[start..] : diff[start..next];
-            chunks.Add((ExtractDiffFileName(chunk), chunk));
-            start = next;
-        }
-        return chunks;
-    }
-
-    /// <summary>从 "diff --git a/X b/Y" 头行取 Y（兼容含空格路径）。</summary>
-    private static string ExtractDiffFileName(string chunk)
-    {
-        const string marker = " b/";
-        var firstLineEnd = chunk.IndexOf('\n');
-        var firstLine = firstLineEnd < 0 ? chunk : chunk[..firstLineEnd];
-        var idx = firstLine.IndexOf(marker, StringComparison.Ordinal);
-        return idx < 0 ? firstLine : firstLine[(idx + marker.Length)..].Trim();
-    }
+    internal static IReadOnlyList<(string FileName, string Chunk)> SplitDiffByFile(string diff) =>
+        ReviewContextHelper.SplitDiffByFile(diff);
 }
 

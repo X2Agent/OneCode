@@ -3,12 +3,10 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
-using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
-using OneCode.Infrastructure.Middleware;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -27,14 +25,10 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 {
     private readonly ILogger _logger;
     private readonly IMainAgentRunner _mainAgentRunner;
-    private readonly IToolCatalog _toolCatalog;
-    private readonly IHookExecutionService _hookExecutionService;
     private readonly ISessionManager _sessionManager;
     private readonly ITokenUsageTracker _tokenUsageTracker;
     private readonly ITokenBreakdownEstimator _tokenBreakdownEstimator;
     private readonly IConfigManager _configManager;
-    private readonly INotifierService _notifierService;
-    private readonly ISessionToolSetManager _sessionToolSetManager;
     private readonly IToolCapabilityResolver _toolCapabilityResolver;
     private readonly BuildRunGate _buildRunGate;
     private readonly TranscriptPersistence _transcriptPersistence;
@@ -75,10 +69,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     {
         _logger = logger;
         _mainAgentRunner = mainAgentRunner;
-        _toolCatalog = toolCatalog;
-        _hookExecutionService = hookExecutionService;
         _sessionManager = session.SessionManager;
-        _sessionToolSetManager = session.SessionToolSetManager;
         _toolCapabilityResolver = session.ToolCapabilityResolver;
         _configManager = session.ConfigManager;
         _buildRunGate = new BuildRunGate(
@@ -94,12 +85,11 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             loggerFactory);
         _tokenUsageTracker = observability.TokenUsageTracker;
         _tokenBreakdownEstimator = observability.TokenBreakdownEstimator;
-        _notifierService = observability.NotifierService;
         _transcriptPersistence = new TranscriptPersistence(session.SessionManager, logger);
         _toolAssembler = new ToolAssembler(
-            _toolCatalog, _configManager, _sessionToolSetManager, _toolCapabilityResolver, _logger);
+            toolCatalog, _configManager, session.SessionToolSetManager, _toolCapabilityResolver, _logger);
         _buildPreambleRunner = new BuildPreambleRunner(_buildRunGate, _toolAssembler);
-        _hookDispatcher = new HookDispatcher(_hookExecutionService, _configManager, _notifierService);
+        _hookDispatcher = new HookDispatcher(hookExecutionService, _configManager, observability.NotifierService);
         _hyperlightRuntimeProbe = session.HyperlightRuntimeProbe;
         _autoDreamService = observability.AutoDreamService;
     }
@@ -325,7 +315,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         var aggregatedText = new System.Text.StringBuilder();
         var aggregatedTurns = 0;
         TokenUsage? aggregatedUsage = null;
-        StreamingSession session = null!;
+        StreamingSession? session = null;
         var outcome = new TerminalOutcomeState { Reason = RunTerminalReason.Completed };
         // 逐批落盘进度：已持久化的封口批次数（run 收尾的 TranscriptPersistence 只补增量）。
         var persistedBatchCount = 0;
@@ -380,7 +370,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             {
                 foreach (var e in session.Digest(evt))
                     yield return e;
-                persistedBatchCount = await PersistSealedBatchesAsync(
+                persistedBatchCount = await _transcriptPersistence.PersistSealedBatchesAsync(
                     request, session, persistedBatchCount, ct).ConfigureAwait(false);
             }
             foreach (var e in session.FlushTrailingText())
@@ -435,11 +425,10 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         }
         finally
         {
-            // 兜底收口：run 已启动但以未收口路径离场（try 内非取消异常、取消与
-            // AwaitRunAsync 的 OCE 竞态）时补做收口，防止已提交的计划滞留
-            // FinalizingPlanRun 失去审批入口。对已收口/非 Plan 工作流为幂等 no-op；
-            // 用 None 而非 ct——取消时的批次落盘与取消写必须完成。
-            if (!planRunClosed && runTask is not null)
+            // 兜底收口：只要未走完正常收口路径（含 StartRun 前取消或同步异常、try 内非取消异常、
+            // 取消与 AwaitRunAsync 的 OCE 竞态），都补做收口，防止工作流滞留。
+            // 对已收口/非 Plan 工作流为幂等 no-op；用 None 而非 ct——取消时的批次落盘与取消写必须完成。
+            if (!planRunClosed)
             {
                 await CloseOutPlanRunAsync(
                     request,
@@ -458,75 +447,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         }
     }
 
-    /// <summary>
-    /// 把新封口的工具批次立即持久化（逐批落盘）：长 run 中途被杀只丢尚未封口的当前批次，
-    /// 而不是整个 run 的工具历史。appender 按 batchId 幂等去重，与 run 收尾的整批投递不冲突。
-    /// 持久化失败不中断 run：收尾的 <see cref="TranscriptPersistence"/> 会重试剩余批次。
-    /// </summary>
-    /// <returns>更新后的已持久化批次数。</returns>
-    private async Task<int> PersistSealedBatchesAsync(
-        QueryStreamRequest request,
-        StreamingSession session,
-        int persistedBatchCount,
-        CancellationToken ct)
-    {
-        var batches = session.ToolBatchCollector.CompletedBatches;
-        if (request.ConversationId is not { } conversationId
-            || ct.IsCancellationRequested
-            || batches.Count <= persistedBatchCount)
-            return persistedBatchCount;
-
-        try
-        {
-            await _sessionManager.AppendCompletedToolBatchesAsync(
-                    conversationId,
-                    batches.Skip(persistedBatchCount).ToList(),
-                    ct)
-                .ConfigureAwait(false);
-            return batches.Count;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to persist sealed tool batches for run {RunId}", request.AgentRunId);
-            return persistedBatchCount;
-        }
-    }
-
-    private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)    {
-        return new MainAgentRunOptions
-        {
-            ModelId = request.ModelId,
-            SystemPrompt = request.SystemPrompt,
-            // Harness fragment travels as its own MAF input: HarnessAgent composes it ahead of
-            // SystemPrompt. Null here means MAF's default instructions, which is intentional for
-            // paths without the product fragment (AutoDream); an empty string would suppress them.
-            HarnessInstructions = request.HarnessInstructions,
-            UserPrompt = request.UserPrompt,
-            UserMessage = request.IsMultimodal ? request.LastUserMessage : null,
-            Messages = request.RunInputMessages,
-            WorkingDirectory = request.WorkingDirectory,
-            // 优先从 IConfigManager.Current.Effective.MaxTurns 动态读取（支持运行时 /config 修改），
-            // 回退到构造函数参数。
-            MaxTurns = _toolAssembler.ResolveMaxTurns(),
-            EnableThinking = request.ThinkingBudget > 0,
-            ThinkingBudgetTokens = request.ThinkingBudget ?? 0,
-            Tools = request.LocalTools.Cast<AITool>().ToList(),
-            // 与 UpdateCacheSafeParams 同源：显式读请求参数而非 ambient。
-            ToolCapabilities = request.ToolCapabilities,
-            WorkingMode = request.WorkingMode,
-            FileChangeCallback = request.FileChangeCallback,
-            ConversationId = request.ConversationId,
-            AgentRunId = request.AgentRunId,
-            // 从 IConfigManager.Current.Effective.MaxBudgetTokens 动态读取（支持运行时 /config 修改）。
-            MaxBudgetTokens = _toolAssembler.ResolveMaxBudgetTokens(),
-            HistorySeedBoundary = request.HistorySeedBoundary,
-            SeedTodoTasks = request.PrescribedBuildPlan?.Tasks,
-        };
-    }
+    private MainAgentRunOptions BuildAgentRunOptions(QueryStreamRequest request)
+        => QueryStreamHelpers.BuildAgentRunOptions(request, _toolAssembler);
 
     private Task<MainAgentRunResult> StartRun(
         BuildRun? buildRun,
@@ -540,7 +462,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 
     private Task CloseOutPlanRunAsync(
         QueryStreamRequest request,
-        StreamingSession session,
+        StreamingSession? session,
         PlanRunEnd end,
         CancellationToken ct)
         => _buildRunGate.CloseOutPlanRunAsync(
@@ -548,7 +470,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             request.AgentRunId,
             request.WorkingMode,
             end,
-            session.ToolBatchCollector,
+            session?.ToolBatchCollector,
             ct);
 
     /// <summary>Catch non-cancellation failures so the failure notification fires; cancellation propagates.</summary>
@@ -580,14 +502,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         await _hookDispatcher.NotifyAsync("OneCode 任务执行失败", runException.Message, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 上下文超限时附加可操作提示（/compact）。检测经
-    /// <see cref="PromptTooLongDetector"/>：覆盖 HTTP 413 与 provider 关键词。
-    /// </summary>
     private static string PromptTooLongHint(Exception runException) =>
-        PromptTooLongDetector.IsPromptTooLong(runException)
-            ? " —— 上下文超出模型窗口，请执行 /compact 压缩会话历史后重试。"
-            : string.Empty;
+        QueryStreamHelpers.PromptTooLongHint(runException);
 
     /// <summary>
     /// 终结段：Plan run 收尾 → 完成通知 → token 记账 → durable BuildRun 回读 →
@@ -675,26 +591,6 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             yield return new BuildRunCompletedEvent(BuildRunGate.CreateBuildRunResult(reloaded, finalText));
     }
 
-    private void UpdateCacheSafeParams(QueryStreamRequest request, IReadOnlyList<AIFunction> localTools)
-    {
-        // 使用 localTools 的冻结快照——子代理通过 CacheSafeParams.Tools 获取工具列表，
-        // 必须是独立副本而非共享可变引用（SessionToolSet 在后续轮次可能继续追加工具）。
-        var toolList = localTools.Cast<AITool>().ToList();
-
-        LastCacheSafeParams = new CacheSafeParams
-        {
-            SystemPrompt = request.SystemPrompt,
-            // HarnessInstructions is deliberately absent: the fragment is injected by MAF at agent
-            // build time for every agent, so a forked child that reuses the parent's product fragment
-            // (ForkedAgentRunner reads it directly) must not also receive it here.
-            ModelId = request.ModelId,
-            ThinkingBudget = request.ThinkingBudget,
-            Tools = toolList.Count > 0 ? toolList : null,
-            // 显式读请求参数而非 ambient：FinalizeAsync 在 StreamCoreAsync 的 finally 复位
-            // ambient 之后执行，届时 CurrentCapabilities 已恢复为外层值（通常 null），
-            // fork 的 ParentCapabilities ∩ snapshot 交集会被静默跳过。
-            ToolCapabilities = request.ToolCapabilities,
-            Metadata = new Dictionary<string, object?> { ["turn"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() }
-        };
-    }
+    private void UpdateCacheSafeParams(QueryStreamRequest request, IReadOnlyList<AIFunction> localTools) =>
+        LastCacheSafeParams = QueryStreamHelpers.CreateCacheSafeParams(request, localTools);
 }

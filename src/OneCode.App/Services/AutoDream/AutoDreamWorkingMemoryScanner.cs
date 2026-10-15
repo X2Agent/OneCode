@@ -28,16 +28,13 @@ public sealed class AutoDreamWorkingMemoryScanner(ILogger<AutoDreamWorkingMemory
     private readonly ILogger<AutoDreamWorkingMemoryScanner>? _logger = logger;
 
     /// <summary>
-    /// Reads every working-memory file for <paramref name="projectRoot"/> that changed since
-    /// <paramref name="since"/>.
+    /// Reads working-memory files for <paramref name="projectRoot"/>, ordered newest first.
     /// </summary>
     /// <param name="projectRoot">Project whose working memory is read. Null yields no artefacts.</param>
-    /// <param name="since">Only files modified after this instant are returned.</param>
     /// <param name="maxArtefacts">Upper bound on returned artefacts, newest first.</param>
     /// <param name="ct">Cancellation token.</param>
     public IReadOnlyList<WorkingMemoryArtefact> Collect(
         string? projectRoot,
-        DateTimeOffset since,
         int maxArtefacts,
         CancellationToken ct = default)
     {
@@ -59,7 +56,7 @@ public sealed class AutoDreamWorkingMemoryScanner(ILogger<AutoDreamWorkingMemory
                 ct.ThrowIfCancellationRequested();
 
                 var info = new FileInfo(path);
-                if (!info.Exists || info.LastWriteTimeUtc <= since.UtcDateTime)
+                if (!info.Exists)
                     continue;
 
                 var content = File.ReadAllText(path);

@@ -177,18 +177,25 @@ public sealed class TuiHostConfigurator(
         // 步骤进度的唯一事实源是 agent 待办清单：待办投影一变化就用最近一次工作流重绘卡片。
         PlanWorkflow? shownWorkflow = null;
         IReadOnlyList<TodoListItem> todos = [];
+        long projectionGeneration = 0;
         overlay.OrchestrationEvents.Subscribe(evt =>
         {
             switch (evt)
             {
                 case OrchestrationEvent.PlanProjectionChanged { Workflow: var workflow }:
                     shownWorkflow = workflow;
-                    _ = ProjectAndShowPlanAsync(workflow, todos, toplevel, app);
+                    var planGen = Interlocked.Increment(ref projectionGeneration);
+                    _ = ProjectAndShowPlanAsync(
+                        workflow, todos, planGen, () => Volatile.Read(ref projectionGeneration), toplevel, app);
                     break;
                 case OrchestrationEvent.TodoProjectionChanged { Items: var items }:
                     todos = items;
                     if (shownWorkflow is { State: PlanWorkflowState.Executing } executing)
-                        _ = ProjectAndShowPlanAsync(executing, todos, toplevel, app);
+                    {
+                        var todoGen = Interlocked.Increment(ref projectionGeneration);
+                        _ = ProjectAndShowPlanAsync(
+                            executing, todos, todoGen, () => Volatile.Read(ref projectionGeneration), toplevel, app);
+                    }
                     break;
             }
         });
@@ -200,6 +207,8 @@ public sealed class TuiHostConfigurator(
     private async Task ProjectAndShowPlanAsync(
         PlanWorkflow workflow,
         IReadOnlyList<TodoListItem> todos,
+        long generation,
+        Func<long> readLatestGeneration,
         OneCodeToplevel toplevel,
         IApplication app)
     {
@@ -210,6 +219,9 @@ public sealed class TuiHostConfigurator(
         try
         {
             var revision = await ResolveDisplayedRevisionAsync(workflow).ConfigureAwait(false);
+            if (generation != readLatestGeneration())
+                return;
+
             var markdown = revision?.Markdown ?? workflow.ApprovedSnapshot?.Markdown;
             var definitions = revision?.Steps ?? workflow.ApprovedSnapshot?.Steps;
             var steps = PlanStepProjector.Project(workflow, definitions, todos);
@@ -221,14 +233,20 @@ public sealed class TuiHostConfigurator(
                 ? overlay.PlanAggregateStore.GetRevisionMarkdownPath(workflow.SessionId, workflow.Id, rev)
                 : null;
 
-            app.Invoke(() => toplevel.ShowPlanFromBackend(
-                title,
-                steps,
-                phase.Value,
-                // 审批阶段渲染完整计划全文供用户审阅；
-                // 执行阶段不渲染全文（步骤列表 + 文档路径保持精简）。
-                phase is PlanCardPhase.PendingApproval ? markdown : null,
-                documentPath));
+            app.Invoke(() =>
+            {
+                if (generation != readLatestGeneration())
+                    return;
+
+                toplevel.ShowPlanFromBackend(
+                    title,
+                    steps,
+                    phase.Value,
+                    // 审批阶段渲染完整计划全文供用户审阅；
+                    // 执行阶段不渲染全文（步骤列表 + 文档路径保持精简）。
+                    phase is PlanCardPhase.PendingApproval ? markdown : null,
+                    documentPath);
+            });
         }
         catch (Exception ex)
         {

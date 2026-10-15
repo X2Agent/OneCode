@@ -92,7 +92,7 @@ public sealed class ServiceCollectionSnapshotTests
             "ModelCatalogRefreshService",    // 模型目录：定时刷新
             "PlanExecutionRecoveryService",  // Plan：恢复中断的执行
             "LspHostedService",              // LSP：语言服务器自动启动（不阻塞启动）
-            "AutoDreamService");             // AutoDream：后台记忆整合（1h 轮询）
+            "AutoDreamService");             // AutoDream：后台记忆整合（任务完成信号驱动）
     }
 
     /// <summary>

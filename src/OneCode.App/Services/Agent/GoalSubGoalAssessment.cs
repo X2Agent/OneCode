@@ -46,7 +46,7 @@ internal static class GoalSubGoalAssessment
         foreach (var validation in evidence.Validations)
             builder.AppendLine(CultureInfo.InvariantCulture, $"- {validation.Gate}: {(validation.Skipped ? "SKIPPED" : validation.Passed ? "PASSED" : "FAILED")} — {validation.Summary}");
         // 工具执行明细与诊断也是确定性证据：缺失会让 judge 只能对照 agent 自述
-        //（门禁全 Skipped 的只读子目标尤其如此），违背 ADR 0010 决策 1.2 的意图。
+        //（门禁全 Skipped 的只读子目标尤其如此），违背「评估器以确定性验证和工具执行证据为准」的边界约束。
         if (evidence.ToolExecutions.Count > 0)
         {
             builder.AppendLine("Tool executions:");

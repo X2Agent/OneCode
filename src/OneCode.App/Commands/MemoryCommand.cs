@@ -205,10 +205,8 @@ public sealed partial class MemoryCommand(
         var sb = new StringBuilder();
         sb.AppendLine("AutoDream Status:");
         sb.AppendLine(CultureInfo.InvariantCulture, $"  Enabled: {autoDreamService.IsEnabled()}");
-        sb.AppendLine("  Trigger mode: BUILD task completion (incremental) or manual /memory autodream trigger");
-        var lastConsolidated = autoDreamService.GetLastConsolidatedAt();
-        sb.AppendLine(CultureInfo.InvariantCulture,
-            $"  Last consolidated: {(lastConsolidated == DateTimeOffset.MinValue ? "never" : lastConsolidated.ToString("O"))}");
+        sb.AppendLine("  Trigger mode: BUILD task completion or manual /memory autodream trigger");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  State directory: {autoDreamService.GetProjectStateDir()}");
         return Task.FromResult(CommandResult.Text(sb.ToString().TrimEnd()));
     }
 }

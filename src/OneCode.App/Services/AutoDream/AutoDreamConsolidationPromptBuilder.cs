@@ -31,8 +31,8 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
     /// <summary>注入整合提示词的当前对话轮次摘要最大总字符数。</summary>
     private const int MaxCurrentConversationChars = 12_000;
 
-    /// <summary>当前内存会话是否存在自 <paramref name="since"/> 以来的新对话轮次。</summary>
-    public bool HasCurrentConversationDelta(DateTimeOffset since)
+    /// <summary>当前内存会话是否包含有效对话轮次。</summary>
+    public bool HasCurrentConversationTurns()
     {
         var conversation = GetMatchingCurrentConversation();
         if (conversation is null || conversation.Messages.Count == 0)
@@ -40,9 +40,6 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
 
         foreach (var message in conversation.Messages)
         {
-            if (message.Timestamp <= since)
-                continue;
-
             switch (message)
             {
                 case UserMessage { IsMeta: false } user when !string.IsNullOrWhiteSpace(user.Content):
@@ -54,22 +51,15 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
         return false;
     }
 
-    /// <summary>提取当前内存会话自 <paramref name="since"/> 以来的用户与助手对话轮次摘要。</summary>
-    internal IReadOnlyList<string> CollectCurrentConversationTurns(DateTimeOffset since, bool includeAllTurns = false)
+    /// <summary>提取当前内存会话的用户与助手对话轮次摘要（从最新轮次向前按字符预算截取完整上下文）。</summary>
+    internal IReadOnlyList<string> CollectCurrentConversationTurns()
     {
         var conversation = GetMatchingCurrentConversation();
         if (conversation is null || conversation.Messages.Count == 0)
             return [];
 
-        var candidateMessages = includeAllTurns
-            ? conversation.Messages
-            : conversation.Messages.Where(m => m.Timestamp > since).ToList();
-
-        if (candidateMessages.Count == 0 && includeAllTurns)
-            candidateMessages = conversation.Messages;
-
         List<string> allTurns = [];
-        foreach (var message in candidateMessages)
+        foreach (var message in conversation.Messages)
         {
             switch (message)
             {
@@ -92,7 +82,7 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
         if (allTurns.Count == 0)
             return [];
 
-        // 从最新轮次向前截取，确保刚刚完成的任务轮次优先保留在预算内
+        // 从最新轮次向前截取，确保刚刚完成的任务轮次及其前置上下文完整保留在预算内
         List<string> selectedReversed = [];
         var remaining = MaxCurrentConversationChars;
         for (var i = allTurns.Count - 1; i >= 0; i--)
@@ -109,23 +99,20 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
         return selectedReversed;
     }
 
-    /// <summary>构建整合提示词：注入自 <paramref name="since"/> 以来的 working-memory 快照与当前内存对话轮次摘要。</summary>
-    public async Task<string> BuildConsolidationPromptAsync(
-        DateTimeOffset since,
-        bool includeAllTurns,
-        CancellationToken ct)
+    /// <summary>构建整合提示词：注入当前项目的 working-memory 快照与当前内存对话轮次摘要。</summary>
+    public async Task<string> BuildConsolidationPromptAsync(CancellationToken ct)
     {
-        var projectRoot = _projectRootProvider() ?? "(unknown)";
-        var artefacts = _workingMemoryScanner.Collect(projectRoot, since, MaxWorkingMemoryArtefacts, ct);
-        var currentTurns = CollectCurrentConversationTurns(since, includeAllTurns);
+        var rawProjectRoot = _projectRootProvider();
+        var hasProjectRoot = !string.IsNullOrWhiteSpace(rawProjectRoot);
+        var artefacts = hasProjectRoot
+            ? _workingMemoryScanner.Collect(rawProjectRoot, MaxWorkingMemoryArtefacts, ct)
+            : [];
+        var currentTurns = CollectCurrentConversationTurns();
 
         var variables = new Dictionary<string, string>
         {
-            ["since"] = since == DateTimeOffset.MinValue
-                ? "never"
-                : since.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-            ["project_root"] = projectRoot,
-            ["working_memory_root"] = FileMemoryStorePaths.ResolveRoot(projectRoot),
+            ["project_root"] = hasProjectRoot ? rawProjectRoot! : "(unknown)",
+            ["working_memory_root"] = hasProjectRoot ? FileMemoryStorePaths.ResolveRoot(rawProjectRoot!) : "(none)",
             ["working_memory_section"] = FormatWorkingMemorySection(artefacts),
             ["current_conversation_section"] = FormatCurrentConversationSection(currentTurns),
         };
@@ -136,7 +123,7 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
     internal static string FormatCurrentConversationSection(IReadOnlyList<string> turns)
     {
         if (turns.Count == 0)
-            return "No new user/assistant turns were recorded in the active conversation since the last consolidation.";
+            return "No user/assistant turns were recorded in the active conversation.";
 
         var sb = new StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture,
@@ -158,13 +145,13 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
     {
         if (artefacts.Count == 0)
         {
-            return "No working-memory artefacts were written since the last consolidation. " +
+            return "No working-memory artefacts were found. " +
                    "Fall back to reviewing the current conversation turns below.";
         }
 
         var sb = new StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture,
-            $"{artefacts.Count} artefact(s) were written since the last consolidation:");
+            $"{artefacts.Count} working-memory artefact(s) found:");
 
         foreach (var artefact in artefacts)
         {

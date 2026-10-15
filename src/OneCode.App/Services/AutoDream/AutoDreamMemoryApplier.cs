@@ -109,8 +109,8 @@ internal sealed class AutoDreamMemoryApplier(
         // Group by scope to batch-write each MEMORY.md
         List<MemoryEntry> userEntries = [];
         List<MemoryEntry> projectEntries = [];
-        List<string> userDeleteKeys = [];
-        List<string> projectDeleteKeys = [];
+        HashSet<string> userDeleteKeys = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> projectDeleteKeys = new(StringComparer.OrdinalIgnoreCase);
         var written = 0;
         var skipped = 0;
 
@@ -265,6 +265,9 @@ internal sealed class AutoDreamMemoryApplier(
 
         if (skipped > 0)
             _logger.LogWarning("AutoDream: skipped {Count} invalid changes", skipped);
+
+        if (written == 0)
+            return (false, 0);
 
         if (userEntries.Count > 0)
         {

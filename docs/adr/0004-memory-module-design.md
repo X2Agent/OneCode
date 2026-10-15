@@ -123,18 +123,17 @@ Build with `dotnet build src/OneCode.slnx`.
 
 **唯一自动触发点**：仅当 `QueryStreamEngine.FinalizeAsync` 中 `request.WorkingMode == WorkingMode.Build` 且任务正常完成未回滚（`outcome.Reason == RunTerminalReason.Completed && !outcome.TransactionRolledBack`）时，调用 `IAutoDreamService.NotifyTaskCompleted()`。`PLAN` 与 `GOAL` 模式不触发记忆更新；用户仍可通过 `/memory autodream trigger` 手动强制触发。
 
-**增量快检与写入链路**：
+**候选快检与写入链路**：
 
 ```text
 BUILD 任务正常完成 → QueryStreamEngine.FinalizeAsync()
                   → IAutoDreamService.NotifyTaskCompleted()
-                  → C# 零 Token 增量快检（working-memory 新笔记 或 当前内存会话自 last_consolidated_at 以来有新对话轮次）
+                  → C# 零 Token 候选快检（当前内存会话存在有效对话轮次 或 存在 working-memory 笔记）
                   → AutoDreamConsolidationPromptBuilder 提取 working-memory 快照与当前对话 User/Assistant 轮次注入 prompt
                   → AutoDreamService.RunConsolidationAgentAsync()（单轮无工具调用，挂载 MemoryContextProvider 注入既有 MEMORY.md）
                   → LLM 输出 JSON 数组 [{action, scope, key, value, ttlHours, supersedes}, ...]
                   → AutoDreamMemoryApplier 校验、清洗、应用 upsert / supersedes / delete
                   → PruneAsync(scope) 清理过期 + 超 50 条按时间淘汰
-                  → 仅当 JSON 数组合法解析并应用成功后更新 last_consolidated_at
 ```
 
 ### 7. 决策：不实现独立团队记忆子系统

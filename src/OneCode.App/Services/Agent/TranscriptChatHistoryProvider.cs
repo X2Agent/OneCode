@@ -31,12 +31,13 @@ namespace OneCode.App.Services.Agent;
 internal sealed class TranscriptChatHistoryProvider(
     ISessionChatHistoryReader chatHistoryReader,
     SessionId conversationId,
-    HistorySeedBoundary? seedBoundary = null)
+    HistorySeedBoundary? seedBoundary = null,
+    bool stripPlanExclusiveTools = false)
     : ChatHistoryProvider(
         provideOutputMessageFilter: ExcludeContextProviderMessages,
         storeInputRequestMessageFilter: ExcludeEphemeralRequestMessages)
 {
-    private const string StateKey = "onecode.transcriptHistory";
+    internal const string StateKey = "onecode.transcriptHistory";
     private const string AttributionKey = "_attribution";
     private const string SubmitPlanToolName = "SubmitPlan";
 
@@ -47,11 +48,12 @@ internal sealed class TranscriptChatHistoryProvider(
         public List<ChatMessage> Messages { get; set; } = [];
 
         /// <summary>
-        /// 当前回合首轮请求由 <see cref="AIContextProvider"/> 注入的瞬态上下文消息（如计划交接上下文、模式指令、待办清单）。
-        /// <c>ChatClientAgent</c> 仅在每次 <c>RunAsync</c> 入口调用一次 <c>AIContextProviders</c>，而
-        /// <c>FunctionInvokingChatClient</c> 在收到 per-service-call 哨兵后会清空自身请求缓冲；
-        /// 此处缓存当轮上下文消息并在同轮后续工具迭代（Call 2..N）中锚定在最新 User 消息之后重放，
-        /// 既保证工具循环期间计划/模式指令不丢失且前缀严格追加，又在新一轮对话开始时整体替换、不入持久化历史。
+        /// 当前回合由 <see cref="AIContextProvider"/> 注入的瞬态上下文消息（如计划交接上下文、模式指令、待办清单）。
+        /// 在每次模型调用时锚定于最后一条真实 <c>User</c> 消息紧邻之前：
+        /// 1. 保证首轮请求末尾是真实 <c>User</c> 消息、工具循环期间（含 <c>ToolApprovalAgent</c> 审批重入）请求末尾是最新 <c>Tool</c> 结果，
+        ///    消除 <c>CompactionMessageIndex.Update</c> 因末尾 <c>AIContextProvider</c> 消息恒等而触发的静默丢消息短路；
+        /// 2. 保证同回合 Call 1..N 前缀严格不变，<c>CompactionMessageIndex</c> 全程走增量追加而不清空已有压缩组；
+        /// 3. 瞬态消息标记为 <see cref="AgentRequestMessageSourceType.AIContextProvider"/>，回写时自动滤除、跨轮整体替换。
         /// </summary>
         [JsonIgnore]
         public List<ChatMessage> TurnContextMessages { get; set; } = [];
@@ -64,55 +66,94 @@ internal sealed class TranscriptChatHistoryProvider(
     public override IReadOnlyList<string> StateKeys => [StateKey];
 
     /// <inheritdoc />
-    protected override ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
+    protected override ValueTask<IEnumerable<ChatMessage>> InvokingCoreAsync(
         InvokingContext context,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         var state = _sessionState.GetOrInitializeState(context.Session);
         if (state.Messages.Count == 0)
         {
             state.Messages = SeedFromTranscript(context);
         }
 
-        var incomingContextMessages = context.RequestMessages
-            .Where(m => m.GetAgentRequestMessageSourceType() == AgentRequestMessageSourceType.AIContextProvider)
-            .Select(DetachAttribution)
-            .ToList();
+        var incomingContextMessages = new List<ChatMessage>();
+        var nonContextRequestMessages = new List<ChatMessage>();
+        foreach (var message in context.RequestMessages)
+        {
+            var sourceType = message.GetAgentRequestMessageSourceType();
+            if (sourceType == AgentRequestMessageSourceType.AIContextProvider)
+            {
+                incomingContextMessages.Add(DetachAttribution(message));
+                continue;
+            }
+
+            if (sourceType == AgentRequestMessageSourceType.ChatHistory
+                || IsDuplicateSynthesizedToolCallMessage(state.Messages, message))
+            {
+                continue;
+            }
+
+            message.MessageId ??= Guid.NewGuid().ToString("N");
+            nonContextRequestMessages.Add(message);
+        }
+
+        var hasNewExternalUserTurn = nonContextRequestMessages.Any(static m =>
+            m.Role == ChatRole.User
+            && m.GetAgentRequestMessageSourceType() == AgentRequestMessageSourceType.External);
 
         if (incomingContextMessages.Count > 0)
         {
-            state.TurnContextMessages = incomingContextMessages;
-            return new ValueTask<IEnumerable<ChatMessage>>(
-                state.Messages.Select(DetachAttribution).ToList());
-        }
+            if (!hasNewExternalUserTurn && state.TurnContextMessages.Count == incomingContextMessages.Count)
+            {
+                for (var i = 0; i < incomingContextMessages.Count; i++)
+                {
+                    incomingContextMessages[i].MessageId = state.TurnContextMessages[i].MessageId;
+                }
+            }
 
-        if (context.RequestMessages.Any(m =>
-                m.Role == ChatRole.User
-                && m.GetAgentRequestMessageSourceType() == AgentRequestMessageSourceType.External))
+            state.TurnContextMessages = incomingContextMessages;
+        }
+        else if (hasNewExternalUserTurn)
         {
             state.TurnContextMessages = [];
         }
 
+        var sourceId = GetType().FullName!;
+        var historyMessages = ExcludeContextProviderMessages(state.Messages)
+            .Select(m => DetachAttribution(m).WithAgentRequestMessageSource(AgentRequestMessageSourceType.ChatHistory, sourceId));
+
+        var conversationMessages = new List<ChatMessage>(state.Messages.Count + nonContextRequestMessages.Count);
+        conversationMessages.AddRange(historyMessages);
+        conversationMessages.AddRange(nonContextRequestMessages);
+
         if (state.TurnContextMessages.Count == 0)
         {
-            return new ValueTask<IEnumerable<ChatMessage>>(
-                state.Messages.Select(DetachAttribution).ToList());
+            return new ValueTask<IEnumerable<ChatMessage>>(conversationMessages);
         }
 
-        var combined = new List<ChatMessage>(state.Messages.Count + state.TurnContextMessages.Count);
-        var lastUserIndex = state.Messages.FindLastIndex(m => m.Role == ChatRole.User);
-        for (var i = 0; i < state.Messages.Count; i++)
+        var turnContextWithSource = state.TurnContextMessages
+            .Select(m => DetachAttribution(m).WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, sourceId))
+            .ToList();
+
+        if (conversationMessages.Count == 0)
         {
-            combined.Add(DetachAttribution(state.Messages[i]));
-            if (i == lastUserIndex)
+            return new ValueTask<IEnumerable<ChatMessage>>(turnContextWithSource);
+        }
+
+        var lastUserIndex = conversationMessages.FindLastIndex(static m => m.Role == ChatRole.User);
+        var insertIndex = lastUserIndex >= 0 ? lastUserIndex : 0;
+
+        var combined = new List<ChatMessage>(conversationMessages.Count + turnContextWithSource.Count);
+        for (var i = 0; i < conversationMessages.Count; i++)
+        {
+            if (i == insertIndex)
             {
-                combined.AddRange(state.TurnContextMessages.Select(DetachAttribution));
+                combined.AddRange(turnContextWithSource);
             }
-        }
 
-        if (lastUserIndex < 0)
-        {
-            combined.InsertRange(0, state.TurnContextMessages.Select(DetachAttribution));
+            combined.Add(conversationMessages[i]);
         }
 
         return new ValueTask<IEnumerable<ChatMessage>>(combined);
@@ -126,6 +167,11 @@ internal sealed class TranscriptChatHistoryProvider(
         var state = _sessionState.GetOrInitializeState(context.Session);
         foreach (var requestMessage in context.RequestMessages)
         {
+            if (IsDuplicateSynthesizedToolCallMessage(state.Messages, requestMessage))
+            {
+                continue;
+            }
+
             state.Messages.Add(DetachAttribution(requestMessage));
         }
 
@@ -140,16 +186,46 @@ internal sealed class TranscriptChatHistoryProvider(
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// 判定请求消息是否为 <c>ToolApprovalAgent</c> 审批恢复时由 <c>FunctionInvokingChatClient</c>
+    /// 合成的重复 <c>Assistant(FunctionCallContent)</c> 消息。
+    /// </summary>
+    private static bool IsDuplicateSynthesizedToolCallMessage(
+        IReadOnlyList<ChatMessage> existingHistory,
+        ChatMessage candidate)
+    {
+        if (candidate.Role != ChatRole.Assistant || existingHistory.Count == 0)
+            return false;
+
+        var candidateCalls = candidate.Contents.OfType<FunctionCallContent>().ToList();
+        if (candidateCalls.Count == 0 || candidateCalls.Count != candidate.Contents.Count)
+            return false;
+
+        var existingCallIds = existingHistory
+            .Where(static m => m.Role == ChatRole.Assistant)
+            .SelectMany(static m => m.Contents.OfType<FunctionCallContent>())
+            .Select(static c => c.CallId)
+            .Where(static id => !string.IsNullOrEmpty(id))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return existingCallIds.Count > 0
+            && candidateCalls.All(c => !string.IsNullOrEmpty(c.CallId) && existingCallIds.Contains(c.CallId));
+    }
+
     /// <summary>从转录播种历史，排除本轮输入用户消息（RequestMessages 已携带，避免重复送达）。</summary>
     private List<ChatMessage> SeedFromTranscript(InvokingContext context)
     {
         var history = chatHistoryReader.GetChatHistory(conversationId);
-        // 阶段边界：approved-plan 受控 Build run 保留 Plan 阶段的对话与只读检索结果
-        // （Read / Grep / WebSearch / WebFetch 等直接复用并命中 Prompt Cache，避免 Build 从零重搜），
-        // 仅剥离边界之前的 SubmitPlan 工具调用对（PlanExclusive 工具在 Build 不挂载，
-        // 成对剥离后无孤儿 tool 消息且不触发历史工具名回放）。
-        if (seedBoundary is { } boundary)
-            history = StripPlanExclusiveToolCallsBeforeBoundary(history, boundary.MessageIndex);
+        // 阶段边界与非 Plan 模式剥离：
+        // 1. 非 Plan 模式或存在阶段边界时剥离 SubmitPlan 工具调用对（PlanExclusive 工具在 Build 不挂载，
+        //    即使受控 Build 续跑前因 /compact 导致 epoch 漂移使 seedBoundary 置空，保留尾部中的 SubmitPlan 也会被剥离）；
+        // 2. 跨阶段冗长错误结果压缩仅在有效 seedBoundary.MessageIndex 范围内生效。
+        var boundaryLimit = seedBoundary is { } boundary
+            ? Math.Clamp(boundary.MessageIndex, 0, history.Count)
+            : 0;
+        var stripLimit = stripPlanExclusiveTools ? history.Count : boundaryLimit;
+        if (stripLimit > 0 || boundaryLimit > 0)
+            history = StripPlanExclusiveToolCallsBeforeBoundary(history, stripLimit, boundaryLimit);
 
         var latestUserText = context.RequestMessages
             .LastOrDefault(message =>
@@ -165,21 +241,25 @@ internal sealed class TranscriptChatHistoryProvider(
     private const int MaxPriorPhaseErrorResultChars = 240;
 
     /// <summary>
-    /// 剥离阶段边界之前的 <c>SubmitPlan</c> 工具调用与对应结果，并将边界之前冗长的失败工具结果
+    /// 剥离指定范围内的 <c>SubmitPlan</c> 工具调用与对应结果，并将阶段边界之前冗长的失败工具结果
     /// （<c>IsError == true</c>）收拢为单行错误摘要，保留其余全部探索对话与成功只读工具结果（100% 零信息损失）。
     /// 若某条消息在剥离后不再包含任何有效内容（如仅含 <c>SubmitPlan</c> 调用的 assistant 消息或仅含其结果的 tool 消息），
     /// 则整条消息一并移除，确保不会残留空消息或孤儿 tool 消息。
     /// </summary>
     private static List<ChatMessage> StripPlanExclusiveToolCallsBeforeBoundary(
         IReadOnlyList<ChatMessage> history,
-        int boundaryIndex)
+        int stripLimit,
+        int errorCompactLimit)
     {
-        var limit = Math.Clamp(boundaryIndex, 0, history.Count);
-        if (limit == 0)
+        var maxLimit = Math.Clamp(Math.Max(stripLimit, errorCompactLimit), 0, history.Count);
+        if (maxLimit == 0)
             return history.ToList();
 
+        var clampedStripLimit = Math.Clamp(stripLimit, 0, history.Count);
+        var clampedErrorLimit = Math.Clamp(errorCompactLimit, 0, history.Count);
+
         var strippedCallIds = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < limit; i++)
+        for (var i = 0; i < clampedStripLimit; i++)
         {
             foreach (var content in history[i].Contents)
             {
@@ -192,14 +272,17 @@ internal sealed class TranscriptChatHistoryProvider(
         }
 
         var filtered = new List<ChatMessage>(history.Count);
-        for (var i = 0; i < limit; i++)
+        for (var i = 0; i < maxLimit; i++)
         {
             var message = history[i];
-            var hasStrippedContent = message.Contents.Any(content =>
+            var canStrip = i < clampedStripLimit;
+            var canCompactError = i < clampedErrorLimit;
+
+            var hasStrippedContent = canStrip && message.Contents.Any(content =>
                 (content is FunctionCallContent call
                     && string.Equals(call.Name, SubmitPlanToolName, StringComparison.Ordinal))
                 || (content is FunctionResultContent result && strippedCallIds.Contains(result.CallId)));
-            var hasCompactedErrorContent = message.Contents.Any(static content =>
+            var hasCompactedErrorContent = canCompactError && message.Contents.Any(static content =>
                 content is FunctionResultContent result && ShouldCompactPriorPhaseError(result));
 
             if (!hasStrippedContent && !hasCompactedErrorContent)
@@ -210,10 +293,11 @@ internal sealed class TranscriptChatHistoryProvider(
 
             var remaining = message.Contents
                 .Where(content =>
-                    !(content is FunctionCallContent call
-                        && string.Equals(call.Name, SubmitPlanToolName, StringComparison.Ordinal))
-                    && !(content is FunctionResultContent result && strippedCallIds.Contains(result.CallId)))
-                .Select(static content => content is FunctionResultContent result
+                    !canStrip
+                    || (!(content is FunctionCallContent call
+                            && string.Equals(call.Name, SubmitPlanToolName, StringComparison.Ordinal))
+                        && !(content is FunctionResultContent result && strippedCallIds.Contains(result.CallId))))
+                .Select(content => canCompactError && content is FunctionResultContent result
                     ? CompactPriorPhaseErrorIfNeeded(result)
                     : content)
                 .ToList();
@@ -230,7 +314,7 @@ internal sealed class TranscriptChatHistoryProvider(
             });
         }
 
-        for (var i = limit; i < history.Count; i++)
+        for (var i = maxLimit; i < history.Count; i++)
             filtered.Add(history[i]);
 
         return filtered;
@@ -297,7 +381,9 @@ internal sealed class TranscriptChatHistoryProvider(
     /// </summary>
     private static ChatMessage DetachAttribution(ChatMessage message)
     {
+        message.MessageId ??= Guid.NewGuid().ToString("N");
         var clone = message.Clone();
+        clone.MessageId = message.MessageId;
         clone.AdditionalProperties?.Remove(AttributionKey);
         for (var i = clone.Contents.Count - 1; i >= 0; i--)
         {

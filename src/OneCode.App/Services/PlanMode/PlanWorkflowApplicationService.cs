@@ -374,6 +374,9 @@ public sealed partial class PlanWorkflowApplicationService(IPlanAggregateStore a
                 $"Event '{@event.GetType().Name}' is invalid in state '{current.State}'."),
         };
 
+        if (ReferenceEquals(updated, current))
+            return;
+
         await SaveWorkflowAsync(updated, current.Version, @event.FencingToken, ct).ConfigureAwait(false);
     }
 

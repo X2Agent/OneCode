@@ -142,7 +142,7 @@ public sealed class IterativeLoopServiceTests
     /// <summary>
     /// 反证：循环路径一旦挂上 agent 级会话历史 provider，<c>FreshContextPerIteration</c> 就被抵消——
     /// 历史 provider 由 <c>ChatClientAgent</c> 在每次服务调用上重新查询，每轮会重新看到整份 transcript，
-    /// 循环退化为「带着全部历史重试」（见 ADR 0010 禁令 7）。
+    /// 循环退化为「带着全部历史重试」（违反迭代循环隔离历史上下文的架构禁令）。
     /// </summary>
     [Fact]
     public async Task RunAsync_DoesNotMountChatHistoryProvider()

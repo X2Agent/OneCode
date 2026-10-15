@@ -27,10 +27,13 @@ public sealed class AgentSessionPersistence(
     /// <param name="historySeedBoundary">
     /// 阶段播种边界（approved-plan 受控 run）：null = 全量转录播种（交互路径）。
     /// </param>
+    /// <param name="stripPlanExclusiveTools">是否无条件剥离转录中的 Plan 专属工具调用对（非 Plan 模式下启用）。</param>
     public ChatHistoryProvider CreateChatHistoryProvider(
         SessionId conversationId,
-        HistorySeedBoundary? historySeedBoundary = null)
-        => new TranscriptChatHistoryProvider(_chatHistoryReader, conversationId, historySeedBoundary);
+        HistorySeedBoundary? historySeedBoundary = null,
+        bool stripPlanExclusiveTools = false)
+        => new TranscriptChatHistoryProvider(
+            _chatHistoryReader, conversationId, historySeedBoundary, stripPlanExclusiveTools);
 
     /// <summary>
     /// Restores an <see cref="AgentSession"/> from <see cref="Conversation.Metadata"/> when a prior run

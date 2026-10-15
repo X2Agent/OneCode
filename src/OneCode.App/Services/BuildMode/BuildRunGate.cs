@@ -147,13 +147,13 @@ public sealed class BuildRunGate(
         string agentRunId,
         WorkingMode workingMode,
         PlanRunEnd end,
-        ToolBatchCollector collector,
+        ToolBatchCollector? collector,
         CancellationToken ct)
     {
         if (conversationId is not { } sessionId)
             return;
 
-        if (end == PlanRunEnd.Cancelled && collector.CompletedBatches.Count > 0)
+        if (end == PlanRunEnd.Cancelled && collector is { CompletedBatches.Count: > 0 })
         {
             await _sessionManager.AppendCompletedToolBatchesAsync(
                 sessionId,
@@ -167,7 +167,7 @@ public sealed class BuildRunGate(
         if (end == PlanRunEnd.Cancelled)
             await _planRunCloser.CancelAsync(sessionId, agentRunId, ct).ConfigureAwait(false);
         else
-            await _planRunCloser.FinishAsync(sessionId, agentRunId, collector.HasOpenBatch, ct).ConfigureAwait(false);
+            await _planRunCloser.FinishAsync(sessionId, agentRunId, collector?.HasOpenBatch ?? false, ct).ConfigureAwait(false);
     }
 
     public IBuildRunStore? BuildRunStore => _buildRunStore;

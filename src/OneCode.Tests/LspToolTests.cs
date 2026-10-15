@@ -343,6 +343,23 @@ public sealed class LspToolTests
         result.Content.Should().Contain("server crashed");
     }
 
+    [Fact]
+    public async Task ExecuteLspAsync_FileOutsideWorkingDirectory_ReturnsErrorWithoutDispatchingRequest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var manager = CreateManagerWithServer();
+        var wd = Substitute.For<IWorkingDirectoryAccessor>();
+        wd.WorkingDirectory.Returns(Path.Combine(Path.GetTempPath(), "LspWorkspace"));
+        var sut = CreateSut(manager, wd: wd);
+
+        var result = await sut.ExecuteLspAsync("definition", "../../outside/secret.cs", server: "test-server", ct: ct);
+
+        result.IsError.Should().BeTrue("LspTool must enforce workspace path boundaries via SafeResolve");
+        result.Content.Should().Contain("outside");
+        await manager.DidNotReceive().SendRequestAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<JsonElement>(), Arg.Any<CancellationToken>());
+    }
+
     // workspaceSymbol：索引回退
 
     [Fact]

@@ -63,6 +63,38 @@ public sealed class WorkingModeController
         WorkingMode.Goal => "GOAL",
         _ => "???",
     };
+
+    /// <summary>
+    /// 从持久化会话元数据（字符串或 <see cref="System.Text.Json.JsonElement"/>）解析工作模式。
+    /// </summary>
+    public static bool TryParseMode(object? raw, out WorkingMode mode)
+    {
+        var text = raw switch
+        {
+            string s => s,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } el => el.GetString(),
+            _ => null,
+        };
+
+        if (string.Equals(text, "plan", StringComparison.OrdinalIgnoreCase))
+        {
+            mode = WorkingMode.Plan;
+            return true;
+        }
+        if (string.Equals(text, "goal", StringComparison.OrdinalIgnoreCase))
+        {
+            mode = WorkingMode.Goal;
+            return true;
+        }
+        if (string.Equals(text, "build", StringComparison.OrdinalIgnoreCase))
+        {
+            mode = WorkingMode.Build;
+            return true;
+        }
+
+        mode = WorkingMode.Build;
+        return false;
+    }
 }
 
 /// <summary>Event payload for <see cref="WorkingModeController.ModeChanged"/>.</summary>

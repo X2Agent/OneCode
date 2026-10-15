@@ -82,6 +82,6 @@
 
 App 层保留 MAF 不具备的产品编排：显式 `/compact`（指定范围、边界标记、Conversation 落盘与 hooks），以及 0.70 历史规模告警。MAF 另提供 `CompactionProvider.CompactAsync` 与 `CompactionStrategy.AsChatReducer`，并非没有历史压缩能力。
 
-0.70 通知在 turn 结束后按完整历史计算，可能晚于已发生的静默压缩，因此定位为历史规模提示，不与模型输入预算严格对齐（压缩所有权边界见 [ADR 0007](adr/0007-maf-integration-boundaries.md)）。
+0.70 通知在 turn 结束后按完整历史计算，可能晚于已发生的静默压缩，因此定位为历史规模提示，不与模型输入预算严格对齐（压缩所有权边界见 [MAF 集成边界](adr/0007-maf-integration-boundaries.md)）。
 
 > 显式 `/compact` 命令（用户主动触发）始终可用，不受阈值控制。

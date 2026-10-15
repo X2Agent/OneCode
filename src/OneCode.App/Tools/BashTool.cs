@@ -2,7 +2,6 @@ using System.ComponentModel;
 using Microsoft.Agents.AI.Tools.Shell;
 using OneCode.Core.Exec;
 using OneCode.App.Session;
-using OneCode.Core.IO;
 
 namespace OneCode.App.Tools;
 
@@ -38,20 +37,40 @@ public sealed class BashTool
         => (_wd, _shellExecutor, _sessionManager)
             = (wd, shellExecutor, sessionManager);
 
-    [Description("Execute a shell command. Dialect selection: shell=\"bash\" (default) runs bash on Unix and pwsh on Windows " +
-                 "via the platform default; shell=\"powershell\" forces pwsh (PowerShell Core) or powershell.exe on Windows " +
-                 "(requires pwsh on Unix) — use it for cmdlets (Get-ChildItem, Invoke-WebRequest, Select-String), " +
-                 "the $PSItem/$_ pipeline variable, or Windows-only modules. " +
+    /// <summary>
+    /// 构建平台感知的工具描述：Windows 下明确持久会话运行 PowerShell（pwsh），避免模型误发 Unix 命令（如 <c>date +...</c>）。
+    /// </summary>
+    public static string BuildDescription()
+    {
+        var platformHeader = OperatingSystem.IsWindows()
+            ? "Execute a shell command. Operating system: Windows. Default persistent shell: PowerShell (pwsh). " +
+              "Use PowerShell syntax — NOT bash/sh (e.g., Get-Date -Format 'yyyy-MM-dd_HH-mm-ss' instead of date +..., " +
+              "$env:VAR instead of $VAR, Get-ChildItem instead of ls -la). "
+            : "Execute a shell command. Operating system: Unix/Linux/macOS. Default persistent shell: bash/sh. ";
+
+        return platformHeader +
+               "Prefer the dedicated Write and Edit tools to create or modify files instead of shell redirection or echo. " +
+               "Dialect selection: shell=\"bash\" (default) runs in the persistent session shell (pwsh on Windows, bash on Unix) " +
+               "preserving cwd and environment across calls; shell=\"powershell\" spawns an isolated fresh PowerShell process per call. " +
+               "Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, Set-ExecutionPolicy, Format-Volume, etc.) are hard-blocked; " +
+               "destructive commands emit a [warning] prefix; sed -i without backup suffix is rejected (bash path). " +
+               "Output is truncated at 100,000 chars using head/tail strategy; timeouts kill the entire process tree.";
+    }
+
+    [Description("Execute a shell command. On Windows the default persistent shell is PowerShell (pwsh) — use PowerShell syntax " +
+                 "(e.g., Get-Date -Format 'yyyy-MM-dd_HH-mm-ss' instead of Unix date +...). On Unix the default persistent shell is bash. " +
+                 "Prefer the dedicated Write/Edit tools to create or modify files instead of shell redirection. " +
+                 "Dialect selection: shell=\"bash\" (default) runs in the persistent session shell (pwsh on Windows, bash on Unix) " +
+                 "preserving cwd/env across calls; shell=\"powershell\" spawns an isolated fresh PowerShell process per call. " +
                  "Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, etc.) are hard-blocked; shell=\"powershell\" " +
                  "additionally hard-blocks Set-ExecutionPolicy / Format-Volume / Restart-Computer / elevated Start-Process; " +
                  "destructive commands emit a [warning] prefix; sed -i without backup suffix is rejected (bash path). " +
-                 "Persistence: with shell=\"bash\" and a session-scoped shell executor configured, commands run in a persistent shell preserving cwd/env across calls; " +
-                 "otherwise (and always with shell=\"powershell\") a fresh process is spawned per call. " +
                  "Output is truncated at 100,000 chars using head/tail strategy; timeouts kill the entire process tree.")]
     public async Task<ToolResult> ExecuteAsync(
-        [Description("The shell command to execute. Use Unix-style syntax on Linux/macOS and PowerShell-compatible syntax on Windows. " +
-                     "Multi-line scripts are supported; chain with && or ; as needed.")] string command,
-        [Description("Shell dialect: \"bash\" (default) or \"powershell\". Use \"powershell\" only when you need PowerShell-specific syntax.")] string shell = "bash",
+        [Description("The shell command to execute. On Windows, use PowerShell syntax (e.g., Get-Date -Format 'yyyy-MM-dd_HH-mm-ss', $env:VAR); " +
+                     "on Linux/macOS, use bash/sh syntax. Prefer Write/Edit tools for file creation and edits.")] string command,
+        [Description("Shell execution mode: \"bash\" (default — runs in the persistent session shell: pwsh on Windows, bash on Unix) " +
+                     "or \"powershell\" (spawns an isolated fresh PowerShell process with additional PowerShell cmdlet guards).")] string shell = "bash",
         [Description("A brief one-line description of what the command does, for audit logging. Not shown to the user.")] string? description = null,
         [Description("Timeout in seconds. Default 120, max 600. On timeout the process tree is killed and partial stdout/stderr is returned.")] int timeout = 120,
         CancellationToken ct = default)

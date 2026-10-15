@@ -102,6 +102,8 @@ public sealed class PlanExecutionRecoveryService(
                     {
                         // 计划已完整提交，只是旧进程没来得及收口：按「run 正常结束」补做收口，
                         // 经同一漏斗推进到待审批（含转录协议校验与审批卡发布）。
+                        // TranscriptPersistence.AppendCompletedToolBatchesAsync 只持久化已封口（call+result 成对）的批次，
+                        // 未封口的半截调用不会落盘，因此恢复时磁盘转录恒满足 hasOpenToolBatch: false。
                         await planRunCloser.FinishAsync(
                             workflow.SessionId,
                             workflow.ActiveRunId ?? string.Empty,

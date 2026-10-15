@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using OneCode.App.Services.Search;
+using OneCode.Core.Results;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Text;
@@ -23,9 +24,14 @@ public sealed partial class LspTool
     private async Task<ToolResult> ExecuteWorkspaceSymbolAsync(string query, string? path, CancellationToken ct)
     {
         // Resolve the path scope once, up front, so the LSP and index paths filter on the same value.
-        var pathScope = path;
-        if (!string.IsNullOrEmpty(pathScope) && !Path.IsPathRooted(pathScope))
-            pathScope = Path.GetFullPath(Path.Combine(_wd.WorkingDirectory, pathScope));
+        string? pathScope = null;
+        if (!string.IsNullOrEmpty(path))
+        {
+            var resolvedScope = ResolveWorkspacePath(path);
+            if (!resolvedScope.IsSuccess)
+                return ToolResult.Error(resolvedScope.Error ?? "Path resolution failed.");
+            pathScope = resolvedScope.Value;
+        }
 
         // LSP-first path: merge SymbolInformation across all running servers.
         if (_serverManager is not null)
@@ -229,6 +235,14 @@ public sealed partial class LspTool
         _ => $"Kind{kind}"
     };
 
+    private Result<string> ResolveWorkspacePath(string path)
+    {
+        var baseDir = string.IsNullOrWhiteSpace(_wd.WorkingDirectory)
+            ? Environment.CurrentDirectory
+            : _wd.WorkingDirectory;
+        return PathsHelper.SafeResolve(path, baseDir, _wd.AdditionalDirectories);
+    }
+
     private static object FormatSymbolResults(string summary, List<SymbolRow> results, string source) => new
     {
         summary,
@@ -252,11 +266,13 @@ public sealed partial class LspTool
     private async Task<ToolResult> ExecuteReferencesBySymbolAsync(
         string symbol, string? path, string? glob, string? excludeGlob, bool exactWord, int maxResults, CancellationToken ct)
     {
-        var workingDir = _wd.WorkingDirectory;
-        var resolveResult = PathsHelper.SafeResolve(path ?? ".", workingDir, _wd.AdditionalDirectories);
+        var resolveResult = ResolveWorkspacePath(path ?? ".");
         if (!resolveResult.IsSuccess)
             return ToolResult.Error(resolveResult.Error ?? "Path resolution failed");
         var searchPath = resolveResult.Value;
+        var workingDir = string.IsNullOrWhiteSpace(_wd.WorkingDirectory)
+            ? Environment.CurrentDirectory
+            : _wd.WorkingDirectory;
 
         if (!Directory.Exists(searchPath) && !File.Exists(searchPath))
             return ToolResult.Error($"Path does not exist: {path}");

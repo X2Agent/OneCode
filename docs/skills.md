@@ -31,7 +31,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 > **架构决策**：技能 provider 由 `SkillProviderFactory` 通过 MAF `AgentSkillsProviderBuilder` 自建
 > （文件技能 + 内置技能 + MCP 技能 + 自定义 script runner），而非使用 Harness 默认 `AgentSkillsProvider`
 > ——当前由官方 builder 统一管理 source 聚合、缓存、去重及所有权。Harness 的 `AgentSkillsSource` 同样可携带 runner，
-> 并非技术上无法迁移；是否改用该入口须验证生命周期与总体维护收益。理由与边界见 [ADR 0007 §1](./adr/0007-maf-integration-boundaries.md)。
+> 并非技术上无法迁移；是否改用该入口须验证生命周期与总体维护收益。理由与边界见 [MAF 集成边界](./adr/0007-maf-integration-boundaries.md)。
 
 > **资源所有权**：provider 每 run 重建，MAF 的 `ChatClientAgent` 不释放交给它的 `AIContextProviders`，
 > 因此由 `AgentContextProviderLease` 在 run 结束后（含取消、异常、流提前结束）统一释放。

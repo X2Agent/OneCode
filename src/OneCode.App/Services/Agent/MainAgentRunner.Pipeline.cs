@@ -52,7 +52,10 @@ public partial class MainAgentRunner
             CompactionStrategy = compactionStrategy,
             // 多轮历史经 MAF chat history 契约（桥接会话转录）提供，不由宿主注入请求消息。
             ChatHistoryProvider = options.ConversationId is { } conversationId
-                ? _sessionStore.CreateChatHistoryProvider(conversationId, options.HistorySeedBoundary)
+                ? _sessionStore.CreateChatHistoryProvider(
+                    conversationId,
+                    options.HistorySeedBoundary,
+                    stripPlanExclusiveTools: options.WorkingMode != WorkingMode.Plan)
                 : null,
             HarnessInstructions = options.HarnessInstructions,
             AgentContextProviders = contextProviders,

@@ -2,8 +2,8 @@
 
 > 状态：计划稿（P0 待立项，P1-P4 依次推进）。
 > UI 形态战略（TUI 是唯一交互前端；Web UI / 桌面壳 / AG-UI 端点不做）的决策依据与业界调研见
-> [ADR-0013](../adr/0013-ui-surface-strategy.md)，本计划是其工程落地图纸。
-> 关联文档：[ADR-0011](../adr/0011-background-agents-delegation-boundary.md)（后台会话/attach/守护进程复用
+> [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)，本计划是其工程落地图纸。
+> 关联文档：[后台代理派工边界](../adr/0011-background-agents-delegation-boundary.md)（后台会话/attach/守护进程复用
 > `QueryStreamEngine`/权限/Build 门禁，不构成背景代理派工触发）、[docs/keybindings.md](../keybindings.md)、
 > [docs/testing/manual-checklist.md](../testing/manual-checklist.md)。
 
@@ -20,7 +20,7 @@
 四项用户诉求与本路线的映射：并行会话监控台 → P1；桌面系统集成（通知/定时）→ P2（托盘为可选薄助手，§5）；
 富渲染与可视化 → P3；远程访问 → P4（ssh 即协议，用户已确认可接受）。
 
-## 2. 设计原则（与 ADR-0013 决策一一对应）
+## 2. 设计原则（与 UI 形态战略决策一一对应）
 
 1. **TUI 是调度器，本机软件是渲染器**：TUI 只做摘要与入口，文件/网页/diff 的渲染委托系统默认应用与编辑器；不在 TUI 内追浏览器效果。
 2. **多路复用交给终端**：一个 OneCode 进程 = 一个项目；跨项目切换用终端 tab/tmux；跨进程接入用 attach。
@@ -29,7 +29,7 @@
 
 ## 3. P0 · 引擎与 TUI 解耦（App 层内，无新项目）
 
-### 3.1 现状（2026-09-30 grep 实测）
+### 3.1 现状
 
 `using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 目录之外共 **24 个文件**。有利事实：`Terminal.Gui` 包依赖本身封闭在
 `Tui/` 目录内（唯一例外 `Services/TuiHostConfigurator.cs`）；`IConversationRunner` 流式契约 public（`Query/IConversationRunner.cs`，
@@ -157,7 +157,7 @@ agent 产出 `report.html` 与图片 → 会话尾部产物卡 → `o` 打开浏
 |---|---|
 | 富渲染天花板（图片内联受终端模拟器割裂、HTML 永远要跳出终端） | 设计原则 1 写死：TUI 只做摘要与入口；能力检测 + 降级链（内联 → `o` 打开） |
 | 手机/远程 ssh TUI 体验一般 | 定位为可用而非精致；mosh/tmux 缓解断线；不为此建自有协议 |
-| 无 GUI 展示面，社区吸引力全押引擎与 TUI | asciinema/GIF 演示 + 引擎质量；与 ADR-0013 决策 6 一致，硬需求出现再立项 |
+| 无 GUI 展示面，社区吸引力全押引擎与 TUI | asciinema/GIF 演示 + 引擎质量；与 UI 形态战略决策一致，硬需求出现再立项 |
 | daemon 与 TUI 并发写同一会话 | 执行权锁（§4.2）+ 事件存储追加写语义；契约测试走真实写入端 |
 | toast 点击无法聚焦终端 | 承诺降级：通知只保证「知道有事」，介入靠 `attach`/重开 TUI |
 | P0 与键盘计划（keybindings-full-keyboard-plan）冲突 | 改动面不重叠（TUI 视图层 vs Query/宿主层）；O5 动注册段时与键盘计划 G 项互查 |
@@ -170,5 +170,5 @@ agent 产出 `report.html` 与图片 → 会话尾部产物卡 → `o` 打开浏
 - **AG-UI 协议端点**：不做（`Microsoft.Agents.AI.*.AGUI` preview 包不进依赖面）。
 - **单进程多项目切换**：不做（§4.1）。
 - **HTML/富媒体内嵌渲染**：不做（§6.2）。
-- 以上任何一项若未来出现 TUI 无法覆盖的程序员场景硬需求，按 [ADR-0013](../adr/0013-ui-surface-strategy.md)
+- 以上任何一项若未来出现 TUI 无法覆盖的程序员场景硬需求，按 [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)
   重新立项评估——P0-P2 投入（引擎解耦/多会话/守护进程）届时原样复用。

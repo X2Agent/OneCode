@@ -53,6 +53,12 @@ public sealed class InteractiveBootstrapService(
         var initialMode = session.PermissionMode.CurrentMode == PermissionMode.Plan
             ? WorkingMode.Plan
             : WorkingMode.Build;
+        if (session.SessionManager.ForegroundConversation is { } foreground
+            && foreground.Metadata.TryGetValue("mode", out var rawMode)
+            && WorkingModeController.TryParseMode(rawMode, out var restoredMode))
+        {
+            initialMode = restoredMode;
+        }
         modeController.Mode = initialMode;
 
         return new InteractiveSession(

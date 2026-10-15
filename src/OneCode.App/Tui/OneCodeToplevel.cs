@@ -342,6 +342,11 @@ public sealed partial class OneCodeToplevel : Window
         ClearConversationView();
         _shell.Transcript.LoadConversation(conversation);
         ApplyRuntimeModel(conversation.Model, currentContextTokens: 0);
+        if (conversation.Metadata.TryGetValue("mode", out var rawMode)
+            && WorkingModeController.TryParseMode(rawMode, out var restoredMode))
+        {
+            _shell.ModeController.Mode = restoredMode;
+        }
     }
 
     /// <summary>

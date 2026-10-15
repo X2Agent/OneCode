@@ -22,7 +22,22 @@ public sealed partial class OneCodeToplevel
             _shell.AgentStatusBar.NotifyProgress();
 
         if (_transcriptPresenter.TryPresent(evt))
+        {
+            if (evt is TuiToolDone { Name: var name, IsError: var err, Result: var result, ToolInput: var toolInput })
+            {
+                // Shell 工具（Bash/PowerShell）展示前 3 行输出预览
+                if (!err && !string.IsNullOrWhiteSpace(result) && IsShellTool(name))
+                {
+                    var shellPreview = ExtractFirstLines(result, 3);
+                    if (!string.IsNullOrEmpty(shellPreview))
+                        _shell.Transcript.AddStreamingNotice($"{TuiGlyphs.ToolResultPrefix} {shellPreview}", TuiPalette.FgMuted);
+                }
+                // LSP diagnostics inline block — after Edit/Write, show any
+                // diagnostics the LSP server published for the modified file.
+                TryRenderLspDiagnosticsForTool(name, toolInput);
+            }
             return;
+        }
 
         switch (evt)
         {
@@ -57,20 +72,6 @@ public sealed partial class OneCodeToplevel
                     // 子代理全部收尾、主代理尚未产生新活动事件——回到中性等待文案。
                     _shell.AgentStatusBar.SetActivity("处理中");
                 }
-                break;
-
-            case TuiToolDone { Name: var name, IsError: var err, Result: var result, ToolInput: var toolInput, ToolId: var toolId }:
-                _shell.Transcript.AddToolDone(name, err, toolInput, result ?? string.Empty, toolId);
-                // Shell 工具（Bash/PowerShell）展示前 3 行输出预览
-                if (!err && !string.IsNullOrWhiteSpace(result) && IsShellTool(name))
-                {
-                    var shellPreview = ExtractFirstLines(result, 3);
-                    if (!string.IsNullOrEmpty(shellPreview))
-                        _shell.Transcript.AddStreamingNotice($"{TuiGlyphs.ToolResultPrefix} {shellPreview}", TuiPalette.FgMuted);
-                }
-                // LSP diagnostics inline block — after Edit/Write, show any
-                // diagnostics the LSP server published for the modified file.
-                TryRenderLspDiagnosticsForTool(name, toolInput);
                 break;
 
             case TuiPermissionCheck { ToolName: var tn, Allowed: var approved, DenialReason: var reason }:

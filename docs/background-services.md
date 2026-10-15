@@ -312,19 +312,18 @@ JSON 形式合并写入 `MEMORY.md`。
 | 门控 | 条件 | 默认值 | 配置键 / 环境变量 |
 |------|------|--------|----------|
 | 启用门控 | 非远程模式 + AutoDream 未被显式关闭 | **开启** | `autodream.enabled` / `ONECODE_AUTODREAM=false` 关闭；`ONECODE_REMOTE=true` 自动关闭 |
-| 增量门控 | 自 `last_consolidated_at` 以来存在新增 working-memory 笔记或当前内存会话存在新对话轮次 | 有增量才运行 LLM | 手动 `Trigger(force: true)` 可跳过 |
+| 候选门控 | 当前内存会话存在有效对话轮次或存在 working-memory 笔记 | 有候选才运行 LLM | 手动 `Trigger(force: true)` 可跳过 |
 
 ### 5.4 执行流程
 
-1. 启用检查与 C# 零 Token 增量快检（任一不通过即退出）
+1. 启用检查与 C# 零 Token 候选快检（任一不通过即退出）
 2. 获取跨进程文件锁（`FileStream` + `FileShare.None`，原子获取）——锁文件在 `{cwd}/.onecode/memory/autodream.lock`
-3. 收集候选：`{cwd}/.onecode/agent-file-memory/` 中自上次整合后被改动的**会话工作记忆**（最多 20 个，最新优先，只读快照），以及 `ISessionManager.ForegroundConversation` 当前内存会话自 `last_consolidated_at` 以来的 `User` / `Assistant` 对话轮次摘要
-4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`since`、`working_memory_root`、`working_memory_section`、`current_conversation_section` 变量）
+3. 收集候选：`{cwd}/.onecode/agent-file-memory/` 中的**会话工作记忆**（最多 20 个，最新优先，只读快照），以及 `ISessionManager.ForegroundConversation` 当前内存会话的 `User` / `Assistant` 对话轮次摘要（从最新轮次向前按字符预算截取完整上下文）
+4. 构建整合提示词（从 `prompts/system/autodream-consolidation.prompt` 加载，注入 `project_root`、`working_memory_root`、`working_memory_section`、`current_conversation_section` 变量）
 5. 启动单轮无工具 `HarnessAgent`（挂载 `MemoryContextProvider` 注入既有 `MEMORY.md`）
 6. Agent 输出增量变更 JSON 数组（支持 `upsert`、`supersedes` 原子替换旧 Key、`delete`）
 7. 解析增量变更 JSON 数组后，按 `scope` 写入 `IMemoryEntryStore`：`user` → `~/.onecode/memory/MEMORY.md`，`project` → `{cwd}/.onecode/memory/MEMORY.md`（未指定 `ttlHours` 默认 `720h`，输出经 `SanitizeKey`/`SanitizeValue` 清洗，防 MEMORY.md 结构注入）
 8. 清理过期/超容量记忆条目（`IMemoryEntryStore.PruneAsync`，单作用域上限 `50` 条，移除过期条目 + 豁免 `manual` 后按 `UpdatedAt` 驱逐最旧条目）
-9. 更新 `last_consolidated_at` 时间戳（仅当 JSON 数组合法解析并应用成功时更新，存入 `{cwd}/.onecode/memory/`）
 
 ### 5.5 写入位置与项目隔离
 
@@ -335,7 +334,7 @@ JSON 形式合并写入 `MEMORY.md`。
 | `MemoryScope.User` | `~/.onecode/memory/` | `MEMORY.md` | 跨项目用户偏好（如沟通风格、工具偏好） |
 | `MemoryScope.Project` | `{cwd}/.onecode/memory/` | `MEMORY.md` | 项目特定决策与约定（如 OAuth 必须用 DPAPI） |
 
-**状态文件按项目隔离**：`autodream.lock` 与 `last_consolidated_at` 存入 `{cwd}/.onecode/memory/`，与项目 `MEMORY.md` 同目录，每个项目有独立的整合时间线和锁。
+**跨进程锁按项目隔离**：`autodream.lock` 存入 `{cwd}/.onecode/memory/`，与项目 `MEMORY.md` 同目录，每个项目有独立的整合锁。
 
 **对话来源按当前会话限定**：仅从匹配当前项目工作目录的活动内存会话（`ISessionManager.ForegroundConversation`）提取对话轮次，不跨会话扫描磁盘历史事件。
 
