@@ -89,8 +89,8 @@ public sealed class DebugFileLoggerProvider : ILoggerProvider, IDisposable
 
                 // 保留上限：每进程一个 {sessionId}.log 且无轮转，不清扫会无限堆积。
                 // 后台清 7 天前的旧日志；并发占用等失败留给下一次启动。
-                var sweepDir = dir;
-                _ = Task.Run(() => SweepOldLogs(sweepDir));
+                if (dir is { } sweepDir)
+                    _ = Task.Run(() => SweepOldLogs(sweepDir));
             }
             catch (Exception ex)
             {

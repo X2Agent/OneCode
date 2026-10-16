@@ -32,11 +32,11 @@ public static class GoalServiceCollectionExtensions
             sp.GetRequiredService<IMainAgentRunner>(),
             sp.GetRequiredService<IChatClient>(),
             sp.GetRequiredService<ILoggerFactory>(),
-            sp.GetRequiredService<ILogger<GoalSubGoalExecutor>>(),
             sp.GetRequiredService<IPromptManager>(),
             sp.GetRequiredService<GoalContextState>(),
             sp.GetRequiredService<GoalSubGoalGateDependencies>(),
-            sp.GetRequiredService<GoalSubTaskDagRunner>()));
+            sp.GetRequiredService<GoalSubTaskDagRunner>(),
+            sp.GetService<TodoProjectionService>()));
         services.AddSingleton<IGoalStepExecutionService>(sp => sp.GetRequiredService<GoalSubGoalExecutor>());
         services.AddSingleton<IGoalCompletionService>(sp => new GoalCompletionService(
             sp.GetRequiredService<IGoalRunStore>(),

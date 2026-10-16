@@ -1,4 +1,3 @@
-using OneCode.Core.Config;
 using IAppStateAccessor = OneCode.Core.Domain.IAppStateAccessor;
 
 namespace OneCode.App.Services;
@@ -13,7 +12,7 @@ namespace OneCode.App.Services;
 /// 启用规则：ThinkingEnabled=true 时启用扩展思考，budget 由 EffortValue 决定。
 /// 返回 (Enable, BudgetTokens)：调用方将 BudgetTokens 传给 StreamQueryAsync。
 /// </summary>
-public sealed class ThinkingParamsResolver(IConfigManager configManager)
+public sealed class ThinkingParamsResolver
 {
     public (bool Enable, int BudgetTokens) Resolve(IAppStateAccessor appState, string modelId)
     {

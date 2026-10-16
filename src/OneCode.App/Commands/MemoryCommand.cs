@@ -149,7 +149,6 @@ public sealed partial class MemoryCommand(
         if (args.Length < 2 || !int.TryParse(args[1], out var idx) || idx < 1)
             return CommandResult.Error("Usage: /memory remove <number>");
 
-        var conv = sessionManager.ForegroundConversation!;
         var entries = await memoryService.ListMemoryEntriesAsync(ct).ConfigureAwait(false);
 
         var target = entries.FirstOrDefault(e => e.Index == idx);

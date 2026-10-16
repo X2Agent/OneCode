@@ -20,8 +20,6 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 
 要求 .NET SDK 10。测试栈：xUnit v3 + FluentAssertions + NSubstitute。
 
-人工测试：见 [docs/testing/manual-checklist.md](docs/testing/manual-checklist.md)——只含单元测试覆盖不到的模块；日常开发改完只跑改动模块标 ● 的行 + 收尾检查，发布前逐项全量执行。
-
 ## Project Architecture
 
 ```

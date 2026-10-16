@@ -5,7 +5,7 @@ using OneCode.Infrastructure.Agent;
 namespace OneCode.App.Services.AutoDream;
 
 /// <summary>
-/// AutoDream 整合提示词构建器：收集上次整合以来写入的 working-memory 快照与当前内存会话中的最新对话轮次，
+/// AutoDream 整合提示词构建器：收集当前项目 working-memory 快照与当前内存会话中的最新对话轮次，
 /// 渲染 <c>system/autodream-consolidation</c> 模板变量，产出整合 Agent 的完整提示词。
 /// </summary>
 internal sealed class AutoDreamConsolidationPromptBuilder(

@@ -214,7 +214,7 @@ public sealed class KeyRoutingTests
     [Fact]
     public void DispatchInputKey_ShiftPageDown_RoutesToSidebar()
     {
-        // 分区滚动：Shift+PageDown 翻右侧计划/团队侧栏，不触发主对话区翻页。
+        // 分区滚动：Shift+PageDown 翻右侧计划侧栏，不触发主对话区翻页。
         var shell = CreateShell();
         var sidebarPageDown = 0;
         var transcriptPageDown = 0;
@@ -423,8 +423,8 @@ public sealed class KeyRoutingTests
         shell.IsPlanSidebarVisible.Should().BeTrue("再次 Ctrl+O 应恢复展示侧边栏");
     }
 
-    // 无计划也无团队时 Ctrl+O 不应展开空面板（空侧栏只增视觉噪声；
-    // 计划/团队一旦出现会自动展开）。
+    // 无计划内容时 Ctrl+O 不应展开空面板（空侧栏只增视觉噪声；
+    // 计划一旦出现会自动展开）。
     [Fact]
     public void SidebarToggle_CtrlO_DoesNotExpandEmptySidebar()
     {

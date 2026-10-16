@@ -3,7 +3,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Lsp;
-using OneCode.Infrastructure.Config;
 
 namespace OneCode.Tests;
 

@@ -4,8 +4,7 @@
 > UI 形态战略（TUI 是唯一交互前端；Web UI / 桌面壳 / AG-UI 端点不做）的决策依据与业界调研见
 > [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)，本计划是其工程落地图纸。
 > 关联文档：[后台代理派工边界](../adr/0011-background-agents-delegation-boundary.md)（后台会话/attach/守护进程复用
-> `QueryStreamEngine`/权限/Build 门禁，不构成背景代理派工触发）、[docs/keybindings.md](../keybindings.md)、
-> [docs/testing/manual-checklist.md](../testing/manual-checklist.md)。
+> `QueryStreamEngine`/权限/Build 门禁，不构成背景代理派工触发）、[docs/keybindings.md](../keybindings.md)。
 
 ## 1. 路线总览
 

@@ -4,6 +4,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
+using static OneCode.App.Services.GoalMode.GoalWorkflowStateMapper;
 
 namespace OneCode.App.Services.GoalMode;
 
@@ -80,7 +81,20 @@ internal sealed class GoalWorkflowRuntime(
     {
         var run = RequireBoundRun(input.GoalRunId);
         if (run.Plan.Count > 0)
+        {
+            if (run.State == GoalRunState.Paused)
+            {
+                var resumed = run with
+                {
+                    State = GoalRunState.Executing,
+                    TerminalReason = null,
+                    FailureSummary = null,
+                };
+                await SaveAsync(resumed, ct).ConfigureAwait(false);
+                run = _run!;
+            }
             return ToWorkflowState(run, FindNextIndex(run.Plan), run.HasReplanned);
+        }
 
         var result = await decomposer.DecomposeWithFallbackAsync(
             input.Goal,
@@ -105,8 +119,8 @@ internal sealed class GoalWorkflowRuntime(
                 FailureSummary = null,
             };
             await SaveAsync(fallback, ct).ConfigureAwait(false);
-                _progress.PlanCreated(plan);
-                return ToWorkflowState(_run!, currentIndex: 0, hasReplanned: _run!.HasReplanned);
+            _progress.PlanCreated(plan);
+            return ToWorkflowState(_run!, currentIndex: 0, hasReplanned: _run!.HasReplanned);
         }
 
         var updated = run with
@@ -153,6 +167,9 @@ internal sealed class GoalWorkflowRuntime(
 
             if (decision == GoalBudgetDecision.SkipCurrentStep)
             {
+                if (state.State == GoalRunState.Paused)
+                    state = state with { State = GoalRunState.Executing, FailureSummary = null };
+
                 var skippedEvidence = new GoalStepExecutionEvidence(
                     step.Id,
                     GoalStepState.Skipped,
@@ -163,7 +180,7 @@ internal sealed class GoalWorkflowRuntime(
                     Evaluation: "Skipped by user after budget limit reached.",
                     ChangedFiles: [],
                     ToolExecutions: [],
-                    Validations: [],
+                    Validations: [new GoalGateEvidence("budget", false, true, "Skipped by user after budget limit reached.")],
                     Diagnostics: []);
                 var skipReceipt = await workspaceService.RecordStepAsync(
                     run,
@@ -203,6 +220,9 @@ internal sealed class GoalWorkflowRuntime(
                 : "预算耗尽，已暂停（可通过 /resume 恢复）");
             return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
         }
+
+        if (state.State == GoalRunState.Paused)
+            state = state with { State = GoalRunState.Executing, FailureSummary = null };
 
         var existingReceipt = await workspaceService.FindStepReceiptAsync(
             run,
@@ -513,117 +533,4 @@ internal sealed class GoalWorkflowRuntime(
             throw new InvalidOperationException("Goal runtime binding does not match the workflow input.");
         return run;
     }
-
-    private static int FindNextIndex(IReadOnlyList<GoalStepSnapshot> plan)
-    {
-        for (var index = 0; index < plan.Count; index++)
-        {
-            if (plan[index].State is GoalStepState.Pending or GoalStepState.InProgress)
-                return index;
-        }
-        return plan.Count;
-    }
-
-    private static GoalWorkflowState ToWorkflowState(GoalRun run, int currentIndex, bool hasReplanned)
-        => new(
-            run.Id,
-            run.Plan,
-            run.Executions,
-            run.Budget,
-            currentIndex,
-            hasReplanned,
-            run.State,
-            run.FailureSummary);
-
-    private static GoalStepSnapshot ToSnapshot(GoalItem item)
-        => new(
-            item.Id,
-            item.Description,
-            item.SuccessCriteria,
-            ToStepState(item.Status),
-            item.RequiredTools ?? [],
-            item.Depth,
-            item.NeedsFurtherDecomposition,
-            item.AllowedPaths,
-            item.RequiresBuild,
-            item.RequiresTests,
-            item.Optional,
-            DecompositionFallback: false,
-            SubTasks: item.SubTasks);
-
-    private static GoalItem ToGoalItem(GoalStepSnapshot item)
-        => new()
-        {
-            Id = item.Id,
-            Description = item.Description,
-            SuccessCriteria = item.SuccessCriteria,
-            Status = ToGoalStatus(item.State),
-            RequiredTools = item.RequiredTools,
-            Depth = item.Depth,
-            NeedsFurtherDecomposition = item.NeedsFurtherDecomposition,
-            AllowedPaths = item.AllowedPaths,
-            RequiresBuild = item.RequiresBuild,
-            RequiresTests = item.RequiresTests,
-            Optional = item.Optional,
-            SubTasks = item.SubTasks,
-        };
-
-    private static GoalStepExecutionEvidence ToEvidence(
-        SubGoalExecution execution,
-        IReadOnlyList<string> fallbackChangedFiles,
-        bool rolledBack = false)
-    {
-        var source = execution.Evidence;
-        // rolledBack: 文件改动已整体还原，即使内部 agent 证据带文件列表，回执也记录为空。
-        return new GoalStepExecutionEvidence(
-            execution.GoalId,
-            ToStepState(execution.Status),
-            execution.Attempts,
-            execution.InputTokens,
-            execution.OutputTokens,
-            execution.AgentOutput,
-            execution.Evaluation,
-            rolledBack ? [] : source?.ChangedFiles ?? fallbackChangedFiles,
-            source?.ToolExecutions.Select(item => new GoalToolEvidence(item.ToolName, item.IsError, item.Result)).ToArray() ?? [],
-            source?.Validations.Select(item => new GoalGateEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray() ?? [],
-            source?.Diagnostics ?? []);
-    }
-
-    private static SubGoalExecution ToSubGoalExecution(GoalStepExecutionEvidence evidence)
-        => new(
-            evidence.GoalId,
-            ToGoalStatus(evidence.State),
-            evidence.Attempts,
-            evidence.InputTokens,
-            evidence.OutputTokens,
-            evidence.AgentOutput,
-            evidence.Evaluation,
-            new SubGoalEvidence(
-                evidence.AgentOutput,
-                evidence.ChangedFiles,
-                evidence.ToolExecutions.Select(item => new GoalToolExecutionEvidence(item.ToolName, item.IsError, item.Result)).ToArray(),
-                evidence.Validations.Select(item => new GoalValidationEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray(),
-                evidence.Diagnostics));
-
-    private static GoalStepState ToStepState(GoalStatus status)
-        => status switch
-        {
-            GoalStatus.Pending => GoalStepState.Pending,
-            GoalStatus.InProgress => GoalStepState.InProgress,
-            GoalStatus.Completed => GoalStepState.Completed,
-            GoalStatus.Failed => GoalStepState.Failed,
-            GoalStatus.Skipped => GoalStepState.Skipped,
-            _ => throw new ArgumentOutOfRangeException(nameof(status)),
-        };
-
-    private static GoalStatus ToGoalStatus(GoalStepState state)
-        => state switch
-        {
-            GoalStepState.Pending => GoalStatus.Pending,
-            GoalStepState.InProgress => GoalStatus.InProgress,
-            GoalStepState.Completed => GoalStatus.Completed,
-            GoalStepState.Failed => GoalStatus.Failed,
-            GoalStepState.Skipped => GoalStatus.Skipped,
-            _ => throw new ArgumentOutOfRangeException(nameof(state)),
-        };
 }

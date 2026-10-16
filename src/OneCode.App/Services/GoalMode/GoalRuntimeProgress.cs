@@ -62,7 +62,7 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
         var (icon, label) = evidence.State switch
         {
             GoalStepState.Completed => ("✓", "完成"),
-            GoalStepState.Failed => ("✗", "失败已回滚"),
+            GoalStepState.Failed => ("✗", "失败"),
             GoalStepState.Skipped => ("○", "跳过"),
             _ => ("·", evidence.State.ToString()),
         };

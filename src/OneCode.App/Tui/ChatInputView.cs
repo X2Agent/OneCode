@@ -91,10 +91,6 @@ public sealed partial class ChatInputView : View
     public event Action? ImagePasteRejected;
 
     /// <summary>
-    /// 并刷新 AgentStatusBar 显示的团队名。
-    /// </summary>
-
-    /// <summary>
     /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。
     /// 交互接管期间的按键交由会话统一处理（见 <see cref="IInteractionSession"/>）。
     /// </summary>

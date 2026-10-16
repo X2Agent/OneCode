@@ -5,7 +5,7 @@ namespace OneCode.App.Services.Agent;
 
 /// <summary>
 /// W4-B: semantic sub-goal / final-goal judge used inside DelegateLoopEvaluator.
-/// Kept custom (not AIJudgeLoopEvaluator) — see plan §2.6 / §14.
+/// Kept custom (not AIJudgeLoopEvaluator) to combine structured hard-gate diagnostics with semantic evaluation.
 /// </summary>
 internal sealed class GoalSubGoalJudge(
     IChatClient chatClient,

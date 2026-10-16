@@ -156,7 +156,7 @@ dotnet test src/OneCode.slnx --filter "FullyQualifiedName~ProviderWireContract|F
 ### 手工验证（本地 Ollama）
 
 设 `provider: "ollama"` + `ollama.temperature: 0.15`，连跑 5 轮含工具调用的对话，抓 Ollama 服务端日志确认
-`options` 块含上述四个键；再把温度调到 0.8 对比畸形 tool-call 比例（走 `docs/testing/manual-checklist.md` 对应条目）。
+`options` 块含上述四个键；再把温度调到 0.8 对比畸形 tool-call 比例。
 
 ---
 
@@ -253,8 +253,6 @@ dotnet restore src/OneCode.slnx
 dotnet build   src/OneCode.slnx     # 无新增警告
 dotnet test    src/OneCode.slnx     # 全绿
 ```
-
-外加 `docs/testing/manual-checklist.md` 中与配置重启生效、Ollama 会话、工具调用相关的条目逐项手测。
 
 **不需要**重新生成 `src/OneCode.Tests/ServiceRegistrationSnapshot.approved.txt`：
 `MaxOutputTokensDecorator` 与 `ProviderAwareDecorator` 都不是 DI 注册项（分别在

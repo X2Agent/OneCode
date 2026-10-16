@@ -4,7 +4,6 @@ using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.Core.Models;
-using OneCode.App.Services.GoalMode;
 
 namespace OneCode.App.Commands;
 

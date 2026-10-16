@@ -2,7 +2,6 @@ using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Tools;
 using OneCode.App.Tui;
-using OneCode.Core.Models;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;

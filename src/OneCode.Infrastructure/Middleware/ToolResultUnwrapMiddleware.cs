@@ -42,7 +42,7 @@ public sealed class ToolResultUnwrapMiddleware(
             var stateBag = AIAgent.CurrentRunContext?.Session?.StateBag;
             stateBag?.ResetToolExecutionContext();
 
-            object result;
+            object? result;
             try
             {
                 result = await next(ctx, ct).ConfigureAwait(false);

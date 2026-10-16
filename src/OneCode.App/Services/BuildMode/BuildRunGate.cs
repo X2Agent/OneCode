@@ -35,9 +35,6 @@ public sealed class BuildRunGate(
         && _controlledBuildAttemptHost is not null
         && _buildRunStore is not null;
 
-    /// <summary>Whether Plan workflow integration is available.</summary>
-    public bool HasPlanWorkflow => _planRunCloser is not null;
-
     public IBuildRunCoordinator? Coordinator => _buildRunCoordinator;
 
     public Task<MainAgentRunResult> RunControlledBuildAttemptAsync(

@@ -474,16 +474,16 @@ public sealed class AgentPipelineBuilderTests
             {
                 Mode = main.PermissionMode,
                 WorkingDirectory = main.WorkingDirectory,
-                RulesBySource = main.RulesBySource,
-                AdditionalWorkingDirectories = main.AdditionalWorkingDirectories,
+                RulesBySource = main.RulesBySource!,
+                AdditionalWorkingDirectories = main.AdditionalWorkingDirectories!,
             }, ct);
         var workerResult = await checker.CheckAsync("Bash", input,
             new ToolPermissionContext
             {
                 Mode = worker.PermissionMode,
                 WorkingDirectory = worker.WorkingDirectory,
-                RulesBySource = worker.RulesBySource,
-                AdditionalWorkingDirectories = worker.AdditionalWorkingDirectories,
+                RulesBySource = worker.RulesBySource!,
+                AdditionalWorkingDirectories = worker.AdditionalWorkingDirectories!,
             }, ct);
 
         mainResult.Decision.Should().Be(PermissionDecision.Deny, "Main 路径应拒绝 rm *");

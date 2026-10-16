@@ -1,8 +1,6 @@
 using InfraConstants = OneCode.Infrastructure.Config.Constants;
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.Core.Prompt;
 using OneCode.Infrastructure;
-using OneCode.Infrastructure.Prompt;
 
 namespace OneCode.App.Services;
 

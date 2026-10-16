@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
+using OneCode.App.Services.Agent;
 using OneCode.Core.Goals;
 
 namespace OneCode.App.Services.GoalMode;
@@ -207,4 +208,120 @@ internal sealed class GoalCompletionExecutor(string id, IGoalWorkflowRuntime run
             ?? throw new InvalidOperationException("Goal workflow shared state was not initialized.");
         return await runtime.CompleteAsync(state, cancellationToken).ConfigureAwait(false);
     }
+}
+
+internal static class GoalWorkflowStateMapper
+{
+    public static int FindNextIndex(IReadOnlyList<GoalStepSnapshot> plan)
+    {
+        for (var index = 0; index < plan.Count; index++)
+        {
+            if (plan[index].State is GoalStepState.Pending or GoalStepState.InProgress)
+                return index;
+        }
+        return plan.Count;
+    }
+
+    public static GoalWorkflowState ToWorkflowState(GoalRun run, int currentIndex, bool hasReplanned)
+        => new(
+            run.Id,
+            run.Plan,
+            run.Executions,
+            run.Budget,
+            currentIndex,
+            hasReplanned,
+            run.State,
+            run.FailureSummary);
+
+    public static GoalStepSnapshot ToSnapshot(GoalItem item)
+        => new(
+            item.Id,
+            item.Description,
+            item.SuccessCriteria,
+            ToStepState(item.Status),
+            item.RequiredTools ?? [],
+            item.Depth,
+            item.NeedsFurtherDecomposition,
+            item.AllowedPaths,
+            item.RequiresBuild,
+            item.RequiresTests,
+            item.Optional,
+            DecompositionFallback: false,
+            SubTasks: item.SubTasks);
+
+    public static GoalItem ToGoalItem(GoalStepSnapshot item)
+        => new()
+        {
+            Id = item.Id,
+            Description = item.Description,
+            SuccessCriteria = item.SuccessCriteria,
+            Status = ToGoalStatus(item.State),
+            RequiredTools = item.RequiredTools,
+            Depth = item.Depth,
+            NeedsFurtherDecomposition = item.NeedsFurtherDecomposition,
+            AllowedPaths = item.AllowedPaths,
+            RequiresBuild = item.RequiresBuild,
+            RequiresTests = item.RequiresTests,
+            Optional = item.Optional,
+            SubTasks = item.SubTasks,
+        };
+
+    public static GoalStepExecutionEvidence ToEvidence(
+        SubGoalExecution execution,
+        IReadOnlyList<string> fallbackChangedFiles,
+        bool clearChangedFiles = false)
+    {
+        var source = execution.Evidence;
+        // clearChangedFiles: 单代理步骤失败时回执清空文件列表，避免被 replan 取代的失败步触发收尾 change-scope 误判。
+        return new GoalStepExecutionEvidence(
+            execution.GoalId,
+            ToStepState(execution.Status),
+            execution.Attempts,
+            execution.InputTokens,
+            execution.OutputTokens,
+            execution.AgentOutput,
+            execution.Evaluation,
+            clearChangedFiles ? [] : source?.ChangedFiles ?? fallbackChangedFiles,
+            source?.ToolExecutions.Select(item => new GoalToolEvidence(item.ToolName, item.IsError, item.Result)).ToArray() ?? [],
+            source?.Validations.Select(item => new GoalGateEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray() ?? [],
+            source?.Diagnostics ?? []);
+    }
+
+    public static SubGoalExecution ToSubGoalExecution(GoalStepExecutionEvidence evidence)
+        => new(
+            evidence.GoalId,
+            ToGoalStatus(evidence.State),
+            evidence.Attempts,
+            evidence.InputTokens,
+            evidence.OutputTokens,
+            evidence.AgentOutput,
+            evidence.Evaluation,
+            new SubGoalEvidence(
+                evidence.AgentOutput,
+                evidence.ChangedFiles,
+                evidence.ToolExecutions.Select(item => new GoalToolExecutionEvidence(item.ToolName, item.IsError, item.Result)).ToArray(),
+                evidence.Validations.Select(item => new GoalValidationEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray(),
+                evidence.Diagnostics));
+
+    public static GoalStepState ToStepState(GoalStatus status)
+        => status switch
+        {
+            GoalStatus.Pending => GoalStepState.Pending,
+            GoalStatus.InProgress => GoalStepState.InProgress,
+            GoalStatus.Completed => GoalStepState.Completed,
+            GoalStatus.Failed => GoalStepState.Failed,
+            GoalStatus.Skipped => GoalStepState.Skipped,
+            _ => throw new ArgumentOutOfRangeException(nameof(status)),
+        };
+
+    public static GoalStatus ToGoalStatus(GoalStepState state)
+        => state switch
+        {
+            GoalStepState.Pending => GoalStatus.Pending,
+            GoalStepState.InProgress => GoalStatus.InProgress,
+            GoalStepState.Completed => GoalStatus.Completed,
+            GoalStepState.Failed => GoalStatus.Failed,
+            GoalStepState.Skipped => GoalStatus.Skipped,
+            _ => throw new ArgumentOutOfRangeException(nameof(state)),
+        };
 }

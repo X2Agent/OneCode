@@ -13,7 +13,7 @@ namespace OneCode.App.Services.Agent;
 /// GOAL sub-goal execution facade (W4): builds the inner AIAgent, then runs MAF
 /// <see cref="LoopAgent"/> via <see cref="GoalSubGoalLoop"/>. Hard gates and semantic
 /// judge live in <see cref="GoalSubGoalHardGate"/> / <see cref="GoalSubGoalJudge"/>.
-/// Prefer DelegateLoopEvaluator over AIJudgeLoopEvaluator — see plan §2.6 / §14.
+/// Prefer DelegateLoopEvaluator over AIJudgeLoopEvaluator.
 /// </summary>
 internal interface IGoalStepExecutionService
 {
@@ -37,14 +37,12 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     private readonly IPromptManager _promptManager;
     private readonly GoalContextState _goalContextState;
     private readonly GoalSubGoalLoop _loop;
-    private readonly GoalSubGoalJudge _judge;
     private readonly GoalSubTaskDagRunner _dagRunner;
 
     public GoalSubGoalExecutor(
         IMainAgentRunner mainAgentRunner,
         IChatClient chatClient,
         ILoggerFactory loggerFactory,
-        ILogger<GoalSubGoalExecutor> logger,
         IPromptManager promptManager,
         GoalContextState goalContextState,
         GoalSubGoalGateDependencies gateDependencies,
@@ -52,15 +50,15 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         TodoProjectionService? todoProjection = null)
     {
         _mainAgentRunner = mainAgentRunner;
-        _logger = logger;
+        _logger = loggerFactory.CreateLogger<GoalSubGoalExecutor>();
         _promptManager = promptManager;
         _goalContextState = goalContextState;
         _dagRunner = dagRunner;
         var hardGate = new GoalSubGoalHardGate(
             gateDependencies.VerificationProvider,
             gateDependencies.DiagnosticRegistry);
-        _judge = new GoalSubGoalJudge(chatClient, promptManager);
-        _loop = new GoalSubGoalLoop(hardGate, _judge, loggerFactory, todoProjection);
+        var judge = new GoalSubGoalJudge(chatClient, promptManager);
+        _loop = new GoalSubGoalLoop(hardGate, judge, loggerFactory, todoProjection);
     }
 
     public async Task<SubGoalExecution> ExecuteSubGoalWithLoopStreamingAsync(

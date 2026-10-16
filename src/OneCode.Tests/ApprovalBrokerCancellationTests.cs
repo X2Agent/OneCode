@@ -1,6 +1,5 @@
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.Core.Coordinator;
 using OneCode.Core.Permissions;
 
 namespace OneCode.Tests;

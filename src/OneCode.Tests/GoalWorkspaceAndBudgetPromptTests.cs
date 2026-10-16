@@ -196,6 +196,41 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
 
         next.CurrentIndex.Should().Be(1, "skipping the current step must advance the cursor to the next sub-goal");
         next.Plan[0].State.Should().Be(GoalStepState.Skipped);
+        next.Executions.Should().ContainSingle()
+            .Which.Validations.Should().ContainSingle(g => g.Gate == "budget" && g.Skipped);
+    }
+
+    [Fact]
+    public async Task PlanAsync_PausedRunWithExistingPlan_TransitionsBackToExecutingForResume()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new JsonGoalRunStore(Path.Combine(_root, "runs-resume"));
+        var step = CreateStep(1);
+        var run = await CreateClaimedRunAsync(store, [step], totalAttempts: 5);
+        await store.SaveFencedAsync(
+            run with
+            {
+                State = GoalRunState.Paused,
+                TerminalReason = RunTerminalReason.BudgetExceeded,
+                FailureSummary = "Budget exhausted.",
+            },
+            run.Version,
+            fencingToken: 7,
+            ct);
+        var pausedRun = (await store.LoadByIdAsync(run.Id, ct))!;
+
+        var channel = Channel.CreateUnbounded<TuiEvent>();
+        var runtime = CreateRuntimeWithPrompt(store, channel.Writer, maxAttempts: 15);
+        await runtime.BindAsync(pausedRun, 7, ct);
+
+        var state = await runtime.PlanAsync(new GoalWorkflowInput(pausedRun.Id, pausedRun.Goal, "test-model", "hash"), ct);
+
+        state.State.Should().Be(GoalRunState.Executing, "resuming a Paused run via PlanAsync must re-enter Executing so GoalPlanExecutor does not short-circuit");
+        state.CurrentIndex.Should().Be(0);
+        var reloaded = (await store.LoadByIdAsync(pausedRun.Id, ct))!;
+        reloaded.State.Should().Be(GoalRunState.Executing);
+        reloaded.TerminalReason.Should().BeNull();
+        reloaded.FailureSummary.Should().BeNull();
     }
 
     [Fact]

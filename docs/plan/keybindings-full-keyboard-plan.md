@@ -77,13 +77,13 @@
 | `sidebar:pageUp` | `Shift+PageUp` | Chat | 侧边栏上翻页 |
 | `sidebar:pageDown` | `Shift+PageDown` | Chat | 侧边栏下翻页 |
 | `app:cyclePane` | `F6` | Global | 输入框 ↔ 侧边栏焦点轮转 |
-| `chat:toggleLastDetails` | `Ctrl+O` | Chat | 展开/折叠最近一条工具/思考/错误详情 |
+| `chat:toggleLastDetails` | `Ctrl+E` | Chat | 展开/折叠最近一条工具/思考/错误详情 |
 | `chat:find` | `Ctrl+F` | Chat | 呼出行内搜索条 |
 | `chat:findNext` | `Enter`（搜索条激活时） | Search | 跳下一处 |
 | `chat:findPrevious` | `Shift+Enter`（搜索条激活时） | Search | 跳上一处 |
 | `chat:findDismiss` | `Esc`（搜索条激活时） | Search | 关闭搜索条并清除高亮 |
 
-> **键位冲突核查**：`Alt+Up/Down/PgUp/PgDn`、`F6`、`Ctrl+O`、`Ctrl+F` 均不在 `KeybindingDefaults.NonRebindable`（ctrl+d/ctrl+m）、`TerminalReserved`（ctrl+z/ctrl+\，仅 Unix）、`MacOSReserved`（cmd+*）列表中，与现有 35 个动作的默认绑定无冲突。`Ctrl+O`/`Ctrl+F` 在终端中为标准控制序列，无协议歧义。
+> **键位冲突核查**：`Alt+Up/Down`、`Shift+PgUp/PgDn`、`F6`、`Ctrl+E`、`Ctrl+F` 均不在 `KeybindingDefaults.NonRebindable`（ctrl+d/ctrl+m）、`TerminalReserved`（ctrl+z/ctrl+\，仅 Unix）、`MacOSReserved`（cmd+*）列表中，且避开已绑定为 `app:sidebarToggle`（Global）的 `Ctrl+O`。`Ctrl+E`/`Ctrl+F` 在终端中为标准控制序列，无协议歧义。
 
 ### 3.2 侧边栏滚动：双路径方案
 
@@ -109,7 +109,7 @@
 
 ### 3.3 折叠块键盘交互
 
-- `Ctrl+O`（`chat:toggleLastDetails`）：定位会话流中**最后一条**折叠行（工具/思考/错误三类 Tag 任一），切换其展开态；重复按压在"展开 → 折叠"间往复。
+- `Ctrl+E`（`chat:toggleLastDetails`）：定位会话流中**最后一条**折叠行（工具/思考/错误三类 Tag 任一），切换其展开态；重复按压在"展开 → 折叠"间往复。
 - 定位逻辑放 `MessageListView`：从尾部向前扫描 `_lines`，找到第一个带 `ToolLineTag` / `ThinkingLineTag` / `ErrorLineTag` 的行；若该行已展开则折叠，否则展开。展开后 `ScrollToLine` 保证可见。
 - 三个 `Toggle*Expansion` 方法从 `private` 提升为 `internal`（或新增统一入口 `ToggleLastDetails()`），供事件路由调用。
 
@@ -152,7 +152,7 @@
 | # | 任务 | 文件 | 验收 |
 |---|---|---|---|
 | 2.1 | `MessageListView` 新增 `ToggleLastDetails()`：尾部向前扫描定位最近折叠行并切换 | `MessageListView.cs` | 单测：含工具/思考/错误折叠行的流，调用后 `IsExpanded` 翻转 |
-| 2.2 | `ChatInputView` 新增 `ToggleDetailsRequested` 事件与 `chat:toggleLastDetails` 分发分支 | `ChatInputView.Keys.cs` | 单测：Ctrl+O 触发事件 |
+| 2.2 | `ChatInputView` 新增 `ToggleDetailsRequested` 事件与 `chat:toggleLastDetails` 分发分支 | `ChatInputView.Keys.cs` | 单测：Ctrl+E 触发事件 |
 | 2.3 | `ReplShell` 订阅并路由到 `_transcript.MessageView.ToggleLastDetails()` | `ReplShell.cs` | 集成：展开后行数变化、`ScrollToLine` 可见 |
 | 2.4 | （可选）`QuestionWizard` 接入 Resolver：将 `Key.` 比较链迁至 `Selector` 上下文扩展绑定 | `QuestionWizard.cs`、`KeybindingDefaults.cs` | 现有交互行为回归测试全绿；**若迁移风险高则放弃，维持现状**（功能已可用，见 §1.2 #5） |
 
@@ -193,7 +193,7 @@
 - [ ] **基础闭环**：输入消息 → `Enter` 提交 → `Esc` 中断运行 → `Ctrl+D` 退出
 - [ ] **侧边栏微调**：PLAN 模式生成计划后，`Alt+Up/Down` 滚动 Plan 面板，焦点始终在输入框（继续打字不丢字符）
 - [ ] **窗格轮转**：`F6` 聚焦侧边栏 → `↑↓/PgUp/PgDn/Home/End` 漫游 → `Esc` 切回输入框
-- [ ] **折叠块**：Agent 执行工具调用后，`Ctrl+O` 展开最近工具详情 → 再按折叠；思考过程、错误详情同理
+- [ ] **折叠块**：Agent 执行工具调用后，`Ctrl+E` 展开最近工具详情 → 再按折叠；思考过程、错误详情同理
 - [ ] **行内搜索**：`Ctrl+F` 呼出搜索条 → 输入关键词即时高亮 → `Enter`/`Shift+Enter` 前后跳转 → `Esc` 关闭
 - [ ] **Diff 审查**：`/diff` → `↑↓/J/K/PgUp/PgDn/Home/End` 浏览 → `Esc` 逐层关闭 overlay
 - [ ] **审批选择器**：权限提示弹出后 `↑↓` 选择、`Enter` 确认、`Esc` 拒绝

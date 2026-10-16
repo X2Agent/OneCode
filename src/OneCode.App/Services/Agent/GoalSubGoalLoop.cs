@@ -132,7 +132,7 @@ internal sealed class GoalSubGoalLoop(
                 eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
                     $"子目标 #{goal.Id} · 第 {state.Iterations}/{GoalLoopDefaults.MaxAttemptsPerSubGoal} 轮未完成，继续迭代"));
 
-                // Continue(feedback) → LoopAgent 用 FeedbackMessageTemplate 将 feedback 注入下一轮
+                // Continue(feedback) → LoopAgent 将本轮反馈追加到聚合反馈日志供下一轮迭代使用
                 return LoopEvaluation.Continue(BuildFeedback(feedback, lastOutput));
             });
 

@@ -39,7 +39,7 @@ public static class HttpServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         });
 
-        // 网页搜索：UA 由 WebSearchTool 按目标站点设置（DuckDuckGo 反爬要求真实浏览器 UA）。
+        // 网页搜索：UA 由具体搜索提供方（如 DuckDuckGoSearchProvider）按需设置。
         services.AddHttpClient(Constants.HttpClientNames.WebSearch, client =>
         {
             client.Timeout = TimeSpan.FromSeconds(Constants.Timeouts.WebSearch);
