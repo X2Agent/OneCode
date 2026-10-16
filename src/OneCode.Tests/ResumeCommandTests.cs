@@ -127,7 +127,7 @@ public sealed class ResumeCommandTests
             State = GoalRunState.Paused,
             Plan =
             [
-                new GoalStepSnapshot(1, "Test", "done", GoalStepState.Pending, [], 0, false, [], [], false, false, false),
+                new GoalStepSnapshot(1, "Test", "done", GoalStepState.Pending, [], 0, false, [], false, false, false),
             ],
         }).ToArray();
         var store = Substitute.For<IGoalRunStore>();

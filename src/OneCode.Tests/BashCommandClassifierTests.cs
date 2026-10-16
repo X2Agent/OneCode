@@ -53,6 +53,15 @@ public sealed class BashCommandClassifierTests
         BashCommandClassifier.IsDestructive("ls -la").Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("python --version 2>/dev/null || python3 --version 2>/dev/null")]
+    [InlineData("dotnet build 2>&1")]
+    [InlineData("ls -la 2>nul")]
+    public void IsDestructive_NullAndStreamRedirection_ReturnsFalse(string command)
+    {
+        BashCommandClassifier.IsDestructive(command).Should().BeFalse();
+    }
+
     [Fact]
     public void ExtractReferencedPaths_RmCommand_ExtractsPaths()
     {

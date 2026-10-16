@@ -81,7 +81,7 @@ public sealed partial class ChatInputView : View
     /// <summary>收窄右侧侧边栏（Ctrl+Shift+←，app:sidebarNarrower）。由 ReplShell 接线到宽度调整。</summary>
     public event Action? SidebarNarrowerRequested;
 
-    /// <summary>切换右侧侧边栏可见性（Ctrl+G，app:sidebarToggle）。由 ReplShell 接线。</summary>
+    /// <summary>切换右侧侧边栏可见性（Ctrl+O，app:sidebarToggle）。由 ReplShell 接线。</summary>
     public event Action? SidebarToggleRequested;
 
     /// <summary>

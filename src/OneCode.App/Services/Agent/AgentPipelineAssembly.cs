@@ -21,6 +21,12 @@ public sealed class AgentPipelineAssembly(
         "reply with one short sentence and stop; the user's approval prompt appears when you finish.";
 
     /// <summary>
+    /// 单次运行内外部网络工具（<c>WebSearch</c>/<c>WebFetch</c>）的调用配额上限，
+    /// 防止网络检索死循环耗尽外部配额，同时不影响本地工具（<c>Read</c>/<c>Write</c>/<c>Edit</c>/<c>Bash</c>）。
+    /// </summary>
+    public const int DefaultMaxExternalWebToolCalls = 20;
+
+    /// <summary>
     /// Builds <see cref="AgentPipelineOptions"/> for the Main agent (<see cref="PipelineProfile.Full"/>).
     /// </summary>
     /// <param name="options">主代理运行选项。</param>
@@ -108,23 +114,21 @@ public sealed class AgentPipelineAssembly(
     public PipelineRoleOverrides BuildMainRoleOverrides(MainAgentRunOptions options)
     {
         return new PipelineRoleOverrides(
-            MaxToolCalls: options.MaxTurns,
-            // 可指导收尾：达到上限后模型应总结进度而非继续重试调用。
+            // 主代理与 Goal 子目标不再对本地工作区工具（Read/Write/Edit/Glob/Grep/Bash/todos_* 等）
+            // 施加硬性调用次数上限；模型往返轮数由 MaxTurns（MaximumIterationsPerRequest）控制，
+            // Token 成本由 BudgetGuardRunMiddleware 控制，外部网络检索由 MaxExternalWebToolCalls 限流。
+            MaxToolCalls: int.MaxValue,
             ToolLimitMessage:
-                $"Main agent tool call budget ({options.MaxTurns}) reached. " +
+                $"Main agent tool call budget reached. " +
                 "Stop calling tools and summarize completed work and remaining items.",
             IsToolAllowed: options.IsToolAllowed,
-            // GoalAuto（GOAL 子目标路径）下 broker 为 null，但必须挂 MAF 审批中间件 +
-            // 全放行规则（AutoApprovalRulesFactory 对 GoalAuto 自动放行全部工具），
-            // 否则 LoopAgent 会因 pending tool approval 无人解析而直接停止。
-            // SuppressToolApproval 保留受控 Build（broker=null + 显式禁用）的语义。
-            //
-            // 该布尔同时门控「工具是否带原生审批标记」：只有真正存在审批通道时才能标记，
-            // 否则每个函数调用都会变成无人应答的审批请求。因此 SuppressToolApproval 时
-            // 标记必须一并关闭——这与它“不挂交互 broker”的意图一致。
-            EnableToolApproval: (options.ApprovalBroker is not null
-                || modeProvider.CurrentMode == PermissionMode.GoalAuto)
-                && !options.SuppressToolApproval);
+            // 只有真正存在交互式审批通道（ApprovalBroker != null）且未显式抑制时才启用
+            // ApprovalRequiredAIFunction 包装与 ToolApprovalAgent。
+            // GoalAuto（GOAL 子目标 LoopAgent）无交互 broker，必须关闭原生审批标记，
+            // 使 PermissionChecker 的 Deny 决策直接作为错误文本回喂给模型自纠，而非挂起中断循环。
+            EnableToolApproval: options.ApprovalBroker is not null && !options.SuppressToolApproval,
+            MaxTurns: options.MaxTurns,
+            MaxExternalWebToolCalls: DefaultMaxExternalWebToolCalls);
     }
 
     private Dictionary<string, AdditionalWorkingDirectory>? BuildAdditionalWorkingDirectories()

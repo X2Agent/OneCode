@@ -17,8 +17,9 @@ namespace OneCode.Infrastructure.Search;
 /// 也让 DDG 无法像 Tavily 一样被独立替换或测试。
 /// </para>
 /// <para>
-/// <b>反爬防御。</b> 请求携带真实浏览器 User-Agent；HTTP 202，以及 HTTP 200 但解析结果为空，
-/// 都视为反爬挑战并抛错。否则会得到「成功但空结果」，模型会误以为搜索正常而反复换词重试。
+/// <b>反爬防御。</b> 请求携带真实浏览器 User-Agent，并通过信号量串行化并发请求及保持最小间隔；
+/// HTTP 202，以及 HTTP 200 但解析结果为空，都视为反爬挑战并抛错。
+/// 否则会得到「成功但空结果」，模型会误以为搜索正常而反复换词重试。
 /// </para>
 /// <para>
 /// <b>无需配置。</b> 与 Tavily 不同，本提供方始终可用（无 API Key），
@@ -31,8 +32,18 @@ public sealed class DuckDuckGoSearchProvider(IHttpClientFactory httpClientFactor
     private const string BrowserUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+    internal static readonly TimeSpan DefaultMinRequestInterval = TimeSpan.FromMilliseconds(1000);
+
     // 单例复用 HtmlParser——AngleSharp 的 HtmlParser 线程安全（每次 ParseDocument 返回独立 IDocument）。
     private static readonly HtmlParser s_htmlParser = new();
+
+    private readonly SemaphoreSlim _requestGate = new(1, 1);
+    private long _lastRequestCompletedTimestamp;
+
+    /// <summary>
+    /// 两次请求之间的最小间隔：避免单轮并行发起多个 <c>WebSearch</c> 时毫秒级突发打中 DDG 触发 HTTP 202 反爬。
+    /// </summary>
+    internal TimeSpan MinRequestInterval { get; init; } = DefaultMinRequestInterval;
 
     /// <inheritdoc />
     public string Name => "duckduckgo";
@@ -43,21 +54,38 @@ public sealed class DuckDuckGoSearchProvider(IHttpClientFactory httpClientFactor
     /// <inheritdoc />
     public async Task<IReadOnlyList<WebSearchResult>> SearchAsync(string query, int maxResults, CancellationToken ct = default)
     {
-        var url = $"https://html.duckduckgo.com/html/?q={Uri.EscapeDataString(query)}";
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        using var httpClient = CreateSearchHttpClient();
-        using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
-
-        if (response.StatusCode == HttpStatusCode.Accepted)
+        await _requestGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException(
-                "DuckDuckGo returned an anti-bot challenge (HTTP 202, no results).");
+            if (_lastRequestCompletedTimestamp != 0 && MinRequestInterval > TimeSpan.Zero)
+            {
+                var elapsed = Stopwatch.GetElapsedTime(_lastRequestCompletedTimestamp);
+                var remaining = MinRequestInterval - elapsed;
+                if (remaining > TimeSpan.Zero)
+                    await Task.Delay(remaining, ct).ConfigureAwait(false);
+            }
+
+            var url = $"https://html.duckduckgo.com/html/?q={Uri.EscapeDataString(query)}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var httpClient = CreateSearchHttpClient();
+            using var response = await httpClient.SendAsync(request, ct).ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.Accepted)
+            {
+                throw new InvalidOperationException(
+                    "DuckDuckGo returned an anti-bot challenge (HTTP 202, no results).");
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var html = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return ParseResults(html, maxResults);
         }
-
-        response.EnsureSuccessStatusCode();
-
-        var html = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        return ParseResults(html, maxResults);
+        finally
+        {
+            _lastRequestCompletedTimestamp = Stopwatch.GetTimestamp();
+            _requestGate.Release();
+        }
     }
 
     private HttpClient CreateSearchHttpClient()

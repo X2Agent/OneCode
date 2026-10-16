@@ -135,26 +135,25 @@ public sealed class MainAgentRunnerTests : IDisposable
     }
 
     [Fact]
-    public void BuildChatOptions_NoReasoningBudget_EscalatesMaxOutputTokensPastReasoningDrain()
+    public void BuildChatOptions_NoExplicitMaxOutputTokens_LeavesNullForPipelineDecorator()
     {
-        // 受控 Build 无推理预算时若沿用 4K 级默认上限，推理模型的隐性 reasoning 会
-        // 吃光全部输出预算、触发零输出重试空转（受控 Build 首轮空转 65 秒的事故形态）。
+        // 业务层不硬编码默认输出上限，交由底层客户端管道（MaxOutputTokensDecorator）统一注入并处理 Length 恢复。
         var options = new MainAgentRunOptions { ModelId = "gpt-5" };
 
         var chatOptions = MainAgentRunner.BuildChatOptions(options);
 
-        chatOptions.MaxOutputTokens.Should().Be(65_536);
+        chatOptions.MaxOutputTokens.Should().BeNull("默认输出上限由底层客户端管道统一注入，业务层不硬编码");
         chatOptions.Reasoning.Should().BeNull("未开启思考时不显式下发 Reasoning");
     }
 
     [Fact]
-    public void BuildChatOptions_ExplicitMaxOutputTokens_WinsOverEscalation()
+    public void BuildChatOptions_ExplicitMaxOutputTokens_PreservesCallerCap()
     {
         var options = new MainAgentRunOptions { ModelId = "gpt-5", MaxOutputTokens = 2_048 };
 
         var chatOptions = MainAgentRunner.BuildChatOptions(options);
 
-        chatOptions.MaxOutputTokens.Should().Be(2_048, "显式配置的输出上限优先于自动升级");
+        chatOptions.MaxOutputTokens.Should().Be(2_048, "显式配置的输出上限必须透传给管道");
     }
 
     [Fact]

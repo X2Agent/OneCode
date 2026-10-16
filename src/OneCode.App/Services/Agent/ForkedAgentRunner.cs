@@ -128,6 +128,7 @@ public sealed class ForkedAgentRunner(
             // ParentWorkingDirectory 此前声明但从未被消费，导致 GOAL worktree 中派生的
             // 子代理落在会话根目录——现在生效。
             var cwd = parameters.ParentWorkingDirectory ?? _workingDirectoryAccessor.WorkingDirectory;
+            using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(cwd);
             var profile = parameters.Profile;
 
             var contextProviders = _contextPipeline.BuildShared(
@@ -183,7 +184,7 @@ public sealed class ForkedAgentRunner(
                 ChatOptions = new ChatOptions
                 {
                     ModelId = csp?.ModelId,
-                    MaxOutputTokens = parameters.MaxOutputTokens ?? 4096,
+                    MaxOutputTokens = parameters.MaxOutputTokens,
                     Tools = tools.Count > 0 ? tools : null,
                     ToolMode = tools.Count > 0 ? ChatToolMode.Auto : null,
                     Instructions = parameters.AgentInstructions,

@@ -54,12 +54,23 @@ public static class PermissionAndLimitMiddleware
                 return ToolResult.Error($"Tool '{ctx.Function.Name}' is not permitted in this agent.");
             }
 
-            // 计数 + MaxToolCalls 检查推迟到权限通过后、实际执行前进行：
-            // 被权限拒绝或审批拒绝的工具调用不计入 MaxToolCalls，避免计数偏差。
+            // 计数 + 配额检查推迟到权限通过后、实际执行前进行：
+            // 被权限拒绝或审批拒绝的工具调用不计入上限，避免计数偏差。
             async ValueTask<object> ExecuteWithLimitAsync(FunctionInvocationContext innerCtx, CancellationToken innerCt)
             {
                 if (metrics.IncrementToolCallCount() > options.MaxToolCalls)
                     return ToolResult.Error(options.ToolLimitMessage);
+
+                if (options.MaxExternalWebToolCalls is { } maxWebCalls
+                    && innerCtx.Function is not null
+                    && IsExternalWebTool(innerCtx.Function.Name)
+                    && metrics.IncrementExternalWebToolCallCount() > maxWebCalls)
+                {
+                    return ToolResult.Error(
+                        $"External web tool budget ({maxWebCalls} calls) reached for '{innerCtx.Function.Name}'. " +
+                        "Stop calling WebSearch/WebFetch and proceed using the information already gathered with local workspace tools (Write, Edit, Read, Bash).");
+                }
+
                 return await next(innerCtx, innerCt).ConfigureAwait(false) ?? "";
             }
 
@@ -153,4 +164,9 @@ public static class PermissionAndLimitMiddleware
             $"Tool '{ctx.Function.Name}' denied: unrecognized permission decision '{perm.Decision}'.",
             "This is likely a framework bug — the PermissionDecision enum has an unhandled value.");
     }
+
+    private static bool IsExternalWebTool(string toolName) =>
+        string.Equals(toolName, "WebSearch", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(toolName, "WebFetch", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(toolName, "BrowserFetch", StringComparison.OrdinalIgnoreCase);
 }

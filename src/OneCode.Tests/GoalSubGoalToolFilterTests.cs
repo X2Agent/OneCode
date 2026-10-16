@@ -12,7 +12,7 @@ public sealed class GoalSubGoalToolFilterTests
     private static IList<AITool> Tools(params string[] names)
         => names.Select(name => (AITool)AIFunctionFactory.Create(() => { }, name: name)).ToList();
 
-    private static readonly string[] AllToolNames = ["Read", "Write", "Bash", "Agent", "ParallelAgents"];
+    private static readonly string[] AllToolNames = ["Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash", "WebSearch", "Agent", "ParallelAgents"];
 
     [Theory]
     [InlineData(0)] // null
@@ -30,16 +30,19 @@ public sealed class GoalSubGoalToolFilterTests
         var filtered = GoalSubGoalExecutor.FilterToolsForSubGoal(Tools([.. AllToolNames]), requiredTools);
 
         // 派工工具（Agent/ParallelAgents）摘除，其余保留
-        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo("Read", "Write", "Bash");
+        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo(
+            "Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash", "WebSearch");
     }
 
     [Fact]
-    public void ExplicitRequiredTools_StripsDispatchToolsFromMatch()
+    public void ExplicitRequiredTools_StripsDispatchToolsAndRetainsBaselineWorkspaceTools()
     {
         var filtered = GoalSubGoalExecutor.FilterToolsForSubGoal(
-            Tools([.. AllToolNames]), ["Read", "Agent"]);
+            Tools([.. AllToolNames]), ["WebSearch", "Agent"]);
 
-        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo("Read");
+        // 显式指定 WebSearch 时，保底并入工作区读写与检索基础工具，同时剔除 Agent 与未请求的 Bash
+        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo(
+            "Read", "Glob", "Grep", "LS", "Edit", "Write", "WebSearch");
     }
 
     [Fact]
@@ -54,12 +57,13 @@ public sealed class GoalSubGoalToolFilterTests
     }
 
     [Fact]
-    public void MixedUnknownAndValidNames_KeepsValidMatches()
+    public void MixedUnknownAndValidNames_KeepsValidMatchesAndBaselineWorkspaceTools()
     {
-        // 既有契约：fail-closed 只针对「零匹配」；部分未知名被静默丢弃，合法匹配保留。
+        // 既有契约：fail-closed 只针对「零匹配」；部分未知名被静默丢弃，合法匹配与工作区保底工具保留。
         var filtered = GoalSubGoalExecutor.FilterToolsForSubGoal(
-            Tools([.. AllToolNames]), ["Read", "NonexistentTool"]);
+            Tools([.. AllToolNames]), ["Bash", "NonexistentTool"]);
 
-        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo("Read");
+        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo(
+            "Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash");
     }
 }

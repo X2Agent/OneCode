@@ -362,6 +362,10 @@ public sealed partial class ChatTranscriptView : View
         Func<int, IReadOnlyList<FormattedLine>> renderAtWidth,
         bool withSpacing = true)
     {
+        var resumeStreaming = _stream.IsStreaming;
+        if (resumeStreaming)
+            FlushStreamingBeforeCommittedBlock();
+
         var spacing = withSpacing && _messageView.TotalLines > 0;
         if (spacing)
         {
@@ -381,6 +385,9 @@ public sealed partial class ChatTranscriptView : View
         if (spacing)
             _messageView.AppendLine("", TuiPalette.BgPrimary);
         _messageView.AppendLines(current);
+
+        if (resumeStreaming)
+            _messageView.BeginStreamingPreview();
     }
 
     /// <summary>

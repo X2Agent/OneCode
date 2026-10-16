@@ -62,7 +62,7 @@ public static partial class PowerShellCommandClassifier
     {
         "remove-item", "clear-content", "set-content", "add-content", "out-file",
         "copy-item", "move-item", "rename-item", "new-item", "expand-archive",
-        "invoke-webrequest", "invoke-restmethod", "tee-object", "export-csv",
+        "tee-object", "export-csv",
         "export-clixml", "format-volume", "clear-disk", "set-executionpolicy",
         "disable-windowsoptionalfeature", "invoke-expression", "start-process",
         "stop-process", "stop-service", "restart-service", "restart-computer",
@@ -362,8 +362,6 @@ public static partial class PowerShellCommandClassifier
             case "copy-item":
             case "move-item":
             case "expand-archive":
-            case "invoke-webrequest":
-            case "invoke-restmethod":
             case "tee-object":
                 candidates.AddRange(filtered.Take(2));
                 break;

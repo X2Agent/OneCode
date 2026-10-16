@@ -17,14 +17,19 @@ namespace OneCode.Infrastructure.Agent;
 public sealed class AgentPipelineMetrics
 {
     private int _toolCallCount;
+    private int _externalWebToolCallCount;
     private int _modelCallCount;
 
     public int ToolCallCount => Volatile.Read(ref _toolCallCount);
+
+    public int ExternalWebToolCallCount => Volatile.Read(ref _externalWebToolCallCount);
 
     /// <summary>真实模型往返次数（Harness 每次迭代一次）；子代理"轮数"的权威口径。</summary>
     public int ModelCallCount => Volatile.Read(ref _modelCallCount);
 
     public int IncrementToolCallCount() => Interlocked.Increment(ref _toolCallCount);
+
+    public int IncrementExternalWebToolCallCount() => Interlocked.Increment(ref _externalWebToolCallCount);
 
     public int IncrementModelCallCount() => Interlocked.Increment(ref _modelCallCount);
 }
@@ -91,6 +96,12 @@ public sealed record AgentPipelineOptions
     public PermissionMode PermissionMode { get; init; } = PermissionMode.Default;
     public int MaxToolCalls { get; init; } = 50;
     public string ToolLimitMessage { get; init; } = "Tool call budget reached. Stop calling tools and summarize completed work and remaining items.";
+    /// <summary>
+    /// 外部网络检索工具（<c>WebSearch</c> / <c>WebFetch</c>）单次运行的调用次数上限；
+    /// 达到上限后仅拒绝继续调用外部网络工具并提示模型用已有信息继续编码，不封锁 <c>Read</c>/<c>Write</c>/<c>Edit</c>/<c>Bash</c> 等本地工具。
+    /// null 表示不单独限制。
+    /// </summary>
+    public int? MaxExternalWebToolCalls { get; init; }
     /// <summary>
     /// 轮数上限（模型往返次数）。设置时 Harness 迭代上限 = 该值 + 1（预留一轮收尾——
     /// 工具预算触发后模型至少还有一次无工具迭代产出总结）。null = 沿用 MaxToolCalls

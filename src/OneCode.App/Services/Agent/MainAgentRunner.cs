@@ -478,15 +478,12 @@ public partial class MainAgentRunner(
         // 留空则由适配器按 budget 自行抬高 max_tokens。
         var reasoningEffort = ResolveReasoningEffort(options);
 
-        // 未开思考时的默认上限取升级值而非 4096：推理模型不经 Reasoning 设置也会自行推理
-        // （o 系 / gpt-5 默认推理消耗输出预算），4K 会被 reasoning 全部吃光触发零输出重试
-        // （受控 Build 即此案例——首轮空转 65 秒）。显式 MaxOutputTokens 仍优先。
+        // 默认输出上限与 Length 升级恢复统一由底层客户端管道（MaxOutputTokensDecorator）处理；
+        // 业务层仅透传调用方显式指定的 MaxOutputTokens，避免与扩展思考预算冲突或各处散落硬编码。
         var chatOptions = new ChatOptions
         {
             ModelId = options.ModelId,
-            MaxOutputTokens = reasoningEffort is null
-                ? options.MaxOutputTokens ?? EscalatedZeroOutputRetryMaxTokens
-                : options.MaxOutputTokens,
+            MaxOutputTokens = options.MaxOutputTokens,
             // 主体正文走 MAF 的 agent-instructions 入口，而不是自己拼一条 system 消息：
             // HarnessAgent 会把 harness 片段拼在它前面（片段缺失时用 MAF 默认文案）。
             Instructions = string.IsNullOrEmpty(options.SystemPrompt) ? null : options.SystemPrompt,

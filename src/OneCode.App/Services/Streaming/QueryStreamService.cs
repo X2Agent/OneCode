@@ -206,7 +206,7 @@ public sealed class QueryStreamService(
         {
             case WorkflowResumeKind.Goal:
                 await foreach (var evt in orchestrationStreamService.StreamResumeGoalAsync(
-                    sessionId, currentModelId, session.SystemPrompt, ct).ConfigureAwait(false))
+                    sessionId, currentModelId, session.SystemPrompt, ct, session).ConfigureAwait(false))
                     yield return evt;
                 break;
         }

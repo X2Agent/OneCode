@@ -571,4 +571,35 @@ public sealed class AgentPipelineBuilderTests
         explore.EnableEditPreChecks.Should().BeFalse();
         explore.EnableStateMachine.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task Create_MaxExternalWebToolCalls_CapsWebSearchAndWebFetchWithoutBlockingLocalTools()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var metrics = new AgentPipelineMetrics();
+        var options = new AgentPipelineOptions
+        {
+            WorkingDirectory = "/work",
+            MaxToolCalls = int.MaxValue,
+            MaxExternalWebToolCalls = 2,
+        };
+        var middleware = PermissionAndLimitMiddleware.Create(options, metrics);
+        var dummyAgent = Substitute.For<AIAgent>();
+
+        var web1 = await middleware(dummyAgent, CreateContext("WebSearch"), (_, _) => new ValueTask<object?>("search-1"), ct);
+        var web2 = await middleware(dummyAgent, CreateContext("WebFetch"), (_, _) => new ValueTask<object?>("fetch-2"), ct);
+        var web3 = await middleware(dummyAgent, CreateContext("WebSearch"), (_, _) => new ValueTask<object?>("search-3"), ct);
+        var localWrite = await middleware(dummyAgent, CreateContext("Write"), (_, _) => new ValueTask<object?>("wrote-file"), ct);
+        var localRead = await middleware(dummyAgent, CreateContext("Read"), (_, _) => new ValueTask<object?>("read-file"), ct);
+
+        web1.Should().Be("search-1");
+        web2.Should().Be("fetch-2");
+        web3.Should().BeOfType<ToolResult>()
+            .Which.Content.Should().Contain("External web tool budget (2 calls) reached")
+            .And.Contain("Write, Edit, Read, Bash");
+        localWrite.Should().Be("wrote-file", "达到外部网络工具配额后，本地 Write 工具绝不能被封锁");
+        localRead.Should().Be("read-file", "达到外部网络工具配额后，本地 Read 工具绝不能被封锁");
+        metrics.ExternalWebToolCallCount.Should().Be(3);
+        metrics.ToolCallCount.Should().Be(5);
+    }
 }

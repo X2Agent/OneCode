@@ -169,4 +169,26 @@ public sealed class WebFetchToolHtmlToMarkdownTests
         md.Should().Contain("正文标题").And.Contain("嵌套评论");
         md.Should().Contain("嵌套评论", Exactly.Once());
     }
+
+    [Theory]
+    [InlineData("<meta charset=\"gb2312\">", null)]
+    [InlineData("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=gbk\" />", null)]
+    [InlineData("<meta charset='GB18030'>", "iso-8859-1")]
+    [InlineData("", "gbk")]
+    public void DecodeResponseBytes_ChineseGbEncodings_DecodesWithoutReplacementCharacters(
+        string metaTag,
+        string? headerCharset)
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var gbk = System.Text.Encoding.GetEncoding("GB18030");
+        var html = $"<html><head>{metaTag}</head><body><h1>孙宇晨最新动态与币安时间线</h1><p>波场 TRON 生态新闻汇总。</p></body></html>";
+        var bytes = gbk.GetBytes(html);
+
+        var decoded = WebFetchTool.DecodeResponseBytes(bytes, headerCharset);
+        var markdown = HtmlToMarkdownConverter.Convert(decoded);
+
+        decoded.Should().NotContain("\uFFFD");
+        markdown.Should().Contain("孙宇晨最新动态与币安时间线");
+        markdown.Should().Contain("波场 TRON 生态新闻汇总");
+    }
 }

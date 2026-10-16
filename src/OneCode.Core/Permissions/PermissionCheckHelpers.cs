@@ -45,9 +45,11 @@ public static class PermissionCheckHelpers
             return false;
 
         var command = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
-        return IsPowerShellDialect(toolName, toolInput)
-            ? PowerShellCommandClassifier.IsReadOnly(command)
-            : BashCommandClassifier.IsReadOnly(command);
+        if (IsPowerShellDialect(toolName, toolInput))
+            return PowerShellCommandClassifier.IsReadOnly(command);
+
+        return BashCommandClassifier.IsReadOnly(command)
+            || (OperatingSystem.IsWindows() && PowerShellCommandClassifier.IsReadOnly(command));
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using OneCode.App.Query;
 using OneCode.Core.Coordinator;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Tui;
 
@@ -23,8 +24,10 @@ public static class TuiEventMapper
             SuggestionsEvent { Items: var items }
                 => new TuiSuggestions(items),
             ToolStartEvent { ToolId: var id, ToolName: var n, ToolInput: var ti }
+                when !HarnessProviderTools.Names.Contains(n)
                 => new TuiToolStart(id, n, ti),
             ToolDoneEvent { ToolName: var n, IsError: var e, Result: var r, ToolInput: var ti, ToolId: var tid }
+                when !HarnessProviderTools.Names.Contains(n)
                 => new TuiToolDone(n, e, r, ti, tid),
             PermissionCheckEvent { ToolName: var tn, Allowed: var a, DenialReason: var dr }
                 => new TuiPermissionCheck(tn, a, dr),
@@ -126,8 +129,10 @@ public static class TuiEventMapper
             OrchestrationEvent.AgentMessage am
                 => new TuiAgentMessage(am.AgentName, am.AgentColor, am.Content),
             OrchestrationEvent.ToolStart ts
+                when !HarnessProviderTools.Names.Contains(ts.Name)
                 => new TuiToolStart(ts.ToolId, ts.Name, ts.ToolInput, ts.AgentName),
             OrchestrationEvent.ToolDone td
+                when !HarnessProviderTools.Names.Contains(td.Name)
                 => new TuiToolDone(td.Name, td.IsError, td.Result, td.ToolInput, td.ToolId, td.AgentName),
             OrchestrationEvent.TextDelta td
                 => new TuiTextDelta(td.Text),

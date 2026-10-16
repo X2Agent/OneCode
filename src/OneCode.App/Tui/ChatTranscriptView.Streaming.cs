@@ -56,6 +56,33 @@ public sealed partial class ChatTranscriptView
         _app.Invoke(() => ActivityChanged?.Invoke("处理中"));
     }
 
+    /// <summary>
+    /// 流式期间插入已提交块（如 <see cref="AddSystem"/> 输出的 Goal 计划摘要）前，
+    /// 先将当前流式预览中已累积的状态行/文本固化到 <c>_committedJournal</c> 并结束预览窗口，
+    /// 待已提交块追加后再重新开启新预览窗口，避免预览重绘吞掉已提交块或重排时顺序倒置。
+    /// </summary>
+    private void FlushStreamingBeforeCommittedBlock()
+    {
+        CancelPendingStreamingRebuild();
+
+        if (_stream.HasThinking)
+            FinalizeThinkingMarker();
+
+        if (_stream.StatusLines.Count > 0 || _stream.TextBuffer.Length > 0)
+        {
+            var statusSnapshot = _stream.StatusLines.ToList();
+            var intermediateText = _stream.TextBuffer.ToString();
+            _committedJournal.Add(BuildCommittedIntermediateTurnJournalEntry(
+                statusSnapshot, intermediateText));
+            var committedLines = BuildCommittedIntermediateTurnLines(
+                statusSnapshot, intermediateText, ContentWidth);
+            _messageView.ReplaceStreamingPreview(committedLines);
+        }
+
+        _messageView.EndStreamingPreview();
+        _stream.ResetForNextTurn();
+    }
+
     public void EndStreaming()
     {
         _logger.LogDebug(

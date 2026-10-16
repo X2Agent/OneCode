@@ -159,4 +159,14 @@ public sealed class PowerShellCommandClassifierTests
     {
         PowerShellCommandClassifier.IsReadOnly("Get-Content file.txt > out.txt").Should().BeFalse();
     }
+
+    [Theory]
+    [InlineData("Get-ChildItem -Force 2>$null")]
+    [InlineData("Get-Content file.txt 2>&1")]
+    [InlineData("Invoke-RestMethod -Uri 'https://example.com/rss'")]
+    [InlineData("Invoke-WebRequest -Uri 'https://example.com' -UseBasicParsing")]
+    public void IsDestructive_NullStreamRedirectionAndHttpFetch_ReturnsFalse(string command)
+    {
+        PowerShellCommandClassifier.IsDestructive(command).Should().BeFalse();
+    }
 }

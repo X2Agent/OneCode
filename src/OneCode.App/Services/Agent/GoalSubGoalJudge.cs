@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Prompt;
 
@@ -34,7 +33,8 @@ internal sealed class GoalSubGoalJudge(
     public async Task<(bool Completed, string? Feedback, long InputTokens, long OutputTokens)> EvaluateSubGoalAsync(
         SubGoalEvidence evidence,
         GoalItem goal,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? workingDirectory = null)
     {
         var criteria = string.IsNullOrWhiteSpace(goal.SuccessCriteria)
             ? "Complete the user's original request as fully as possible."
@@ -47,7 +47,7 @@ internal sealed class GoalSubGoalJudge(
             Success criteria: {criteria}
 
             Verified execution evidence:
-            {GoalSubGoalAssessment.FormatEvidenceForJudge(evidence)}
+            {GoalSubGoalAssessment.FormatEvidenceForJudge(evidence, workingDirectory)}
 
             Deterministic gates have passed. Evaluate only semantic coverage of the sub-goal and success criteria.
             Reply with exactly one of:
@@ -63,8 +63,8 @@ internal sealed class GoalSubGoalJudge(
             new(ChatRole.User, judgePrompt),
         };
 
-        var chatOptions = new ChatOptions { MaxOutputTokens = 1024 };
-        var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct).ConfigureAwait(false);
+        // 默认输出上限与 Length 截断恢复统一由底层客户端管道（MaxOutputTokensDecorator）处理。
+        var response = await _chatClient.GetResponseAsync(messages, cancellationToken: ct).ConfigureAwait(false);
         var verdict = response.Text ?? "";
 
         var inputTokens = (long)(response.Usage?.InputTokenCount ?? 0);
@@ -83,55 +83,5 @@ internal sealed class GoalSubGoalJudge(
         return verdict.Contains(DoneMarker, StringComparison.OrdinalIgnoreCase)
             ? (true, null, inputTokens, outputTokens)
             : (false, verdict.Trim(), inputTokens, outputTokens);
-    }
-
-    public async Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
-        string originalGoal,
-        IReadOnlyList<GoalItem> goals,
-        IReadOnlyList<SubGoalExecution> executions,
-        CancellationToken ct)
-    {
-        var evidenceSummary = new StringBuilder();
-        foreach (var goal in goals.Where(goal => !goal.Optional))
-        {
-            var execution = executions.LastOrDefault(item => item.GoalId == goal.Id);
-            evidenceSummary.AppendLine(CultureInfo.InvariantCulture, $"Sub-goal #{goal.Id}: {goal.Description}");
-            evidenceSummary.AppendLine(CultureInfo.InvariantCulture, $"Success criteria: {goal.SuccessCriteria}");
-            evidenceSummary.AppendLine(CultureInfo.InvariantCulture, $"Status: {execution?.Status.ToString() ?? "Missing"}");
-            if (execution?.Evidence is { } evidence)
-                evidenceSummary.AppendLine(GoalSubGoalAssessment.FormatEvidenceForJudge(evidence));
-        }
-
-        var prompt = $"""
-            You are the final semantic reviewer for a completed engineering goal.
-
-            Original goal:
-            {originalGoal}
-
-            Required sub-goal evidence:
-            {evidenceSummary}
-
-            All deterministic gates have passed. Decide whether the combined evidence covers the original goal
-            across sub-goal boundaries without material omissions or contradictions.
-            Reply with exactly one of:
-            - "VERDICT: DONE" if the original goal is fully covered
-            - "VERDICT: MORE" followed by the specific missing integration or requirement coverage
-            """;
-        var response = await _chatClient.GetResponseAsync(
-            [
-                new ChatMessage(ChatRole.System, "You are a strict final goal reviewer. Reply with VERDICT: DONE or VERDICT: MORE."),
-                new ChatMessage(ChatRole.User, prompt),
-            ],
-            new ChatOptions { MaxOutputTokens = 1024 },
-            ct).ConfigureAwait(false);
-        var verdict = response.Text ?? string.Empty;
-        // 与子目标判定同一规则：MORE 优先，歧义时保持"未通过"。
-        var passed = verdict.Contains(DoneMarker, StringComparison.OrdinalIgnoreCase)
-            && !verdict.Contains(MoreMarker, StringComparison.OrdinalIgnoreCase);
-        return (
-            passed,
-            passed ? "Final AI semantic review returned DONE." : verdict.Trim(),
-            (long)(response.Usage?.InputTokenCount ?? 0),
-            (long)(response.Usage?.OutputTokenCount ?? 0));
     }
 }

@@ -185,8 +185,32 @@ internal sealed class ShellTokenizer(ShellTokenizerOptions options)
         return statements;
     }
 
-    internal bool ContainsWriteRedirection(IReadOnlyList<string> statement) =>
-        statement.Any(token => _writeRedirectionSet.Contains(token));
+    internal bool ContainsWriteRedirection(IReadOnlyList<string> statement)
+    {
+        for (var i = 0; i < statement.Count; i++)
+        {
+            if (!_writeRedirectionSet.Contains(statement[i]))
+                continue;
+
+            if (i + 1 < statement.Count && IsNullOrStreamRedirectionTarget(statement[i + 1]))
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 识别标准流丢弃或流复制目标（如 <c>2&gt;/dev/null</c>、<c>2&gt;$null</c>、<c>2&gt;&amp;1</c>），
+    /// 避免将常规错误静默重定向误判为破坏性文件覆盖写入。
+    /// </summary>
+    private static bool IsNullOrStreamRedirectionTarget(string target) =>
+        string.Equals(target, "/dev/null", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(target, "$null", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(target, "nul", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(target, "&1", StringComparison.Ordinal)
+        || string.Equals(target, "&2", StringComparison.Ordinal);
 
     internal static bool IsReadOnlyGitStatement(IReadOnlyList<string> statement, int commandIndex, IReadOnlySet<string> readOnlyGitSubcommands)
     {

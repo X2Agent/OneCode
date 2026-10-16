@@ -77,6 +77,7 @@ public sealed class OneCodeShellExecutor(
         IEnumerable<string> denyPatterns,
         CancellationToken ct)
     {
+        ConversationShellExecutorManager.EnsureUtf8ChildProcessEnvironment();
         await using var executor = new LocalShellExecutor(new LocalShellExecutorOptions
         {
             Mode = ShellMode.Stateless,

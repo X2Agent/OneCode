@@ -39,7 +39,7 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
     }
 
     /// <summary>
-    /// 组装完整的 IChatClient 装饰器链：ProviderAware → RetryOnOverload → baseClient
+    /// 组装完整的 IChatClient 装饰器链：MaxOutputTokens → ProviderAware → RetryOnOverload → baseClient
     /// </summary>
     public IChatClient CreateWithDecorators(
         string providerId,
@@ -64,7 +64,8 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
             retryLogger,
             maxRetries: streamMaxRetries,
             streamIdleTimeout: TimeSpan.FromSeconds(streamIdleTimeoutSeconds));
-        return new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
+        var providerAware = new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
+        return new MaxOutputTokensDecorator(providerAware);
     }
 
     private static IChatClient CreateAnthropicClient(string apiKey, string? baseUrl, string? model)

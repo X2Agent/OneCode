@@ -9,7 +9,7 @@ namespace OneCode.App.Tui;
 /// │                                        │               │
 /// │  Chat — sole main view (scrollable)    │  PlanSidebar  │  Dim.Fill()
 /// │  (sidebar auto-shrinks the chat width  │  (auto, ≤45col│  when a plan
-/// │   when a plan exists; Ctrl+G toggles)  │   Ctrl+G)     │   exists)
+/// │   when a plan exists; Ctrl+O toggles)  │   Ctrl+O)     │   exists)
 /// │                                        │               │
 /// ├─ TodoStrip ─────────────────────────────────────────────┤  0–6 rows
 /// │  ◆ 待办 (2/5) ✓ #1 …  ○ #3 …                (隐藏时 0)  │  (todos_* snapshot)
@@ -214,12 +214,17 @@ public sealed partial class ReplShell : View
 
         // 待办横条（agent todos_* 清单快照）：空快照时不可见、不占行；
         // 显示时从内容区底部借行，对话列宽度不变。见 ReplShell.TodoPanel.cs。
-        _todoStrip = new TodoStripView
+        _todoStrip = new TodoStripView(
+            () => KeybindingViewBuilder.GetEffectiveKeyDisplay(
+                _keyResolver.Bindings,
+                KeybindingDefaults.ActionAppSidebarToggle,
+                TodoStripView.DefaultToggleShortcutDisplay))
         {
             X = 0,
             Width = Dim.Fill(),
             Visible = false,
         };
+        _todoStrip.ExpansionChanged += ApplyTodoStripLayout;
 
         // assembly — no welcome view; thinking renders as a clickable
         // summary inside ChatTranscriptView, not a separate top panel.
@@ -283,8 +288,9 @@ public sealed partial class ReplShell : View
     }
 
     /// <summary>
-    /// 切换当前侧边栏可见性（Ctrl+G，app:sidebarToggle）。
-    /// 有活跃计划面板时切换其展开/隐藏；无内容时不展开空面板。
+    /// 切换当前侧边栏可见性或待办/Goal 进度面板展开态（Ctrl+O，app:sidebarToggle）。
+    /// 当存在活跃 Plan 面板时优先切换右侧边栏；否则若输入框上方 TodoStrip 有内容（Goal 子目标或待办），
+    /// 则切换其折叠/展开详情态。
     /// </summary>
     internal void ToggleSidebarVisibility()
     {
@@ -292,13 +298,18 @@ public sealed partial class ReplShell : View
         {
             _planSidebar.Visible = false;
         }
+        else if (_activePlan is not null)
+        {
+            _planSidebar.Visible = true;
+        }
+        else if (_todoStrip.HasContent)
+        {
+            _todoStrip.ToggleExpanded();
+            return;
+        }
         else
         {
-            // 当前未显示：有内容才展开——Ctrl+G 虽是显式动作，但空侧栏只增视觉噪声；
-            // 计划一旦出现会自动展开（见 SetPlanSidebarVisible / ShowPlanCard）。
-            if (_activePlan is null)
-                return;
-            _planSidebar.Visible = true;
+            return;
         }
 
         ApplySidebarLayout();

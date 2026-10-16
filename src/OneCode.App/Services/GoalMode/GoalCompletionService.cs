@@ -1,8 +1,5 @@
-using OneCode.App.Services.Agent;
 using OneCode.App.Services.Lsp;
 using OneCode.Core.Goals;
-
-
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 
@@ -16,7 +13,6 @@ internal interface IGoalCompletionService
 internal sealed class GoalCompletionService(
     IGoalRunStore store,
     IGoalWorkspaceService workspaceService,
-    IGoalStepExecutionService stepExecutionService,
     IVerificationProvider? verificationProvider = null,
     LspDiagnosticRegistry? diagnosticRegistry = null,
     TimeSpan? diagnosticQuietPeriod = null,
@@ -26,6 +22,7 @@ internal sealed class GoalCompletionService(
     // Fix-3：读取诊断前等待 quiescent——连续 quietPeriod 无新 Error 视为稳定，上限 timeout。
     private readonly TimeSpan _diagnosticQuietPeriod = diagnosticQuietPeriod ?? TimeSpan.FromSeconds(2);
     private readonly TimeSpan _diagnosticTimeout = diagnosticTimeout ?? TimeSpan.FromSeconds(30);
+    private readonly bool _hasExplicitQuietPeriod = diagnosticQuietPeriod is not null;
     private readonly ILogger<GoalCompletionService>? _logger = logger;
 
     public async Task<GoalRun> CompleteAsync(GoalRun run, long fencingToken, CancellationToken ct)
@@ -106,7 +103,8 @@ internal sealed class GoalCompletionService(
             ?? throw new InvalidOperationException("GoalRun has no isolated workspace snapshot.");
         var changedFiles = current.Executions
             .SelectMany(execution => execution.ChangedFiles)
-            .Select(path => Path.GetFullPath(path))
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => GoalWorkspacePathResolver.ResolveWorktreeFilePath(current, path))
             // Fix-4/F-09：路径比较平台化——Windows 大小写不敏感，Unix 敏感。
             .Distinct(PathComparer.Default)
             .ToArray();
@@ -193,31 +191,9 @@ internal sealed class GoalCompletionService(
         if (!diagnosticsGate.Passed && !diagnosticsGate.Skipped)
             return await FailAsync(current, fencingToken, report, "Goal static diagnostics failed.", ct).ConfigureAwait(false);
 
-        var semantic = await stepExecutionService.EvaluateFinalGoalAsync(
-            current.Goal,
-            current.Plan.Select(ToGoalItem).ToArray(),
-            current.Executions.Select(ToSubGoalExecution).ToArray(),
-            ct).ConfigureAwait(false);
-        report.Add(new GoalGateEvidence("final-semantic-review", semantic.Passed, false, semantic.Summary));
-        var budget = current.Budget with
-        {
-            TotalInputTokens = current.Budget.TotalInputTokens + semantic.InputTokens,
-            TotalOutputTokens = current.Budget.TotalOutputTokens + semantic.OutputTokens,
-        };
-        if (!semantic.Passed)
-        {
-            return await FailAsync(
-                current with { Budget = budget },
-                fencingToken,
-                report,
-                "Final Goal semantic review failed.",
-                ct).ConfigureAwait(false);
-        }
-
         var publishing = current with
         {
             State = GoalRunState.Publishing,
-            Budget = budget,
             FinalValidation = report,
             FailureSummary = null,
             TerminalReason = null,
@@ -286,6 +262,9 @@ internal sealed class GoalCompletionService(
 
     private async Task<bool> WaitForDiagnosticQuiescenceAsync(IReadOnlySet<string> changedFiles, CancellationToken ct)
     {
+        if (!_hasExplicitQuietPeriod && diagnosticRegistry!.GetAllDiagnostics().Count == 0)
+            return true;
+
         var deadline = DateTimeOffset.UtcNow + _diagnosticTimeout;
         var signature = DiagnosticsSignature(changedFiles);
         while (DateTimeOffset.UtcNow < deadline)
@@ -327,55 +306,6 @@ internal sealed class GoalCompletionService(
             && last.State == GoalStepState.Skipped
             && last.Validations.Any(gate => gate.Gate == "budget" && gate.Skipped);
     }
-
-    private static GoalItem ToGoalItem(GoalStepSnapshot item) => new()
-    {
-        Id = item.Id,
-        Description = item.Description,
-        SuccessCriteria = item.SuccessCriteria,
-        Status = item.State switch
-        {
-            GoalStepState.Pending => GoalStatus.Pending,
-            GoalStepState.InProgress => GoalStatus.InProgress,
-            GoalStepState.Completed => GoalStatus.Completed,
-            GoalStepState.Failed => GoalStatus.Failed,
-            GoalStepState.Skipped => GoalStatus.Skipped,
-            _ => throw new ArgumentOutOfRangeException(nameof(item)),
-        },
-        RequiredTools = item.RequiredTools,
-        Depth = item.Depth,
-        NeedsFurtherDecomposition = item.NeedsFurtherDecomposition,
-        ExpectedFiles = item.ExpectedFiles,
-        AllowedPaths = item.AllowedPaths,
-        RequiresBuild = item.RequiresBuild,
-        RequiresTests = item.RequiresTests,
-        Optional = item.Optional,
-    };
-
-    private static SubGoalExecution ToSubGoalExecution(GoalStepExecutionEvidence evidence)
-        => new(
-            evidence.GoalId,
-            // F-10：保留 Skipped/InProgress/Pending 保真映射，非 Completed 不再一律降级 Failed，
-            // 提升 final-semantic-review 的输入保真度。
-            evidence.State switch
-            {
-                GoalStepState.Completed => GoalStatus.Completed,
-                GoalStepState.Skipped => GoalStatus.Skipped,
-                GoalStepState.InProgress => GoalStatus.InProgress,
-                GoalStepState.Pending => GoalStatus.Pending,
-                _ => GoalStatus.Failed,
-            },
-            evidence.Attempts,
-            evidence.InputTokens,
-            evidence.OutputTokens,
-            evidence.AgentOutput,
-            evidence.Evaluation,
-            new SubGoalEvidence(
-                evidence.AgentOutput,
-                evidence.ChangedFiles,
-                evidence.ToolExecutions.Select(item => new GoalToolExecutionEvidence(item.ToolName, item.IsError, item.Result)).ToArray(),
-                evidence.Validations.Select(item => new GoalValidationEvidence(item.Gate, item.Passed, item.Skipped, item.Summary)).ToArray(),
-                evidence.Diagnostics));
 
     private static void ValidateFencing(GoalRun run, long fencingToken)
     {

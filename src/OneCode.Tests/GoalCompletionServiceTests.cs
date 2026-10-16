@@ -1,13 +1,9 @@
-using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Lsp;
-using OneCode.App.Tui;
 using OneCode.Core.Workflows;
 using OneCode.Core.Domain;
 using OneCode.Core.Goals;
-using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
-using System.Threading.Channels;
 
 namespace OneCode.Tests;
 
@@ -36,15 +32,73 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var workspace = new CompletionWorkspaceService();
         var service = new GoalCompletionService(
             store,
-            workspace,
-            new CompletionStepService(semanticPassed: true));
+            workspace);
 
         var completed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
         completed.State.Should().Be(GoalRunState.Completed);
         completed.PublishReceipt.Should().NotBeNull();
         completed.TerminalReason.Should().Be(RunTerminalReason.Completed);
-        completed.FinalValidation.Should().Contain(gate => gate.Gate == "final-semantic-review" && gate.Passed);
+        completed.FinalValidation.Should().Contain(gate => gate.Gate == "requirement-and-integration-coverage" && gate.Passed);
+        workspace.PublishCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Complete_SubdirectoryRelativeChangedFile_ResolvesAgainstIsolatedWorktreeInsteadOfProcessCwd()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "subdir-scope"));
+        var repoRoot = Path.Combine(_root, "repo");
+        var subDir = Path.Combine(repoRoot, ".dev-workspace");
+        var worktreeRoot = Path.Combine(_root, "repo.worktree", "html");
+        Directory.CreateDirectory(subDir);
+        Directory.CreateDirectory(Path.Combine(worktreeRoot, ".dev-workspace"));
+
+        var step = new GoalStepSnapshot(
+            1, "step", "done", GoalStepState.Completed, [], 0, false, [], false, false, false);
+        var evidence = new GoalStepExecutionEvidence(
+            1,
+            GoalStepState.Completed,
+            1,
+            10,
+            5,
+            "done",
+            "accepted",
+            ["justin-sun-timeline.html"],
+            [],
+            [new GoalGateEvidence("change-scope", true, false, "passed")],
+            []);
+        var initial = new GoalRun
+        {
+            Id = GoalRunId.New(),
+            SessionId = SessionId.NewId(),
+            Goal = "goal",
+            WorkingDirectory = subDir,
+            WorkspaceFingerprint = "fingerprint",
+            DefinitionHash = "definition",
+            State = GoalRunState.Validating,
+            Plan = [step],
+            Executions = [evidence],
+            Workspace = new GoalWorkspaceSnapshot(
+                "workspace",
+                repoRoot,
+                worktreeRoot,
+                "onecode/goal/html",
+                "main",
+                "base",
+                "fingerprint",
+                DateTimeOffset.UtcNow),
+        };
+        await store.SaveAsync(initial, 0, TestContext.Current.CancellationToken);
+        var saved = await store.LoadByIdAsync(initial.Id, TestContext.Current.CancellationToken)
+            ?? throw new InvalidOperationException();
+        var claimed = await store.ClaimWorkflowAsync(initial.Id, 7, saved.Version, TestContext.Current.CancellationToken);
+        var workspace = new CompletionWorkspaceService();
+        var service = new GoalCompletionService(store, workspace);
+
+        var completed = await service.CompleteAsync(claimed, 7, TestContext.Current.CancellationToken);
+
+        completed.State.Should().Be(GoalRunState.Completed);
+        completed.FinalValidation.Should().Contain(gate => gate.Gate == "change-scope" && gate.Passed);
         workspace.PublishCalls.Should().Be(1);
     }
 
@@ -59,8 +113,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var workspace = new CompletionWorkspaceService();
         var service = new GoalCompletionService(
             store,
-            workspace,
-            new CompletionStepService(semanticPassed: true));
+            workspace);
 
         var failed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
@@ -79,8 +132,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var workspace = new CompletionWorkspaceService(replayed: true);
         var service = new GoalCompletionService(
             store,
-            workspace,
-            new CompletionStepService(semanticPassed: true));
+            workspace);
 
         var completed = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
@@ -95,7 +147,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         // Fix-1/F-03：预算耗尽跳过的必需步骤 → 终态 Paused（可续跑），而非 Failed。
         var store = new JsonGoalRunStore(Path.Combine(_root, "budget-pause"));
         var skippedStep = new GoalStepSnapshot(
-            1, "step", "done", GoalStepState.Skipped, [], 0, false, [], [], false, false, false);
+            1, "step", "done", GoalStepState.Skipped, [], 0, false, [], false, false, false);
         var skippedEvidence = new GoalStepExecutionEvidence(
             1,
             GoalStepState.Skipped,
@@ -115,8 +167,7 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
             evidenceOverride: skippedEvidence);
         var service = new GoalCompletionService(
             store,
-            new CompletionWorkspaceService(),
-            new CompletionStepService(semanticPassed: true));
+            new CompletionWorkspaceService());
 
         var paused = await service.CompleteAsync(run, 7, TestContext.Current.CancellationToken);
 
@@ -145,7 +196,6 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
         var service = new GoalCompletionService(
             store,
             new CompletionWorkspaceService(),
-            new CompletionStepService(semanticPassed: true),
             diagnosticRegistry: registry,
             diagnosticQuietPeriod: TimeSpan.FromMilliseconds(50),
             diagnosticTimeout: TimeSpan.FromSeconds(5));
@@ -187,7 +237,6 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
             var service = new GoalCompletionService(
                 store,
                 new CompletionWorkspaceService(),
-                new CompletionStepService(semanticPassed: true),
                 diagnosticRegistry: registry,
                 diagnosticQuietPeriod: TimeSpan.FromMilliseconds(60),
                 diagnosticTimeout: TimeSpan.FromMilliseconds(300));
@@ -229,7 +278,6 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
             [],
             0,
             false,
-            [],
             [],
             false,
             false,
@@ -306,27 +354,5 @@ public sealed class GoalCompletionServiceTests : IAsyncLifetime
 
         public Task CleanupAsync(GoalRun run, long fencingToken, CancellationToken ct = default)
             => Task.CompletedTask;
-    }
-
-    private sealed class CompletionStepService(bool semanticPassed) : IGoalStepExecutionService
-    {
-        public Task<SubGoalExecution> ExecuteSubGoalWithLoopStreamingAsync(
-            GoalItem goal,
-            GoalRunOptions options,
-            EditTransaction sharedTransaction,
-            ChannelWriter<TuiEvent> eventWriter,
-            CancellationToken ct)
-            => throw new NotSupportedException();
-
-        public void UpdateGoalContext(GoalPlan plan, GoalItem currentGoal, IReadOnlyList<SubGoalExecution> executions, bool sharedTransactionOwned)
-        {
-        }
-
-        public Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
-            string originalGoal,
-            IReadOnlyList<GoalItem> goals,
-            IReadOnlyList<SubGoalExecution> executions,
-            CancellationToken ct)
-            => Task.FromResult((semanticPassed, semanticPassed ? "passed" : "failed", 2L, 1L));
     }
 }

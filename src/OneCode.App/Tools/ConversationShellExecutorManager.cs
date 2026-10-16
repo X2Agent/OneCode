@@ -58,6 +58,14 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
                 await session.Executor.InitializeAsync(ct).ConfigureAwait(false);
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(timeout);
+                if (!PathsEqual(session.WorkingDirectory, workingDirectory) && Directory.Exists(workingDirectory))
+                {
+                    var cdCommand = OperatingSystem.IsWindows()
+                        ? $"Set-Location -LiteralPath '{workingDirectory.Replace("'", "''", StringComparison.Ordinal)}'"
+                        : $"cd '{workingDirectory.Replace("'", "'\\''", StringComparison.Ordinal)}'";
+                    await session.Executor.RunAsync(cdCommand, timeoutCts.Token).ConfigureAwait(false);
+                    session.WorkingDirectory = workingDirectory;
+                }
                 return await session.Executor.RunAsync(command, timeoutCts.Token).ConfigureAwait(false);
             }
             finally
@@ -118,11 +126,13 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
         _sessions.GetOrAdd(
             conversationId,
             _ => new Lazy<SessionShell>(
-                () => new SessionShell(CreateExecutor(workingDirectory)),
+                () => new SessionShell(CreateExecutor(workingDirectory), workingDirectory),
                 LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
-    private static LocalShellExecutor CreateExecutor(string workingDirectory) =>
-        new(new LocalShellExecutorOptions
+    private static LocalShellExecutor CreateExecutor(string workingDirectory)
+    {
+        EnsureUtf8ChildProcessEnvironment();
+        return new(new LocalShellExecutorOptions
         {
             Mode = ShellMode.Persistent,
             WorkingDirectory = workingDirectory,
@@ -132,11 +142,38 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
             AcknowledgeUnsafe = true,
             Policy = SharedPolicy,
         });
+    }
+
+    internal static void EnsureUtf8ChildProcessEnvironment()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PYTHONUTF8")))
+            Environment.SetEnvironmentVariable("PYTHONUTF8", "1");
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PYTHONIOENCODING")))
+            Environment.SetEnvironmentVariable("PYTHONIOENCODING", "utf-8");
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+            return true;
+        try
+        {
+            var fullLeft = Path.TrimEndingDirectorySeparator(Path.GetFullPath(left));
+            var fullRight = Path.TrimEndingDirectorySeparator(Path.GetFullPath(right));
+            return string.Equals(fullLeft, fullRight, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     /// <summary>单个会话的 shell 进程，以及串行化其使用的闸门。</summary>
-    private sealed class SessionShell(LocalShellExecutor executor)
+    private sealed class SessionShell(LocalShellExecutor executor, string workingDirectory)
     {
         public LocalShellExecutor Executor { get; } = executor;
+
+        public string WorkingDirectory { get; set; } = workingDirectory;
 
         /// <summary>串行化命令执行与释放动作，避免释放期间仍有命令在途。</summary>
         public SemaphoreSlim Gate { get; } = new(1, 1);

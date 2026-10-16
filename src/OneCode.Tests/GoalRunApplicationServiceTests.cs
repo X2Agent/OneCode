@@ -81,6 +81,38 @@ public sealed class GoalRunApplicationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Begin_SameSessionAfterTerminalRun_ArchivesPreviousRunAndStartsNewGoalRun()
+    {
+        var store = new JsonGoalRunStore(_root);
+        var workspace = Substitute.For<IGoalWorkspaceService>();
+        var fingerprint = Substitute.For<IWorkspaceFingerprintProvider>();
+        fingerprint.ComputeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+        workspace.PrepareAsync(Arg.Any<GoalRun>(), Arg.Any<CancellationToken>())
+            .Returns(call => Workspace(call.ArgAt<GoalRun>(0)));
+        var sut = new GoalRunApplicationService(store, workspace, fingerprint);
+        var sessionId = SessionId.NewId();
+
+        var first = await sut.BeginAsync(sessionId, "first goal", _root, "m", "p", "t", ct: TestContext.Current.CancellationToken);
+        await store.SaveAsync(
+            first with
+            {
+                State = GoalRunState.Cancelled,
+                TerminalReason = OneCode.Core.Workflows.RunTerminalReason.Cancelled,
+            },
+            first.Version,
+            TestContext.Current.CancellationToken);
+
+        var second = await sut.BeginAsync(sessionId, "second goal", _root, "m", "p", "t", ct: TestContext.Current.CancellationToken);
+
+        second.Id.Should().NotBe(first.Id, "a completed/cancelled GoalRun in the same session must not block starting a new Goal");
+        second.Goal.Should().Be("second goal");
+        second.Version.Should().Be(1);
+        var archivedFirst = await store.LoadByIdAsync(first.Id, TestContext.Current.CancellationToken);
+        archivedFirst.Should().NotBeNull("the previous terminal GoalRun must remain loadable by id from its archived snapshot");
+        archivedFirst!.State.Should().Be(GoalRunState.Cancelled);
+    }
+
+    [Fact]
     public async Task Begin_WorkspaceFingerprintDriftFailsClosed()
     {
         var store = new JsonGoalRunStore(_root);

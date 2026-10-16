@@ -1,3 +1,4 @@
+using NSubstitute;
 using OneCode.Infrastructure.Search;
 
 namespace OneCode.Tests;
@@ -123,5 +124,65 @@ public sealed class DuckDuckGoSearchProviderTests
     public void NormalizeWhitespace_CollapsesRunsAndTrims()
     {
         DuckDuckGoSearchProvider.NormalizeWhitespace("  a \n\t b   c  ").Should().Be("a b c");
+    }
+
+    [Fact]
+    public async Task SearchAsync_ConcurrentRequests_SerializesAndRespectsMinRequestInterval()
+    {
+        var inFlight = 0;
+        var maxInFlight = 0;
+        var requestTimestamps = new List<long>();
+        var lockObj = new object();
+
+        var factory = NSubstitute.Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(new DelegateHttpMessageHandler(async ct =>
+        {
+            var current = Interlocked.Increment(ref inFlight);
+            lock (lockObj)
+            {
+                if (current > maxInFlight)
+                    maxInFlight = current;
+                requestTimestamps.Add(System.Diagnostics.Stopwatch.GetTimestamp());
+            }
+
+            try
+            {
+                await Task.Delay(25, ct);
+                return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "<html><body><div class='result'><a class='result__a' href='https://example.com/1'>Hit</a></div></body></html>"),
+                };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref inFlight);
+            }
+        })));
+
+        var provider = new DuckDuckGoSearchProvider(factory)
+        {
+            MinRequestInterval = TimeSpan.FromMilliseconds(80),
+        };
+
+        var ct = TestContext.Current.CancellationToken;
+        var results = await Task.WhenAll(
+            provider.SearchAsync("query-1", 5, ct),
+            provider.SearchAsync("query-2", 5, ct));
+
+        results.Should().AllSatisfy(r => r.Should().ContainSingle());
+        maxInFlight.Should().Be(1, "concurrent DuckDuckGo requests must be serialized to avoid HTTP 202 anti-bot challenges");
+        requestTimestamps.Should().HaveCount(2);
+        var gapBetweenFirstCompletionAndSecondStart = System.Diagnostics.Stopwatch.GetElapsedTime(
+            requestTimestamps[0], requestTimestamps[1]);
+        gapBetweenFirstCompletionAndSecondStart.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(70));
+    }
+
+    private sealed class DelegateHttpMessageHandler(
+        Func<CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => handler(cancellationToken);
     }
 }

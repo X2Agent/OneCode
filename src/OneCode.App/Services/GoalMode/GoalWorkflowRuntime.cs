@@ -4,14 +4,14 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
-using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.App.Services.GoalMode;
 
 public sealed record GoalWorkflowRuntimeContext(
     GoalRunOptions Options,
     ChannelWriter<TuiEvent> EventWriter,
-    Func<EditTransaction> TransactionFactory);
+    Func<EditTransaction> TransactionFactory,
+    bool PromptOnBudgetExhausted = false);
 
 public interface IGoalWorkflowRuntimeFactory
 {
@@ -50,7 +50,11 @@ internal sealed class GoalWorkflowRuntime(
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntime
 {
     private const int MaxRecursiveDecompositionDepth = 3;
-    private readonly GoalBudget _budget = context.Options.Budget ?? new GoalBudget();
+    private const int ExtraAttemptsPerExtension = 10;
+    private const long ExtraTokensPerExtension = 100_000;
+    private static readonly TimeSpan ExtraWallClockPerExtension = TimeSpan.FromHours(1);
+
+    private GoalBudget _budget = context.Options.Budget ?? new GoalBudget();
     private readonly GoalRuntimeProgress _progress = new(context.EventWriter, context.Options.Budget ?? new GoalBudget());
     private GoalRun? _run;
     private long _fencingToken;
@@ -129,37 +133,74 @@ internal sealed class GoalWorkflowRuntime(
         var usage = GoalBudgetAccountant.BuildUsage(budget);
         // Fix-6：EvaluateWarning 已存在但从未发布——级别变化时推送 TUI 预警（黄/橙）。
         _progress.PublishBudgetWarning(usage);
-        if (_budget.ShouldForceTerminate(usage))
-        {
-            var paused = run with
-            {
-                Budget = budget,
-                State = GoalRunState.Paused,
-                TerminalReason = OneCode.Core.Workflows.RunTerminalReason.BudgetExceeded,
-                FailureSummary = "Goal execution budget was exhausted.",
-            };
-            await SaveAsync(paused, ct).ConfigureAwait(false);
-            _progress.Progress("预算耗尽，已暂停（可通过 /resume 恢复）");
-            return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
-        }
-
         var step = state.Plan[state.CurrentIndex];
-        // Fix-7/N-01：守卫不依赖游标位置——resume 到 index 0 时同样受剩余尝试额度约束。
-        // B3 修订：额度不足时以 Paused 收束而非 skip-and-continue——跳过回执会让该步在
-        // resume 后永不重执行（回执回放判 Skipped），「追加预算 + /resume 续跑」承诺失效。
-        // Paused 保留游标，追加预算续跑后从当前步开始。旧数据的 Skipped 回执由
-        // GoalCompletionService.IsBudgetSkipped 向后兼容兜底。
-        if (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalLoopDefaults.MaxAttemptsPerSubGoal)
+
+        while (_budget.ShouldForceTerminate(usage)
+            || (_budget.MaxSubGoalAttempts - state.Budget.TotalAttempts < GoalLoopDefaults.MaxAttemptsPerSubGoal))
         {
+            var isAttemptShortfall = !_budget.ShouldForceTerminate(usage);
+            var reason = isAttemptShortfall
+                ? $"剩余尝试额度（{Math.Max(0, _budget.MaxSubGoalAttempts - state.Budget.TotalAttempts)} 次）不足以安全执行下一个子目标（需至少 {GoalLoopDefaults.MaxAttemptsPerSubGoal} 次）。"
+                : $"Goal 执行预算已耗尽（尝试 {usage.TotalAttempts}/{_budget.MaxSubGoalAttempts} 次，Token {usage.TotalTokens:N0}{(_budget.MaxTotalTokens is { } maxTok ? $"/{maxTok:N0}" : "")}）。";
+
+            var decision = await PromptBudgetDecisionAsync(reason, usage, step.Description, ct).ConfigureAwait(false);
+            if (decision == GoalBudgetDecision.ContinueWithExtraBudget)
+            {
+                ExtendBudget(usage);
+                _progress.Progress("已追加预算额度，继续执行");
+                continue;
+            }
+
+            if (decision == GoalBudgetDecision.SkipCurrentStep)
+            {
+                var skippedEvidence = new GoalStepExecutionEvidence(
+                    step.Id,
+                    GoalStepState.Skipped,
+                    Attempts: 0,
+                    InputTokens: 0,
+                    OutputTokens: 0,
+                    AgentOutput: string.Empty,
+                    Evaluation: "Skipped by user after budget limit reached.",
+                    ChangedFiles: [],
+                    ToolExecutions: [],
+                    Validations: [],
+                    Diagnostics: []);
+                var skipReceipt = await workspaceService.RecordStepAsync(
+                    run,
+                    skippedEvidence,
+                    _fencingToken,
+                    ct).ConfigureAwait(false);
+                _progress.Progress($"已按用户选择跳过子目标 #{step.Id}");
+                return await ApplyEvidenceAsync(state, skipReceipt.Evidence, ct).ConfigureAwait(false);
+            }
+
+            if (decision == GoalBudgetDecision.Abort)
+            {
+                var cancelled = run with
+                {
+                    Budget = budget,
+                    State = GoalRunState.Cancelled,
+                    TerminalReason = OneCode.Core.Workflows.RunTerminalReason.Cancelled,
+                    FailureSummary = "Goal execution aborted by user at budget prompt.",
+                };
+                await SaveAsync(cancelled, ct).ConfigureAwait(false);
+                _progress.Progress("已终止 Goal 执行");
+                return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
+            }
+
             var paused = run with
             {
                 Budget = budget,
                 State = GoalRunState.Paused,
                 TerminalReason = OneCode.Core.Workflows.RunTerminalReason.BudgetExceeded,
-                FailureSummary = "剩余尝试额度不足以安全执行下一个子目标，已暂停（追加预算后 /resume 继续）。",
+                FailureSummary = isAttemptShortfall
+                    ? "剩余尝试额度不足以安全执行下一个子目标，已暂停（追加预算后 /resume 继续）。"
+                    : "Goal execution budget was exhausted.",
             };
             await SaveAsync(paused, ct).ConfigureAwait(false);
-            _progress.Progress("剩余尝试额度不足，已暂停（追加预算后 /resume 继续）");
+            _progress.Progress(isAttemptShortfall
+                ? "剩余尝试额度不足，已暂停（追加预算后 /resume 继续）"
+                : "预算耗尽，已暂停（可通过 /resume 恢复）");
             return ToWorkflowState(_run!, state.CurrentIndex, state.HasReplanned);
         }
 
@@ -216,7 +257,7 @@ internal sealed class GoalWorkflowRuntime(
 
         var currentGoal = ToGoalItem(step with { State = GoalStepState.InProgress });
         // P0：步骤开始进度（含预算快照）——消除 Goal 模式执行期的长时间静默。
-        _progress.StepStarted(state.CurrentIndex, state.Plan.Count, step, GoalBudgetAccountant.BuildUsage(state.Budget));
+        _progress.StepStarted(state.CurrentIndex, state.Plan.Count, step, GoalBudgetAccountant.BuildUsage(state.Budget), state.Plan, state.Executions);
         var currentPlan = new GoalPlan { Goals = state.Plan.Select(ToGoalItem).ToArray() };
         var priorExecutions = state.Executions.Select(ToSubGoalExecution).ToArray();
         subGoalExecutor.UpdateGoalContext(
@@ -228,15 +269,15 @@ internal sealed class GoalWorkflowRuntime(
         using var transaction = context.TransactionFactory();
 
         SubGoalExecution execution;
-        // A2：回执是否已持久化（RecordStepAsync 成功或重入确认）。已记录后
-        // 取消/异常路径不得回滚文件，否则回执=Completed 而工作树已还原，永久分叉。
-        var receiptRecorded = false;
         try
         {
+            if (run.Workspace is null)
+                throw new InvalidOperationException("GoalRun has no isolated workspace.");
+
+            var effectiveWorktreeDir = GoalWorkspacePathResolver.ResolveEffectiveWorkingDirectory(run);
             var options = context.Options with
             {
-                WorkingDirectory = run.Workspace?.IsolatedPath
-                    ?? throw new InvalidOperationException("GoalRun has no isolated workspace."),
+                WorkingDirectory = effectiveWorktreeDir,
                 SharedTransaction = transaction,
             };
             execution = await subGoalExecutor.ExecuteSubGoalWithLoopStreamingAsync(
@@ -245,18 +286,17 @@ internal sealed class GoalWorkflowRuntime(
                 transaction,
                 context.EventWriter,
                 ct).ConfigureAwait(false);
-            // DAG 步（subTasks）：fork 各自提交独立事务，step 级事务为空壳——失败时不回滚
-            // 也不清空 ChangedFiles（成功兄弟的改动保留在 worktree，replan 可续建），标记
-            // partial-committed。单代理步骤维持「失败即回滚」语义。
+            // Goal 模式运行在独立的隔离 worktree 中（主仓库不受影响），
+            // 取消或步骤失败时不再调用 transaction.Rollback() 删除 worktree 中的阶段性文件，
+            // 以便 Replan 或 /resume 在已有进展上继续。
+            // 单代理步骤失败时回执清空 ChangedFiles，防止被 replan 取代的失败步触发收尾 change-scope 误判。
             var isDagStep = step.SubTasks is { Count: > 0 };
-            var rolledBack = !isDagStep && execution.Status != GoalStatus.Completed;
-            if (rolledBack)
-                transaction.Rollback();
+            var clearFailedStepChangedFiles = !isDagStep && execution.Status != GoalStatus.Completed;
             if (step.DecompositionFallback)
                 execution = execution with { Evaluation = $"{execution.Evaluation} [decomposition-fallback]" };
             if (isDagStep && execution.Status != GoalStatus.Completed)
                 execution = execution with { Evaluation = $"{execution.Evaluation} [partial-committed]" };
-            var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), rolledBack);
+            var evidence = ToEvidence(execution, transaction.GetModifiedFiles(), clearFailedStepChangedFiles);
             GoalStepReceipt receipt;
             try
             {
@@ -265,7 +305,6 @@ internal sealed class GoalWorkflowRuntime(
                     evidence,
                     _fencingToken,
                     ct).ConfigureAwait(false);
-                receiptRecorded = true;
             }
             catch (Exception receiptEx)
             {
@@ -276,22 +315,10 @@ internal sealed class GoalWorkflowRuntime(
                     CancellationToken.None).ConfigureAwait(false);
                 if (reconciled is null)
                 {
-                    // Fix-8/F-12：rollback 次生异常不得吞掉原始异常。
-                    try
-                    {
-                        transaction.Rollback();
-                    }
-                    catch (Exception rollbackEx)
-                    {
-                        logger?.LogError(
-                            rollbackEx,
-                            "Rollback failed after step receipt failure for goal step #{Id}.",
-                            evidence.GoalId);
-                    }
+                    transaction.PreserveForManualReconciliation();
                     ExceptionDispatchInfo.Capture(receiptEx).Throw();
                 }
                 receipt = reconciled;
-                receiptRecorded = true;
             }
 
             transaction.Commit();
@@ -332,26 +359,25 @@ internal sealed class GoalWorkflowRuntime(
                         },
                     };
                     await SaveStateAsync(applied, ct).ConfigureAwait(false);
-                    // P3：replan 对用户可见——失败步骤的后续安排是关键节点。
-                    _progress.Progress("步骤失败，已重新规划剩余步骤");
+                    // P3：replan 对用户可见——失败步骤的后续安排是关键节点，且立即刷新底部计划面板。
+                    _progress.PlanReplanned(
+                        applied.Plan,
+                        applied.Executions,
+                        applied.CurrentIndex,
+                        GoalBudgetAccountant.BuildUsage(applied.Budget));
                 }
             }
             return applied;
         }
         catch (OperationCanceledException)
         {
-            // A2：回执已记录（或重入确认）时不得回滚——该步已是持久提交，
-            // 回滚会造成「回执=Completed 而工作树已还原」的永久分叉。
-            if (!receiptRecorded)
-                SafeRollback(transaction);
-            // Cancellation is an interruption. Keep the GoalRun Executing so the
-            // next workflow generation can reacquire it and retry the unfinished step.
+            // Cancellation is an interruption. Keep the GoalRun Executing and preserve
+            // worktree files so the next workflow generation (/resume) can continue.
+            transaction.PreserveForManualReconciliation();
             throw;
         }
         catch (Exception ex)
         {
-            if (!receiptRecorded)
-                SafeRollback(transaction);
             await SaveTerminalAsync(
                 GoalRunState.Failed,
                 OneCode.Core.Workflows.RunTerminalReason.AgentException,
@@ -360,17 +386,43 @@ internal sealed class GoalWorkflowRuntime(
         }
     }
 
-    private void SafeRollback(EditTransaction transaction)
+    private async Task<GoalBudgetDecision> PromptBudgetDecisionAsync(
+        string reason,
+        GoalBudgetUsage usage,
+        string stepDescription,
+        CancellationToken ct)
     {
-        // Fix-8：终态异常路径中 rollback 失败只记录次生异常，保留原始异常向上传播。
-        try
+        if (!context.PromptOnBudgetExhausted)
+            return GoalBudgetDecision.Pause;
+
+        var request = new TuiGoalBudgetExhaustedRequest(reason, usage, _budget, stepDescription);
+        if (!context.EventWriter.TryWrite(request))
+            return GoalBudgetDecision.Pause;
+
+        using var reg = ct.Register(() => request.ResponseSource.TrySetCanceled(ct));
+        return await request.ResponseSource.Task.ConfigureAwait(false);
+    }
+
+    private void ExtendBudget(GoalBudgetUsage usage)
+    {
+        var minRequiredAttempts = usage.TotalAttempts + GoalLoopDefaults.MaxAttemptsPerSubGoal;
+        var nextAttempts = Math.Max(_budget.MaxSubGoalAttempts + ExtraAttemptsPerExtension, minRequiredAttempts);
+        long? nextTokens = _budget.MaxTotalTokens is { } maxTok
+            ? Math.Max(maxTok + ExtraTokensPerExtension, usage.TotalTokens + ExtraTokensPerExtension)
+            : null;
+        TimeSpan? nextWallClock = _budget.MaxWallClock is { } maxClock
+            ? (usage.Elapsed is { } elapsed && elapsed >= maxClock
+                ? elapsed + ExtraWallClockPerExtension
+                : maxClock + ExtraWallClockPerExtension)
+            : null;
+
+        _budget = _budget with
         {
-            transaction.Rollback();
-        }
-        catch (Exception rollbackEx)
-        {
-            logger?.LogError(rollbackEx, "Goal step transaction rollback failed; original exception is preserved.");
-        }
+            MaxSubGoalAttempts = nextAttempts,
+            MaxTotalTokens = nextTokens,
+            MaxWallClock = nextWallClock,
+        };
+        _progress.UpdateBudget(_budget);
     }
 
     public async Task<GoalWorkflowOutput> CompleteAsync(GoalWorkflowState state, CancellationToken ct)
@@ -414,7 +466,7 @@ internal sealed class GoalWorkflowRuntime(
         };
         await SaveStateAsync(next, ct).ConfigureAwait(false);
         // P3：步骤回执对用户可见——✓/✗/跳过 + 重试轮数 + 变更文件数。
-        _progress.StepReceipt(index, state.Plan.Count, evidence);
+        _progress.StepReceipt(index, state.Plan.Count, evidence, next.Plan, next.Executions, GoalBudgetAccountant.BuildUsage(next.Budget));
         return next;
     }
 
@@ -492,7 +544,6 @@ internal sealed class GoalWorkflowRuntime(
             item.RequiredTools ?? [],
             item.Depth,
             item.NeedsFurtherDecomposition,
-            item.ExpectedFiles,
             item.AllowedPaths,
             item.RequiresBuild,
             item.RequiresTests,
@@ -510,7 +561,6 @@ internal sealed class GoalWorkflowRuntime(
             RequiredTools = item.RequiredTools,
             Depth = item.Depth,
             NeedsFurtherDecomposition = item.NeedsFurtherDecomposition,
-            ExpectedFiles = item.ExpectedFiles,
             AllowedPaths = item.AllowedPaths,
             RequiresBuild = item.RequiresBuild,
             RequiresTests = item.RequiresTests,

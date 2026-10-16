@@ -71,4 +71,35 @@ public sealed class AgentPipelineAssemblyTests
         seeded.EnableTodoStallNudge.Should().BeTrue("seeded todos are the step progress, so stalls must be nudged");
         plain.EnableTodoStallNudge.Should().BeFalse("ordinary runs keep the model's own pacing");
     }
+
+    [Fact]
+    public void BuildMainOptions_GoalAutoWithoutBroker_DisablesToolApprovalToPreventLoopTermination()
+    {
+        var modeProvider = Substitute.For<IPermissionModeProvider>();
+        modeProvider.CurrentMode.Returns(PermissionMode.GoalAuto);
+        var assembly = new AgentPipelineAssembly(
+            workingDirectoryAccessor: Substitute.For<IWorkingDirectoryAccessor>(),
+            hookExecutionService: Substitute.For<IHookExecutionService>(),
+            verificationProvider: Substitute.For<IVerificationProvider>(),
+            modeProvider: modeProvider,
+            permissionChecker: Substitute.For<IPermissionChecker>(),
+            tokenLedger: new TokenLedger());
+        using var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
+
+        var built = assembly.BuildMainOptions(
+            new MainAgentRunOptions
+            {
+                ModelId = "m",
+                WorkingMode = WorkingMode.Goal,
+                ApprovalBroker = null,
+                SuppressToolApproval = true,
+            },
+            transaction,
+            @"C:\repo",
+            "m",
+            providerId: null);
+
+        built.EnableToolApproval.Should().BeFalse(
+            "autonomous Goal sub-goals have no interactive approval broker; wrapping tools in ApprovalRequiredAIFunction would abort LoopAgent on any denied path");
+    }
 }

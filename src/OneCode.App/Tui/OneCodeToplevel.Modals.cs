@@ -402,4 +402,64 @@ public sealed partial class OneCodeToplevel
 
         return await tcs.Task.ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 处理 GOAL 预算耗尽时的用户决策交互 — 使用 InlineSelector 询问继续（追加预算）、跳过、暂停或终止。
+    /// </summary>
+    private Task HandleGoalBudgetExhaustedRequestAsync(TuiGoalBudgetExhaustedRequest request)
+    {
+        _app.Invoke(() =>
+        {
+            List<InlineSelectorOption> options =
+            [
+                new("continue", "继续执行（自动追加预算）", "追加 +10 次尝试额度、+100k Tokens 与 +1 小时墙钟时间，立即继续"),
+                new("skip", "跳过当前子目标", "将当前子目标标记为跳过，推进到下一个子目标"),
+                new("pause", "暂停并保存进度", "保存当前 Checkpoint 与隔离 Worktree，稍后可通过 /resume 恢复"),
+                new("abort", "终止任务", "停止当前 Goal 执行"),
+            ];
+
+            var stepHint = string.IsNullOrWhiteSpace(request.CurrentStepDescription)
+                ? request.Reason
+                : $"{request.Reason}\n当前子目标：{request.CurrentStepDescription}";
+            var selector = new InlineSelector(
+                "⚠ GOAL 预算已达上限，请选择下一步操作",
+                options,
+                prompt: stepHint,
+                useInformationRequestCard: true);
+            _shell.ShowInlineSelector(selector);
+
+            _ = selector.ResultTask.ContinueWith(t =>
+            {
+                _app.Invoke(() =>
+                {
+                    try
+                    {
+                        _shell.DismissInlineSelector();
+                        if (t.IsCompletedSuccessfully && !t.Result.IsDismissed)
+                        {
+                            var decision = t.Result.SelectedId switch
+                            {
+                                "continue" => GoalBudgetDecision.ContinueWithExtraBudget,
+                                "skip" => GoalBudgetDecision.SkipCurrentStep,
+                                "pause" => GoalBudgetDecision.Pause,
+                                "abort" => GoalBudgetDecision.Abort,
+                                _ => GoalBudgetDecision.Pause,
+                            };
+                            request.ResponseSource.TrySetResult(decision);
+                        }
+                        else
+                        {
+                            request.ResponseSource.TrySetResult(GoalBudgetDecision.Pause);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        request.ResponseSource.TrySetResult(GoalBudgetDecision.Pause);
+                    }
+                });
+            }, TaskScheduler.Default);
+        });
+
+        return Task.CompletedTask;
+    }
 }

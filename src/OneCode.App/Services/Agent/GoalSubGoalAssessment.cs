@@ -18,7 +18,7 @@ internal static class GoalSubGoalAssessment
         IReadOnlyList<string> allowedPaths)
     {
         var allowedRoots = allowedPaths
-            .Select(path => ResolveWorkspacePath(workingDirectory, path))
+            .Select(path => ResolveAllowedScopeRoot(workingDirectory, path))
             .ToList();
         return changedFiles
             .Select(Path.GetFullPath)
@@ -26,6 +26,20 @@ internal static class GoalSubGoalAssessment
                 || allowedRoots.Count > 0 && !allowedRoots.Any(root => PathBoundary.IsWithinDirectory(path, root)))
             .Select(path => Path.GetRelativePath(workingDirectory, path))
             .ToList();
+    }
+
+    private static string ResolveAllowedScopeRoot(string workingDirectory, string path)
+    {
+        var resolved = ResolveWorkspacePath(workingDirectory, path);
+        // 若分解器误把 allowedPaths 写成单个文件路径（带扩展名且非目录），提升到其所在的父目录（不超出 workingDirectory），
+        // 避免同目录下的辅助脚本或中间产物被 change-scope 硬门禁误杀。
+        if (!Directory.Exists(resolved) && !string.IsNullOrEmpty(Path.GetExtension(resolved)))
+        {
+            var parent = Path.GetDirectoryName(resolved);
+            if (!string.IsNullOrEmpty(parent) && PathBoundary.IsWithinDirectory(parent, workingDirectory))
+                return parent;
+        }
+        return resolved;
     }
 
     public static string ResolveWorkspacePath(string workingDirectory, string path)
@@ -36,12 +50,13 @@ internal static class GoalSubGoalAssessment
         return resolved;
     }
 
-    public static string FormatEvidenceForJudge(SubGoalEvidence evidence)
+    public static string FormatEvidenceForJudge(SubGoalEvidence evidence, string? workingDirectory = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("Agent summary:");
         builder.AppendLine(evidence.AgentSummary);
-        builder.AppendLine(CultureInfo.InvariantCulture, $"Changed files: {(evidence.ChangedFiles.Count == 0 ? "(none)" : string.Join(", ", evidence.ChangedFiles))}");
+        var displayFiles = FormatChangedFilesForDisplay(evidence.ChangedFiles, workingDirectory);
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Changed files: {(displayFiles.Count == 0 ? "(none)" : string.Join(", ", displayFiles))}");
         builder.AppendLine("Deterministic validation:");
         foreach (var validation in evidence.Validations)
             builder.AppendLine(CultureInfo.InvariantCulture, $"- {validation.Gate}: {(validation.Skipped ? "SKIPPED" : validation.Passed ? "PASSED" : "FAILED")} — {validation.Summary}");
@@ -60,6 +75,21 @@ internal static class GoalSubGoalAssessment
                 builder.AppendLine(CultureInfo.InvariantCulture, $"- {TruncateForSummary(diagnostic, 200)}");
         }
         return builder.ToString();
+    }
+
+    private static IReadOnlyList<string> FormatChangedFilesForDisplay(
+        IReadOnlyList<string> changedFiles,
+        string? workingDirectory)
+    {
+        if (changedFiles.Count == 0 || string.IsNullOrWhiteSpace(workingDirectory))
+            return changedFiles;
+
+        var fullWorkingDir = Path.GetFullPath(workingDirectory);
+        return changedFiles
+            .Select(path => Path.IsPathRooted(path) && PathBoundary.IsWithinDirectory(path, fullWorkingDir)
+                ? Path.GetRelativePath(fullWorkingDir, Path.GetFullPath(path))
+                : path)
+            .ToList();
     }
 
     public static string TruncateForSummary(string output, int maxChars = 500)

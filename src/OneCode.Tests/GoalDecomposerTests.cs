@@ -132,12 +132,13 @@ public sealed class GoalDecomposerTests
     }
 
     [Fact]
-    public async Task Replan_RenumbersFromMaxPlanId_NotFromFailedGoalId()
+    public async Task Replan_RenumbersFromMaxRetainedGoalId_AvoidingBothCollisionsAndNumberingGaps()
     {
-        // 回归锚定：按需递归分解用 Max(Id)+1 插入高位 Id，replan 若按 failedGoal.Id+1 编号，
-        // 产出会与保留段的分解子步骤撞 Id——ApplyEvidenceAsync 按 Id 寻址会错位
-        // （plan/证据/预算三源错乱）。replan 必须与分解同规则：当前计划最大 Id + 1。
-        // 场景：初始 [1,2,3]，2 分解出 4,5 → plan=[1,2,4,5,3]，3（index 4）失败触发 replan。
+        // 回归锚定：
+        // 1) 按需递归分解用 Max(Id)+1 插入高位 Id（例如步骤 2 分解出 4, 5），replan 必须从保留段
+        //    （[0..failedGoalIndex]）的最大 Id + 1 起算，防止与已执行的高位子步骤撞 Id；
+        // 2) 未执行的剩余步骤（idx > failedGoalIndex）在重规划后会被丢弃，不得计入 baseId 计算，
+        //    否则当步骤 #1 失败且步骤 #2, #3 尚未执行时，新步骤会跳号成 #4, #5（断层）。
         var responseText = """
             {"goals":[{"id":1,"description":"retry via refactor","successCriteria":"done"},
                       {"id":2,"description":"validate","successCriteria":"done"}]}
@@ -149,7 +150,9 @@ public sealed class GoalDecomposerTests
                 Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(CreateResponse(responseText)));
 
-        var currentPlan = new GoalPlan
+        // 场景 A：初始 [1,2,3]，2 分解出 4,5 → plan=[1,2,4,5,3]，3（index 4）失败触发 replan。
+        // 保留段 [1,2,4,5,3] 最大 Id 为 5，因此新步骤编号为 [6, 7]。
+        var decomposedPlan = new GoalPlan
         {
             Goals =
             [
@@ -161,17 +164,37 @@ public sealed class GoalDecomposerTests
             ],
         };
 
-        var result = await decomposer.ReplanAsync(
+        var decomposedResult = await decomposer.ReplanAsync(
             "original goal",
-            currentPlan,
+            decomposedPlan,
             failedGoalIndex: 4,
             [],
             modelId: null,
             TestContext.Current.CancellationToken);
 
-        var goals = result!.Value.RemainingGoals;
-        goals.Select(g => g.Id).Should().BeEquivalentTo([6, 7],
-            "replan 从当前计划最大 Id+1 起编号，LLM 自报的 Id 被覆盖");
+        decomposedResult!.Value.RemainingGoals.Select(g => g.Id).Should().Equal(6, 7);
+
+        // 场景 B：初始 [1,2,3]，步骤 #1（index 0）失败，未执行的 #2, #3 被丢弃。
+        // 保留段仅 [#1]，最大 Id 为 1，因此新步骤必须连续编号为 [2, 3]，不得跳到 [4, 5]。
+        var firstStepFailedPlan = new GoalPlan
+        {
+            Goals =
+            [
+                new GoalItem { Id = 1, Description = "failed step 1", SuccessCriteria = "done" },
+                new GoalItem { Id = 2, Description = "unexecuted step 2", SuccessCriteria = "done" },
+                new GoalItem { Id = 3, Description = "unexecuted step 3", SuccessCriteria = "done" },
+            ],
+        };
+
+        var contiguousResult = await decomposer.ReplanAsync(
+            "original goal",
+            firstStepFailedPlan,
+            failedGoalIndex: 0,
+            [],
+            modelId: null,
+            TestContext.Current.CancellationToken);
+
+        contiguousResult!.Value.RemainingGoals.Select(g => g.Id).Should().Equal(2, 3);
     }
 
     private static ChatResponse CreateResponse(string text) => new(

@@ -217,7 +217,6 @@ public sealed class GoalWorkflowTests : IAsyncLifetime
         0,
         false,
         [],
-        [],
         false,
         false,
         false);

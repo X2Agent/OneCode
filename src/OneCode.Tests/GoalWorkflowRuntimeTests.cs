@@ -211,11 +211,11 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             null);
         var planning = new FakePlanningService
         {
-            ReplanResult = [new GoalItem { Id = 3, Description = "replanned step", SuccessCriteria = "done" }],
+            ReplanResult = [new GoalItem { Id = 2, Description = "replanned step", SuccessCriteria = "done" }],
         };
         var steps = new FakeStepExecutionService(failedExecution);
         var workspace = new FakeWorkspaceService();
-        var runtime = CreateRuntime(store, planning, steps, workspace);
+        var (runtime, events) = CreateRuntimeWithEvents(store, planning, steps, workspace);
         await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
         var state = new GoalWorkflowState(run.Id, [Snapshot(1), Snapshot(2)], [], run.Budget, 0, false, GoalRunState.Executing);
 
@@ -230,7 +230,15 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         failedStep.SupersededByReplan.Should().BeTrue();
         applied.Plan.Should().NotContain(step => step.State == GoalStepState.Failed,
             "失败态不得留在 plan，否则完成完整性检查永远不满足");
-        applied.Plan.Last().Id.Should().Be(3, "replanned 步骤追加在尾部");
+        applied.Plan.Last().Id.Should().Be(2, "replanned 步骤紧接保留步骤连续编号为 #2");
+
+        var published = new List<TuiEvent>();
+        while (events.Reader.TryRead(out var evt))
+            published.Add(evt);
+        var lastPlanUpdate = published.OfType<TuiGoalPlanUpdated>().Last();
+        lastPlanUpdate.Steps.Select(s => s.Id).Should().Equal(new[] { 1, 2 },
+            "重规划完成后必须立即向 TUI 推送更新后的计划快照，无需等待下一步开始");
+        lastPlanUpdate.Steps[0].SupersededByReplan.Should().BeTrue();
 
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         persisted!.Executions.Should().Contain(e => e.GoalId == 1 && e.State == GoalStepState.Failed,
@@ -524,7 +532,6 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         0,
         false,
         [],
-        [],
         false,
         false,
         false);
@@ -644,13 +651,6 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             bool sharedTransactionOwned)
         {
         }
-
-        public Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
-            string originalGoal,
-            IReadOnlyList<GoalItem> goals,
-            IReadOnlyList<SubGoalExecution> executions,
-            CancellationToken ct)
-            => Task.FromResult((true, "passed", 0L, 0L));
     }
 
     private sealed class FakeWorkspaceService(GoalStepExecutionEvidence? replay = null) : IGoalWorkspaceService
@@ -709,7 +709,6 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         RequiredTools = item.RequiredTools,
         Depth = item.Depth,
         NeedsFurtherDecomposition = item.NeedsFurtherDecomposition,
-        ExpectedFiles = item.ExpectedFiles,
         AllowedPaths = item.AllowedPaths,
         RequiresBuild = item.RequiresBuild,
         RequiresTests = item.RequiresTests,

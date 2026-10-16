@@ -41,7 +41,6 @@ public static class GoalServiceCollectionExtensions
         services.AddSingleton<IGoalCompletionService>(sp => new GoalCompletionService(
             sp.GetRequiredService<IGoalRunStore>(),
             sp.GetRequiredService<IGoalWorkspaceService>(),
-            sp.GetRequiredService<IGoalStepExecutionService>(),
             sp.GetService<IVerificationProvider>(),
             sp.GetService<Services.Lsp.LspDiagnosticRegistry>(),
             logger: sp.GetRequiredService<ILogger<GoalCompletionService>>()));

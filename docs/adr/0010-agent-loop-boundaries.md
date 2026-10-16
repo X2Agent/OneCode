@@ -41,8 +41,7 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
    只收到 `context.InitialMessages` + `context.LastResponse.Text`，**拿不到**构建/测试结果、变更文件、
    工具错误、LSP 诊断。GOAL 的完成条件是这些确定性证据，自研 judge 读
    `GoalSubGoalAssessment.FormatEvidenceForJudge(evidence)` 是能力升级而非重复实现。
-3. **`FreshContextPerIteration = true`** —— 对编码任务正确：失败尝试的污染历史不带入下一轮；代价仅是每轮重放
-   原始 prompt + 聚合反馈日志（3 轮以内可接受）。
+3. **`FreshContextPerIteration = false`** —— 子目标重试时复用同一 `AgentSession`，保留已有探索上下文与工具输出（长上下文由管道内置 `CompactionProvider` 压缩），直接在现有进展上修复门禁或 Judge 指出的缺口。
 4. **审批不会卡死循环** —— 对应官方"审批 heuristics + loop"范式：`AgentPipelineAssembly.BuildMainRoleOverrides`
    在 `PermissionMode.GoalAuto` 下强制挂审批中间件 + GoalAuto 自动放行规则。两条 Deny 路径分开看：
    **未带审批标记**的工具（只读路径越界等）在执行期中间件即被拒（ToolResult error），错误证据进入硬门禁反馈下一轮重试；
@@ -100,7 +99,7 @@ AlwaysRequire 审批边界，审批请求无人应答会让整个 run 以异常�
 **修正判定规则**：原实现 `verdict.Contains("VERDICT: DONE") → 完成` 是 **fail-open**；
 框架 `AIJudgeLoopEvaluator` 用的是 `!contains(MORE) && contains(DONE)`，歧义时 MORE 胜出、循环继续。
 原规则下，judge 输出同时含两个标记或格式漂移时，**未完成的子目标会被静默放行为已完成**。
-现改为 MORE 优先，`EvaluateFinalGoalAsync` 同步对齐。守卫测试：
+现改为 MORE 优先。守卫测试：
 `RunAsync_JudgeVerdictAmbiguous_TreatsAsIncompleteInsteadOfAccepting`。
 
 ### 5. fresh context 必须回显上一轮输出

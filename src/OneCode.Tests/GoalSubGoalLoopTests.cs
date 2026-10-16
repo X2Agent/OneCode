@@ -41,18 +41,19 @@ public sealed class GoalSubGoalLoopTests : IDisposable
     [Fact]
     public async Task RunAsync_DeterministicGateFails_ReinvokesWithGateFeedbackAndPriorOutputNeverCallingJudge()
     {
-        // 期望产物缺失 → 硬门禁每轮必败；AI Judge 根本不该被调用（省一次模型调用）。
+        // 修改越界 → change-scope 硬门禁每轮必败；AI Judge 根本不该被调用（省一次模型调用）。
         var judge = Substitute.For<IChatClient>();
         var inner = new ScriptedStreamingAgent("Implemented the parser and exported the symbol.");
         var loop = CreateLoop(judge);
+        var outOfScopeFile = Path.Combine(_workingDirectory, "forbidden", "Parser.cs");
 
         var result = await RunAsync(loop, inner, new GoalItem
         {
             Id = 7,
             Description = "Add parser",
             SuccessCriteria = "Parser compiles",
-            ExpectedFiles = ["src/Parser.cs"],
-        });
+            AllowedPaths = ["src"],
+        }, modifiedFiles: [outOfScopeFile]);
 
         result.Status.Should().Be(GoalStatus.Failed);
         result.Attempts.Should().Be(3, "MaxIterations 是全局硬上限，评估器无法突破");
@@ -60,11 +61,11 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         await judge.DidNotReceiveWithAnyArgs().GetResponseAsync(
             Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>());
 
-        // 第二轮输入必须带上轮实际产出 + 硬门禁真实失败原因，否则 fresh context 下 agent 会重复劳动。
+        // 第二轮输入必须带上轮实际产出 + 硬门禁真实失败原因。
         var secondInput = inner.MessagesPerCall[1].Select(m => m.Text);
         secondInput.Should().Contain(text => text!.Contains("Implemented the parser"));
         secondInput.Should().Contain(text => text!.Contains("## 上一轮已完成的工作"));
-        secondInput.Should().Contain(text => text!.Contains("expected-artifacts"));
+        secondInput.Should().Contain(text => text!.Contains("change-scope"));
         secondInput.Should().Contain(text => text!.Contains("Parser.cs"));
     }
 
@@ -196,32 +197,137 @@ public sealed class GoalSubGoalLoopTests : IDisposable
     }
 
     [Fact]
-    public async Task RunAsync_FeedbackLogAccumulatesAcrossIterations_LaterInputCarriesEveryPriorEntry()
+    public async Task RunAsync_RetriesAcrossIterations_PreservesSessionContextAndInjectsDeltaFeedback()
     {
-        // fresh context 下 LoopAgent 重发"原始输入 + 聚合 feedback 日志"。
-        // 这里每轮都由硬门禁失败（judge 不参与），第三轮的反馈必须仍含前两轮的条目——
-        // 若日志被替换成"仅最新一条"，早期失败原因会丢失，下一轮无从对照。
+        // FreshContextPerIteration = false：重试时必须复用同一个 AgentSession 以保留探索上下文与工具输出，
+        // 并按轮注入增量反馈，避免每轮清空会话导致失忆。
         var judge = Substitute.For<IChatClient>();
         var inner = new ScriptedStreamingAgent("round-1 work", "round-2 work");
         var loop = CreateLoop(judge);
+        var outOfScopeFile = Path.Combine(_workingDirectory, "forbidden", "Guard.cs");
 
         var result = await RunAsync(loop, inner, new GoalItem
         {
             Id = 9,
             Description = "Add guard",
             SuccessCriteria = "No panics",
-            ExpectedFiles = ["src/Guard.cs"],
-        });
+            AllowedPaths = ["src"],
+        }, modifiedFiles: [outOfScopeFile]);
 
         result.Status.Should().Be(GoalStatus.Failed);
         result.Attempts.Should().Be(3);
         await judge.DidNotReceiveWithAnyArgs().GetResponseAsync(
             Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>());
 
-        var feedback = inner.MessagesPerCall[2].Select(m => m.Text).Last()!;
-        feedback.Split("## 仍未满足", StringSplitOptions.None).Should().HaveCount(3,
-            "三轮里前两轮的失败条目都应保留在聚合日志中");
-        feedback.Should().Contain("round-2 work", "第三轮要能看到上一轮刚做完的事");
+        inner.SessionsPerCall.Should().HaveCount(3);
+        inner.SessionsPerCall.Distinct().Should().ContainSingle(
+            "FreshContextPerIteration = false 必须在同一子目标的重试间复用同一个 AgentSession");
+
+        var round2Feedback = inner.MessagesPerCall[1].Select(m => m.Text).Last()!;
+        round2Feedback.Should().Contain("round-1 work");
+        round2Feedback.Should().Contain("change-scope");
+
+        var round3Feedback = inner.MessagesPerCall[2].Select(m => m.Text).Last()!;
+        round3Feedback.Should().Contain("round-2 work", "第三轮要能看到上一轮刚做完的事");
+        round3Feedback.Should().Contain("change-scope");
+    }
+
+    [Fact]
+    public async Task RunAsync_HistoricalToolErrorWithValidDeliverable_PassesHardGateAndCompletes()
+    {
+        // 回归锚定：Coding 场景中探索性搜索失败或首次编译报错后修复，在历史工具记录中会留下 IsError=true；
+        // 只要 Judge 判定通过，不得因历史工具错误而拒绝子目标。
+        var targetFile = Path.Combine(_workingDirectory, "report.html");
+        File.WriteAllText(targetFile, "<!doctype html><html><body>OK</body></html>");
+
+        var judge = CreateJudgeClient("VERDICT: DONE");
+        var inner = new ScriptedStreamingAgent("Fixed the issue and generated report.html.");
+        var loop = CreateLoop(judge);
+
+        var result = await RunAsync(
+            loop,
+            inner,
+            new GoalItem
+            {
+                Id = 10,
+                Description = "Generate HTML report",
+                SuccessCriteria = "report.html exists and is non-empty",
+            },
+            toolExecutions:
+            [
+                new GoalToolExecutionEvidence("WebFetch", IsError: true, "HTTP 403 Forbidden"),
+                new GoalToolExecutionEvidence("Write", IsError: false, "Wrote report.html"),
+            ],
+            modifiedFiles: [targetFile]);
+
+        result.Status.Should().Be(GoalStatus.Completed);
+        result.Attempts.Should().Be(1);
+        result.Evidence!.ChangedFiles.Should().ContainSingle()
+            .Which.Should().Be(Path.GetFullPath(targetFile),
+                "SubGoalEvidence.ChangedFiles 必须保留规范化绝对路径，防止子目录偏移在回执阶段丢失");
+    }
+
+    [Fact]
+    public async Task RunAsync_RepeatedStreamingUsageChunksInSameTurn_DeduplicatesInsteadOfMultiplying()
+    {
+        // 回归锚定：StepFun 等 OpenAI 兼容流式接口在每个 SSE chunk 上附带当轮累计 UsageContent。
+        // MAF ToAgentResponse() 会把每个 chunk 的 UsageContent 累加，导致单轮 Token 虚增千倍触发假预算超限。
+        // GoalSubGoalLoop 必须按轮次边界去重，同轮取快照最大值，跨工具轮次再累加。
+        var responseId = "resp-turn-1";
+        var inner = ScriptedStreamingAgent.WithRawUpdates(
+            [[
+                new AgentResponseUpdate(ChatRole.Assistant, "chunk-1 ")
+                {
+                    ResponseId = responseId,
+                    Contents = [new TextContent("chunk-1 "), new UsageContent(new UsageDetails { InputTokenCount = 1000, OutputTokenCount = 10 })],
+                },
+                new AgentResponseUpdate(ChatRole.Assistant, "chunk-2 ")
+                {
+                    ResponseId = responseId,
+                    Contents = [new TextContent("chunk-2 "), new UsageContent(new UsageDetails { InputTokenCount = 1000, OutputTokenCount = 25 })],
+                },
+                new AgentResponseUpdate(ChatRole.Assistant, "chunk-3")
+                {
+                    ResponseId = responseId,
+                    Contents = [new TextContent("chunk-3"), new UsageContent(new UsageDetails { InputTokenCount = 1000, OutputTokenCount = 40 })],
+                },
+            ]]);
+        var judge = CreateJudgeClient("VERDICT: DONE");
+        var loop = CreateLoop(judge);
+
+        var result = await RunAsync(loop, inner, CreateGoal());
+
+        result.Status.Should().Be(GoalStatus.Completed);
+        result.InputTokens.Should().Be(1000, "同一轮次 3 个 SSE chunk 重复上报的 1000 InputTokens 不得被累加为 3000");
+        result.OutputTokens.Should().Be(40, "同一轮次的累计 OutputTokens 应取该轮最终快照 40 而非 10+25+40=75");
+    }
+
+    [Fact]
+    public async Task RunAsync_SingleFileAllowedPath_AllowsSiblingHelperFileInSameDirectory()
+    {
+        // 回归锚定：当分解器误将单个输出文件名（如 "news-data.json"）填入 AllowedPaths 时，
+        // Agent 在同一工作目录下创建的辅助脚本（如 "extract_article.py"）不得被 change-scope 误判越界。
+        var helperScript = Path.Combine(_workingDirectory, "extract_article.py");
+        File.WriteAllText(helperScript, "print('ok')");
+
+        var judge = CreateJudgeClient("VERDICT: DONE");
+        var inner = new ScriptedStreamingAgent("Extracted data using helper script.");
+        var loop = CreateLoop(judge);
+
+        var result = await RunAsync(
+            loop,
+            inner,
+            new GoalItem
+            {
+                Id = 11,
+                Description = "Collect news",
+                SuccessCriteria = "News collected",
+                AllowedPaths = ["news-data.json"],
+            },
+            modifiedFiles: [helperScript]);
+
+        result.Status.Should().Be(GoalStatus.Completed);
+        result.Evidence!.Validations.Should().Contain(v => v.Gate == "change-scope" && v.Passed);
     }
 
     private static GoalSubGoalLoop CreateLoop(IChatClient judgeClient)
@@ -267,10 +373,19 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         GoalSubGoalLoop loop,
         AIAgent inner,
         GoalItem goal,
-        IReadOnlyList<GoalToolExecutionEvidence>? toolExecutions = null)
+        IReadOnlyList<GoalToolExecutionEvidence>? toolExecutions = null,
+        IReadOnlyList<string>? modifiedFiles = null)
     {
         var channel = Channel.CreateUnbounded<TuiEvent>();
         var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
+        if (modifiedFiles is not null && inner is ScriptedStreamingAgent scripted)
+        {
+            scripted.OnInvoke = () =>
+            {
+                foreach (var file in modifiedFiles)
+                    transaction.Snapshot(file);
+            };
+        }
         try
         {
             return await loop.RunAsync(
@@ -317,6 +432,7 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         {
             _iterations = iterations.ToList();
             MessagesPerCall = [];
+            SessionsPerCall = [];
         }
 
         /// <summary>按原始消息脚本化（用于 pending tool approval 等非文本响应）。</summary>
@@ -331,13 +447,19 @@ public sealed class GoalSubGoalLoopTests : IDisposable
 
         public List<List<ChatMessage>> MessagesPerCall { get; }
 
+        public List<AgentSession?> SessionsPerCall { get; }
+
+        public Action? OnInvoke { get; set; }
+
         protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session,
             AgentRunOptions? options,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            OnInvoke?.Invoke();
             MessagesPerCall.Add(messages.ToList());
+            SessionsPerCall.Add(session);
             // 超出脚本长度时重复最后一轮响应——迭代上限由 LoopAgent 决定，不由脚本长度决定。
             var index = Math.Min(MessagesPerCall.Count - 1, _iterations.Count - 1);
             foreach (var update in _iterations[index])

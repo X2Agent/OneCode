@@ -16,7 +16,7 @@
 | 单真相源契约（上下文/动作/默认绑定/保留键） | `KeybindingDefaults.cs` | ✅ 5 上下文、35 动作 |
 | 上下文优先级 + 1000ms 和弦 + Eager-fire | `KeybindingResolver.cs` | ✅ |
 | 用户覆盖 + 热重载 + Schema 校验 | `KeybindingLoader.cs` / `KeybindingSchema.cs` / `KeybindingValidator.cs` | ✅ |
-| 侧边栏显隐快捷键 | `app:sidebarToggle`（Ctrl+G，Global） | ✅ 旧计划称"无需快捷键"已过时 |
+| 侧边栏显隐快捷键 | `app:sidebarToggle`（Ctrl+O，Global） | ✅ 旧计划称"无需快捷键"已过时 |
 | 侧边栏宽度键盘调整 | `app:sidebarWider/Narrower`（Ctrl+Shift+←/→） | ✅ 双路径分发（输入框聚焦经 `ChatInputView.Keys.cs`，非聚焦经 `ReplShell.Keyboard.cs` 兜底） |
 | Autocomplete/Diff/Selector 上下文接入 Resolver | `KeybindingDefaults.DefaultBindings` | ✅ 旧计划"硬编码"描述已过时 |
 | 对话区键盘滚动 | `chat:scrollUp/Down`（Shift+↑↓ / Ctrl+PgUp/PgDn）、`chat:pageUp/pageDown`（PgUp/PgDn / Ctrl+U） | ✅ 事件转发范式：`ReplShell.cs:106-111` |
@@ -207,6 +207,6 @@
 | 项 | 理由 |
 |---|---|
 | 文本选取与键盘复制模式 | Windows 终端 / tmux 原生鼠标选择 + `Ctrl+Shift+C` 已覆盖复制需求；TUI 内自建选取模式 ROI 低、与终端选择语义冲突。列为后续可选。 |
-| 侧边栏显隐快捷键 | 已有 `Ctrl+G`（`app:sidebarToggle`），数据驱动展开语义不变。 |
+| 侧边栏显隐快捷键 | 已有 `Ctrl+O`（`app:sidebarToggle`），数据驱动展开语义不变。 |
 | Tab / Ctrl+Left/Right 硬编码迁移 | 行为依赖运行时状态（多动作复用单键），见 §1.3。 |
 | QuestionWizard 强行接入 Resolver | 已有 `IInteractionSession` 接管 + Esc 兜底链，功能不受损；迁移收益低于回归风险（阶段 2.4 标记可选）。 |

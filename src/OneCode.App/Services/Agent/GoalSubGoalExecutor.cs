@@ -28,11 +28,6 @@ internal interface IGoalStepExecutionService
         GoalItem currentGoal,
         IReadOnlyList<SubGoalExecution> executions,
         bool sharedTransactionOwned);
-    Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
-        string originalGoal,
-        IReadOnlyList<GoalItem> goals,
-        IReadOnlyList<SubGoalExecution> executions,
-        CancellationToken ct);
 }
 
 internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
@@ -53,7 +48,8 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         IPromptManager promptManager,
         GoalContextState goalContextState,
         GoalSubGoalGateDependencies gateDependencies,
-        GoalSubTaskDagRunner dagRunner)
+        GoalSubTaskDagRunner dagRunner,
+        TodoProjectionService? todoProjection = null)
     {
         _mainAgentRunner = mainAgentRunner;
         _logger = logger;
@@ -64,7 +60,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             gateDependencies.VerificationProvider,
             gateDependencies.DiagnosticRegistry);
         _judge = new GoalSubGoalJudge(chatClient, promptManager);
-        _loop = new GoalSubGoalLoop(hardGate, _judge, loggerFactory);
+        _loop = new GoalSubGoalLoop(hardGate, _judge, loggerFactory, todoProjection);
     }
 
     public async Task<SubGoalExecution> ExecuteSubGoalWithLoopStreamingAsync(
@@ -78,13 +74,18 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
 
         // 步内并行分支：subTasks 非空时走共享 DAG 执行器（fork 自管事务，step 级事务空壳）。
         if (goal.SubTasks is { Count: > 0 })
+        {
+            using var dagCwdScope = OneCodeAgentRunContext.UseWorkingDirectory(options.WorkingDirectory);
             return await _dagRunner.RunAsync(goal, options, eventWriter, ct).ConfigureAwait(false);
+        }
 
         try
         {
+            using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(options.WorkingDirectory);
             List<GoalToolExecutionEvidence> toolExecutions = [];
-            var userPrompt = await BuildSubGoalPromptAsync(goal, ct).ConfigureAwait(false);
+            var userPrompt = await BuildSubGoalPromptAsync(goal, options.WorkingDirectory, ct).ConfigureAwait(false);
             var runOptions = await BuildSubGoalRunOptionsAsync(
+                _promptManager,
                 goal,
                 options,
                 sharedTransaction,
@@ -121,13 +122,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         }
     }
 
-    public Task<(bool Passed, string Summary, long InputTokens, long OutputTokens)> EvaluateFinalGoalAsync(
-        string originalGoal,
-        IReadOnlyList<GoalItem> goals,
-        IReadOnlyList<SubGoalExecution> executions,
-        CancellationToken ct)
-        => _judge.EvaluateFinalGoalAsync(originalGoal, goals, executions, ct);
-
     /// <summary>
     /// 更新 GOAL 模式共享上下文（供子目标执行期间 system prompt 注入使用）。
     /// </summary>
@@ -157,7 +151,8 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     /// <summary>
     /// 构造子目标的 <see cref="MainAgentRunOptions"/>。
     /// </summary>
-    private async Task<MainAgentRunOptions> BuildSubGoalRunOptionsAsync(
+    internal static async Task<MainAgentRunOptions> BuildSubGoalRunOptionsAsync(
+        IPromptManager promptManager,
         GoalItem goal,
         GoalRunOptions options,
         EditTransaction sharedTransaction,
@@ -168,7 +163,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         // Load the shared harness fragment from IPromptManager (three-layer store:
         // project > user > built-in). Mode-specific Goal instructions are injected once per turn
         // by ModeInstructionProvider under WorkingMode.Goal (system/goal.prompt).
-        var harnessPrompt = await _promptManager.GetPromptAsync(PromptComposer.HarnessPromptName, ct).ConfigureAwait(false)
+        var harnessPrompt = await promptManager.GetPromptAsync(PromptComposer.HarnessPromptName, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException(
                 $"Harness prompt '{PromptComposer.HarnessPromptName}' not found in any IPromptManager store.");
 
@@ -178,7 +173,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
 
         return new MainAgentRunOptions
         {
-            SystemPrompt = null,
+            SystemPrompt = options.SystemPrompt,
             HarnessInstructions = harnessPrompt,
             UserPrompt = userPrompt,
             ModelId = options.ModelId,
@@ -187,6 +182,9 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             Tools = filteredTools,
             WorkingMode = WorkingMode.Goal,
             SharedTransaction = sharedTransaction,
+            // GOAL 子目标在 LoopAgent 内无交互式审批通道，必须禁用 ApprovalRequiredAIFunction 包装，
+            // 让权限/路径错误直接作为 ToolResult.Error 返回给 LLM 自纠，而非因 pending approval 中止循环。
+            SuppressToolApproval = true,
             // 同一事件同时进入 UI 和确定性验证证据收集器。
             OrchestrationEventSink = evt =>
             {
@@ -197,12 +195,26 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     }
 
     /// <summary>
+    /// 工作区基础读写与探查工具集合：当子目标显式声明了 <c>RequiredTools</c> 时，
+    /// 始终保底并入这组基础工具，防止模型写出文件后因缺少 <c>Read</c>/<c>Glob</c> 无法自检而被迫调用无关工具。
+    /// </summary>
+    internal static readonly IReadOnlySet<string> BaselineWorkspaceTools = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Read",
+        "Glob",
+        "Grep",
+        "LS",
+        "Edit",
+        "Write",
+    };
+
+    /// <summary>
     /// 按子目标 RequiredTools 白名单过滤工具集。
     /// 规则：
     /// - RequiredTools 为 null/空 → 返回全量工具集（不裁剪）
     /// - RequiredTools 包含 "*" → 返回全量工具集（显式通配）
-    /// - 否则 → 仅保留名称匹配的工具
-    /// - 过滤后为空 → 抛出异常（fail-closed），不回退到全量工具集
+    /// - 否则 → 验证声明的工具名至少命中一个非派工工具，随后并入 <see cref="BaselineWorkspaceTools"/> 保底工作区基础工具
+    /// - 声明的工具名无一命中 → 抛出异常（fail-closed），不回退到全量工具集
     /// 所有路径无条件摘除派工工具（<see cref="ToolCapabilitySet.SubAgentDispatchTools"/>）：
     /// 子目标不可再派工，与「嵌套派工深度上限 1」的 fork 路径语义一致
     ///（docs/sub-agents.md「所有子代理的工具面无条件摘除」）。
@@ -217,15 +229,15 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         if (requiredTools.Contains("*"))
             return WithoutSubAgentDispatchTools(allTools);
 
-        var allowedSet = new HashSet<string>(requiredTools, StringComparer.Ordinal);
-        var filtered = allTools
-            .Where(t => t is AIFunction af && allowedSet.Contains(af.Name))
+        var requestedSet = new HashSet<string>(requiredTools, StringComparer.Ordinal);
+        var requestedMatches = allTools
+            .Where(t => t is AIFunction af && requestedSet.Contains(af.Name))
             .ToList();
 
         // P2-1: fail-closed — do not fall back to allTools when no match is found.
         // Unknown tool names in the plan indicate a decomposition error; using allTools
         // would silently expand permissions beyond what the plan intended.
-        if (filtered.Count == 0)
+        if (requestedMatches.Count == 0)
         {
             throw new InvalidOperationException(
                 $"No valid tools found for requiredTools [{string.Join(", ", requiredTools)}]. " +
@@ -233,8 +245,8 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 "Fix the plan or use '*' to explicitly allow all tools.");
         }
 
-        var withoutDispatch = WithoutSubAgentDispatchTools(filtered);
-        if (withoutDispatch.Count == 0)
+        var requestedWithoutDispatch = WithoutSubAgentDispatchTools(requestedMatches);
+        if (requestedWithoutDispatch.Count == 0)
         {
             // fail-closed：分解器把派工工具写进了 RequiredTools——子目标工具面摘除后为空集，
             // 不得静默零工具运行。
@@ -244,7 +256,14 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 "Fix the plan: dispatch is a main-agent capability.");
         }
 
-        return withoutDispatch;
+        var allowedWithBaseline = new HashSet<string>(requestedSet, StringComparer.Ordinal);
+        allowedWithBaseline.UnionWith(BaselineWorkspaceTools);
+
+        var filtered = allTools
+            .Where(t => t is AIFunction af && allowedWithBaseline.Contains(af.Name))
+            .ToList();
+
+        return WithoutSubAgentDispatchTools(filtered);
     }
 
     /// <summary>摘除派工工具（Agent / ParallelAgents）——子目标不可再派工。</summary>
@@ -254,17 +273,22 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             .ToList();
 
     /// <summary>
-    /// 生成子目标的初始 user prompt。
-    /// 反馈注入由 <see cref="LoopAgent"/> 通过 <c>FeedbackMessageTemplate</c> 自动处理，
-    /// 无需在此方法中拼接 feedback。
+    /// 生成子目标的初始 user prompt，显式告知工作目录与允许修改的路径范围（AllowedPaths），
+    /// 防止执行代理在不知情下写出越界文件触发 change-scope 硬门禁失败。
     /// </summary>
-    private Task<string> BuildSubGoalPromptAsync(GoalItem goal, CancellationToken ct)
+    private Task<string> BuildSubGoalPromptAsync(GoalItem goal, string workingDirectory, CancellationToken ct)
     {
+        var scopeInstruction = goal.AllowedPaths is { Count: > 0 }
+            ? $"Allowed modification scope (workspace-relative): {string.Join(", ", goal.AllowedPaths)} (do not modify or leave files outside this scope)."
+            : $"Allowed modification scope: within working directory ({workingDirectory}).";
+
         var prompt =
             $"""
             ## Sub-goal {goal.Id}: {goal.Description}
 
             Success criteria: {goal.SuccessCriteria}
+            Working directory: {workingDirectory}
+            {scopeInstruction}
 
             Execute this sub-goal. When done, clearly state whether the success criteria
             were met, and provide specific evidence (e.g., test results, file changes,

@@ -43,7 +43,7 @@ public partial class MainAgentRunner
 
         var handle = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
-            ChatClient = new MaxOutputTokensDecorator(_chatClient),
+            ChatClient = _chatClient is MaxOutputTokensDecorator ? _chatClient : new MaxOutputTokensDecorator(_chatClient),
             Name = "main-agent",
             ChatOptions = BuildChatOptions(options),
             LoggerFactory = _loggerFactory,

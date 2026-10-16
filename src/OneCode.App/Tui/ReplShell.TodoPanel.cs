@@ -5,7 +5,7 @@ namespace OneCode.App.Tui;
 
 /// <summary>
 /// 待办横条（<see cref="TodoStripView"/>）的宿主逻辑：快照进入、显示/隐藏与
-/// 内容区高度让位。与 Plan 侧边栏（右停靠、Ctrl+G 切换）的关系只有一处：
+/// 内容区高度让位。与 Plan 侧边栏（右停靠、Ctrl+O 切换）的关系只有一处：
 /// 计划执行中且侧边栏可见时，横条不再重复显示计划预置的步骤待办。
 /// </summary>
 public sealed partial class ReplShell
@@ -25,10 +25,23 @@ public sealed partial class ReplShell
         RefreshTodoStrip();
     }
 
+    /// <summary>更新 GOAL 模式子目标进度快照并刷新横条布局。</summary>
+    public void ShowGoalPlan(
+        IReadOnlyList<OneCode.Core.Goals.GoalStepSnapshot> steps,
+        IReadOnlyList<OneCode.Core.Goals.GoalStepExecutionEvidence> executions,
+        int currentIndex,
+        OneCode.Core.Goals.GoalBudgetUsage? usage = null,
+        OneCode.Core.Goals.GoalBudget? budget = null)
+    {
+        _todoStrip.UpdateGoalPlan(steps, executions, currentIndex, usage, budget);
+        ApplyTodoStripLayout();
+    }
+
     /// <summary>清空待办横条并隐藏（会话切换/关闭时调用）。</summary>
     public void ClearTodoPanel()
     {
         _todoItems = [];
+        _todoStrip.ClearGoalPlan();
         RefreshTodoStrip();
     }
 

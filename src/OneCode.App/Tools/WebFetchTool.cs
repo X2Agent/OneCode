@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Caching.Memory;
 using OneCode.Infrastructure.Config;
 
@@ -9,17 +10,23 @@ namespace OneCode.App.Tools;
 /// <summary>
 /// WebFetch tool - fetches content from a URL and applies a prompt to extract information.
 /// </summary>
-public sealed class WebFetchTool(
+public sealed partial class WebFetchTool(
     IHttpClientFactory httpClientFactory,
     IMemoryCache cache,
     ILogger<WebFetchTool> logger)
 {
+    static WebFetchTool()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     // Constants matching TypeScript implementation
     private const int MaxHttpContentLength = 10 * 1024 * 1024; // 10MB
     private const int FetchTimeoutMs = 60000;
     private const int MaxRedirects = 10;
     public const int MaxMarkdownLength = 25_000; // Single-page inline budget (~6K tokens)
     private const int CacheTtlMs = 15 * 60 * 1000; // 15 minutes
+    private const int CharsetSniffByteLimit = 4096;
 
     // 降级引导（失败路径）：工具不做浏览器渲染等替代路径的硬编码调用，
     // 决策权归模型——仅在失败结果文本中提供替代路径（BrowserFetch），
@@ -228,8 +235,10 @@ public sealed class WebFetchTool(
 
             response.EnsureSuccessStatusCode();
 
-            var content = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            var headerCharset = response.Content.Headers.ContentType?.CharSet;
+            var content = DecodeResponseBytes(bytes, headerCharset);
 
             return new FetchResult
             {
@@ -291,6 +300,97 @@ public sealed class WebFetchTool(
 
         return false;
     }
+
+    /// <summary>
+    /// 解码 HTTP 响应字节：优先依据 BOM、HTTP <c>Content-Type</c> 头与 HTML <c>&lt;meta charset&gt;</c>
+    /// （按 WHATWG 标准将 <c>gb2312</c>/<c>gbk</c> 统一映射为超集 <c>GB18030</c>），
+    /// 避免中文资讯页因缺失 HTTP 响应头 charset 或声明为 GB2312/GBK 而被按 UTF-8 解出乱码。
+    /// </summary>
+    internal static string DecodeResponseBytes(ReadOnlySpan<byte> bytes, string? headerCharset = null)
+    {
+        if (bytes.IsEmpty)
+            return string.Empty;
+
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return Encoding.UTF8.GetString(bytes[3..]);
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return Encoding.Unicode.GetString(bytes[2..]);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return Encoding.BigEndianUnicode.GetString(bytes[2..]);
+
+        var normalizedHeader = NormalizeCharsetName(headerCharset);
+        var sniffedCharset = SniffHtmlOrXmlCharset(bytes);
+
+        // 许多老旧站点 HTTP 头未带 charset 或默认回传 iso-8859-1，而 HTML <meta charset="gb2312/gbk"> 才是真实编码。
+        var effectiveCharset = string.IsNullOrEmpty(normalizedHeader)
+            || (!string.IsNullOrEmpty(sniffedCharset)
+                && normalizedHeader is "iso-8859-1" or "latin1" or "us-ascii")
+            ? sniffedCharset
+            : normalizedHeader;
+
+        if (!string.IsNullOrEmpty(effectiveCharset) && TryResolveEncoding(effectiveCharset, out var detectedEncoding))
+            return detectedEncoding.GetString(bytes);
+
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static string? SniffHtmlOrXmlCharset(ReadOnlySpan<byte> bytes)
+    {
+        var sampleLength = Math.Min(bytes.Length, CharsetSniffByteLimit);
+        var asciiPrefix = Encoding.ASCII.GetString(bytes[..sampleLength]);
+
+        var metaMatch = HtmlMetaCharsetRegex().Match(asciiPrefix);
+        if (metaMatch.Success)
+            return NormalizeCharsetName(metaMatch.Groups["charset"].Value);
+
+        var xmlMatch = XmlDeclarationEncodingRegex().Match(asciiPrefix);
+        if (xmlMatch.Success)
+            return NormalizeCharsetName(xmlMatch.Groups["charset"].Value);
+
+        return null;
+    }
+
+    private static string? NormalizeCharsetName(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var trimmed = raw.Trim().Trim('"', '\'', ';').Trim().ToLowerInvariant();
+        if (trimmed.Length == 0)
+            return null;
+
+        // WHATWG Encoding Standard: gb2312 / gbk / gb_2312-80 统一由超集 GB18030 解码。
+        return trimmed switch
+        {
+            "gb2312" or "gbk" or "gb_2312" or "gb_2312-80" or "x-gbk" or "chinese" => "gb18030",
+            "utf8" => "utf-8",
+            _ => trimmed,
+        };
+    }
+
+    private static bool TryResolveEncoding(string charset, out Encoding encoding)
+    {
+        try
+        {
+            encoding = Encoding.GetEncoding(charset);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            encoding = Encoding.UTF8;
+            return false;
+        }
+    }
+
+    [GeneratedRegex(
+        @"<meta\b[^>]*?\bcharset\s*=\s*[""']?\s*(?<charset>[A-Za-z0-9_\-]+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HtmlMetaCharsetRegex();
+
+    [GeneratedRegex(
+        @"<\?xml\b[^>]*?\bencoding\s*=\s*[""'](?<charset>[A-Za-z0-9_\-]+)[""']",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex XmlDeclarationEncodingRegex();
 
     private sealed class FetchResult
     {

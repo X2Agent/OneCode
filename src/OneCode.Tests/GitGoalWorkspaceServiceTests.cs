@@ -11,70 +11,30 @@ namespace OneCode.Tests;
 public sealed class GitGoalWorkspaceServiceTests
 {
     [Fact]
-    public async Task Prepare_DirtyWorkspaceCarriesUncommittedChangesIntoWorktree()
+    public async Task Prepare_DirtyWorkspaceIncludesRootPathCountAndSamples()
     {
         var git = Substitute.For<IGitHelper>();
-        var run = CreateRun();
+        var run = CreateRun() with { WorkingDirectory = "C:/repo/.dev-workspace" };
         git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
         git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(2);
-        git.RunAsync(Arg.Any<string[]>(), "C:/repo", Arg.Any<CancellationToken>())
-            .Returns(call => GitResult(call.ArgAt<string[]>(0)));
         git.RunAsync(
                 Arg.Is<string[]>(args => args.SequenceEqual(new[] { "status", "--porcelain" })),
                 "C:/repo",
                 Arg.Any<CancellationToken>())
             .Returns(new GitCommandResult(true, " M src/A.cs\n?? .dev-workspace/notes.md\n", ""));
-        git.RunAsync(
-                Arg.Is<string[]>(args => args.Length > 0 && args[0] == "apply"),
-                Arg.Any<string>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new GitCommandResult(true, "", ""));
-        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
-        fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
-        var service = new GitGoalWorkspaceService(git, fingerprints);
+        var service = new GitGoalWorkspaceService(git, Substitute.For<IWorkspaceFingerprintProvider>());
 
-        var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
+        var act = () => service.PrepareAsync(run, TestContext.Current.CancellationToken);
 
-        result.CarriedUncommittedCount.Should().Be(2);
-        result.CarriedUncommittedPaths.Should().Equal("src/A.cs", ".dev-workspace/notes.md");
-        await git.Received().RunAsync(
-            Arg.Is<string[]>(args => args.SequenceEqual(new[] { "worktree", "add", "-b", result.WorktreeBranch, result.IsolatedPath, "base-head" })),
-            "C:/repo",
-            Arg.Any<CancellationToken>());
-        await git.Received().RunAsync(
-            Arg.Is<string[]>(args => args.SequenceEqual(new[] { "diff", "HEAD", "--binary" })),
-            "C:/repo",
-            Arg.Any<CancellationToken>());
-        await git.Received().RunAsync(
-            Arg.Is<string[]>(args => args.Length == 5
-                && args[0] == "apply"
-                && args[1] == "--binary"
-                && args[2] == "--whitespace=nowarn"
-                && args[3] == "--index"
-                && args[4].EndsWith(".patch", StringComparison.Ordinal)),
-            result.IsolatedPath,
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Prepare_CleanWorkspaceCarriesNoWarning()
-    {
-        var git = Substitute.For<IGitHelper>();
-        var run = CreateRun();
-        git.GetRepositoryRootAsync(run.WorkingDirectory, Arg.Any<CancellationToken>()).Returns("C:/repo");
-        git.CountPorcelainChangesAsync("C:/repo", Arg.Any<CancellationToken>()).Returns(0);
-        git.RunAsync(Arg.Any<string[]>(), "C:/repo", Arg.Any<CancellationToken>())
-            .Returns(call => GitResult(call.ArgAt<string[]>(0)));
-        var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
-        fingerprints.ComputeAsync("C:/repo", Arg.Any<CancellationToken>()).Returns("fingerprint-a");
-        var service = new GitGoalWorkspaceService(git, fingerprints);
-
-        var result = await service.PrepareAsync(run, TestContext.Current.CancellationToken);
-
-        result.CarriedUncommittedCount.Should().BeNull();
-        result.CarriedUncommittedPaths.Should().BeNull();
+        var ex = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
+        ex.Message.Should().Contain("clean Git working tree");
+        ex.Message.Should().Contain("C:/repo");
+        ex.Message.Should().Contain(".dev-workspace");
+        ex.Message.Should().Contain("2 dirty path");
+        ex.Message.Should().Contain("src/A.cs");
+        ex.Message.Should().Contain(".dev-workspace/notes.md");
         await git.DidNotReceive().RunAsync(
-            Arg.Is<string[]>(args => args[0] == "diff" || args[0] == "apply"),
+            Arg.Is<string[]>(args => args[0] == "worktree"),
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
@@ -296,6 +256,75 @@ public sealed class GitGoalWorkspaceServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Stale*");
         await git.DidNotReceiveWithAnyArgs().RunAsync(default!, default, default);
+    }
+
+    [Fact]
+    public async Task Publish_WithIgnoredWorktreeDeliverable_CopiesFileToRepositoryRootAndSucceedsOnEmptyGitDiff()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"onecode-goal-pub-ignored-{Guid.NewGuid():N}");
+        var repoRoot = Path.Combine(tempRoot, "repo");
+        var worktreeRoot = Path.Combine(tempRoot, "repo.worktree", "html");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".dev-workspace"));
+        Directory.CreateDirectory(Path.Combine(worktreeRoot, ".dev-workspace"));
+        var worktreeHtml = Path.Combine(worktreeRoot, ".dev-workspace", "justin-sun-timeline.html");
+        await File.WriteAllTextAsync(worktreeHtml, "<html>timeline</html>", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var git = Substitute.For<IGitHelper>();
+            var fingerprints = Substitute.For<IWorkspaceFingerprintProvider>();
+            git.CountPorcelainChangesAsync(worktreeRoot, Arg.Any<CancellationToken>()).Returns(0);
+            fingerprints.ComputeAsync(repoRoot, Arg.Any<CancellationToken>()).Returns("fingerprint-a");
+            var targetHeadReads = 0;
+            git.RunAsync(Arg.Any<string[]>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(call =>
+                {
+                    var args = call.ArgAt<string[]>(0);
+                    return args[0] switch
+                    {
+                        "log" => new GitCommandResult(true, "", ""),
+                        "symbolic-ref" => new GitCommandResult(true, "main", ""),
+                        "rev-parse" when args[1] == "HEAD" && call.ArgAt<string>(1) == worktreeRoot => new GitCommandResult(true, "publish-marker-commit", ""),
+                        "rev-parse" when args[1] == "HEAD" => new GitCommandResult(
+                            true,
+                            ++targetHeadReads == 1 ? "base-head" : "published-head",
+                            ""),
+                        "rev-list" => new GitCommandResult(true, "step-commit\npublish-marker-commit", ""),
+                        "commit" or "cherry-pick" => new GitCommandResult(true, "", ""),
+                        "diff" => new GitCommandResult(true, "", ""),
+                        _ => throw new InvalidOperationException($"Unexpected git call: {string.Join(' ', args)}"),
+                    };
+                });
+
+            var evidence = CreateEvidence(1) with { ChangedFiles = [worktreeHtml] };
+            var run = CreateClaimedRun() with
+            {
+                WorkingDirectory = Path.Combine(repoRoot, ".dev-workspace"),
+                Executions = [evidence],
+                Workspace = new GoalWorkspaceSnapshot(
+                    "goal-run",
+                    repoRoot,
+                    worktreeRoot,
+                    "onecode/goal/html",
+                    "main",
+                    "base-head",
+                    "fingerprint-a",
+                    DateTimeOffset.UtcNow),
+            };
+            var service = new GitGoalWorkspaceService(git, fingerprints);
+
+            var receipt = await service.PublishAsync(run, 7, TestContext.Current.CancellationToken);
+
+            var targetHtml = Path.Combine(repoRoot, ".dev-workspace", "justin-sun-timeline.html");
+            File.Exists(targetHtml).Should().BeTrue("ignored deliverable in worktree must be copied to main workspace on publish");
+            (await File.ReadAllTextAsync(targetHtml, TestContext.Current.CancellationToken)).Should().Be("<html>timeline</html>");
+            receipt.ChangedFiles.Should().ContainSingle(".dev-workspace/justin-sun-timeline.html");
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
     }
 
     private static GoalStepExecutionEvidence CreateEvidence(int goalId) => new(

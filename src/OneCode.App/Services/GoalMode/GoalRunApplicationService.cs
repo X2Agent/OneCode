@@ -45,7 +45,7 @@ public sealed class GoalRunApplicationService(
             throw new ArgumentException("Goal is required.", nameof(goal));
         var normalizedDirectory = Path.GetFullPath(workingDirectory);
         var existing = await store.LoadBySessionAsync(sessionId, ct).ConfigureAwait(false);
-        if (existing is not null)
+        if (existing is not null && !existing.IsTerminal)
         {
             if (!string.Equals(existing.Goal, goal, StringComparison.Ordinal)
                 || !string.Equals(Path.GetFullPath(existing.WorkingDirectory), normalizedDirectory, StringComparison.OrdinalIgnoreCase))

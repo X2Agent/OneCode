@@ -147,7 +147,6 @@ public sealed class GoalRunStoreTests : IDisposable
                     0,
                     false,
                     [],
-                    [],
                     true,
                     true,
                     false),

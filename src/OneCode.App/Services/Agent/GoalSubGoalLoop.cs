@@ -14,15 +14,14 @@ namespace OneCode.App.Services.Agent;
 internal sealed class GoalSubGoalLoop(
     GoalSubGoalHardGate hardGate,
     GoalSubGoalJudge judge,
-    ILoggerFactory loggerFactory)
+    ILoggerFactory loggerFactory,
+    TodoProjectionService? todoProjection = null)
 {
     /// <summary>per-run 状态登记在 <see cref="LoopContext.AdditionalProperties"/> 上的键。</summary>
     internal const string RunStateKey = "OneCode.GoalSubGoalLoop.RunState";
 
     /// <summary>
-    /// feedback 中回显上一轮输出的截断长度。<see cref="LoopAgentOptions.FreshContextPerIteration"/>
-    /// 下 inner agent 对上一轮产出零记忆，不回显就会重复已完成的动作
-    /// （对齐 MAF <c>CompletionMarkerLoopEvaluator.LastResponsePlaceholder</c> 的用意）。
+    /// feedback 中回显上一轮输出的截断长度，帮助下一轮迭代快速对照上一轮总结与门禁/Judge 反馈。
     /// </summary>
     private const int LastOutputFeedbackChars = 600;
 
@@ -30,6 +29,7 @@ internal sealed class GoalSubGoalLoop(
     private readonly GoalSubGoalJudge _judge = judge;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
     private readonly ILogger<GoalSubGoalLoop> _logger = loggerFactory.CreateLogger<GoalSubGoalLoop>();
+    private readonly TodoProjectionService? _todoProjection = todoProjection;
 
     /// <summary>Run MAF LoopAgent for one sub-goal with hard-gate + semantic judge.</summary>
     public async Task<SubGoalExecution> RunAsync(
@@ -52,6 +52,8 @@ internal sealed class GoalSubGoalLoop(
             var state = new GoalLoopRunState();
             var changeVersion = sharedTransaction.CaptureChangeVersion();
 
+            var usageTracker = new StreamingTurnUsageTracker();
+
             // 用 DelegateLoopEvaluator 包装自定义评估逻辑。
             // LoopAgent 把评估器返回的 Feedback 追加进聚合反馈日志并随下一轮输入重发
             //（框架硬编码行为），实现"执行→评估→反馈注入重试"循环，无需手写 for 循环。
@@ -60,8 +62,6 @@ internal sealed class GoalSubGoalLoop(
                 loopContext.AdditionalProperties.TryAdd(RunStateKey, state);
                 state.Iterations = loopContext.Iteration;
 
-                // 从 LastResponse 提取本轮输出文本和 token（FreshContextPerIteration=true
-                // 保证每轮 session 独立，不会跨轮累积输出）。
                 var lastOutputBuilder = new StringBuilder();
                 foreach (var message in loopContext.LastResponse.Messages)
                 {
@@ -75,14 +75,12 @@ internal sealed class GoalSubGoalLoop(
                     }
                 }
 
-                // M.E.AI 契约：usage 聚合在 response.Usage 上，不留在 Messages 里
-                // （MAF LoopAgentTests: AggregatedTranscript_DoesNotDuplicateUsageIntoMessages）——
-                // 从 Messages 扫 UsageContent 是死代码，token 会全部漏计。
-                if (loopContext.LastResponse.Usage is { } usage)
-                {
-                    state.InputTokens += (long)(usage.InputTokenCount ?? 0);
-                    state.OutputTokens += (long)(usage.OutputTokenCount ?? 0);
-                }
+                // OpenAI 兼容流式端点（如 StepFun）会在每个 SSE chunk 上附带当轮累计 UsageContent，
+                // LoopAgent.LastResponse.Usage 会将同一轮所有 chunk 的 UsageContent 重复累加导致虚增百倍。
+                // 此处优先采用按轮次（FunctionResultContent / ResponseId 边界）去重后的真实 token 统计。
+                var (iterInput, iterOutput) = usageTracker.ConsumeIterationUsage(loopContext.LastResponse.Usage);
+                state.InputTokens += iterInput;
+                state.OutputTokens += iterOutput;
 
                 var lastOutput = lastOutputBuilder.ToString();
                 state.FinalOutputText = lastOutput;
@@ -116,7 +114,7 @@ internal sealed class GoalSubGoalLoop(
 
                 // AI Judge 只负责语义覆盖，并必须读取真实证据摘要。
                 var (isCompleted, feedback, judgeInTokens, judgeOutTokens) = await _judge.EvaluateSubGoalAsync(
-                    hardValidation.Evidence, goal, evalCt).ConfigureAwait(false);
+                    hardValidation.Evidence, goal, evalCt, options.WorkingDirectory).ConfigureAwait(false);
                 state.InputTokens += judgeInTokens;
                 state.OutputTokens += judgeOutTokens;
 
@@ -144,15 +142,14 @@ internal sealed class GoalSubGoalLoop(
                 new LoopAgentOptions
                 {
                     MaxIterations = GoalLoopDefaults.MaxAttemptsPerSubGoal,
-                    FreshContextPerIteration = true,
+                    FreshContextPerIteration = false,
                     OnBehalfOfAuthorName = "goal-judge",
                     ExcludeOnBehalfOfMessages = true,
                 },
                 _loggerFactory);
 
             // system prompt 只经 inner agent 的 ChatOptions.Instructions 下达（BuildSubGoalRunOptionsAsync
-            // 已设置），此处不再放一条 System 消息——否则 fresh context 每轮重放 InitialMessages 时
-            // 同一段 prompt 会双份送达模型。
+            // 已设置），此处不再放一条 System 消息。
             var messages = new List<ChatMessage>
             {
                 BuildUserMessage(userPrompt, options.ImagePaths),
@@ -161,14 +158,26 @@ internal sealed class GoalSubGoalLoop(
             _logger.LogInformation("Sub-goal {Id} executing with LoopAgent (max {Max} iterations): {Description}",
                 goal.Id, GoalLoopDefaults.MaxAttemptsPerSubGoal, goal.Description);
 
+            var session = await loopAgent.CreateSessionAsync(ct).ConfigureAwait(false);
+            if (_todoProjection is not null)
+                await _todoProjection.PublishAsync(innerAgent, session, ct).ConfigureAwait(false);
+
+            var todoMutations = new TodoMutationObserver();
             await foreach (var update in loopAgent.RunStreamingAsync(
-                messages, cancellationToken: ct).ConfigureAwait(false))
+                messages, session, cancellationToken: ct).ConfigureAwait(false))
             {
-                // Agent text remains in the MAF response and evaluation evidence.
-                // The Goal transcript intentionally exposes only projected progress,
-                // tool activity and file changes rather than every model token.
-                _ = update;
+                usageTracker.Observe(update);
+                if (_todoProjection is not null && todoMutations.Observe(update))
+                    await _todoProjection.PublishAsync(innerAgent, session, ct).ConfigureAwait(false);
             }
+
+            // 若最后一轮达到 MaxIterations 先停后判未进入 evaluator，补计最后一轮未结算的流式 token。
+            var (tailInput, tailOutput) = usageTracker.ConsumeIterationUsage(fallbackUsage: null);
+            state.InputTokens += tailInput;
+            state.OutputTokens += tailOutput;
+
+            if (_todoProjection is not null)
+                await _todoProjection.PublishAsync(innerAgent, session, ct).ConfigureAwait(false);
 
             // evaluator 从未触发说明 LoopAgent 在首轮就停止——最常见原因是
             // pending tool approval 无人解析（审批中间件未挂载或放行规则未生效）。
@@ -226,7 +235,7 @@ internal sealed class GoalSubGoalLoop(
     }
 
     /// <summary>
-    /// 组装注入下一轮的 feedback：先回显上一轮 agent 的实际产出（fresh context 下它对此零记忆），
+    /// 组装注入下一轮的 feedback：先回显上一轮 agent 的实际产出摘要，
     /// 再给出本轮未通过的原因与证据。
     /// </summary>
     private static string BuildFeedback(string? outcome, string lastOutput)
@@ -312,4 +321,93 @@ internal sealed class GoalLoopRunState
 
     /// <summary>evaluator 是否从未执行（LoopAgent 首轮即停，通常是 pending tool approval）。</summary>
     public bool EvaluatorNeverRan => Iterations == 0;
+}
+
+/// <summary>
+/// 按工具调用轮次（<see cref="FunctionResultContent"/> / <see cref="AgentResponseUpdate.ResponseId"/> 边界）
+/// 对流式 <see cref="UsageContent"/> 去重累加，防止每个 SSE chunk 携带当轮累计 usage 的模型虚增百倍 Token。
+/// </summary>
+internal sealed class StreamingTurnUsageTracker
+{
+    private long _committedInputTokens;
+    private long _committedOutputTokens;
+    private long _currentTurnInputTokens;
+    private long _currentTurnOutputTokens;
+    private string? _currentUsageResponseId;
+    private bool _usageTurnBoundaryPending;
+    private bool _observedAnyInIteration;
+
+    public void Observe(AgentResponseUpdate update)
+    {
+        if (update.Contents is not { Count: > 0 })
+            return;
+
+        foreach (var content in update.Contents)
+        {
+            if (content is FunctionResultContent && (_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0))
+            {
+                _usageTurnBoundaryPending = true;
+            }
+            else if (content is UsageContent { Details: { } details })
+            {
+                ObserveUsageDetails(update.ResponseId, details);
+            }
+        }
+    }
+
+    public (long InputTokens, long OutputTokens) ConsumeIterationUsage(UsageDetails? fallbackUsage)
+    {
+        if (_observedAnyInIteration)
+        {
+            var totalInput = _committedInputTokens + _currentTurnInputTokens;
+            var totalOutput = _committedOutputTokens + _currentTurnOutputTokens;
+            Reset();
+            return (totalInput, totalOutput);
+        }
+
+        Reset();
+        if (fallbackUsage is null)
+            return (0, 0);
+
+        return (
+            Math.Max(0, fallbackUsage.InputTokenCount ?? 0),
+            Math.Max(0, fallbackUsage.OutputTokenCount ?? 0));
+    }
+
+    private void ObserveUsageDetails(string? responseId, UsageDetails details)
+    {
+        var input = Math.Max(0, details.InputTokenCount ?? 0);
+        var output = Math.Max(0, details.OutputTokenCount ?? 0);
+        if (input == 0 && output == 0)
+            return;
+
+        _observedAnyInIteration = true;
+        var isNewResponseId = !string.IsNullOrEmpty(responseId)
+            && !string.IsNullOrEmpty(_currentUsageResponseId)
+            && !string.Equals(responseId, _currentUsageResponseId, StringComparison.Ordinal);
+
+        if ((_currentTurnInputTokens > 0 || _currentTurnOutputTokens > 0)
+            && (_usageTurnBoundaryPending || isNewResponseId))
+        {
+            _committedInputTokens += _currentTurnInputTokens;
+            _committedOutputTokens += _currentTurnOutputTokens;
+            _usageTurnBoundaryPending = false;
+        }
+
+        _currentTurnInputTokens = input;
+        _currentTurnOutputTokens = output;
+        if (!string.IsNullOrEmpty(responseId))
+            _currentUsageResponseId = responseId;
+    }
+
+    private void Reset()
+    {
+        _committedInputTokens = 0;
+        _committedOutputTokens = 0;
+        _currentTurnInputTokens = 0;
+        _currentTurnOutputTokens = 0;
+        _currentUsageResponseId = null;
+        _usageTurnBoundaryPending = false;
+        _observedAnyInIteration = false;
+    }
 }

@@ -64,7 +64,8 @@ public static class ToolCallEventMiddleware
                 isError = stateBag is not null
                     ? result is ToolResult tr ? tr.IsError : stateBag.GetOrInitializeToolExecutionContext().IsError
                     : result is ToolResult { IsError: true };
-                resultStr = ExtractResultText(result);
+                (resultStr, var envIsError) = ExtractResultText(result);
+                isError |= envIsError;
                 return result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -91,12 +92,19 @@ public static class ToolCallEventMiddleware
     }
 
     /// <summary>
-    /// 从工具结果中提取可读文本。对 ToolResult 取 Content，对其他类型用 ToString()。
-    /// 避免对 ToolResult 调 ToString() 返回全字段 dump 污染事件展示。
+    /// 从工具结果中提取可读文本。对 ToolResult 取 Content；若内层已将 ToolResult 序列化为
+    /// JSON 信封字符串（如 <c>{"content": "...", "isError": ...}</c>），自动解包提取正文与错误标志，
+    /// 避免在 TUI 预览中直接打印 JSON 信封。
     /// </summary>
-    private static string? ExtractResultText(object? result) => result switch
+    private static (string? Text, bool IsError) ExtractResultText(object? result)
     {
-        ToolResult tr => tr.Content,
-        _ => result?.ToString()
-    };
+        if (result is ToolResult tr)
+            return (tr.Content, tr.IsError);
+
+        var raw = result?.ToString();
+        if (raw is not null && DisplayJsonSerializer.TryUnwrapEnvelope(raw, out var envIsError, out var unwrapped))
+            return (unwrapped, envIsError);
+
+        return (raw, false);
+    }
 }

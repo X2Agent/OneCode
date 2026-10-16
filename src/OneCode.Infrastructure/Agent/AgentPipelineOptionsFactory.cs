@@ -48,7 +48,8 @@ public sealed record PipelineRoleOverrides(
     bool EnableToolApproval = true,
     IEnumerable<Func<ToolAutoApprovalRuleContext, ValueTask<bool>>>? AutoApprovalRules = null,
     // 轮数上限（模型往返次数）；null = 不设轮数上限（迭代上限退回 MaxToolCalls）。
-    int? MaxTurns = null);
+    int? MaxTurns = null,
+    int? MaxExternalWebToolCalls = null);
 
 /// <summary>
 /// PIPE-1: 统一的 AgentPipelineOptions 工厂。
@@ -118,6 +119,7 @@ public static class AgentPipelineOptionsFactory
             AutoApprovalRules = autoApprovalRules,
 
             MaxToolCalls = overrides.MaxToolCalls,
+            MaxExternalWebToolCalls = overrides.MaxExternalWebToolCalls,
             MaxTurns = overrides.MaxTurns,
             ToolLimitMessage = overrides.ToolLimitMessage,
             IsToolAllowed = isToolAllowed,

@@ -39,7 +39,6 @@ public sealed record GoalStepSnapshot(
     IReadOnlyList<string> RequiredTools,
     int Depth,
     bool NeedsFurtherDecomposition,
-    IReadOnlyList<string> ExpectedFiles,
     IReadOnlyList<string> AllowedPaths,
     bool RequiresBuild,
     bool RequiresTests,
@@ -65,6 +64,9 @@ public sealed record GoalSubTask(
     IReadOnlyList<string> DependsOn,
     bool ReadOnly);
 
+/// <summary>
+/// 子目标回执的确定性证据；<paramref name="ChangedFiles"/> 内部流转统一为隔离 worktree 内的规范化绝对路径（兼容解析历史相对路径）。
+/// </summary>
 public sealed record GoalStepExecutionEvidence(
     int GoalId,
     GoalStepState State,
@@ -115,11 +117,7 @@ public sealed record GoalWorkspaceSnapshot(
     string TargetBranch,
     string BaseCommit,
     string TargetWorkspaceFingerprint,
-    DateTimeOffset CreatedAt,
-    // 创建 worktree 时带入的目标工作区未提交改动数（干净树为 null，便于区分“未知”与“没有”）。
-    int? CarriedUncommittedCount = null,
-    // 带入的未提交改动路径样本（与 CarriedUncommittedCount 对应，最多展示前若干条）。
-    IReadOnlyList<string>? CarriedUncommittedPaths = null);
+    DateTimeOffset CreatedAt);
 
 public sealed record GoalRun : IWorkflowRun
 {

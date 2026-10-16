@@ -215,6 +215,24 @@ public sealed partial class OneCodeToplevel
             case TuiQuestionWizardRequest { Title: var title, Questions: var questions, ResponseSource: var rs }:
                 _ = HandleQuestionWizardRequestAsync(title, questions, rs);
                 break;
+
+            // GOAL 预算耗尽交互请求 — 弹出 InlineSelector 询问继续（追加预算）/跳过/暂停/终止
+            case TuiGoalBudgetExhaustedRequest budgetRequest:
+                _ = HandleGoalBudgetExhaustedRequestAsync(budgetRequest);
+                break;
+
+            case TuiWorkingDirectoryChanged cwdChanged:
+                _ = _shell.RefreshSessionContextBarAsync(cwdChanged.WorkingDirectory);
+                break;
+
+            case TuiGoalPlanUpdated planUpdated:
+                _shell.ShowGoalPlan(
+                    planUpdated.Steps,
+                    planUpdated.Executions,
+                    planUpdated.CurrentIndex,
+                    planUpdated.Usage,
+                    planUpdated.Budget);
+                break;
         }
     }
 
@@ -373,6 +391,11 @@ public sealed partial class OneCodeToplevel
     private static string ExtractFirstLines(string text, int lineCount)
     {
         if (string.IsNullOrEmpty(text)) return "";
+        if (OneCode.Core.Tools.DisplayJsonSerializer.TryUnwrapEnvelope(text, out _, out var unwrapped)
+            && !string.IsNullOrEmpty(unwrapped))
+        {
+            text = unwrapped;
+        }
         var lines = text.Replace("\r\n", "\n").Split('\n');
         if (lines.Length <= lineCount) return text.Trim();
         return string.Join("\n", lines.Take(lineCount)).Trim() + $"\n{TuiGlyphs.Ellipsis} ({lines.Length - lineCount} more lines)";

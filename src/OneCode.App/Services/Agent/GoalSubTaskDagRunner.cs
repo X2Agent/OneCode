@@ -133,9 +133,10 @@ internal sealed class GoalSubTaskDagRunner(
         }
     }
 
-    private static CacheSafeParams BuildCacheSafeParams(GoalRunOptions options)
+    internal static CacheSafeParams BuildCacheSafeParams(GoalRunOptions options)
         => new()
         {
+            SystemPrompt = options.SystemPrompt,
             ModelId = options.ModelId,
             Tools = options.Tools.ToList(),
             ToolCapabilities = ToolCapabilitySet.CreateUnrestricted(

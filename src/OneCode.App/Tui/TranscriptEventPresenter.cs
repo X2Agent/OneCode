@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace OneCode.App.Tui;
 
 /// <summary>
@@ -58,10 +56,26 @@ internal sealed class TranscriptEventPresenter(ChatTranscriptView transcript)
                     transcript.AddSystem($"  {i + 1}. {steps[i]}");
                 return true;
 
-            case TuiGoalResult { Completed: var completed, Failed: var failed, Skipped: var skipped, ValidationSummary: var summary }:
-                // P1：结构化证据保留用于 resume/报告；对话流渲染简洁结果卡
-                // （此前被静默吞掉，用户看不到任何步骤级结论）。
-                transcript.AddSystem($"Goal 执行结束：✓ 完成 {completed} · ✗ 失败 {failed} · ○ 跳过 {skipped}");
+            case TuiGoalResult
+            {
+                Completed: var completed,
+                Failed: var failed,
+                Skipped: var skipped,
+                Committed: var committed,
+                ValidationSummary: var summary,
+                ChangedFiles: var changedFiles,
+                FinalConclusion: var conclusion,
+            }:
+                if (!string.IsNullOrWhiteSpace(conclusion))
+                {
+                    transcript.AppendStreamingToken(conclusion.Trim() + "\n");
+                }
+                var publishTag = committed ? " · 已合并提交到当前分支" : "";
+                transcript.AddSystem($"Goal 执行结束：✓ 完成 {completed} · ✗ 失败 {failed} · ○ 跳过 {skipped}{publishTag}");
+                if (changedFiles is { Count: > 0 })
+                {
+                    transcript.AddSystem($"  产物文件 ({changedFiles.Count})：{string.Join(", ", changedFiles.Take(10))}{(changedFiles.Count > 10 ? " …" : "")}");
+                }
                 foreach (var line in summary.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                     transcript.AddSystem($"  {line.Trim()}");
                 return true;

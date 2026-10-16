@@ -154,7 +154,7 @@ public enum ModeProgressState
     Paused,
 }
 
-/// <summary>Goal 的结构化执行结果，供验证、恢复和测试读取；主对话不直接渲染其内部明细。</summary>
+/// <summary>Goal 的结构化执行结果，供验证、恢复和测试读取；主对话渲染简洁交付摘要与变更文件。</summary>
 public sealed record TuiGoalResult(
     int Completed,
     int Failed,
@@ -164,10 +164,23 @@ public sealed record TuiGoalResult(
     IReadOnlyList<string> CompletedGoals,
     IReadOnlyList<string> FailedGoals,
     IReadOnlyList<string> SkippedGoals,
-    string ValidationSummary) : TuiEvent;
+    string ValidationSummary,
+    IReadOnlyList<string>? ChangedFiles = null,
+    string? FinalConclusion = null) : TuiEvent;
 
 /// <summary>Goal 分解完成——子目标编号清单，presenter 渲染为一次性清单块（执行前让用户看到计划）。</summary>
 public sealed record TuiGoalPlan(IReadOnlyList<string> Steps) : TuiEvent;
+
+/// <summary>
+/// Goal 结构化子目标进度快照——驱动输入框上方的可折叠/展开 <c>TodoStripView</c> 展示
+/// 子目标状态、验收标准、预期文件、重试轮数与评估结论。
+/// </summary>
+public sealed record TuiGoalPlanUpdated(
+    IReadOnlyList<OneCode.Core.Goals.GoalStepSnapshot> Steps,
+    IReadOnlyList<OneCode.Core.Goals.GoalStepExecutionEvidence> Executions,
+    int CurrentIndex,
+    OneCode.Core.Goals.GoalBudgetUsage? Usage = null,
+    OneCode.Core.Goals.GoalBudget? Budget = null) : TuiEvent;
 
 
 /// <summary>
@@ -216,6 +229,42 @@ public sealed record TuiApprovalRequest(
 public sealed record TuiLspDiagnosticsChanged : TuiEvent;
 
 /// <summary>
+/// 工作目录切换通知：驱动底部状态栏刷新当前目录与 Git worktree 分支。
+/// </summary>
+public sealed record TuiWorkingDirectoryChanged(string WorkingDirectory) : TuiEvent;
+
+/// <summary>
+/// GOAL 预算耗尽时的用户决策。
+/// </summary>
+public enum GoalBudgetDecision
+{
+    /// <summary>继续执行并自动追加预算额度。</summary>
+    ContinueWithExtraBudget,
+
+    /// <summary>跳过当前子目标，继续执行后续子目标。</summary>
+    SkipCurrentStep,
+
+    /// <summary>暂停保存当前进度（稍后通过 /resume 恢复）。</summary>
+    Pause,
+
+    /// <summary>终止当前 Goal 任务。</summary>
+    Abort,
+}
+
+/// <summary>
+/// GOAL 预算耗尽交互请求 — 当总尝试轮次、Token 或墙钟触顶时暂停并询问用户下一步操作。
+/// </summary>
+public sealed record TuiGoalBudgetExhaustedRequest(
+    string Reason,
+    OneCode.Core.Goals.GoalBudgetUsage Usage,
+    OneCode.Core.Goals.GoalBudget CurrentBudget,
+    string? CurrentStepDescription = null) : TuiEvent
+{
+    /// <summary>用于回传用户预算决策的 TaskCompletionSource。</summary>
+    public TaskCompletionSource<GoalBudgetDecision> ResponseSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+/// <summary>
 /// GOAL 预算警告 — 消耗比例跨越 70%（Early/黄）或 90%（Late/橙）阈值时发布。
 /// 仅在警告级别发生变化时发布一次，TUI 据此渲染横幅。
 /// </summary>
@@ -235,7 +284,7 @@ public sealed record TuiBudgetWarning(
     long LimitTokens) : TuiEvent;
 
 /// <summary>
-/// 通用 TUI 系统提示（非错误、非助手输出）——例如 Goal 启动前的脏工作树说明。
+/// 通用 TUI 系统提示（非错误、非助手输出）——例如会话恢复或任务状态说明。
 /// TUI 渲染为流式提示行；若文本包含 \n 会按预换行逐行显示。
 /// </summary>
 public sealed record TuiNotice(string Message) : TuiEvent;

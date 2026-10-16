@@ -127,7 +127,7 @@ public static class KeybindingDefaults
     {
         // App 级别
         [ActionAppExit] = "退出应用",
-        [ActionAppSidebarToggle] = "切换右侧侧边栏可见性（Plan 面板）",
+        [ActionAppSidebarToggle] = "切换计划侧边栏或底部待办/目标面板展开状态",
         [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan 面板）",
         [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan 面板）",
 
@@ -192,7 +192,7 @@ public static class KeybindingDefaults
         new(ContextGlobal, new Dictionary<string, string?>
         {
             ["ctrl+d"] = ActionAppExit,
-            ["ctrl+g"] = ActionAppSidebarToggle,
+            ["ctrl+o"] = ActionAppSidebarToggle,
 
             // 侧边栏宽度调整（Plan 面板）：Ctrl+Shift+方向键，步进见
             // SidebarViewBase.KeyboardResizeStep。不占用 ctrl+left/right（占位建议循环）。

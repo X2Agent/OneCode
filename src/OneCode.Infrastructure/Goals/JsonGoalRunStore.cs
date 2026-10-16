@@ -38,6 +38,9 @@ public sealed class JsonGoalRunStore : IGoalRunStore
             var current = LoadCurrent(Path.Combine(directory, "run.json"));
             if (current?.Id == runId)
                 return Task.FromResult<GoalRun?>(current);
+            var archived = LoadCurrent(Path.Combine(directory, $"run.{runId}.json"));
+            if (archived?.Id == runId)
+                return Task.FromResult<GoalRun?>(archived);
         }
         return Task.FromResult<GoalRun?>(null);
     }
@@ -101,6 +104,14 @@ public sealed class JsonGoalRunStore : IGoalRunStore
             var path = GetRunFilePath(run.SessionId);
             await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
             var current = LoadCurrent(path);
+            if (current is not null && current.IsTerminal && expectedVersion == 0 && current.Id != run.Id)
+            {
+                // 同会话内上一次 GoalRun 已达终态（Completed/Failed/Cancelled/Blocked）时，
+                // 归档旧终态快照并允许当前会话启动新的 GoalRun。
+                var archivePath = Path.Combine(Path.GetDirectoryName(path)!, $"run.{current.Id}.json");
+                File.Move(path, archivePath, overwrite: true);
+                current = null;
+            }
             var actualVersion = current?.Version ?? 0;
             if (actualVersion != expectedVersion)
             {

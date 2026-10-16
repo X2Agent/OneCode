@@ -76,6 +76,25 @@ public static class KeybindingViewBuilder
             .ToList();
     }
 
+    /// <summary>
+    /// 查询某个动作当前生效的快捷键显示名称（例如 <c>"Ctrl+O"</c>）；若该动作被用户重映射，
+    /// 返回用户配置的按键文本；若未找到有效绑定则返回 <paramref name="fallback"/>。
+    /// </summary>
+    public static string GetEffectiveKeyDisplay(
+        IReadOnlyList<KeybindingEntry> mergedBindings,
+        string action,
+        string fallback)
+    {
+        if (mergedBindings.Count == 0)
+            return fallback;
+
+        var views = Build(mergedBindings);
+        var match = views.LastOrDefault(v =>
+            v.Source != KeybindingSource.Unbound
+            && string.Equals(v.Action, action, StringComparison.Ordinal));
+        return match?.KeyDisplay ?? fallback;
+    }
+
     private static string NormalizeEntryKey(KeybindingEntry entry) =>
         KeybindingParser.NormalizeKeyForComparison(KeybindingParser.ChordToString(entry.Chord));
 

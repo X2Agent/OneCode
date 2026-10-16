@@ -50,104 +50,119 @@ public sealed class OrchestrationStreamService(
         // Checkpoint 序列化选项单一来源：BeginAsync 计算 DefinitionHash 与执行期 Compile
         // 校验必须使用同一实例，否则 hash 恒不一致（GoalRun definition hash mismatch）。
         var serializerOptions = new JsonSerializerOptions();
+        var originalWorkingDirectory = wd.WorkingDirectory;
         var goalRun = await goalRunApplicationService.BeginAsync(
             conversationId,
             text,
-            wd.WorkingDirectory,
+            originalWorkingDirectory,
             currentModelId,
             systemPromptHash,
             toolCapabilityHash,
             serializerOptions,
             ct).ConfigureAwait(false);
-        // 脏工作树提示：WIP 已带入隔离 worktree，Goal 直接基于未提交改动执行。
-        if (goalRun.Workspace is { CarriedUncommittedCount: > 0 } carried)
-        {
-            var samples = carried.CarriedUncommittedPaths ?? [];
-            var sampleText = samples.Count == 0
-                ? string.Empty
-                : "\n" + string.Join("\n", samples.Take(8).Select(p => $"  · {p}"))
-                    + (samples.Count > 8 ? "\n  · …" : string.Empty);
-            yield return new TuiNotice(
-                $"⚠ 目标工作区有 {carried.CarriedUncommittedCount} 个未提交改动，已带入 Goal 隔离 worktree，"
-                + "发布时会随结果一起提交。" + sampleText);
-        }
+
+        var effectiveWorktreeDir = GoalWorkspacePathResolver.ResolveEffectiveWorkingDirectory(goalRun);
 
         // 展示 Goal 隔离 worktree 位置，便于用户定位新建目录。
         if (goalRun.Workspace is { } workspace)
         {
             yield return new TuiNotice(
-                $"🔒 Goal 隔离 worktree：{workspace.IsolatedPath}"
+                $"🔒 Goal 隔离 worktree：{effectiveWorktreeDir}"
                 + $"（分支 {workspace.WorktreeBranch}，基于 {workspace.TargetBranch}）");
         }
 
-        var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
+        if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            SingleReader = true,
-        });
-        var options = new GoalRunOptions
-        {
-            Goal = goalRun.Goal,
-            WorkingDirectory = goalRun.Workspace?.IsolatedPath ?? goalRun.WorkingDirectory,
-            ModelId = currentModelId,
-            Tools = tools,
-            MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
-            Budget = budget.ToGoalBudget(),
-            OrchestrationEventSink = orchEvt =>
-            {
-                if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
-                    && mapped is not TuiTextDelta)
-                {
-                    mergedChannel.Writer.TryWrite(mapped);
-                }
-            },
-            ImagePaths = imagePaths,
-        };
-        var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
-            options,
-            mergedChannel.Writer,
-            static () => new EditTransaction()));
-        var runTask = Task.Run(async () =>
-        {
-            try
-            {
-                var result = await goalWorkflowHost.RunNextAsync(
-                    goalRun,
-                    currentModelId,
-                    systemPromptHash,
-                    toolCapabilityHash,
-                    runtime,
-                    serializerOptions,
-                    ct: ct).ConfigureAwait(false);
-                var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
-                mergedChannel.Writer.TryWrite(ToGoalResult(final));
-                mergedChannel.Writer.TryWrite(new TuiDone(
-                    InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                    OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                    TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
-                    TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
-                    SessionId: final.SessionId,
-                    TransactionRolledBack: false,
-                    ValidationFailureSummary: final.FailureSummary));
-                _ = result;
-            }
-            catch (OperationCanceledException)
-            {
-                // 取消即正常收尾，不再向下游写入错误。
-            }
-            catch (Exception ex)
-            {
-                mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
-            }
-            finally
-            {
-                mergedChannel.Writer.TryComplete();
-            }
-        }, ct);
+            await session.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
+            yield return new TuiWorkingDirectoryChanged(effectiveWorktreeDir);
+        }
 
-        await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return evt;
-        await runTask.ConfigureAwait(false);
+        try
+        {
+            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+            });
+            var options = new GoalRunOptions
+            {
+                Goal = goalRun.Goal,
+                WorkingDirectory = effectiveWorktreeDir,
+                SystemPrompt = session.SystemPrompt,
+                ModelId = currentModelId,
+                Tools = tools,
+                MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
+                Budget = budget.ToGoalBudget(),
+                OrchestrationEventSink = orchEvt =>
+                {
+                    if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
+                        && mapped is not TuiTextDelta)
+                    {
+                        mergedChannel.Writer.TryWrite(mapped);
+                    }
+                },
+                ImagePaths = imagePaths,
+            };
+            var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
+                options,
+                mergedChannel.Writer,
+                static () => new EditTransaction(),
+                PromptOnBudgetExhausted: true));
+            var runTask = Task.Run(async () =>
+            {
+                try
+                {
+                    using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(effectiveWorktreeDir);
+                    var result = await goalWorkflowHost.RunNextAsync(
+                        goalRun,
+                        currentModelId,
+                        systemPromptHash,
+                        toolCapabilityHash,
+                        runtime,
+                        serializerOptions,
+                        ct: ct).ConfigureAwait(false);
+                    var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
+                        ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
+                    mergedChannel.Writer.TryWrite(ToGoalResult(final));
+                    mergedChannel.Writer.TryWrite(new TuiDone(
+                        InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
+                        OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
+                        TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
+                        TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
+                        SessionId: final.SessionId,
+                        TransactionRolledBack: false,
+                        ValidationFailureSummary: final.FailureSummary));
+                    _ = result;
+                }
+                catch (OperationCanceledException)
+                {
+                    // 取消即正常收尾，不再向下游写入错误。
+                }
+                catch (Exception ex)
+                {
+                    mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
+                }
+                finally
+                {
+                    mergedChannel.Writer.TryComplete();
+                }
+            }, ct);
+
+            await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return evt;
+            await runTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                await session.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
+        if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return new TuiWorkingDirectoryChanged(originalWorkingDirectory);
+        }
     }
 
     /// <summary>
@@ -159,7 +174,8 @@ public sealed class OrchestrationStreamService(
         SessionId sessionId,
         string currentModelId,
         string systemPrompt,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        InteractiveSession? session = null)
     {
         var goalRun = await goalRunApplicationService.GetBySessionAsync(sessionId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"No GoalRun exists for session '{sessionId}'.");
@@ -180,63 +196,105 @@ public sealed class OrchestrationStreamService(
             serializerOptions);
         if (!string.Equals(expectedHash, goalRun.DefinitionHash, StringComparison.Ordinal))
             throw new InvalidOperationException("Goal workflow definition changed and cannot be resumed.");
-        var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions { SingleReader = true });
-        var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
-            new GoalRunOptions
-            {
-                Goal = goalRun.Goal,
-                WorkingDirectory = goalRun.Workspace?.IsolatedPath ?? goalRun.WorkingDirectory,
-                ModelId = currentModelId,
-                Tools = tools,
-                MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
-                Budget = budget.ToGoalBudget(),
-            },
-            mergedChannel.Writer,
-            static () => new EditTransaction()));
-        var runTask = Task.Run(async () =>
+
+        var originalWorkingDirectory = session?.SessionManager.WorkingDirectory ?? goalRun.WorkingDirectory;
+        var effectiveWorktreeDir = GoalWorkspacePathResolver.ResolveEffectiveWorkingDirectory(goalRun);
+
+        if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            try
+            await session.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
+            yield return new TuiWorkingDirectoryChanged(effectiveWorktreeDir);
+        }
+
+        try
+        {
+            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions { SingleReader = true });
+            var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
+                new GoalRunOptions
+                {
+                    Goal = goalRun.Goal,
+                    WorkingDirectory = effectiveWorktreeDir,
+                    SystemPrompt = systemPrompt,
+                    ModelId = currentModelId,
+                    Tools = tools,
+                    MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
+                    Budget = budget.ToGoalBudget(),
+                    OrchestrationEventSink = orchEvt =>
+                    {
+                        if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
+                            && mapped is not TuiTextDelta)
+                        {
+                            mergedChannel.Writer.TryWrite(mapped);
+                        }
+                    },
+                },
+                mergedChannel.Writer,
+                static () => new EditTransaction(),
+                PromptOnBudgetExhausted: true));
+            var runTask = Task.Run(async () =>
             {
-                _ = await goalWorkflowHost.RunNextAsync(
-                    goalRun,
-                    currentModelId,
-                    systemPromptHash,
-                    toolCapabilityHash,
-                    runtime,
-                    serializerOptions,
-                    ct: ct).ConfigureAwait(false);
-                var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after resume.");
-                mergedChannel.Writer.TryWrite(ToGoalResult(final));
-                mergedChannel.Writer.TryWrite(new TuiDone(
-                    checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                    checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                    final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
-                    final.Executions.Sum(execution => execution.Attempts),
-                    SessionId: final.SessionId,
-                    ValidationFailureSummary: final.FailureSummary));
-            }
-            catch (OperationCanceledException)
+                try
+                {
+                    using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(effectiveWorktreeDir);
+                    _ = await goalWorkflowHost.RunNextAsync(
+                        goalRun,
+                        currentModelId,
+                        systemPromptHash,
+                        toolCapabilityHash,
+                        runtime,
+                        serializerOptions,
+                        ct: ct).ConfigureAwait(false);
+                    var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
+                        ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after resume.");
+                    mergedChannel.Writer.TryWrite(ToGoalResult(final));
+                    mergedChannel.Writer.TryWrite(new TuiDone(
+                        checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
+                        checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
+                        final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
+                        final.Executions.Sum(execution => execution.Attempts),
+                        SessionId: final.SessionId,
+                        ValidationFailureSummary: final.FailureSummary));
+                }
+                catch (OperationCanceledException)
+                {
+                    // 取消即正常收尾，不再向下游写入错误。
+                }
+                catch (Exception ex)
+                {
+                    mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
+                }
+                finally
+                {
+                    mergedChannel.Writer.TryComplete();
+                }
+            }, ct);
+            await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                yield return evt;
+            await runTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
             {
-                // 取消即正常收尾，不再向下游写入错误。
+                await session.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex)
-            {
-                mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
-            }
-            finally
-            {
-                mergedChannel.Writer.TryComplete();
-            }
-        }, ct);
-        await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return evt;
-        await runTask.ConfigureAwait(false);
+        }
+
+        if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return new TuiWorkingDirectoryChanged(originalWorkingDirectory);
+        }
     }
 
-    /// <summary>构建 GOAL 结果投影（完成/失败/跳过计数与验证门摘要）。</summary>
+    /// <summary>构建 GOAL 结果投影（完成/失败/跳过计数、验证门摘要与产物文件列表）。</summary>
     private static TuiGoalResult ToGoalResult(GoalRun run)
-        => new(
+    {
+        var changedFiles = run.PublishReceipt?.ChangedFiles
+            ?? run.Executions.SelectMany(e => e.ChangedFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var lastCompletedOutput = run.Executions
+            .LastOrDefault(e => e.State == GoalStepState.Completed && !string.IsNullOrWhiteSpace(e.AgentOutput))
+            ?.AgentOutput;
+        return new(
             run.Plan.Count(step => step.State == GoalStepState.Completed),
             run.Plan.Count(step => step.State == GoalStepState.Failed),
             run.Plan.Count(step => step.State == GoalStepState.Skipped),
@@ -248,5 +306,8 @@ public sealed class OrchestrationStreamService(
             run.FinalValidation.Count == 0
                 ? run.FailureSummary ?? "Goal execution did not produce final validation evidence."
                 : string.Join("\n", run.FinalValidation.Select(gate =>
-                    $"[{(gate.Skipped ? "SKIP" : gate.Passed ? "PASS" : "FAIL")}] {gate.Gate}: {gate.Summary}")));
+                    $"[{(gate.Skipped ? "SKIP" : gate.Passed ? "PASS" : "FAIL")}] {gate.Gate}: {gate.Summary}")),
+            ChangedFiles: changedFiles,
+            FinalConclusion: lastCompletedOutput);
+    }
 }

@@ -21,6 +21,10 @@ public static class OneCodeAgentRunContext
     // 外层中间件的上下文，但对同一引用对象的写入两侧都可见。
     private static readonly AsyncLocal<RunSeal?> PlanSubmissionSealSlot = new();
 
+    // 异步作用域级工作目录覆盖（如 Goal 隔离 Worktree、子代理显式目录覆盖）。
+    // SessionWorkingDirectoryAccessor 优先读取此值，消除单例工具与管道中间件之间的目录分裂。
+    private static readonly AsyncLocal<string?> WorkingDirectoryOverrideSlot = new();
+
     public static string? CurrentRunId
     {
         get => CurrentRunIdSlot.Value;
@@ -52,6 +56,31 @@ public static class OneCodeAgentRunContext
     {
         get => PlanSubmissionSealSlot.Value;
         set => PlanSubmissionSealSlot.Value = value;
+    }
+
+    /// <summary>
+    /// 当前异步执行上下文的工作目录覆盖；为 null 时回退到会话级工作目录。
+    /// </summary>
+    public static string? WorkingDirectoryOverride
+    {
+        get => WorkingDirectoryOverrideSlot.Value;
+        set => WorkingDirectoryOverrideSlot.Value = value;
+    }
+
+    /// <summary>
+    /// 在当前异步作用域内绑定工作目录覆盖，释放时自动恢复原值。
+    /// </summary>
+    public static WorkingDirectoryScope UseWorkingDirectory(string? workingDirectory)
+    {
+        var previous = WorkingDirectoryOverrideSlot.Value;
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+            WorkingDirectoryOverrideSlot.Value = workingDirectory;
+        return new WorkingDirectoryScope(previous);
+    }
+
+    public readonly struct WorkingDirectoryScope(string? previous) : IDisposable
+    {
+        public void Dispose() => WorkingDirectoryOverrideSlot.Value = previous;
     }
 }
 

@@ -15,6 +15,11 @@ public sealed record GoalRunOptions
     /// <summary>工作目录。</summary>
     public required string WorkingDirectory { get; init; }
 
+    /// <summary>
+    /// 会话基础系统提示词（由 <c>system/default.prompt</c> 渲染，含 <c>AGENTS.md</c> 与 <c>Environment</c> 上下文）。
+    /// </summary>
+    public string? SystemPrompt { get; init; }
+
     /// <summary>模型 ID（默认走主模型）。</summary>
     public string? ModelId { get; init; }
 
@@ -101,9 +106,6 @@ public sealed record GoalItem
     /// </summary>
     public bool NeedsFurtherDecomposition { get; init; }
 
-    /// <summary>完成此子目标后必须存在的工作区相对路径。</summary>
-    public IReadOnlyList<string> ExpectedFiles { get; init; } = [];
-
     /// <summary>
     /// 此子目标允许修改的工作区相对路径或目录。为空时仅允许修改工作目录内文件；
     /// 非空时进一步收窄到声明范围。
@@ -171,6 +173,7 @@ public sealed record GoalValidationEvidence(
 /// <summary>
 /// 子目标真实证据。AI Judge 只能在 HardValidationPassed 为 true 后运行，
 /// 且其输入必须包含此证据摘要，不能只依赖 Agent 自述。
+/// <paramref name="ChangedFiles"/> 统一保存工作区/隔离 worktree 内的规范化绝对路径，避免子目录相对化丢失父级目录偏移。
 /// </summary>
 public sealed record SubGoalEvidence(
     string AgentSummary,

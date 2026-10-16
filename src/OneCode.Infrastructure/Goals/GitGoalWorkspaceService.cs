@@ -1,6 +1,7 @@
 using OneCode.Core.Build;
 using OneCode.Core.Commands;
 using OneCode.Core.Goals;
+using OneCode.Core.IO;
 using OneCode.Infrastructure.Git;
 
 namespace OneCode.Infrastructure.Goals;
@@ -9,6 +10,9 @@ public sealed class GitGoalWorkspaceService(
     IGitHelper git,
     IWorkspaceFingerprintProvider fingerprintProvider) : IGoalWorkspaceService
 {
+    // 8: enough to show the dirty set without dumping a large status listing into the TUI error line.
+    private const int DirtyPathSampleLimit = 8;
+
     public async Task<GoalWorkspaceSnapshot> PrepareAsync(
         GoalRun run,
         CancellationToken ct = default)
@@ -17,13 +21,11 @@ public sealed class GitGoalWorkspaceService(
             ?? throw new InvalidOperationException("Goal isolated execution requires a Git repository.");
         var dirtyCount = await git.CountPorcelainChangesAsync(repositoryRoot, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Could not inspect the Goal target workspace.");
-        // 脏工作树不再阻断 Goal：未提交改动（WIP）会被带入隔离 worktree，
-        // Goal 直接基于 WIP 执行，发布时随步骤提交一起回到目标分支。
-        IReadOnlyList<string>? carriedPaths = null;
         if (dirtyCount != 0)
         {
             var status = await git.RunAsync(["status", "--porcelain"], repositoryRoot, ct).ConfigureAwait(false);
-            carriedPaths = ParsePorcelainPaths(status?.Stdout).ToList();
+            throw CreateDirtyWorkspaceException(
+                run.WorkingDirectory, repositoryRoot, dirtyCount, status?.Stdout);
         }
 
         var baseCommit = await ReadRequiredAsync(["rev-parse", "HEAD"], repositoryRoot, ct).ConfigureAwait(false);
@@ -63,10 +65,6 @@ public sealed class GitGoalWorkspaceService(
             }
         }
 
-        if (carriedPaths is { Count: > 0 })
-            await CarryUncommittedChangesIntoWorktreeAsync(
-                repositoryRoot, path, carriedPaths, ct).ConfigureAwait(false);
-
         return new GoalWorkspaceSnapshot(
             workspaceId,
             repositoryRoot,
@@ -75,54 +73,7 @@ public sealed class GitGoalWorkspaceService(
             targetBranch,
             baseCommit,
             targetFingerprint,
-            DateTimeOffset.UtcNow,
-            dirtyCount != 0 ? dirtyCount : null,
-            carriedPaths is { Count: > 0 } ? carriedPaths : null);
-    }
-
-    /// <summary>
-    /// 把目标工作区的未提交改动复制进隔离 worktree（只读源工作区，绝不改动它）：
-    /// 已跟踪改动经 <c>git diff HEAD --binary</c> 导出补丁后在 worktree 内
-    /// <c>git apply --index</c>（含 staged 状态）；未跟踪文件逐个复制。
-    /// </summary>
-    private async Task CarryUncommittedChangesIntoWorktreeAsync(
-        string repositoryRoot,
-        string worktreePath,
-        IReadOnlyList<string> carriedPaths,
-        CancellationToken ct)
-    {
-        var trackedDiff = await git.RunAsync(
-            ["diff", "HEAD", "--binary"], repositoryRoot, ct).ConfigureAwait(false);
-        if (trackedDiff is not { Success: true })
-            throw new InvalidOperationException(
-                $"Failed to export uncommitted changes: {trackedDiff?.Stderr ?? "git unavailable"}");
-        if (!string.IsNullOrEmpty(trackedDiff.Stdout))
-        {
-            var patchPath = Path.Combine(
-                Path.GetTempPath(), $"onecode-goal-{Guid.NewGuid():N}.patch");
-            await File.WriteAllTextAsync(patchPath, trackedDiff.Stdout, ct).ConfigureAwait(false);
-            try
-            {
-                await RunRequiredAsync(
-                    ["apply", "--binary", "--whitespace=nowarn", "--index", patchPath],
-                    worktreePath,
-                    ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                File.Delete(patchPath);
-            }
-        }
-
-        foreach (var relative in carriedPaths.Where(p => !p.Contains(" -> ", StringComparison.Ordinal)))
-        {
-            var source = Path.Combine(repositoryRoot, relative);
-            if (!File.Exists(source))
-                continue; // rename 目标等已由补丁覆盖，或文件在准备期间消失
-            var destination = Path.Combine(worktreePath, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(source, destination, overwrite: true);
-        }
+            DateTimeOffset.UtcNow);
     }
 
     public async Task<GoalStepReceipt?> FindStepReceiptAsync(
@@ -207,6 +158,7 @@ public sealed class GitGoalWorkspaceService(
             workspace.RepositoryRoot, workspace.TargetBranch, marker, ct).ConfigureAwait(false);
         if (existingReceipt is not null)
             return await BuildReceiptAsync(
+                run,
                 operationId,
                 existingReceipt,
                 workspace.BaseCommit,
@@ -252,6 +204,7 @@ public sealed class GitGoalWorkspaceService(
         }
         var publishedCommit = await ReadRequiredAsync(["rev-parse", "HEAD"], workspace.RepositoryRoot, ct).ConfigureAwait(false);
         return await BuildReceiptAsync(
+            run,
             operationId,
             publishedCommit,
             workspace.BaseCommit,
@@ -281,6 +234,7 @@ public sealed class GitGoalWorkspaceService(
     }
 
     private async Task<GoalPublishReceipt> BuildReceiptAsync(
+        GoalRun run,
         string operationId,
         string commit,
         string baseCommit,
@@ -288,14 +242,80 @@ public sealed class GitGoalWorkspaceService(
         bool replayed,
         CancellationToken ct)
     {
-        var files = await ReadRequiredAsync(
+        var diffResult = await git.RunAsync(
             ["diff", "--name-only", baseCommit, commit], repositoryRoot, ct).ConfigureAwait(false);
+        if (diffResult is not { Success: true })
+            throw new InvalidOperationException($"Git command failed: git diff --name-only {baseCommit} {commit} — {diffResult?.Stderr ?? "git unavailable"}");
+
+        var changedFiles = (diffResult.Stdout ?? string.Empty)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        SyncUntrackedStepDeliverables(run, repositoryRoot, replayed, changedFiles);
+
         return new GoalPublishReceipt(
             operationId,
             commit,
-            files.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            changedFiles,
             DateTimeOffset.UtcNow,
             replayed);
+    }
+
+    /// <summary>
+    /// 将被 <c>.gitignore</c> 忽略（未进入 Git commit）但由已完成子目标实际产出的工作树文件
+    /// 从隔离 worktree 同步回主仓库对应相对路径，避免 <see cref="CleanupAsync"/> 移除 worktree 后产物丢失。
+    /// </summary>
+    private static void SyncUntrackedStepDeliverables(
+        GoalRun run,
+        string repositoryRoot,
+        bool replayed,
+        List<string> committedFiles)
+    {
+        if (run.Workspace is not { } workspace || string.IsNullOrWhiteSpace(workspace.IsolatedPath))
+            return;
+
+        var known = new HashSet<string>(committedFiles, StringComparer.OrdinalIgnoreCase);
+        var stepRelativePaths = run.Executions
+            .Where(e => e.State == GoalStepState.Completed)
+            .SelectMany(e => e.ChangedFiles)
+            .Select(path => GoalWorkspacePathResolver.ResolveWorktreeRelativePath(run, path))
+            .Where(rel => !string.IsNullOrWhiteSpace(rel))
+            .Select(rel => rel!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rel in stepRelativePaths)
+        {
+            if (known.Contains(rel))
+                continue;
+
+            var osRel = rel.Replace('/', Path.DirectorySeparatorChar);
+            var sourcePath = Path.GetFullPath(Path.Combine(workspace.IsolatedPath, osRel));
+            var targetPath = Path.GetFullPath(Path.Combine(repositoryRoot, osRel));
+            if (!PathBoundary.IsWithinDirectory(sourcePath, workspace.IsolatedPath)
+                || !PathBoundary.IsWithinDirectory(targetPath, repositoryRoot))
+            {
+                continue;
+            }
+
+            if (!replayed && File.Exists(sourcePath))
+            {
+                if (!string.Equals(sourcePath, targetPath, PathBoundary.DefaultComparison))
+                {
+                    var parentDir = Path.GetDirectoryName(targetPath);
+                    if (!string.IsNullOrEmpty(parentDir))
+                        Directory.CreateDirectory(parentDir);
+                    File.Copy(sourcePath, targetPath, overwrite: true);
+                }
+
+                known.Add(rel);
+                committedFiles.Add(rel);
+            }
+            else if (replayed && File.Exists(targetPath))
+            {
+                known.Add(rel);
+                committedFiles.Add(rel);
+            }
+        }
     }
 
     private static string BuildStepOperationId(GoalRunId runId, int goalId)
@@ -333,6 +353,31 @@ public sealed class GitGoalWorkspaceService(
         var result = await git.RunAsync(arguments, directory, ct).ConfigureAwait(false);
         if (result is not { Success: true })
             throw new InvalidOperationException($"Git command failed: git {string.Join(' ', arguments)} — {result?.Stderr ?? "git unavailable"}");
+    }
+
+    private static InvalidOperationException CreateDirtyWorkspaceException(
+        string workingDirectory,
+        string repositoryRoot,
+        int dirtyCount,
+        string? porcelain)
+    {
+        var samples = ParsePorcelainPaths(porcelain).Take(DirtyPathSampleLimit).ToList();
+        var sampleText = samples.Count == 0
+            ? string.Empty
+            : " Examples: " + string.Join(", ", samples) + (dirtyCount > samples.Count ? ", …" : ".");
+
+        var sameDirectory = string.Equals(
+            Path.GetFullPath(workingDirectory),
+            Path.GetFullPath(repositoryRoot),
+            StringComparison.OrdinalIgnoreCase);
+        var location = sameDirectory
+            ? $"Checked Git repository '{repositoryRoot}'."
+            : $"Checked Git repository root '{repositoryRoot}' (session working directory is '{workingDirectory}').";
+
+        return new InvalidOperationException(
+            "Goal isolated execution requires a clean Git working tree. "
+            + $"{location} Found {dirtyCount} dirty path(s).{sampleText} "
+            + "Commit, stash, or discard those changes, then retry Goal mode.");
     }
 
     private static IEnumerable<string> ParsePorcelainPaths(string? porcelain)

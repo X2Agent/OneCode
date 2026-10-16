@@ -196,10 +196,11 @@ internal sealed class GoalDecomposer(
                 return null;
             }
 
-            // 重新编号：与按需递归分解同规则（当前计划最大 Id + 1）——失败步之前可能已有
-            // 分解产物的高位 Id，按 failedGoal.Id + 1 编号会与保留段撞 Id，导致
-            // ApplyEvidenceAsync 按 Id 寻址错位（plan/证据/预算三源错乱）。
-            var baseId = currentPlan.Goals.Count == 0 ? 1 : currentPlan.Goals.Max(g => g.Id) + 1;
+            // 重新编号：基于实际保留的已执行步骤（[0..failedGoalIndex]）的最大 Id + 1 连续编号。
+            // 这样既不会与失败步之前已由递归分解产生的高位 Id 冲突（避免 ApplyEvidenceAsync 按 Id 寻址错位），
+            // 又能在丢弃未执行的剩余步骤（idx > failedGoalIndex）后保持编号连续，消除 #1 -> #4 的断层。
+            var retainedGoals = currentPlan.Goals.Take(failedGoalIndex + 1).ToList();
+            var baseId = retainedGoals.Count == 0 ? 1 : retainedGoals.Max(g => g.Id) + 1;
             var replannedGoals = new List<GoalItem>(newPlan.Goals.Count);
             foreach (var goal in newPlan.Goals)
             {
@@ -318,7 +319,7 @@ internal sealed class GoalDecomposer(
     private static ChatOptions CreateStructuredChatOptions(string? modelId) => new()
     {
         ModelId = modelId,
-        MaxOutputTokens = 8192,
+        // MaxOutputTokens 由底层客户端管道（MaxOutputTokensDecorator）统一注入默认上限并负责 Length 升级恢复。
         // ResponseFormat 不在此处设置：能力协商统一由 StructuredChatCall 完成
         //（schema 请求 → 同响应文本降级 → 硬拒绝时无格式重试）。goal-decomposer 系统提示词
         // 自带完整 JSON 契约，正是无格式重试路径（可移植基线）的契约来源。

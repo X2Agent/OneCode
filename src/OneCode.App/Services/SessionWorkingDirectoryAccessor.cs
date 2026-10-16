@@ -1,3 +1,4 @@
+using OneCode.App.Services.Agent;
 using OneCode.Core.Config;
 using OneCode.App.Session;
 
@@ -20,7 +21,7 @@ internal sealed class SessionWorkingDirectoryAccessor(ISessionWorkingDirectory s
     private readonly ISessionWorkingDirectory _sessionManager = sessionManager;
     private readonly IConfigManager _configManager = configManager;
 
-    public string WorkingDirectory => _sessionManager.WorkingDirectory;
+    public string WorkingDirectory => OneCodeAgentRunContext.WorkingDirectoryOverride ?? _sessionManager.WorkingDirectory;
 
     public IReadOnlyList<string> AdditionalDirectories
     {

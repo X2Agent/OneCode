@@ -623,6 +623,32 @@ public sealed class ChatTranscriptViewTests
             "multi-line error details must stay collapsed until expanded");
     }
 
+    [Fact]
+    public void AddSystem_DuringStreamingAfterStreamingNotices_PreservesChronologicalOrderAcrossRerenderAndToolCalls()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        view.AddUserMessageDirect("生成孙宇晨新闻 HTML");
+        view.BeginStreaming();
+        view.AddStreamingNotice("工作区有 49 个未提交更改已带入 Goal 隔离工作区");
+        view.AddStreamingNotice("Goal 隔离工作区已就绪");
+        view.AddSystem("已分解为 1 个子目标:\n  [1] 搜集新闻并生成 HTML");
+
+        // 模拟右侧 TodoStripView 打开触发宽度重排，以及后续子目标流式工具调用到达
+        view.RerenderCommittedContent(70);
+        view.AddToolStart("WebSearch", """{"query":"Justin Sun"}""", toolId: "call_1");
+
+        var lines = view.MessageView.RenderedLines;
+        var noticeIdx = IndexOf(lines, l => l.Contains("工作区有 49 个未提交更改", StringComparison.Ordinal));
+        var readyIdx = IndexOf(lines, l => l.Contains("Goal 隔离工作区已就绪", StringComparison.Ordinal));
+        var planIdx = IndexOf(lines, l => l.Contains("已分解为 1 个子目标", StringComparison.Ordinal));
+        var toolIdx = IndexOf(lines, l => l.Contains("WebSearch", StringComparison.Ordinal));
+
+        noticeIdx.Should().BeGreaterThanOrEqualTo(0);
+        readyIdx.Should().BeGreaterThan(noticeIdx);
+        planIdx.Should().BeGreaterThan(readyIdx, "已提交的计划摘要块必须保持在开头的流式工作区提示之后，不得在重排后倒置到提示上方");
+        toolIdx.Should().BeGreaterThan(planIdx, "后续流式工具调用不得覆盖已提交的计划摘要块");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         var count = 0;

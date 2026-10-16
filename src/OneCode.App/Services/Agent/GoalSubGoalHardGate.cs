@@ -24,35 +24,11 @@ internal sealed class GoalSubGoalHardGate(
     {
         List<GoalValidationEvidence> validations = [];
         var fullWorkingDirectory = Path.GetFullPath(workingDirectory);
-        var relativeChangedFiles = changedFiles
-            .Select(path => Path.GetRelativePath(fullWorkingDirectory, Path.GetFullPath(path)))
+        var normalizedChangedFiles = changedFiles
+            .Select(path => Path.GetFullPath(path, fullWorkingDirectory))
             .ToList();
 
-        var toolErrors = toolExecutions.Where(e => e.IsError).ToList();
-        validations.Add(new GoalValidationEvidence(
-            "tool-execution",
-            toolErrors.Count == 0,
-            false,
-            toolErrors.Count == 0
-                ? $"{toolExecutions.Count} tool execution(s) completed without unresolved errors."
-                : $"{toolErrors.Count} tool execution error(s): {string.Join("; ", toolErrors.Select(e => $"{e.ToolName}: {e.Result}"))}"));
-
-        var missingFiles = goal.ExpectedFiles
-            .Select(path => GoalSubGoalAssessment.ResolveWorkspacePath(fullWorkingDirectory, path))
-            .Where(path => !File.Exists(path) && !Directory.Exists(path))
-            .Select(path => Path.GetRelativePath(fullWorkingDirectory, path))
-            .ToList();
-        validations.Add(new GoalValidationEvidence(
-            "expected-artifacts",
-            missingFiles.Count == 0,
-            goal.ExpectedFiles.Count == 0,
-            goal.ExpectedFiles.Count == 0
-                ? "No explicit expected artifacts were declared."
-                : missingFiles.Count == 0
-                    ? $"All {goal.ExpectedFiles.Count} expected artifact(s) exist."
-                    : $"Missing expected artifact(s): {string.Join(", ", missingFiles)}"));
-
-        var outOfScope = GoalSubGoalAssessment.FindOutOfScopeFiles(fullWorkingDirectory, changedFiles, goal.AllowedPaths);
+        var outOfScope = GoalSubGoalAssessment.FindOutOfScopeFiles(fullWorkingDirectory, normalizedChangedFiles, goal.AllowedPaths);
         validations.Add(new GoalValidationEvidence(
             "change-scope",
             outOfScope.Count == 0,
@@ -100,7 +76,7 @@ internal sealed class GoalSubGoalHardGate(
 
         var evidence = new SubGoalEvidence(
             AgentSummary: agentOutput,
-            ChangedFiles: relativeChangedFiles,
+            ChangedFiles: normalizedChangedFiles,
             ToolExecutions: toolExecutions.ToList(),
             Validations: validations,
             Diagnostics: diagnostics);
