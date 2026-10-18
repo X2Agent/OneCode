@@ -51,7 +51,8 @@ public interface IConversationRunner
         WorkingMode workingMode = WorkingMode.Build,
         Action<FileChange>? fileChangeCallback = null,
         IReadOnlyList<string>? imagePaths = null,
-        string? harnessPrompt = null);
+        string? harnessPrompt = null,
+        bool unattended = false);
 
     IAsyncEnumerable<QueryEvent> StreamWorkflowRunAsync(
         WorkflowRunRequest request,

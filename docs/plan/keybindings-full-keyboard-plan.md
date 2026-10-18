@@ -13,25 +13,28 @@
 
 | 能力 | 实现位置 | 状态 |
 |---|---|---|
-| 单真相源契约（上下文/动作/默认绑定/保留键） | `KeybindingDefaults.cs` | ✅ 5 上下文、35 动作 |
+| 单真相源契约（上下文/动作/默认绑定/保留键） | `KeybindingDefaults.cs` | ✅ 6 上下文、44 动作（含 `ContextSearch`、`sidebar:scrollUp/Down`、`chat:toggleLastDetails`、`chat:find*`） |
 | 上下文优先级 + 1000ms 和弦 + Eager-fire | `KeybindingResolver.cs` | ✅ |
 | 用户覆盖 + 热重载 + Schema 校验 | `KeybindingLoader.cs` / `KeybindingSchema.cs` / `KeybindingValidator.cs` | ✅ |
 | 侧边栏显隐快捷键 | `app:sidebarToggle`（Ctrl+O，Global） | ✅ 旧计划称"无需快捷键"已过时 |
 | 侧边栏宽度键盘调整 | `app:sidebarWider/Narrower`（Ctrl+Shift+←/→） | ✅ 双路径分发（输入框聚焦经 `ChatInputView.Keys.cs`，非聚焦经 `ReplShell.Keyboard.cs` 兜底） |
+| 侧边栏整页翻页与行级微调 | `sidebar:pageUp/pageDown`（Shift+PageUp/PageDown）、`sidebar:scrollUp/scrollDown`（Alt+Up/Down） | ✅ 已落地免切焦点侧栏翻页与 3 行微调（审批挂起态放行） |
+| 折叠块键盘展开/折叠 | `chat:toggleLastDetails`（Ctrl+E） | ✅ `MessageListView.ToggleLastDetails()` 逆序定位最近一条工具/思考/错误块并切换展开态 |
+| 会话内行内搜索闭环 | `chat:find`（Ctrl+F）+ `ContextSearch`（Enter / Shift+Enter / Esc） | ✅ `ChatTranscriptView.FindPrevious()` + `ChatInputView` 行内搜索模式 |
 | Autocomplete/Diff/Selector 上下文接入 Resolver | `KeybindingDefaults.DefaultBindings` | ✅ 旧计划"硬编码"描述已过时 |
 | 对话区键盘滚动 | `chat:scrollUp/Down`（Shift+↑↓ / Ctrl+PgUp/PgDn）、`chat:pageUp/pageDown`（PgUp/PgDn / Ctrl+U） | ✅ 事件转发范式：`ReplShell.cs:106-111` |
 | Esc 兜底链（Overlay → 补全 → 交互会话） | `ReplShell.Keyboard.cs` Level 1-3 | ✅ 关闭永远可用 |
 | 交互会话统一接管（选择器/提问向导） | `IInteractionSession` / `ChatInputView.Keys.cs` 挂起态转发 | ✅ |
-| 搜索内核 | `ChatTranscriptView.Search.cs`：`SearchAndScroll` / `FindNext` / `ClearSearchHighlight` | ✅ 缺键盘入口（见 §2） |
+| 搜索内核 | `ChatTranscriptView.Search.cs`：`SearchAndScroll` / `FindNext` / `FindPrevious` / `ClearSearchHighlight` | ✅ 已接入 Ctrl+F 键盘入口 |
 
-### 1.2 未达成（本计划要解决的盲区）
+### 1.2 盲区收敛状态（阶段一至阶段三已全部落地）
 
-| # | 盲区 | 代码证据 | 严重度 |
+| # | 盲区 | 代码证据 | 状态 |
 |---|---|---|---|
-| 1 | **侧边栏内容键盘滚动**：Plan 面板内容超出屏幕时只能鼠标滚轮滚动 | `SidebarViewBase.cs`：`CanFocus = false`、无键盘处理；内部 `_content`（`MessageListView`）滚动 API 齐全但无外部触发路径 | 🔴 阻断 |
-| 2 | **折叠块键盘展开/折叠**：思考过程/工具详情/错误详情仅鼠标点击切换 | `MessageListView.cs:476` 起：`ToggleToolExpansion` / `ToggleThinkingExpansion` / `ToggleErrorExpansion` 均为私有方法，仅 `OnMouseEvent` 的 `LeftButtonClicked` 分支调用 | 🔴 阻断 |
-| 3 | **行内搜索无键盘入口**：仅 `/find <keyword>` 命令行入口，无 Ctrl+F 呼出、无跳上一处 | `ChatTranscriptView.Search.cs`：有 `FindNext` 无 `FindPrevious`；`FindCommand` 为唯一入口 | 🟡 体验 |
-| 4 | **窗格焦点轮转缺失**：无法把焦点交给侧边栏做长文沉浸漫游 | `SidebarViewBase` 构造函数：`CanFocus = false; TabStop = TabBehavior.NoStop` | 🟡 体验 |
+| 1 | **侧边栏内容行级微调滚动**：`Shift+PgUp/PgDn` 翻页 + `Alt+Up/Down` 3 行微调 | `SidebarViewBase.ScrollUp/ScrollDown`；`KeybindingDefaults.ActionSidebarScrollUp/Down` | ✅ 已落地 |
+| 2 | **折叠块键盘展开/折叠**：思考过程/工具详情/错误详情键盘切换 | `MessageListView.ToggleLastDetails()` + `KeybindingDefaults.ActionChatToggleLastDetails`（`Ctrl+E`） | ✅ 已落地 |
+| 3 | **行内搜索键盘入口与向上跳转**：`Ctrl+F` 呼出、`Enter`/`Shift+Enter` 跳转、`Esc` 退出 | `ChatTranscriptView.FindPrevious()` + `KeybindingDefaults.ContextSearch` + `ChatInputView.BeginSearchMode/EndSearchMode` | ✅ 已落地 |
+| 4 | **窗格焦点轮转（已收敛裁剪）**：由免切焦点的 `Alt+Up/Down`（3行）+ `Shift+PgUp/PgDn`（整页）完全覆盖侧栏阅读 | 保持 `SidebarViewBase` 的 `CanFocus = false` 单焦点契约，不引入 `F6`（`app:cyclePane`）双焦点状态机 | ⚪ 已收敛 |
 | 5 | **QuestionWizard 未接 Resolver**：原始 `Key.` 比较链 | `QuestionWizard.cs:59-171`：`kb == Key.Enter` 等硬编码 | 🟢 低（已有 `IInteractionSession` 接管 + Esc 兜底，功能不受损） |
 
 ### 1.3 维持现状的硬编码（有意保留，不迁移）
@@ -74,16 +77,15 @@
 |---|---|---|---|
 | `sidebar:scrollUp` | `Alt+Up` | Chat | 侧边栏上滚 3 行（焦点不动） |
 | `sidebar:scrollDown` | `Alt+Down` | Chat | 侧边栏下滚 3 行 |
-| `sidebar:pageUp` | `Shift+PageUp` | Chat | 侧边栏上翻页 |
-| `sidebar:pageDown` | `Shift+PageDown` | Chat | 侧边栏下翻页 |
-| `app:cyclePane` | `F6` | Global | 输入框 ↔ 侧边栏焦点轮转 |
+| `sidebar:pageUp` | `Shift+PageUp` | Chat | 侧边栏上翻页（✅ 已落地） |
+| `sidebar:pageDown` | `Shift+PageDown` | Chat | 侧边栏下翻页（✅ 已落地） |
 | `chat:toggleLastDetails` | `Ctrl+E` | Chat | 展开/折叠最近一条工具/思考/错误详情 |
 | `chat:find` | `Ctrl+F` | Chat | 呼出行内搜索条 |
 | `chat:findNext` | `Enter`（搜索条激活时） | Search | 跳下一处 |
 | `chat:findPrevious` | `Shift+Enter`（搜索条激活时） | Search | 跳上一处 |
 | `chat:findDismiss` | `Esc`（搜索条激活时） | Search | 关闭搜索条并清除高亮 |
 
-> **键位冲突核查**：`Alt+Up/Down`、`Shift+PgUp/PgDn`、`F6`、`Ctrl+E`、`Ctrl+F` 均不在 `KeybindingDefaults.NonRebindable`（ctrl+d/ctrl+m）、`TerminalReserved`（ctrl+z/ctrl+\，仅 Unix）、`MacOSReserved`（cmd+*）列表中，且避开已绑定为 `app:sidebarToggle`（Global）的 `Ctrl+O`。`Ctrl+E`/`Ctrl+F` 在终端中为标准控制序列，无协议歧义。
+> **键位冲突核查**：`Alt+Up/Down`、`Shift+PgUp/PgDn`、`Ctrl+E`、`Ctrl+F` 均不在 `KeybindingDefaults.NonRebindable`（ctrl+d/ctrl+m）、`TerminalReserved`（ctrl+z/ctrl+\，仅 Unix）、`MacOSReserved`（cmd+*）列表中，且避开已绑定为 `app:sidebarToggle`（Global）的 `Ctrl+O`。`Ctrl+E`/`Ctrl+F` 在终端中为标准控制序列，无协议歧义。原计划中的 `F6`（`app:cyclePane`）已收敛裁剪：通过免切焦点的 `Alt+Up/Down` + `Shift+PgUp/PgDn` 即可完整覆盖侧栏阅读，保持 `SidebarViewBase` 的 `CanFocus = false` 单焦点模型。
 
 ### 3.2 侧边栏滚动：双路径方案
 

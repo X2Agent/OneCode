@@ -104,12 +104,13 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         WorkingMode workingMode = WorkingMode.Build,
         Action<FileChange>? fileChangeCallback = null,
         IReadOnlyList<string>? imagePaths = null,
-        string? harnessPrompt = null)
+        string? harnessPrompt = null,
+        bool unattended = false)
     {
         var userMessage = QueryStreamHelpers.BuildUserMessage(prompt, imagePaths, _logger);
         await foreach (var evt in StreamInteractiveAsync(
             [userMessage], systemPrompt, modelId, thinkingBudget,
-            sessionId: null, workingDirectory: null, ct, workingMode, fileChangeCallback, harnessPrompt))
+            sessionId: null, workingDirectory: null, ct, workingMode, fileChangeCallback, harnessPrompt, unattended))
             yield return evt;
     }
 
@@ -134,10 +135,11 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         [EnumeratorCancellation] CancellationToken ct = default,
         WorkingMode workingMode = WorkingMode.Build,
         Action<FileChange>? fileChangeCallback = null,
-        string? harnessInstructions = null)
+        string? harnessInstructions = null,
+        bool unattended = false)
     {
         yield return new ToolPoolReadyEvent(0, 0, 0);
-        var includeNextPrompt = _configManager.Current.Effective.NextPromptSuggesterEnabled == true;
+        var includeNextPrompt = !unattended && _configManager.Current.Effective.NextPromptSuggesterEnabled == true;
         if (includeNextPrompt)
             systemPrompt += NextPromptTrailerInstruction;
 
@@ -145,8 +147,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         var userPrompt = lastUserMessage?.Text ?? "";
         var isMultimodal = lastUserMessage?.Contents?.OfType<DataContent>().Any() == true;
         workingDirectory ??= _sessionManager.WorkingDirectory ?? Environment.CurrentDirectory;
-        sessionId ??= _sessionManager.ForegroundConversation?.Id;
-        var conversationId = _sessionManager.ForegroundConversation?.Id;
+        sessionId ??= unattended ? SessionId.NewId() : _sessionManager.ForegroundConversation?.Id;
+        var conversationId = unattended ? null : _sessionManager.ForegroundConversation?.Id;
 
         // input 拦截点：在 AppendUserPromptAsync 之前触发——被阻断的 prompt 不进入运行循环、
         // 也不落会话历史（deny 阻断；AdditionalContexts 以 user 消息并入本轮输入）。
@@ -191,7 +193,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             WorkingMode: workingMode,
             FileChangeCallback: fileChangeCallback,
             HarnessInstructions: harnessInstructions,
-            ToolCapabilities: capabilities);
+            ToolCapabilities: capabilities,
+            SuppressToolApproval: unattended);
 
         await foreach (var e in StreamCoreAsync(request, ct).ConfigureAwait(false))
         {
@@ -305,12 +308,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 
         // 预先读取全部 ambient 旧值：一次 try/finally 覆盖所有 set 点，
         // 构建 run 骨架（StreamingSession/RunOptions/Channel/StartRun）抛出时不再泄漏。
-        var previousBuildRunId = OneCodeAgentRunContext.CurrentBuildRunId;
-        var previousRunId = OneCodeAgentRunContext.CurrentRunId;
-        var previousConversationId = ToolActivationContext.CurrentConversationId;
-        var previousCapabilities = ToolActivationContext.CurrentCapabilities;
-        var previousSubagentWriter = OneCodeAgentRunContext.SubagentEventWriter;
-        var previousPlanSeal = OneCodeAgentRunContext.PlanSubmissionSeal;
+        var ambientScope = AgentRunAmbientScope.CaptureCurrent();
 
         var aggregatedText = new System.Text.StringBuilder();
         var aggregatedTurns = 0;
@@ -339,12 +337,12 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             // NoticeEvent 的 yield 之后尤其如此。StartRun 捕获的 EC 决定工具执行时的 ambient
             // （SubmitPlan 的 run 绑定、动态激活会话定位都依赖它），故在此显式重建；先例见
             // ControlledBuildAttemptRuntime（受控路径的同款处理）。
-            OneCodeAgentRunContext.CurrentBuildRunId = preambleState.BuildRun?.Id.ToString();
-            OneCodeAgentRunContext.CurrentRunId = request.AgentRunId;
-            // 每个 Plan run 一枚新封条：SubmitPlan 成功后落封，工具中间件据此拒绝后续工具调用。
-            OneCodeAgentRunContext.PlanSubmissionSeal = request.WorkingMode == WorkingMode.Plan ? new RunSeal() : null;
-            ToolActivationContext.CurrentConversationId = request.ConversationId?.ToString();
-            ToolActivationContext.CurrentCapabilities = request.ToolCapabilities;
+            AgentRunAmbientScope.Apply(
+                buildRunId: preambleState.BuildRun?.Id.ToString(),
+                runId: request.AgentRunId,
+                conversationId: request.ConversationId?.ToString(),
+                capabilities: request.ToolCapabilities,
+                planSubmissionSeal: request.WorkingMode == WorkingMode.Plan ? new RunSeal() : null);
 
             // CacheSafe 快照必须在 run 开始前就绪：AgentTool 在会话首个查询期间发起的 fork
             // 会读取 Current，等到 FinalizeAsync 再写就让首轮 fork 拿到 null（子代理工具表被
@@ -438,12 +436,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             }
             // 全量复位 ambient：消费尾段（Flush/Finalize）无 ambient 读取方，
             // 统一在外层收口，覆盖构建骨架阶段的早期异常路径。
-            OneCodeAgentRunContext.CurrentBuildRunId = previousBuildRunId;
-            OneCodeAgentRunContext.CurrentRunId = previousRunId;
-            OneCodeAgentRunContext.SubagentEventWriter = previousSubagentWriter;
-            OneCodeAgentRunContext.PlanSubmissionSeal = previousPlanSeal;
-            ToolActivationContext.CurrentConversationId = previousConversationId;
-            ToolActivationContext.CurrentCapabilities = previousCapabilities;
+            ambientScope.Dispose();
         }
     }
 

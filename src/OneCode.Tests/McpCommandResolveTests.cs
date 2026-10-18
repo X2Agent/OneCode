@@ -21,8 +21,6 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class McpCommandResolveTests
 {
-    // ---- InstallTargetResolver（纯函数内核） ----
-
     [Fact]
     public void TryParseIndex_ValidOneBasedNumber_ReturnsIndex()
     {
@@ -124,8 +122,6 @@ public sealed class McpCommandResolveTests
         ok.Should().BeFalse();
         candidates.Should().BeEmpty();
     }
-
-    // ---- ResolveInstallTargetAsync（端到端，stub registry） ----
 
     private sealed class StubHandler : HttpMessageHandler
     {

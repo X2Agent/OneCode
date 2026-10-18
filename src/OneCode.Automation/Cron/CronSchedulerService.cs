@@ -231,7 +231,7 @@ public sealed class CronSchedulerService : BackgroundService
     {
         _logger.LogInformation("Cron scheduler service started");
 
-        ReloadJobs();
+        await ReloadJobsAsync(stoppingToken).ConfigureAwait(false);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -287,17 +287,21 @@ public sealed class CronSchedulerService : BackgroundService
             {
                 _logger.LogInformation("Firing cron job {Id}: {Prompt}", job.Id, job.Prompt);
 
+                string lastStatus = "ok";
+                string? lastError = null;
                 try
                 {
                     await _executor.ExecuteJobAsync(job.Prompt, ct).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     // Host is shutting down — propagate so ExecuteAsync's loop breaks.
                     throw;
                 }
                 catch (Exception ex)
                 {
+                    lastStatus = "error";
+                    lastError = ex.Message;
                     _logger.LogError(ex, "Error triggering cron job {Id}", job.Id);
                 }
 
@@ -310,6 +314,8 @@ public sealed class CronSchedulerService : BackgroundService
                 lock (_reloadLock)
                 {
                     job.LastRunAt = now.ToUnixTimeSeconds();
+                    job.LastStatus = lastStatus;
+                    job.LastError = lastError;
 
                     if (job.Recurring)
                     {
@@ -352,79 +358,86 @@ public sealed class CronSchedulerService : BackgroundService
 
     private void ReloadJobs()
     {
+        _ = Task.Run(() => ReloadJobsAsync(CancellationToken.None));
+    }
+
+    private async Task ReloadJobsAsync(CancellationToken ct)
+    {
         lock (_reloadLock)
         {
             // Debounce inside the lock to prevent TOCTOU: if the check were outside,
             // multiple FSW threads could all pass the check before any acquires the lock.
             if (DateTimeOffset.UtcNow - _lastReload < ReloadDebounce) return;
+            _lastReload = DateTimeOffset.UtcNow;
+        }
 
-            if (!Directory.Exists(_cronDir)) return;
+        if (!Directory.Exists(_cronDir)) return;
 
-            var files = Directory.GetFiles(_cronDir, "*.json");
+        var files = Directory.GetFiles(_cronDir, "*.json");
+        List<CronJobEntry> candidates = [];
+
+        foreach (var file in files)
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+                var entry = JsonSerializer.Deserialize<CronJobEntry>(json);
+                if (entry is null) continue;
+
+                if (!CronPaths.IsValidJobId(entry.Id))
+                {
+                    _logger.LogWarning(
+                        "Skipping cron job file {File}: invalid ID '{Id}' (potential path traversal)", file, entry.Id);
+                    continue;
+                }
+
+                if (!entry.Durable)
+                {
+                    _logger.LogDebug(
+                        "Skipping non-durable cron file {File} on reload", file);
+                    continue;
+                }
+
+                if (entry.NextRunAt is null && entry.Recurring && !entry.Paused)
+                {
+                    var next = _cronParser.ComputeNextRun(entry.Cron, DateTimeOffset.UtcNow);
+                    entry.NextRunAt = next?.ToUnixTimeSeconds();
+                }
+
+                candidates.Add(entry);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse cron job file {File}; skipping", file);
+            }
+        }
+
+        lock (_reloadLock)
+        {
+            var inMemoryOnly = _jobs.Where(j => !j.Durable).ToList();
             List<CronJobEntry> loaded = [];
 
-            foreach (var file in files)
+            foreach (var entry in candidates)
             {
-                try
+                if (loaded.Count + inMemoryOnly.Count + _pendingJobIds.Count >= MaxJobs)
                 {
-                    var json = File.ReadAllText(file);
-                    var entry = JsonSerializer.Deserialize<CronJobEntry>(json);
-                    if (entry is null) continue;
-
-                    // Path traversal defence: reject entries whose Id contains characters
-                    // that could escape the cron directory when used in file-path construction.
-                    if (!CronPaths.IsValidJobId(entry.Id))
-                    {
-                        _logger.LogWarning(
-                            "Skipping cron job file {File}: invalid ID '{Id}' (potential path traversal)", file, entry.Id);
-                        continue;
-                    }
-
-                    // Durable enforcement: only load jobs whose Durable flag is true. A non-
-                    // durable file shouldn't exist on disk in normal operation, but if one
-                    // does (e.g. host downgraded ONECODE_DURABLE_CRON after creating durable
-                    // jobs), we honour the file's Durable flag rather than the env switch —
-                    // the env switch only governs whether *new* persists, not whether *old*
-                    // resumes.
-                    if (!entry.Durable)
-                    {
-                        _logger.LogDebug(
-                            "Skipping non-durable cron file {File} on reload", file);
-                        continue;
-                    }
-
-                    if (entry.NextRunAt is null && entry.Recurring && !entry.Paused)
-                    {
-                        var next = _cronParser.ComputeNextRun(entry.Cron, DateTimeOffset.UtcNow);
-                        entry.NextRunAt = next?.ToUnixTimeSeconds();
-                    }
-
-                    if (loaded.Count + _jobs.Count(j => !j.Durable) + _pendingJobIds.Count >= MaxJobs)
-                    {
-                        _logger.LogWarning(
-                            "Skipping cron job file {File}: scheduler limit {MaxJobs} reached", file, MaxJobs);
-                        continue;
-                    }
-
-                    if (loaded.Any(j => string.Equals(j.Id, entry.Id, StringComparison.OrdinalIgnoreCase)) ||
-                        _pendingJobIds.Contains(entry.Id))
-                        continue;
-
-                    loaded.Add(entry);
+                    _logger.LogWarning(
+                        "Skipping cron job {Id}: scheduler limit {MaxJobs} reached", entry.Id, MaxJobs);
+                    continue;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to parse cron job file {File}; skipping", file);
-                }
+
+                if (loaded.Any(j => string.Equals(j.Id, entry.Id, StringComparison.OrdinalIgnoreCase)) ||
+                    _pendingJobIds.Contains(entry.Id))
+                    continue;
+
+                loaded.Add(entry);
             }
 
-            // Merge instead of replace: in-memory (non-durable) jobs added via AddJob
-            // are NOT backed by a JSON file, so ReloadJobs (triggered by FileSystemWatcher
-            // when a *different* durable job is created) would otherwise drop them all.
-            // We keep the durable set in sync with disk and preserve the in-memory set.
-            var inMemoryOnly = _jobs.Where(j => !j.Durable).ToList();
             _jobs = inMemoryOnly.Concat(loaded).ToList();
-            _lastReload = DateTimeOffset.UtcNow;
         }
     }
 

@@ -33,17 +33,47 @@ function Get-LatestVersion {
         "User-Agent" = "onecode-installer"
         "X-GitHub-Api-Version" = "2022-11-28"
     }
-    $release = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest" `
-        -Headers $headers `
-        -ErrorAction Stop
-
-    $version = [string]$release.tag_name
-    if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "GitHub latest release 响应不包含 tag_name: $RepoOwner/$RepoName"
+    $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } else { $null }
+    if ($token) {
+        $headers["Authorization"] = "Bearer $token"
     }
 
-    return $version
+    try {
+        $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest" `
+            -Headers $headers `
+            -ErrorAction Stop
+
+        $version = [string]$release.tag_name
+        if (-not [string]::IsNullOrWhiteSpace($version)) {
+            return $version
+        }
+    }
+    catch {
+        Write-Info "GitHub API 请求受限或失败，回退通过 /releases/latest 重定向解析版本..."
+    }
+
+    # 回退方案：通过 github.com/<owner>/<repo>/releases/latest 的 302 重定向 URL 提取最新 tag（不消耗 REST API 配额）
+    $req = [System.Net.HttpWebRequest]::Create("$GitHubBase/releases/latest")
+    $req.Method = "HEAD"
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = "onecode-installer"
+    try {
+        $resp = [System.Net.HttpWebResponse]$req.GetResponse()
+    }
+    catch [System.Net.WebException] {
+        $resp = [System.Net.HttpWebResponse]$_.Exception.Response
+    }
+
+    if ($null -ne $resp) {
+        $location = $resp.Headers["Location"]
+        $resp.Close()
+        if ($location -match "/releases/tag/([^/?#]+)") {
+            return $Matches[1]
+        }
+    }
+
+    throw "无法获取 $RepoOwner/$RepoName 的最新 Release 版本（API 与重定向回退均失败）"
 }
 
 # ── 下载并安装 ────────────────────────────────────────────────────

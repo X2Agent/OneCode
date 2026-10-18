@@ -21,13 +21,13 @@ namespace OneCode.Infrastructure.Ai;
 ///
 /// <para><b>取消语义</b>：<see cref="OperationCanceledException"/> 一律透传，不降级为 hook 结果。</para>
 /// </summary>
-public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionService hookExecutionService) : IChatClient
+public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionService hookExecutionService)
+    : DelegatingChatClient(inner)
 {
-    private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     private readonly IHookExecutionService _hooks =
         hookExecutionService ?? throw new ArgumentNullException(nameof(hookExecutionService));
 
-    public async Task<ChatResponse> GetResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -35,7 +35,7 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
         if (_hooks.HasActiveHooks(HookInterceptionPoint.PreModelCall, options?.ModelId))
             await FirePreAsync(messages, options, cancellationToken).ConfigureAwait(false);
 
-        var response = await _inner.GetResponseAsync(messages, options, cancellationToken)
+        var response = await base.GetResponseAsync(messages, options, cancellationToken)
             .ConfigureAwait(false);
 
         if (_hooks.HasActiveHooks(HookInterceptionPoint.PostModelCall, options?.ModelId))
@@ -44,7 +44,7 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
         return response;
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -56,7 +56,7 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
         List<ChatResponseUpdate>? updates =
             _hooks.HasActiveHooks(HookInterceptionPoint.PostModelCall, options?.ModelId) ? [] : null;
 
-        await foreach (var update in _inner
+        await foreach (var update in base
             .GetStreamingResponseAsync(messages, options, cancellationToken)
             .ConfigureAwait(false))
         {
@@ -114,9 +114,4 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
 
         return JsonSerializer.SerializeToElement(projected);
     }
-
-    public object? GetService(Type serviceType, object? serviceKey = null)
-        => _inner.GetService(serviceType, serviceKey);
-
-    void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
 }

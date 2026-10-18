@@ -26,8 +26,7 @@ internal interface IGoalStepExecutionService
     void UpdateGoalContext(
         GoalPlan plan,
         GoalItem currentGoal,
-        IReadOnlyList<SubGoalExecution> executions,
-        bool sharedTransactionOwned);
+        IReadOnlyList<SubGoalExecution> executions);
 }
 
 internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
@@ -123,7 +122,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     /// <summary>
     /// 更新 GOAL 模式共享上下文（供子目标执行期间 system prompt 注入使用）。
     /// </summary>
-    public void UpdateGoalContext(GoalPlan plan, GoalItem currentGoal, IReadOnlyList<SubGoalExecution> executions, bool sharedTransactionOwned)
+    public void UpdateGoalContext(GoalPlan plan, GoalItem currentGoal, IReadOnlyList<SubGoalExecution> executions)
     {
         var completedSummaries = executions
             .Where(e => e.Status == GoalStatus.Completed)
@@ -140,7 +139,6 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             TotalGoals: plan.Goals.Count,
             CompletedSummaries: completedSummaries,
             FailedSummaries: failedSummaries,
-            SharedTransactionHint: true,
             CurrentGoalDepth: currentGoal.Depth);
 
         _goalContextState.Update(snapshot);
@@ -180,16 +178,13 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             Tools = filteredTools,
             WorkingMode = WorkingMode.Goal,
             SharedTransaction = sharedTransaction,
-            // GOAL 子目标在 LoopAgent 内无交互式审批通道，必须禁用 ApprovalRequiredAIFunction 包装，
-            // 让权限/路径错误直接作为 ToolResult.Error 返回给 LLM 自纠，而非因 pending approval 中止循环。
-            SuppressToolApproval = true,
             // 同一事件同时进入 UI 和确定性验证证据收集器。
             OrchestrationEventSink = evt =>
             {
                 evidenceSink(evt);
                 options.OrchestrationEventSink?.Invoke(evt);
             },
-        };
+        }.AsUnattended();
     }
 
     /// <summary>

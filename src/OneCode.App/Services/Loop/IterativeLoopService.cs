@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tui;
 using OneCode.Core.Exec;
@@ -135,8 +136,12 @@ public sealed class IterativeLoopService(
         {
             try
             {
+                var messages = new List<ChatMessage>
+                {
+                    QueryStreamHelpers.BuildUserMessage(request.Task ?? string.Empty, imagePaths, NullLogger.Instance),
+                };
                 await foreach (var _ in loopAgent.RunStreamingAsync(
-                    BuildMessages(request, imagePaths), cancellationToken: ct).ConfigureAwait(false))
+                    messages, cancellationToken: ct).ConfigureAwait(false))
                 {
                     // 循环中间输出不进主对话转录：进度与验证结果以 TuiModeProgress 单独投影，
                     // 否则每轮完整 agent 输出会把转录刷满。
@@ -243,51 +248,15 @@ public sealed class IterativeLoopService(
         return builder.ToString();
     }
 
-    private static IReadOnlyList<ChatMessage> BuildMessages(LoopRunRequest request, IReadOnlyList<string>? imagePaths)
-    {
-        List<AIContent> contents = [];
-        if (!string.IsNullOrWhiteSpace(request.Task))
-            contents.Add(new TextContent(request.Task));
-
-        foreach (var path in imagePaths ?? [])
-        {
-            if (!File.Exists(path)) continue;
-            var mediaType = Path.GetExtension(path).ToLowerInvariant() switch
-            {
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".gif" => "image/gif",
-                ".webp" => "image/webp",
-                ".bmp" => "image/bmp",
-                _ => "image/png",
-            };
-            contents.Add(new DataContent(File.ReadAllBytes(path), mediaType));
-        }
-
-        return [new ChatMessage(ChatRole.User, contents)];
-    }
-
     private string ExtractLastOutput(LoopContext loopContext, LoopRunState state)
     {
-        var builder = new StringBuilder();
-        foreach (var message in loopContext.LastResponse.Messages)
+        if (loopContext.LastResponse.Usage is { } details)
         {
-            if (message.Role != ChatRole.Assistant) continue;
-            foreach (var content in message.Contents)
-            {
-                switch (content)
-                {
-                    case TextContent text when !string.IsNullOrEmpty(text.Text):
-                        builder.Append(text.Text);
-                        break;
-                    case UsageContent usage when usage.Details is { } details:
-                        state.InputTokens += (long)(details.InputTokenCount ?? 0);
-                        state.OutputTokens += (long)(details.OutputTokenCount ?? 0);
-                        break;
-                }
-            }
+            state.InputTokens += (long)(details.InputTokenCount ?? 0);
+            state.OutputTokens += (long)(details.OutputTokenCount ?? 0);
         }
 
-        state.LastOutput = builder.ToString();
+        state.LastOutput = loopContext.LastResponse.Text ?? string.Empty;
         return state.LastOutput;
     }
 

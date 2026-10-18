@@ -300,4 +300,32 @@ public sealed partial class MessageListView
         _scroll.RequestScrollToBottomIfAutoScroll();
         SetNeedsDraw();
     }
+
+    /// <summary>
+    /// 从对话流尾部逆序查找最近一条带可折叠详情标记（<see cref="ToolLineTag"/> /
+    /// <see cref="ThinkingLineTag"/> / <see cref="ErrorLineTag"/>）的摘要行并切换展开态（Ctrl+E）。
+    /// </summary>
+    public bool ToggleLastDetails()
+    {
+        for (var i = _lines.Count - 1; i >= 0; i--)
+        {
+            switch (_lines[i].Tag)
+            {
+                case ToolLineTag toolTag:
+                    ToggleToolExpansion(i, toolTag);
+                    return true;
+                case ThinkingLineTag thinkingTag:
+                    ToggleThinkingExpansion(i, thinkingTag);
+                    return true;
+                case ErrorLineTag errorTag:
+                    // Error 展开详情行与首行摘要共享相同的 ErrorLineTag.Content；
+                    // 跳过详情行，定位到该错误块的首行摘要后再切换。
+                    while (i > 0 && _lines[i - 1].Tag is ErrorLineTag prevErr && prevErr.Content == errorTag.Content)
+                        i--;
+                    ToggleErrorExpansion(i, (ErrorLineTag)_lines[i].Tag!);
+                    return true;
+            }
+        }
+        return false;
+    }
 }

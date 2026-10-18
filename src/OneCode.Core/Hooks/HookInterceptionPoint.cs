@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OneCode.Core.Hooks;
 
 /// <summary>
@@ -16,27 +18,35 @@ namespace OneCode.Core.Hooks;
 public enum HookInterceptionPoint
 {
     /// <summary>外部输入进入 agent run 前。target：输入文本。matcher：无（全量）。</summary>
+    [JsonStringEnumMemberName("input")]
     Input,
 
     /// <summary>模型请求前。target：请求消息。matcher：modelId。</summary>
+    [JsonStringEnumMemberName("pre_model_call")]
     PreModelCall,
 
     /// <summary>模型完整响应后。target：响应内容。matcher：modelId。</summary>
+    [JsonStringEnumMemberName("post_model_call")]
     PostModelCall,
 
     /// <summary>工具执行前。target：工具参数。matcher：工具名（glob）。</summary>
+    [JsonStringEnumMemberName("pre_tool_call")]
     PreToolCall,
 
     /// <summary>工具执行后。target：工具结果。matcher：工具名（glob）。</summary>
+    [JsonStringEnumMemberName("post_tool_call")]
     PostToolCall,
 
     /// <summary>最终响应交付调用方前。target：响应文本。matcher：无（全量）。</summary>
+    [JsonStringEnumMemberName("output")]
     Output,
 
     /// <summary>内部：agent run 开始。不开放。</summary>
+    [JsonStringEnumMemberName("agent_startup")]
     AgentStartup,
 
     /// <summary>内部：agent run 结束。不开放。</summary>
+    [JsonStringEnumMemberName("agent_shutdown")]
     AgentShutdown,
 }
 

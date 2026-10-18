@@ -41,8 +41,8 @@ public sealed class AppStartupService(
                 t => logger.LogWarning(t.Exception!, "Image temp-dir cleanup failed"),
                 TaskContinuationOptions.OnlyOnFaulted);
 
-        // DurableFile 崩溃残留清扫：WriteAtomic 崩溃时无法执行 finally，GUID 临时文件
-        // 会逐次堆积。各持久化 store 都落在用户配置根目录下，从根递归清扫即可全覆盖。
+        // DurableFile 崩溃残留清扫与自更新 .old 旧可执行文件清理
+        Setup.UpgradeService.TryCleanupStaleOldExecutable(Environment.ProcessPath, logger);
         var durableRoot = PathsHelper.GetUserConfigDir();
         _ = Task.Run(
             () =>

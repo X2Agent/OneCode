@@ -98,7 +98,7 @@ Build with `dotnet build src/OneCode.slnx`.
 | 特性 | 实现方式 |
 |------|---------|
 | 目录解析 | `User` → `~/.onecode/memory/`；`Project` → `{cwd}/.onecode/memory/`（运行时通过 `IWorkingDirectoryAccessor` 实时读取，`/cd` 切换生效） |
-| 并发控制 | 跨进程锁文件 + 原子替换（`DurableFile`），写操作串行化；读操作无锁 |
+| 并发控制 | 跨进程锁文件 `.MEMORY.lock`（`FileShare.None`，有限重试）+ 临时文件原子替换（`File.Replace`/`File.Move`），写操作串行化；读操作无锁 |
 | 过期处理 | `AutoDreamMemoryApplier` 对未指定 `ttlHours` 的自动记忆默认赋予 `720h`（30 天）；`LoadAsync` 惰性过滤 `IsExpired`；`PruneAsync` 物理删除 |
 | 容量治理 | 单作用域硬上限 `MaxEntries = 50`；超出时 `manual` 豁免，其余按 `UpdatedAt` 升序淘汰最旧条目 |
 | 读取预算 | `MemoryService.LoadMemoryPromptAsync` 设总字符预算 `MaxMemoryContextChars = 8_000`（约 2,000 Tokens），按 `manual` 优先 → `Project` 优先于 `User` → `UpdatedAt` 降序截断兜底 |
@@ -117,7 +117,7 @@ Build with `dotnet build src/OneCode.slnx`.
 | 路径 | 保护方式 | 位置 |
 |---|---|---|
 | 容量淘汰 | `PruneAsync` 对 `Source == "manual"` **豁免**，永不被自动淘汰 | `MemoryEntryStore.PruneAsync` |
-| AutoDream 写入 | 拒绝 delete / upsert / supersede 用户手写条目；拒绝创建 `manual:` 前缀的 key | `AutoDreamMemoryApplier.ApplyConsolidationChangesAsync` |
+| AutoDream 写入 | 拒绝 delete / upsert / supersede 用户手写条目；拒绝创建 `manual:` 前缀的 key | `AutoDreamMemoryApplier.TryApplyConsolidationChangesAsync`（`ApplyConsolidationChangesAsync` 只是丢弃 `Succeeded` 的包装器） |
 
 ### 6. AutoDream 任务完成触发与当前对话增量整理
 

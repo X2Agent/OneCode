@@ -47,8 +47,9 @@
      （当前算了但丢弃，正是本项缺失的那一环）。
    - 同步更新 XML 文档里的 tuple 说明。
 
-3. **`src/OneCode.App/Services/Agent/MainAgentRunner.Pipeline.cs`**
-   - 第 21–22 行的解构补第三个值；第 36 行 `new MaxOutputTokensDecorator(_chatClient)` → `new MaxOutputTokensDecorator(_chatClient, contextWindow)`。
+3. **`src/OneCode.Infrastructure/Ai/ChatClientFactory.cs` 与 `src/OneCode.App/Services/Agent/MainAgentRunner.Pipeline.cs`**
+   - `MaxOutputTokensDecorator` 已下沉至 `OneCode.Infrastructure.Ai` 并在 `ChatClientFactory.CreateWithDecorators` 根管道挂载；移除 `MainAgentRunner.Pipeline.cs` 中重复包装的 `new MaxOutputTokensDecorator(_chatClient)`，并将 `contextWindow` 传入装饰器以钳制 `EscalatedMaxTokens`。
+   - `MainAgentRunner.Pipeline.cs` 第 21–22 行的解构补第三个值 `contextWindow` 供 `BuildChatOptions` 使用。
 
 4. **`src/OneCode.App/Services/Agent/ForkedAgentRunner.cs:119-121`**
    - `BuildForWorkerAsync(...)` 解构补第三项（值未使用处直接解构忽略）。

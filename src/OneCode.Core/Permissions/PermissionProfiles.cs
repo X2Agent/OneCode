@@ -30,9 +30,6 @@ internal enum DestructiveShellPolicy
 
     /// <summary>Deny immediately (GoalAuto).</summary>
     Deny,
-
-    /// <summary>Ask for approval (interactive permission prompt).</summary>
-    Ask,
 }
 
 /// <summary>How unknown (non-shell, non-write) tools are handled after AutoAllowFileWriteAndShell.</summary>
@@ -136,8 +133,6 @@ public static class PermissionProfiles
         {
             DestructiveShellPolicy.Deny => PermissionCheckResult.Deny(
                 "Destructive shell command denied in GOAL mode. Use a safer alternative."),
-            DestructiveShellPolicy.Ask => PermissionCheckResult.Ask(
-                "Dangerous shell command requires approval (no interactive channel available)."),
             DestructiveShellPolicy.EvaluateRules => null,
             _ => null,
         };

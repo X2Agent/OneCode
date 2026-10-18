@@ -15,15 +15,6 @@ public enum BuildResumeAction
     /// <summary>Accepting 态恢复——补完被中断的提交确认。</summary>
     ConfirmCommit,
 
-    /// <summary>Intake/Assessing——继续需求评估。</summary>
-    ContinueAssessment,
-
-    /// <summary>Clarifying 但已有持久化计划——计划即已批准的契约，直接进入执行准备。</summary>
-    ResumePrescribedPlan,
-
-    /// <summary>ScopeConfirmed/Planning——按已确认范围准备执行。</summary>
-    PrepareFromScope,
-
     /// <summary>审批门/执行中态——原样停靠并通知观察者。</summary>
     ParkAtGate,
 }
@@ -69,18 +60,6 @@ public static class BuildResumePolicy
         return existing.State switch
         {
             BuildRunState.Accepting => new(BuildResumeAction.ConfirmCommit),
-            BuildRunState.Intake or BuildRunState.Assessing => new(BuildResumeAction.ContinueAssessment),
-
-            // 持久化计划即已批准的范围契约。旧检查点可能在强制前进入 Clarifying；
-            // 直接恢复而不是让用户对同一份计划重复批准。无计划的 Clarifying 遗留
-            // run 落到 ParkAtGate 停靠——澄清对话入口已移除，不存在继续路径。
-            BuildRunState.Clarifying when existing.Plan is not null
-                => new(BuildResumeAction.ResumePrescribedPlan),
-            BuildRunState.ScopeConfirmed or BuildRunState.Planning
-                => new(BuildResumeAction.PrepareFromScope),
-
-            // Planned 是用户审批门：计划停靠在此直到 Approve/Reject。
-            // Implementing/Verifying/Recovering 及其余非终态一律原样停靠。
             _ => new(BuildResumeAction.ParkAtGate),
         };
     }

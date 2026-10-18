@@ -17,10 +17,11 @@ public sealed class AppSettings
     public string? Model { get => Get<string>(CoreConstants.ConfigKeys.Model); init => _values[CoreConstants.ConfigKeys.Model] = value; }
     public int MaxTurns { get => Get(CoreConstants.ConfigKeys.MaxTurns, CoreConstants.Session.MaxTurnsDefault); init => _values[CoreConstants.ConfigKeys.MaxTurns] = value; }
     public long MaxBudgetTokens { get => Get(CoreConstants.ConfigKeys.MaxBudgetTokens, CoreConstants.Session.MaxBudgetTokensDefault); init => _values[CoreConstants.ConfigKeys.MaxBudgetTokens] = value; }
-    public string PermissionMode { get => Get(CoreConstants.ConfigKeys.PermissionMode, CoreConstants.PermissionModes.Default) ?? CoreConstants.PermissionModes.Default; init => _values[CoreConstants.ConfigKeys.PermissionMode] = value; }
+    public string PermissionMode { get => Get(CoreConstants.ConfigKeys.PermissionMode, "default") ?? "default"; init => _values[CoreConstants.ConfigKeys.PermissionMode] = value; }
     public bool NextPromptSuggesterEnabled { get => Get(CoreConstants.ConfigKeys.NextPromptSuggesterEnabled, true); init => _values[CoreConstants.ConfigKeys.NextPromptSuggesterEnabled] = value; }
     public bool NotificationsEnabled { get => Get(CoreConstants.ConfigKeys.NotificationsEnabled, false); init => _values[CoreConstants.ConfigKeys.NotificationsEnabled] = value; }
     public int OllamaContextWindow { get => Get(CoreConstants.ConfigKeys.OllamaContextWindow, 32_768); init => _values[CoreConstants.ConfigKeys.OllamaContextWindow] = value; }
+    public double OllamaTemperature { get => Get(CoreConstants.ConfigKeys.OllamaTemperature, 0.15); init => _values[CoreConstants.ConfigKeys.OllamaTemperature] = value; }
     /// <summary>
     /// 流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即判定
     /// 连接停滞（TCP 半开/代理停滞）并重试。取值需容忍推理模型两段内容之间的分钟级静默。

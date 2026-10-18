@@ -283,8 +283,7 @@ internal sealed class GoalWorkflowRuntime(
         subGoalExecutor.UpdateGoalContext(
             currentPlan,
             currentGoal,
-            priorExecutions,
-            sharedTransactionOwned: false);
+            priorExecutions);
 
         using var transaction = context.TransactionFactory();
 
@@ -298,7 +297,6 @@ internal sealed class GoalWorkflowRuntime(
             var options = context.Options with
             {
                 WorkingDirectory = effectiveWorktreeDir,
-                SharedTransaction = transaction,
             };
             execution = await subGoalExecutor.ExecuteSubGoalWithLoopStreamingAsync(
                 currentGoal,

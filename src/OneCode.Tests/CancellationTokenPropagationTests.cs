@@ -114,8 +114,6 @@ public sealed class CancellationTokenPropagationTests
             "pre-cancelled token must propagate before enumeration starts");
     }
 
-    // Helpers
-
     private static TokenLedger CreateTracker(long initialTokens = 0)
     {
         var tracker = new TokenLedger();

@@ -62,9 +62,14 @@ public sealed class CronCommand(
                 var last = j.LastRunAt is long lts
                     ? DateTimeOffset.FromUnixTimeSeconds(lts).LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                     : "-";
+                var statusSuffix = !string.IsNullOrEmpty(j.LastStatus)
+                    ? string.IsNullOrEmpty(j.LastError)
+                        ? $" ({j.LastStatus})"
+                        : $" ({j.LastStatus}: {j.LastError})"
+                    : "";
                 sb.AppendLine(CultureInfo.InvariantCulture, $"  {j.Id} {state}{durable} {j.Cron} ({schedule})");
                 sb.AppendLine(CultureInfo.InvariantCulture, $"      prompt: {preview}");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"      next: {next}  last: {last}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"      next: {next}  last: {last}{statusSuffix}");
             }
         }
         sb.AppendLine("\nUsage: /cron create <cron> <prompt> [--once] [--durable] | delete <id> | pause <id> | resume <id> | run <id>");

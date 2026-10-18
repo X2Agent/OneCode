@@ -128,8 +128,6 @@ public sealed class CompactServiceTests
         result.Should().BeNull();
     }
 
-    // Helpers
-
     private static (CompactService Service, IChatClient Client) CreateSut()
     {
         var client = Substitute.For<IChatClient>();

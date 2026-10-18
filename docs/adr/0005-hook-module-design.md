@@ -50,10 +50,11 @@ public enum HookInterceptionPoint
 **拦截点元数据**：`HookPointMetadataRegistry` 为每个拦截点声明 matcher 字段名与可选值，用于 UI 展示和文档生成：
 
 ```csharp
-[HookInterceptionPoint.PreToolCall] = new(
-    "工具真正执行前",
-    "在工具调用执行前触发。deny 使本次工具调用以错误载荷返回、批次循环继续（不中断整轮）",
-    new MatcherMetadata("tool_name", ["Bash", "Edit", "Write", "Read", "Grep", "Glob", "Task", "todos_*", "mcp.*"]));
+HookPointMetadata.WithMatcher(
+    HookInterceptionPoints.ToWireName(HookInterceptionPoint.PreToolCall),
+    "工具调用前",
+    "在工具真正执行前触发。deny 使本次工具调用以错误载荷返回、批次循环继续（不中断整轮）",
+    new HookMatcherMetadata("tool_name", "按工具名匹配，大小写不敏感，支持 glob", ["Bash", "Edit", "Write", "Read", "Grep", "Glob", "Task", "todos_*", "mcp__*"]));
 ```
 
 ### 2. 执行器收敛到 3 种真实使用的类型
@@ -186,9 +187,10 @@ public sealed class HookRegistry
 // 1. 策略前置检查（工作区不可信 → 返回空结果）
 // 2. _hookRegistry.GetMatchesForPoint(payload.Point, actualMatcherValue)
 // 3. hooks.Sort((a, b) => a.Priority.CompareTo(b.Priority))
-// 4. 串行执行：foreach (hook in hooks) { results.Add(await ExecuteSingleHookAsync(hook, payload, ct)); }
+// 4. 串行执行：foreach (hook in hooks) {
+//        result = await ExecuteSingleHookAsync(hook, payload, ct); results.Add(result);
+//        if (hook.Once && result.Outcome is Success or Blocking) Unregister(hook.Name); }
 // 5. HookResultAggregator.Aggregate(results)
-// 6. 清理 once hook（Unregister）
 ```
 
 **聚合策略**：
@@ -197,7 +199,7 @@ public sealed class HookRegistry
 |---------|---------|------|
 | 列表字段（`BlockingErrors` / `AdditionalContexts`） | 累加 | 所有阻断错误和额外上下文都应保留 |
 | 字符串字段（`Message` / `SystemMessage`） | last-write-wins | 后执行的 hook 可覆盖前者的消息 |
-| 结果字段（`Outcome` / `BlockingError`） | 任一阻断即生效 | 见 `HookResultAggregator.Aggregate` |
+| `BlockingErrors` | 非空即阻断 | 见 `HookResultAggregator.Aggregate`（聚合结果没有 `Outcome` 字段） |
 
 **理由**：
 - 串行执行保证 hook 之间的顺序依赖（如审计 hook 需在通知 hook 之前执行）
@@ -357,7 +359,7 @@ public bool IsCurrentWorkspaceTrusted()
 
 ### 11. Webhook 通知基类复用
 
-**决策**：飞书 / 企业微信 / 钉钉等 Webhook 类通知渠道共享 `WebhookNotificationProviderBase` 基类，子类只需重写 6 个抽象成员（基类 5 个 protected 成员 + 公共 `Name`）。
+**决策**：飞书 / 企业微信等编译型 Webhook 通知渠道共享 `WebhookNotificationProviderBase` 基类，子类只需重写 6 个抽象成员（基类 5 个 protected 成员 + 公共 `Name`）。钉钉不走编译型类，由 `notification-providers.json` 的声明式 `DeclarativeNotificationProvider` 执行。
 
 ```csharp
 public abstract class WebhookNotificationProviderBase(HttpClient httpClient, ILogger? logger = null) : INotificationProvider
@@ -478,6 +480,7 @@ internal static string Render(string template, HookPayload payload)
 [JsonSerializable(typeof(HookConfig))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+[JsonSerializable(typeof(Dictionary<string, NotificationProviderDefinition>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

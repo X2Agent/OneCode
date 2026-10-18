@@ -1,10 +1,7 @@
 // MAAI001 suppressed: AIContextProvider uses experimental MAF APIs
 using System.Text;
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using OneCode.App.Services.Lsp;
-
-
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Services.Context;
@@ -82,7 +79,7 @@ public sealed class LspDiagnosticContextProvider(
                 // Unchanged — re-inject the cached message without rebuilding it.
                 return ValueTask.FromResult(new AIContext
                 {
-                    Messages = [new ChatMessage(ChatRole.System, _lastInjectedMessage)],
+                    Instructions = _lastInjectedMessage,
                 });
             }
 
@@ -94,7 +91,7 @@ public sealed class LspDiagnosticContextProvider(
 
             return ValueTask.FromResult(new AIContext
             {
-                Messages = [new ChatMessage(ChatRole.System, message)],
+                Instructions = message,
             });
         }
         catch (Exception ex)

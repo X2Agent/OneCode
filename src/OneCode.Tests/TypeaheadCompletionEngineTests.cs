@@ -15,7 +15,7 @@ public sealed class TypeaheadCompletionEngineTests
 
     private static TypeaheadCompletionEngine CreateEngine(
         Func<IReadOnlyList<SessionCandidate>>? provider) =>
-        new([], Directory.GetCurrentDirectory(), () => [], sessionCandidatesProvider: provider);
+        new([], Directory.GetCurrentDirectory(), sessionCandidatesProvider: provider);
 
     private static SessionCandidate Candidate(string fullId, string title = "会话标题", string mode = "plan") =>
         new(fullId, title, mode, 27);
@@ -79,5 +79,80 @@ public sealed class TypeaheadCompletionEngineTests
         var engine = CreateEngine(() => [Candidate(FullIdA)]);
 
         engine.GetCompletions("/hello").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetCompletionItems_BareAt_ListsWorkspaceFilesFlatAndSkipsIgnoredDirs()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"onecode-at-flat-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "src", "Services"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "docs", "empty"));
+        Directory.CreateDirectory(Path.Combine(tempDir, ".git"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "bin", "Debug"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "obj"));
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "README.md"), "# readme");
+            File.WriteAllText(Path.Combine(tempDir, "src", "Services", "CronJobExecutor.cs"), "// code");
+            File.WriteAllText(Path.Combine(tempDir, ".git", "config"), "git");
+            File.WriteAllText(Path.Combine(tempDir, "bin", "Debug", "app.dll"), "bin");
+            File.WriteAllText(Path.Combine(tempDir, "obj", "project.assets.json"), "{}");
+
+            var engine = new TypeaheadCompletionEngine([], tempDir);
+            var items = engine.GetCompletionItems("@");
+
+            var expectedNested = Path.Combine("src", "Services", "CronJobExecutor.cs");
+            items.Select(i => i.Display).Should().Equal("README.md", expectedNested);
+            items[0].Insert.Should().Be("@README.md ");
+            items[1].Insert.Should().Be($"@{expectedNested} ");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetCompletions_AtFileFuzzySearch_RanksFilenamePrefixBeforeSubstringAndSubsequence()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"onecode-fuzzy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempDir, "src", "Tui"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "src", "Tests"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "src", "Services"));
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "src", "Tui", "ChatInputView.cs"), "// view");
+            File.WriteAllText(Path.Combine(tempDir, "src", "Tests", "MyChatInputHelper.cs"), "// helper");
+            File.WriteAllText(Path.Combine(tempDir, "src", "Services", "CronJobExecutor.cs"), "// cron");
+
+            var engine = new TypeaheadCompletionEngine([], tempDir);
+
+            var prefixAndSubstring = engine.GetCompletions("check @ChatInput");
+            var expectedPrefix = $"check @{Path.Combine("src", "Tui", "ChatInputView.cs")} ";
+            var expectedSubstring = $"check @{Path.Combine("src", "Tests", "MyChatInputHelper.cs")} ";
+            prefixAndSubstring.Should().Equal(expectedPrefix, expectedSubstring);
+
+            var subsequence = engine.GetCompletions("@cje");
+            subsequence.Should().Equal($"@{Path.Combine("src", "Services", "CronJobExecutor.cs")} ");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("@", true)]
+    [InlineData("check @xyz", true)]
+    [InlineData("/he", false)]
+    [InlineData("/session switch 4f", false)]
+    [InlineData("plain text", false)]
+    [InlineData("a @b c", false)]
+    [InlineData("", false)]
+    public void IsAtFileInput_ClassifiesInputModeCorrectly(string input, bool expected)
+    {
+        TypeaheadCompletionEngine.IsAtFileInput(input).Should().Be(expected);
     }
 }

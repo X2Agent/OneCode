@@ -15,7 +15,7 @@ colors:
   fg-secondary: "#8B949E"
   fg-muted: "#6B7280"
   bg-primary: "#0A0A0A"
-  bg-input: "#0F1218"
+  bg-input: "#111111"
   bg-terminal: "#0D1117"
   bg-terminal-header: "#161B22"
   bg-card: "#111111"
@@ -69,8 +69,8 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 | `fg-primary` | `#E6EDF3` | 正文和主要控件文字 |
 | `fg-secondary` | `#8B949E` | 描述、次要信息 |
 | `fg-muted` | `#6B7280` | 分隔线、弱提示 |
-| `bg-primary` | `#0A0A0A` | 消息区和根画布 |
-| `bg-input` | `#0F1218` | 输入区、状态栏、上下文栏、待办横条（底部固定栏与消息区只保留微弱分层） |
+| `bg-primary` | `#0A0A0A` | 消息区、状态栏、上下文栏和根画布 |
+| `bg-input` | `#111111` | 输入区与待办横条（中性微亮深灰，与主背景形成克制分层） |
 | `bg-terminal` | `#0D1117` | 终端型内容区域 |
 | `bg-terminal-header` | `#161B22` | 表单字段和终端头部 |
 | `bg-card` | `#111111` | 卡片和模态浮层 |
@@ -98,7 +98,7 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 根布局从上到下由消息区、Agent 状态栏、聊天输入区和会话上下文栏组成；OverlayHost 覆盖在最上层。
 
 - 消息区使用 `bg-primary`，弹性占据剩余空间。
-- Agent 状态栏和会话上下文栏各占 1 行，与输入区、待办横条统一使用 `bg-input`——底部固定栏与消息区只保留微弱分层，不得形成突兀色块。
+- Agent 状态栏和会话上下文栏各占 1 行，使用 `bg-primary` 融入主画布；仅输入区与待办横条使用 `bg-input` 作为微亮分层，不形成底部大面积异色色块。
 - 输入区使用 `bg-input`，单行输入总高度为 2 行，多行输入最多 6 行。
 - 输入区父级负责设置动态高度和底部位置；输入控件只报告内容所需行数并绘制自身。
 - 侧栏默认宽度按屏宽 40% 比例计算（封顶 100 列），最小宽度 28 列；主会话区保底 65 列。
@@ -108,7 +108,7 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 
 ### Chat Input
 
-- 顶部分隔线使用 `separator`；编辑器获得焦点时使用 `accent`。
+- 顶部分隔线常规状态下使用低调的 `border` / `separator`，仅在搜索模式（`Ctrl+F`）等显式状态激活时高亮为 `in-progress`。
 - 编辑器背景始终使用 `bg-input`，空闲、聚焦、忙碌、只读和补全状态不得暴露默认背景。
 - `Enter` 提交；`Shift+Enter` 换行；`Ctrl+V` 智能粘贴。
 - 普通输入状态下 `Tab` 循环工作模式；补全激活时 `Tab` 接受补全；空输入有建议时 `Tab` 接受建议。

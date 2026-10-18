@@ -3,28 +3,26 @@ using Microsoft.Agents.AI;
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
-/// Shared <see cref="HarnessAgentOptions"/> product opt-outs for OneCode.
-/// Keeps Main/Worker/Fork and AutoDream aligned so MAF Harness defaults
-/// do not dual-mount alongside product providers.
-/// Boundary rationale and the replacement for each opt-out:
-/// docs/adr/0007-maf-integration-boundaries.md §1.
+/// OneCode 对 <see cref="HarnessAgentOptions"/> 的统一产品侧关闭项。
+/// 让 Main/Worker/Fork 与 AutoDream 保持一致，避免 MAF Harness 默认实现与产品 provider 双挂载。
+/// 每个关闭项都在同一 options 对象中声明了产品侧替代实现。
 /// </summary>
 public static class OneCodeHarnessDefaults
 {
     /// <summary>
-    /// Explicit "no system prompt text at all" value for <see cref="HarnessAgentOptions.HarnessInstructions"/>.
+    /// <see cref="HarnessAgentOptions.HarnessInstructions"/> 的「完全不注入系统提示词」取值。
     /// </summary>
     /// <remarks>
-    /// <see langword="null"/> means "use MAF's <see cref="HarnessAgent.DefaultInstructions"/>", so paths that
-    /// carry a self-contained prompt (AutoDream, Goal sub-goals) must pass this instead — otherwise MAF
-    /// would add its generic instructions on top of a prompt that was never composed with them.
+    /// <see langword="null"/> 表示「使用 MAF 的 <see cref="HarnessAgent.DefaultInstructions"/>」，
+    /// 因此自带完整提示词的通路（AutoDream、Goal 子目标）必须传本常量，否则 MAF 会把通用指令
+    /// 叠加到一段从未与它们一起合成的提示词上。
     /// </remarks>
     public const string SuppressFrameworkDefaults = "";
 
     /// <summary>
-    /// Applies OneCode product opt-outs onto an already-constructed options instance.
-    /// Does not touch path-specific fields such as <see cref="HarnessAgentOptions.DisableToolAutoApproval"/>
-    /// or <see cref="HarnessAgentOptions.MaximumIterationsPerRequest"/>.
+    /// 把 OneCode 的产品侧关闭项应用到一个已构造的 options 实例上。
+    /// 不触碰通路相关的字段，例如 <see cref="HarnessAgentOptions.DisableToolAutoApproval"/>
+    /// 与 <see cref="HarnessAgentOptions.MaximumIterationsPerRequest"/>。
     /// </summary>
     public static void ApplyProductOptOuts(HarnessAgentOptions options)
     {

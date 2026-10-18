@@ -38,7 +38,8 @@ public sealed class PlanExecutionContextProviderTests
 
             foreach (var turn in new[] { turn1, turn2 })
             {
-                var text = turn.Messages!.Single().Text;
+                var text = turn.Instructions;
+                text.Should().NotBeNullOrEmpty();
                 text.Should().Contain("build the thing", "用户原始诉求必须随计划一并交接");
                 text.Should().Contain("Prefer sqlite", "规划期澄清必须随计划一并交接");
                 text.Should().Contain("# Test plan", "批准计划全文必须在每轮上下文里");
@@ -63,7 +64,7 @@ public sealed class PlanExecutionContextProviderTests
         {
             var result = await InvokeAsync(TestContext.Current.CancellationToken);
 
-            result.Messages.Should().BeNull("只有 StartingExecution/Executing 才注入交接上下文");
+            result.Instructions.Should().BeNull("只有 StartingExecution/Executing 才注入交接上下文");
         }
         finally
         {
@@ -80,7 +81,7 @@ public sealed class PlanExecutionContextProviderTests
 
         var result = await InvokeAsync(TestContext.Current.CancellationToken);
 
-        result.Messages.Should().BeNull();
+        result.Instructions.Should().BeNull();
         await _workflowService.DidNotReceive().GetAsync(
             Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
     }
@@ -101,8 +102,8 @@ public sealed class PlanExecutionContextProviderTests
         {
             var result = await InvokeAsync(TestContext.Current.CancellationToken);
 
-            result.Messages.Should().ContainSingle()
-                .Which.Text.Should().Contain("# Test plan",
+            result.Instructions.Should().NotBeNullOrEmpty()
+                .And.Contain("# Test plan",
                     "高级权限档（BypassPermissions/Auto/DontAsk）切入受控 Build 时同样必须注入批准计划全文");
         }
         finally

@@ -22,7 +22,7 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 （`ITaskService.GetTaskToken`）——ESC / 新输入不会取消它，只有 `stop` 或任务终态才取消。
 
 **可发现性**：`Agent`/`ParallelAgents` 是 `Contextual` 加载。云端模型全量目录可见；
-本地模型（<32K 上下文走 `SessionToolSet` 过滤）经三条激活链路进入工具集：
+本地模型（未知 provider 且窗口 < 32,768 时走 `SessionToolSet` 过滤；Anthropic/OpenAI/Ollama 由 provider 自身决定）经三条激活链路进入工具集：
 ① 用户 prompt 关键词评分（初始选择）；② `ToolSearch`；③ 未知工具兜底（模型幻觉调用已注册未加载的
 工具名时自动激活，下一轮生效）。
 
@@ -41,13 +41,13 @@ OneCode 的**确定性子代理派工**总览：派工入口、profile 能力矩
 | 能力 | Full（主） | Worker | Explore / Plan |
 |---|---|---|---|
 | 状态机 / 三振恢复 | ✅ | ❌ | ❌ |
-| 编辑前置检查与验证（EditPreChecks / Verification） | ✅ | ✅ | ❌ |
+| 编辑前置检查与验证（EditPreChecks / Verification） | ✅ | ✅（Verification 另受权限档位门控：`Default` 档关闭） | ❌ |
 | 工具审批 | ✅ | ✅（继承父权限模式） | ✅（但工具全只读，不会触发） |
 | 只读工具白名单 | ❌ | ❌ | ✅ |
 | LSP 诊断 / Shell 环境 | ✅ | ❌ | ❌ |
 | 工作记忆（FileMemory） | ✅ | ❌ | ❌ |
 | Todo（自持清单） | ✅ | ✅ | ❌ |
-| CodeAct 沙箱 / 编辑后验证 | ✅ | ✅ | ❌ |
+| CodeAct 沙箱 / 编辑后验证 | ✅ | ✅（Plan 模式或 `SuppressToolApproval` 时装配期剔除） | ❌ |
 
 只读白名单（Explore/Plan）：`Read`、`Grep`、`Glob`、`LS`、`Git`、`WebFetch`、`WebSearch`、`ToolSearch`、
 `Lsp`——全为 `ToolRisk.ReadOnly`，按 `ToolPolicyDefaults.ForRisk`
@@ -75,16 +75,15 @@ AgentTool.RunAgentAsync
             └─ 独立 AgentSession 一次性 RunAsync（会话不保留，见 F5）
 ```
 
-- **事务**：fork 默认自建 `EditTransaction`，成功即 commit；Goal 子目标路径由调用方传
-  `SharedTransaction`（多子目标共用，提交/回滚由 Goal 控制面负责）。
+- **事务**：fork 默认自建 `EditTransaction`，成功即 commit；Goal 子目标路径在隔离工作树中按子目标创建独立 `EditTransaction`，步内通过后 commit 并写入 Git 检查点，步内失败则回滚该子目标事务。
 - **记账**：子代理经 `PipelineSecurityContext` 共享 `ITokenLedger` 与 `MaxBudgetTokens`，
   预算熔断（`BudgetGuardRunMiddleware`）与用量追踪（`UsageTrackingRunMiddleware`）在子代理链上同样生效。
   用量按当前会话入账（fork 建管道时取 `ISessionIdProvider.CurrentSessionId`），`/status stats` 的
   会话统计包含子代理消耗；上下文提供器不消费该会话 ID（子代理转录保持 fork 本地）。
 - **任务清单**：`TaskService` 生产实现**持久化**（conversation / BuildRun 作用域跨重启存活），
   TUI 经 `Task` 工具与任务侧栏可见；输出日志可增量取（`AppendTaskOutput` / `GetTaskOutput`）。
-- **上下文 provider 释放**：每 run 构建的 provider（如 skills）经 `AgentContextProviderLease`
-  由组装方在最后一次使用后释放。
+- **上下文 provider 释放**：每 run 构建的 provider（如 skills）由主代理与 fork 两条路径的组装方
+  经 `AgentContextProviderLease` 在最后一次使用后释放（含取消、异常与超时路径）。
 
 ---
 
@@ -140,25 +139,25 @@ Goal 模式的子目标执行不经 `ForkedAgentRunner`：子目标经 `GoalSubG
 
 - **轮数口径**：只按模型往返计数（`MaximumIterationsPerRequest` = 上限 + 1，末轮保留给收尾）；
   同一轮里的并行工具调用不重复计数。工具调用另有安全上限（轮数的 4 倍），只拦失控循环不参与正常判定。
-- **80% 收尾提醒**：模型调用达到轮数上限的 80%（`TurnBudgetNudgeChatClient`，仅子代理管道装配）时，
+- **80% 收尾提醒**：当轮数上限 `> 5`（即 ≥6）且模型调用达到轮数上限的 80%（`TurnBudgetNudgeChatClient`，仅子代理管道装配）时，
   请求末尾注入一次"开始收尾总结"提醒——失控研究循环的根因是模型对预算零可见性，软提醒先于硬上限
   收敛多数循环；提醒只注入一次，确实不理会时由轮数上限兜底。
-- **墙钟超时**：`agents.defaults.timeoutMinutes`（默认 10 分钟，≤0 不限制），到时与轮预算同路径收尾。
-- **优雅收尾**：模型往返用掉预留的收尾迭代（或工具安全上限触发）即视为预算耗尽；若最后一次迭代没有文本，
-  再补一次禁用工具的收尾调用，让子代理总结已完成工作与剩余事项；结果信封标记 `[PARTIAL]`
+- **墙钟超时**：单节点受 `agents.defaults.timeoutMinutes`（默认 10 分钟，≤0 不限制）控制，到时取消当前子代理并以 `TimedOut = true`（结果信封标记 `[PARTIAL]`）直接返回，不发起额外总结请求；`ParallelAgents` 另设 30 分钟工作流级总超时保护。
+- **优雅收尾**：模型往返用掉预留的收尾迭代（或工具安全上限触发）即视为轮数预算耗尽；若最后一次迭代没有文本，
+  再补一次禁用工具的收尾调用（`RunWrapUpAsync`），让子代理总结已完成工作与剩余事项；结果信封标记 `[PARTIAL]`
   （`maxTurnsReached=true`）。`[PARTIAL]` 只陈述事实，父代理应直接使用已有发现，不要重复派发同一任务。
   token 消耗继续计入父会话的 `MaxBudgetTokens`。
 - **Explore 停止条件**：Explore 角色指令自带"先广后窄检索、覆盖率足够即总结、连续无新信息即收尾、
   WebFetch 只核实关键事实"约束，预算上限是兜底而非唯一防线。
-- **Plan 与 Build 的调研边界**：所有只读探索（代码库定位与按需外部查询）在 PLAN 模式完成，并将确认的文件路径、
+- **Plan 与 Build 的调研边界**：计划到构建交接时，只读探索（代码库定位与按需外部查询）应在 PLAN 阶段完成，并将确认的文件路径、
   符号签名、架构决定与已核实的外部事实/引用直接写入计划正文；同会话 BUILD 执行轮直接继承规划期对话与工具结果，
   跨上下文压缩与崩溃恢复则通过冻结的审批快照（计划正文 + 用户原话 + 澄清答案）保持上下文完整。计划步骤（`steps`）
-  只定义具体的代码/文件变更与验证动作，不把只读检索拆为 BUILD 步骤。Explore 子代理仅用于跨模块代码库探索，
-  不委托联网采集。
+  只定义具体的代码/文件变更与验证动作，不把只读检索拆为 BUILD 步骤。BUILD 自由提问路径仍可按需做只读检索。
+  Explore 子代理仅用于跨模块代码库探索，不委托联网采集。
 
 ### 子代理实时进度（TUI）
 
-`Agent` 工具运行期间，转录流上的工具行登记为实时进度行：头行 `Agent · [代理名] · 描述`
+`Agent` 工具运行期间，转录流上的工具行登记为实时进度行：头行 `▸ Agent [代理名] · 描述`
 （ToolStart 摘要通道把参数收窄为 agent + description 紧凑 JSON，不含 prompt），其下活动行原位刷新
 `运行中 · turn N · N 次工具调用 · 当前工具… · 已耗时 Xs`（`ForkedAgentRunner` 经 `SubagentProgressUpdate`
 旁路上报，受控 Build attempt 内同样重建该旁路）。展开运行中的行可见任务目标 + 同一份实时统计

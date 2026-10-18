@@ -56,7 +56,6 @@ public interface IBuildRunCoordinator
 public sealed partial class BuildRunCoordinator(
     IBuildRunStore store,
     IWorkspaceFingerprintProvider fingerprintProvider,
-    RequirementAssessmentService assessmentService,
     BuildStateTransitionService transitions,
     BuildTaskLinker taskLinker,
     ILogger<BuildRunCoordinator> logger) : IBuildRunCoordinator
@@ -104,31 +103,6 @@ public sealed partial class BuildRunCoordinator(
                     return committed;
                 }
 
-                case BuildResumeAction.ContinueAssessment:
-                    return await ContinueAssessmentAsync(
-                        existing,
-                        ct,
-                        durableStateObserver).ConfigureAwait(false);
-
-                case BuildResumeAction.ResumePrescribedPlan:
-                    return await PrepareForExecutionAsync(
-                        existing,
-                        CreateScope(existing.IntakePrompt, "prescribed-plan", DateTimeOffset.UtcNow, existing.Plan),
-                        DateTimeOffset.UtcNow,
-                        ct,
-                        durableStateObserver,
-                        existing.Plan).ConfigureAwait(false);
-
-                case BuildResumeAction.PrepareFromScope:
-                    return await PrepareForExecutionAsync(
-                        existing,
-                        existing.Scope
-                            ?? throw new InvalidDataException($"BuildRun '{existing.Id}' lost its confirmed scope."),
-                        DateTimeOffset.UtcNow,
-                        ct,
-                        durableStateObserver,
-                        prescribedPlan).ConfigureAwait(false);
-
                 case BuildResumeAction.ParkAtGate:
                 default:
                     // Planned 审批门与 Implementing/Verifying/Recovering 等执行中态：
@@ -140,38 +114,29 @@ public sealed partial class BuildRunCoordinator(
 
         var now = DateTimeOffset.UtcNow;
         var fingerprint = await fingerprintProvider.ComputeAsync(workingDirectory, ct).ConfigureAwait(false);
+        var scope = CreateScope(prompt, prescribedPlan is null ? "runtime-derived" : "prescribed-plan", now, prescribedPlan);
+        var plan = prescribedPlan ?? CreateQuickFixPlan(scope);
+        BuildPlanValidator.Validate(plan);
+
         var run = new BuildRun
         {
             Id = BuildRunId.New(),
             ConversationId = conversationId,
             State = BuildRunState.Created,
             IntakePrompt = prompt.Trim(),
-            Plan = prescribedPlan,
+            Scope = scope,
             WorkingDirectory = Path.GetFullPath(workingDirectory),
             WorkspaceFingerprint = fingerprint,
             CreatedAt = now,
             UpdatedAt = now,
         };
 
-        run = transitions.Transition(run, BuildRunState.Intake, now);
-        run = await SaveAndReloadAsync(run, 0, ct, durableStateObserver).ConfigureAwait(false);
-
-        var assessment = assessmentService.Assess(prompt);
-        run = transitions.Transition(run, BuildRunState.Assessing, now) with
+        var linkedPlan = taskLinker.LinkPlanTasks(run, plan);
+        run = transitions.Transition(run, BuildRunState.Planned, now) with
         {
-            Assessment = assessment,
+            Plan = linkedPlan,
         };
-        run = await SaveAndReloadAsync(run, run.Version, ct, durableStateObserver).ConfigureAwait(false);
-
-        // 需求评估只作记录 enrichment：受控执行恒由上层批准的预置计划驱动，不再
-        // 进入澄清对话（历史流内澄清门已随 PlanWorkflow 上线移除）。
-        return await PrepareForExecutionAsync(
-            run,
-            CreateScope(prompt, prescribedPlan is null ? "runtime-derived" : "prescribed-plan", now, prescribedPlan),
-            now,
-            ct,
-            durableStateObserver,
-            prescribedPlan).ConfigureAwait(false);
+        return await SaveAndReloadAsync(run, 0, ct, durableStateObserver).ConfigureAwait(false);
     }
 
     public async Task<BuildRun> PrepareAttemptAsync(

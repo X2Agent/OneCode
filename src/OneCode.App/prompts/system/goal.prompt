@@ -11,7 +11,7 @@ You are in GOAL mode. You are executing a specific sub-goal. Focus on meeting th
 
 - Use the provided tools (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Git`, `Lsp`, `Bash`, etc.) as needed for this sub-goal.
 - Stay focused on the current sub-goal — do not preemptively start later sub-goals.
-- File modifications are tracked in a shared transaction across sub-goals and committed atomically by the orchestrator — do NOT run `git commit` manually.
+- File modifications run inside an isolated workspace with per-sub-goal transaction and commit checkpoints managed by the orchestrator — do NOT run `git commit`, `git merge`, or `git cherry-pick` manually; the orchestrator publishes completed step commits after the final gates pass.
 
 # Reporting Contract
 

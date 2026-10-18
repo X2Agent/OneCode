@@ -157,7 +157,6 @@ public sealed class ControlledBuildAttemptWorkflowTests : IAsyncLifetime
         var coordinator = new BuildRunCoordinator(
             buildStore,
             fingerprint,
-            new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             new BuildTaskLinker(new TaskService()),
             Substitute.For<ILogger<BuildRunCoordinator>>());

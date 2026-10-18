@@ -32,20 +32,11 @@ public static class PlanTodoSeeder
 
         // TodoState 是 MAF 内部类型，不能直接写 StateBag；走 provider 自己注入的 todos_add 工具——
         // 与模型调用同一条公开契约，状态格式与序列化由框架负责。
-        var context = new AIContextProvider.InvokingContext(agent, session, new AIContext());
-        var aiContext = await provider.InvokingAsync(context, ct).ConfigureAwait(false);
-        var add = aiContext.Tools?.OfType<AIFunction>().FirstOrDefault(tool => tool.Name == AddToolName)
-            ?? throw new InvalidOperationException($"TodoProvider did not expose '{AddToolName}'.");
-
         var payload = new
         {
             todos = tasks.Select(task => new { title = FormatTitle(task), description = FormatDescription(task) }),
         };
-        var arguments = new AIFunctionArguments();
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload));
-        foreach (var property in document.RootElement.EnumerateObject())
-            arguments[property.Name] = property.Value.Clone();
-        _ = await add.InvokeAsync(arguments, ct).ConfigureAwait(false);
+        await InvokeTodoToolAsync(provider, agent, session, AddToolName, payload, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -67,21 +58,32 @@ public static class PlanTodoSeeder
         if (remaining.Count == 0)
             return 0;
 
-        var context = new AIContextProvider.InvokingContext(agent, session, new AIContext());
-        var aiContext = await provider.InvokingAsync(context, ct).ConfigureAwait(false);
-        var complete = aiContext.Tools?.OfType<AIFunction>().FirstOrDefault(tool => tool.Name == CompleteToolName)
-            ?? throw new InvalidOperationException($"TodoProvider did not expose '{CompleteToolName}'.");
-
         var payload = new
         {
             items = remaining.Select(item => new { id = item.Id, reason = "completed on build closeout" }),
         };
+        await InvokeTodoToolAsync(provider, agent, session, CompleteToolName, payload, ct).ConfigureAwait(false);
+        return remaining.Count;
+    }
+
+    private static async Task InvokeTodoToolAsync(
+        TodoProvider provider,
+        AIAgent agent,
+        AgentSession session,
+        string toolName,
+        object payload,
+        CancellationToken ct)
+    {
+        var context = new AIContextProvider.InvokingContext(agent, session, new AIContext());
+        var aiContext = await provider.InvokingAsync(context, ct).ConfigureAwait(false);
+        var tool = aiContext.Tools?.OfType<AIFunction>().FirstOrDefault(t => t.Name == toolName)
+            ?? throw new InvalidOperationException($"TodoProvider did not expose '{toolName}'.");
+
         var arguments = new AIFunctionArguments();
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(payload));
         foreach (var property in document.RootElement.EnumerateObject())
             arguments[property.Name] = property.Value.Clone();
-        _ = await complete.InvokeAsync(arguments, ct).ConfigureAwait(false);
-        return remaining.Count;
+        _ = await tool.InvokeAsync(arguments, ct).ConfigureAwait(false);
     }
 
     /// <summary>待办标题：步骤 id 前缀 + 步骤标题。</summary>

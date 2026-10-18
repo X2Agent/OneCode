@@ -213,8 +213,15 @@ public sealed partial class ChatTranscriptView
 
             if (_stream.WrappedTextLines.Count > 0 && pending.Count > 0)
                 pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            foreach (var line in _stream.WrappedTextLines)
+            for (var i = 0; i < _stream.WrappedTextLines.Count; i++)
             {
+                var line = _stream.WrappedTextLines[i];
+                if (_stream.IsStreaming && i == _stream.WrappedTextLines.Count - 1)
+                {
+                    var withCursor = line + TuiGlyphs.StreamingCursor;
+                    if (TextWidthHelper.GetDisplayWidth(withCursor) <= Math.Max(1, wrapWidth))
+                        line = withCursor;
+                }
                 pending.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{line}", TuiPalette.AssistantMessage));
             }
 
@@ -330,7 +337,7 @@ public sealed partial class ChatTranscriptView
     /// </summary>
     private Func<int, IReadOnlyList<FormattedLine>> BuildCommittedStreamJournalEntry(
         IReadOnlyList<FormattedLine> statusLines, string text)
-        => width => BuildCommittedStreamLines(statusLines, text, width);
+        => MemoizeByWidth(width => BuildCommittedStreamLines(statusLines, text, width));
 
     /// <summary>
     /// 为一段仅含状态行（无回复文本）的已提交流构造重渲日志条目。
@@ -341,7 +348,7 @@ public sealed partial class ChatTranscriptView
 
     private Func<int, IReadOnlyList<FormattedLine>> BuildCommittedIntermediateTurnJournalEntry(
         IReadOnlyList<FormattedLine> statusLines, string text)
-        => width => BuildCommittedIntermediateTurnLines(statusLines, text, width);
+        => MemoizeByWidth(width => BuildCommittedIntermediateTurnLines(statusLines, text, width));
 
     /// <summary>
     /// 构建中间工具轮（ContinueStreaming）的紧凑轨迹行：

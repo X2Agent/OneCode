@@ -1,6 +1,5 @@
 // MAAI001 suppressed: AIContextProvider uses experimental MAF APIs
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using OneCode.App.Services.Context;
 
 namespace OneCode.App.Services.Agent;
@@ -19,13 +18,13 @@ namespace OneCode.App.Services.Agent;
 /// </summary>
 public sealed class ModeInstructionProvider(string instructions) : ReadOnlyAIContextProviderBase
 {
-    private readonly ChatMessage _instructionMessage = new(ChatRole.System, instructions);
+    private readonly string _instructions = instructions;
 
     protected override ValueTask<AIContext> ProvideAIContextAsync(
         AIContextProvider.InvokingContext context,
         CancellationToken cancellationToken = default)
         => ValueTask.FromResult(new AIContext
         {
-            Messages = [_instructionMessage],
+            Instructions = _instructions,
         });
 }

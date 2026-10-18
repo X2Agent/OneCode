@@ -10,7 +10,7 @@
 
 ## 决策
 
-1. **对外契约接口化**：`IConversationRunner` + `ICacheSafeParamsProvider` 供 TUI 与后台消费者（Cron / AutoDream）使用；全部流式编排——Build 门禁前置、MAF agent run 驱动、事件消化、终结记账——收敛在 `QueryStreamEngine`。
+1. **对外契约接口化**：`IConversationRunner` + `ICacheSafeParamsProvider` 供 TUI 与 Cron 等后台消费者使用（AutoDream 直接驱动 `HarnessAgent`，不经该契约）；全部流式编排——Build 门禁前置、MAF agent run 驱动、事件消化、终结记账——收敛在 `QueryStreamEngine`。
 2. **实现以接口注册进 DI**：`QueryStreamEngine` 由组合根工厂组装（`ChatSessionDependencies` / `ChatObservabilityDependencies` 打包依赖），以两个接口暴露；headless 触发器依赖接口而非具体类，配合 `ToolCatalog` 惰性构建保持构造图为 DAG（工具实例反向依赖本接口的消费者，具体类型互引会导致构造期 DI 无限递归）。
 3. **可变流式状态收敛为状态对象**：上述累加器提升为 `StreamingSession`，使 `StreamingSession.Digest` 保持为 `(update, session) → events` 的纯映射，可独立单测；`QueryStreamEngine` 只负责编排（创建 session、驱动 MAF run、分发事件、记账终结）。
 4. **CallId 去重属于状态对象职责**：MAF 可能跨 `AgentResponseUpdate` 边界重放同一 `FunctionCallContent`/`FunctionResultContent`（轮次历史回放），由 `StreamingSession` 内的 `_emittedToolCallIds` 保证同一工具调用只产生一次 ToolStart/ToolDone 事件。

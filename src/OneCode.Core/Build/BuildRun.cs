@@ -14,7 +14,6 @@ public sealed record BuildRun : IWorkflowRun
     public required SessionId? ConversationId { get; init; }
     public required BuildRunState State { get; init; }
     public string IntakePrompt { get; init; } = string.Empty;
-    public BuildScopeSnapshot? ProposedScope { get; init; }
     public BuildScopeSnapshot? Scope { get; init; }
     /// <summary>
     /// The persisted BuildPlan derived from the approved plan snapshot
@@ -23,8 +22,6 @@ public sealed record BuildRun : IWorkflowRun
     /// (PlansMatch via BuildResumePolicy).
     /// </summary>
     public BuildPlan? Plan { get; init; }
-    public RequirementAssessment? Assessment { get; init; }
-    public IReadOnlyList<string> ClarificationQuestions { get; init; } = [];
     /// <summary>Approved tool policy confirmed by the user at the plan gate. Null until the plan is approved.</summary>
     public ApprovedToolPolicy? ApprovedToolPolicy { get; init; }
     public DateTimeOffset? PlanApprovedAt { get; init; }
@@ -77,11 +74,6 @@ public readonly record struct BuildRunId(string Value)
 public enum BuildRunState
 {
     Created,
-    Intake,
-    Assessing,
-    Clarifying,
-    ScopeConfirmed,
-    Planning,
     Planned,
     Implementing,
     Verifying,
@@ -129,33 +121,6 @@ public enum AcceptanceStatus
     Passed,
     Failed,
     Skipped,
-}
-
-/// <summary>
-/// Deterministic assessment performed before Build mode can expose write tools.
-/// </summary>
-public sealed record RequirementAssessment(
-    bool GoalIsClear,
-    bool ScopeIsBounded,
-    bool AcceptanceIsDeterministic,
-    bool ConstraintsAreComplete,
-    bool RequiresUserDecision,
-    BuildRiskLevel Risk,
-    IReadOnlyList<string> Reasons)
-{
-    public bool RequiresClarification =>
-        !GoalIsClear
-        || !ScopeIsBounded
-        || !AcceptanceIsDeterministic
-        || !ConstraintsAreComplete
-        || RequiresUserDecision;
-}
-
-public enum BuildRiskLevel
-{
-    Low,
-    Medium,
-    High,
 }
 
 /// <summary>

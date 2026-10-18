@@ -117,4 +117,30 @@ public sealed class MaxOutputTokensDecoratorTests
         seenMessageCounts.Should().Equal([1, 3],
             "continuation must append the partial assistant turn and recovery prompt without a redundant pre-continuation retry");
     }
+
+    [Fact]
+    public async Task GetResponseAsync_SmallContextWindow_ClampsEscalationCapToContextWindowMinusOne()
+    {
+        var inner = Substitute.For<IChatClient>();
+        var callCount = 0;
+        var seenCaps = new List<int?>();
+        inner.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                seenCaps.Add(ci.Arg<ChatOptions?>()?.MaxOutputTokens);
+                return ++callCount == 1
+                    ? new ChatResponse(new ChatMessage(ChatRole.Assistant, "part 1")) { FinishReason = ChatFinishReason.Length }
+                    : new ChatResponse(new ChatMessage(ChatRole.Assistant, "part 2")) { FinishReason = ChatFinishReason.Stop };
+            });
+        var sut = new MaxOutputTokensDecorator(inner, contextWindow: 8_192);
+
+        var response = await sut.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "ollama small window")],
+            new ChatOptions { MaxOutputTokens = 2_048 },
+            TestContext.Current.CancellationToken);
+
+        response.Text.Should().Be("part 2");
+        seenCaps.Should().Equal([2_048, 8_191],
+            "small contextWindow must clamp escalation cap to contextWindow - 1 instead of 65536");
+    }
 }

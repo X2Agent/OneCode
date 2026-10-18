@@ -132,13 +132,12 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_ApprovedPolicy_SuppressesInteractiveApprovalAndEnforcesWhitelist()
+    public async Task ExecuteAsync_ApprovedPolicy_PreservesInteractiveApprovalAndEnforcesWhitelist()
     {
         var run = CreateClaimedRun();
         var runner = CreateRunner(async options =>
         {
-            options.SuppressToolApproval.Should().BeTrue();
-            options.ApprovalBroker.Should().BeNull();
+            options.SuppressToolApproval.Should().BeFalse("受控 Build 与直接切到 Build 提问共享交互式审批，不得静默关闭工具审批");
             options.IsToolAllowed.Should().NotBeNull();
             options.IsToolAllowed!("Write").Should().BeTrue();           // approved
             options.IsToolAllowed!("ReadFile").Should().BeTrue();        // read-only fallback
@@ -146,10 +145,7 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
             options.IsToolAllowed!("file_memory_ls").Should().BeTrue();  // harness 内存草稿箱工具必须放行
             options.IsToolAllowed!("Bash").Should().BeFalse();           // not approved, not read-only
             options.ToolCapabilities!.AllowedToolNames.Should().Contain("Write");
-            options.PermissionRules!.Keys.Should().Contain("build-approved-policy");
-            var alwaysAllowTools = options.PermissionRules["build-approved-policy"].AlwaysAllow!
-                .Select(r => r.ToolName).ToList();
-            alwaysAllowTools.Should().Contain(["Write", "todos_get_remaining", "todos_complete", "file_memory_ls"]);
+            options.PermissionRules.Should().BeNull("不得注入 AlwaysAllow 越过用户权限档位与工具审批弹窗");
             return PassingResult([]);
         });
         var coordinator = Substitute.For<IBuildRunCoordinator>();

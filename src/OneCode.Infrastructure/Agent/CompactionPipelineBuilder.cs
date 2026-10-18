@@ -5,31 +5,11 @@ using OneCode.Infrastructure.Ai;
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
-/// Builds the compaction <b>strategy</b> for main and worker agents.
-///
-/// <para><b>策略组成</b>：L1 折叠旧 tool call 组 → L2 LLM 摘要 → L3 截断。
-/// 三层均为 MAF 原生策略，阈值按模型上下文窗口比例计算，替代早期版本的硬编码绝对值阈值。
-/// 所有策略由 <see cref="PipelineCompactionStrategy"/> 串联执行。</para>
-///
-/// <para><b>注入方式</b>：策略经 <c>HarnessAgentOptions.CompactionStrategy</c> 交给 Harness，
-/// 由 Harness 自行挂载 <c>CompactionProvider</c>。产品侧不再单独构建 provider——
-/// 两处各挂一份会造成同一次模型调用被压缩两次，而外层一份会覆盖内层的状态。</para>
-///
-/// <para><b>不按调用参数去重</b>：同名同参数的工具调用可能产生不同结果（例如首次失败后修复重试成功、
-/// 或目标文件已被外部修改），因此压缩管道不按 <c>(toolName, args)</c> 剔除调用组；
-/// 需要压缩时由 L1 折叠 / L2 摘要 / L3 截断按预算处理。</para>
-///
-/// <para><b>策略管道（按 escalation 顺序）</b>：
-/// <list type="number">
-///   <item><description><see cref="ToolResultCompactionStrategy"/> — 折叠旧 tool call 组为 YAML 摘要</description></item>
-///   <item><description><see cref="SummarizationCompactionStrategy"/> — LLM 深度摘要</description></item>
-///   <item><description><see cref="TruncationCompactionStrategy"/> — 兜底截断最旧的非系统消息组</description></item>
-/// </list>
-/// </para>
-///
-/// <para><b>阈值计算</b>：所有阈值基于
-/// <c>inputBudget = (maxContextWindowTokens - maxOutputTokens) × (1 - RequestOverheadRatio)</c> 按比例计算，
-/// 自动适配不同模型的上下文长度（32K ~ 1M+）。非法配置在装配时抛异常，不静默钳制。</para>
+/// 为主 Agent 与子 Agent 构建 L1/L2/L3 压缩策略链。
+/// 策略经 <c>HarnessAgentOptions.CompactionStrategy</c> 交给 Harness；产品侧再挂一份
+/// <c>CompactionProvider</c> 会让同一次模型调用被压缩两次。
+/// 不按 <c>(toolName, args)</c> 去重：相同调用在重试成功或文件被外部修改后结果可能不同。
+/// 阈值按模型上下文窗口比例计算，非法配置在装配时抛异常。
 /// </summary>
 public static class CompactionPipelineBuilder
 {
@@ -51,19 +31,16 @@ public static class CompactionPipelineBuilder
     private const int ResearchTruncationCapTokens = 120_000;
 
     /// <summary>
-    /// Fraction of the input budget held back for instructions, tool schemas and protocol framing.
+    /// 从输入预算中预留、用于指令、工具 schema 与协议封装的比例。
     /// </summary>
     /// <remarks>
-    /// A ratio rather than a constant: the overhead grows with the tool surface and the system prompt,
-    /// both of which scale with the model's own budget. 10% is deliberately modest — the aim is to stop
-    /// the thresholds from being computed against space that is not actually available, not to model the
-    /// request precisely.
+    /// 用比例而非固定值：这部分开销随工具面与系统提示词增长，而两者都随模型预算缩放。
+    /// 取 10% 是刻意保守的估计——目的是避免阈值按实际不可用的空间计算，而不是精确建模请求开销。
     /// </remarks>
     private const double RequestOverheadRatio = 0.10;
 
     /// <summary>
-    /// Builds the standard compaction strategy for the main agent.
-    /// 阈值按模型上下文窗口比例计算，自动适配不同模型。
+    /// 为主 Agent 构建标准压缩策略；阈值按模型上下文窗口比例计算，自动适配不同模型。
     /// </summary>
     /// <param name="chatClient">用于 LLM 摘要的 IChatClient（通常用主模型）。</param>
     /// <param name="maxContextWindowTokens">模型上下文窗口大小（如 1_000_000 for Claude Sonnet 4.5）。</param>

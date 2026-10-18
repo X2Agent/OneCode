@@ -349,8 +349,7 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
         public void UpdateGoalContext(
             GoalPlan plan,
             GoalItem currentGoal,
-            IReadOnlyList<SubGoalExecution> executions,
-            bool sharedTransactionOwned)
+            IReadOnlyList<SubGoalExecution> executions)
         {
         }
     }

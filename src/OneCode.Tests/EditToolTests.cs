@@ -188,8 +188,6 @@ public sealed class EditToolTests : IDisposable
         (await File.ReadAllTextAsync(file)).Should().Be("only one NEW here");
     }
 
-    // Helpers
-
     private string Write(string name, string content)
     {
         var path = Path.Combine(_tmpDir, name);
@@ -287,8 +285,6 @@ public sealed class EditInsertModeTests : IDisposable
         (await File.ReadAllTextAsync(file)).Should().Be("line1\nline2\n",
             "dry_run must not modify the file");
     }
-
-    // Helpers
 
     private string Write(string name, string content)
     {

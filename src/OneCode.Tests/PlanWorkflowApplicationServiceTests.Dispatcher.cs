@@ -1,4 +1,4 @@
-// PlanWorkflowApplicationServiceTests partial：Build 派工（启动 / 恢复 / 并发去重 / 重试耗尽）（原文件按职责区块的纯文本搬移）
+// PlanWorkflowApplicationServiceTests partial：Build 派工（启动 / 恢复 / 并发去重 / 重试耗尽）
 using NSubstitute;
 using OneCode.App.Query;
 using OneCode.App.Services;
@@ -74,8 +74,7 @@ public sealed partial class PlanWorkflowApplicationServiceTests
             .Returns(SingleQueryEvent(new BuildRunStateEvent(
                 new BuildRunId("br-observed"),
                 BuildRunState.Implementing,
-                1,
-                [])));
+                1)));
         var sessionManager = Substitute.For<ISessionManager>();
         sessionManager.WorkingDirectory.Returns(_root);
         sessionManager.GetConversation(sessionId).Returns(CreateConversation(sessionId));
@@ -475,8 +474,7 @@ public sealed partial class PlanWorkflowApplicationServiceTests
             .Returns(SingleQueryEvent(new BuildRunStateEvent(
                 new BuildRunId("br-observed"),
                 finalState,
-                1,
-                [])));
+                1)));
         var sessionManager = Substitute.For<ISessionManager>();
         sessionManager.WorkingDirectory.Returns(_root);
         sessionManager.GetConversation(workflow.SessionId).Returns(CreateConversation(workflow.SessionId));

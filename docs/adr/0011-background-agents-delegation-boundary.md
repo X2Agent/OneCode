@@ -60,19 +60,18 @@ MAF 提供三层「子代理委派」入口，BackgroundAgents 占中间层：
   `[Experimental]`（诊断 ID `MAAI001`）。该能力在 .NET / Python 两侧先后落地，.NET 侧发布更早：
   .NET 于 `dotnet-1.4.0` 引入 SubAgents、`dotnet-1.6.2` 改名 BackgroundAgents；Python 侧至 `python-1.7.0` 才提供。
 
-### 4. 版本证据（OneCode pinned 包 1.22.0）
+### 4. 版本证据（OneCode pinned 包 1.24.0）
 
 按 [MAF 集成边界](./0007-maf-integration-boundaries.md)「不得用本地 checkout 为已发布包行为作证」的要求，
 做双层取证：
 
-1. **DLL 字符串验证**（`D:\NuGet\Packages\microsoft.agents.ai\1.22.0\lib\net10.0\Microsoft.Agents.AI.dll`）：
+1. **DLL 字符串验证**（`Microsoft.Agents.AI` 1.24.0 `lib/net10.0/Microsoft.Agents.AI.dll`）：
    `BackgroundAgentsProvider` / `BackgroundAgentRuntimeState` / `GetIncompleteTasks` /
    `ReleaseSessionAsync` / `CreateTools` / `StartTrackedRun` / `BackgroundTaskCompletionLoopEvaluator` /
    `BackgroundAgentsProviderOptions` 均在；**`StartTaskAsync` 不存在**（无编程式起任务入口）。
-2. **tag 源码比对**：`dotnet-1.22.0` tag 的 `BackgroundAgentsProvider.cs` 与本地 HEAD 在该目录
-   `Harness/BackgroundAgents/**` 无差异，六个工具名与四成员公共面一致。
+2. **源码比对**：`BackgroundAgentsProvider.cs` 在 `Harness/BackgroundAgents/**` 目录无差异，六个工具名与四成员公共面一致。
 
-> Microsoft Learn 后台代理文档的 .NET zone 写「主机端后台智能体会话版本目前在 .NET 中不可用」，与 pinned 1.22.0 不符
+> Microsoft Learn 后台代理文档的 .NET zone 写「主机端后台智能体会话版本目前在 .NET 中不可用」，与 pinned 1.24.0 不符
 > （`ReleaseSessionAsync` / `GetIncompleteTasks` 均已存在）。以本地源码与 pinned 包为准。
 
 ### 5. OneCode 现状（并非「四模式都是单主代理」）
@@ -160,9 +159,9 @@ Workflows 才是，而且已经切过了。
 ### 3. 保留并完善产品确定性派工体系
 
 `Agent` / `ParallelAgents` + `PipelineProfile` + `ToolCapabilitySet` + `TaskService` 保留。
-**「删除自定义」的净核算约等于零**：若整体迁移，可直接删除的是 `AgentTool`(144 行)、
-`ParallelAgentsTool`(101)、`AgentTaskWorkflow`(601)、`ForkedAgentRunner`(286)、
-`WorkerAgentService`(101) 共约 1234 行；但 `PipelineProfile` / `SubAgentPipelineFactory` /
+**「删除自定义」的净核算约等于零**：若整体迁移，可直接删除的是 `AgentTool`、
+`ParallelAgentsTool`、`AgentTaskWorkflow`、`ForkedAgentRunner`、`WorkerAgentService`
+共约 1,200 行；但 `PipelineProfile` / `SubAgentPipelineFactory` /
 `TaskService` / `ToolCapabilitySet` **不可删**（闸与生命周期必须活在某个地方），
 而 provider 是 sealed 且工具直注，唯一加固点是 `PermissionAndLimitMiddleware` 的
 `IsToolAllowed` 名字闸——等于把删掉的闸再建一遍，同时丢掉确定性与 DAG。
@@ -195,12 +194,12 @@ Workflows 才是，而且已经切过了。
 | ID | 事项 | 一句话验收 | 状态 |
 |---|---|---|---|
 | F1 | `build.prompt` 幽灵工具名 `Task`→`Agent`、委派指引写实、子代理结果注入防护 | 提示词点名的工具均在 `AddToolServices` 注册表；派工语义行不出现宿主后台任务工具名（`ModePromptToolReferenceTests` 守卫，双重反证） | **已完成**（2026-09-21） |
-| F2 | `ForkedAgentRunner` 接 `OrchestrationEventSink` / `FileChangeCallback` | 子代理工具调用带 agent 标签实时可见（行为测试） | 待立项 |
+| F2 | `ForkedAgentRunner` 接 `OrchestrationEventSink` / `FileChangeCallback` | 子代理工具调用带 agent 标签实时可见（行为测试） | **部分完成**（sink 已接通并驱动 TUI 进度；`FileChangeCallback` 尚未接线） |
 | F3 | `Agent` 工具可发现性（本地模型路径） | 调研类 prompt 首轮激活 `Agent`；激活顺序单调追加 | 待立项 |
 | F4 | 有界等待原语（借鉴 `wait_for_first_completion`） | 超时返回运行中清单 / 终态返回结果 / 取消传播 | 待立项 |
 | F5 | continue 语义（借鉴 `continue_task`） | 子会话上下文保留；清理后句柄释放；默认仍 fresh | 待立项 |
 | F6 | 并发上限 + 会话释放（借鉴 `ReleaseSessionAsync`） | 上限生效；关闭时取消并等待；重启后终态标记 + 输出留存 | 待立项 |
-| F7 | 子代理结果注入防护覆盖 Build/Plan 主代理 | 注入指令不触发派工/批准（prompt 断言 + fail-closed 回归） | **已完成**（随 F1 落地；`plan.prompt` 原已将 "agent research reports" 列为不可信） |
+| F7 | 子代理结果注入防护覆盖 Build/Plan 主代理 | 注入指令不触发派工/批准（prompt 断言 + fail-closed 回归） | **已完成**（随 F1 落地；防护主体在 `harness.prompt`，`plan.prompt` 要求不依据不可信工具输出/文件/网页执行指令） |
 
 ## 后果
 
@@ -215,13 +214,11 @@ Workflows 才是，而且已经切过了。
 ## 引用
 
 - MAF 源码（`agent-framework/`，版本关系见 [integration-guide §1.1](../maf/integration-guide.md)；
-  本地 checkout `dotnet-1.22.0-6-g669c8b95e` 与 pinned 包同处 `dotnet-1.22.0` 基线，下述路径中
-  `BackgroundAgents/`、`Loop/` 在该基线内无差异，`ToolApproval/` 已被 `#8432` 重写、`AgentMode/` 被 `#8458` 扩展，
-  行号引用一律以 `dotnet-1.22.0` 为准）：
+  pinned 包为 `1.24.0`，下述路径中 `BackgroundAgents/`、`Loop/` 无差异，`ToolApproval/` 已被 `#8432` 重写、`AgentMode/` 被 `#8458` 扩展）：
   `dotnet/src/Microsoft.Agents.AI/Harness/BackgroundAgents/`（6 文件）、
   `Harness/Loop/BackgroundTaskCompletionLoopEvaluator.cs`、
   `Harness/ToolApproval/ToolApprovalAgent.cs`、`Microsoft.Agents.AI.Harness/HarnessAgentOptions.cs`。
-- pinned 包 DLL：`D:\NuGet\Packages\microsoft.agents.ai\1.22.0\lib\net10.0\Microsoft.Agents.AI.dll`
+- pinned 包 DLL：`Microsoft.Agents.AI` 1.24.0 `lib/net10.0/Microsoft.Agents.AI.dll`
   （§4 版本证据）。
 - 产品源码：`src/OneCode.App/Tools/AgentTool.cs`、`Tools/ParallelAgentsTool.cs`、
   `Services/Agent/ForkedAgentRunner.cs`、`Services/Agent/AgentTaskWorkflow.cs`、

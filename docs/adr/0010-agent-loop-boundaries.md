@@ -1,6 +1,6 @@
 # 代理循环能力边界：GOAL 子目标循环与 /loop 运行时有界循环
 
-**状态**: Accepted（2026-10-06 修订：①决策 4 的机制声明修正——GoalAuto 下**带审批标记**的工具（破坏性 shell 等）被规则 Deny 后以 pending request 上浮、LoopAgent 立即早停（安全方向），「中间件 Deny→反馈重试」仅适用于**未带标记**的工具；②表格中「FeedbackMessageTemplate」措辞修正——LoopAgentOptions 无此选项，反馈注入是 LoopAgent 的聚合反馈日志硬编码行为；③token 证据口径修正——inner 迭代 usage 从 `LastResponse.Usage` 读取（M.E.AI 契约：usage 不进 Messages）。）
+**状态**: Accepted
 **日期**: 2026-09-21
 **关联**: [MAF 集成边界与禁止清单](./0007-maf-integration-boundaries.md)、
 [结构化请求 + 文本降级](./0008-structured-output-text-fallback.md)、
@@ -42,12 +42,11 @@ Microsoft.Agents.AI 提供 `LoopAgent`（`DelegatingAIAgent`）：每次迭代�
    工具错误、LSP 诊断。GOAL 的完成条件是这些确定性证据，自研 judge 读
    `GoalSubGoalAssessment.FormatEvidenceForJudge(evidence)` 是能力升级而非重复实现。
 3. **`FreshContextPerIteration = false`** —— 子目标重试时复用同一 `AgentSession`，保留已有探索上下文与工具输出（长上下文由管道内置 `CompactionProvider` 压缩），直接在现有进展上修复门禁或 Judge 指出的缺口。
-4. **审批不会卡死循环** —— 对应官方"审批 heuristics + loop"范式：`AgentPipelineAssembly.BuildMainRoleOverrides`
-   在 `PermissionMode.GoalAuto` 下强制挂审批中间件 + GoalAuto 自动放行规则。两条 Deny 路径分开看：
-   **未带审批标记**的工具（只读路径越界等）在执行期中间件即被拒（ToolResult error），错误证据进入硬门禁反馈下一轮重试；
-   **带审批标记**的工具（Bash/Destructive 等，FICC 先把整个响应转成 ToolApprovalRequestContent）被
-   `ToolApprovalAgent` 规则 Deny 后以 **pending request 上浮**，LoopAgent 立即早停（`HasPendingApprovalRequests`）
-   ——方向安全（不越权、不卡死），但该子目标整轮 abort、仅享一次 replan，模型收不到"换安全命令"的迭代反馈。
+4. **审批不会卡死循环** —— GOAL 子目标以 `.AsUnattended()` 装配：`ApprovalBroker` 为空，
+   `EnableToolApproval = false`，因此既不挂 `ToolApprovalAgent`，也不对工具施加审批标记
+   （`AgentPipelineAssembly.BuildMainRoleOverrides`，由 `AgentPipelineAssemblyTests` 守卫）。
+   所有 Deny（含 Destructive 工具）都由权限中间件在执行期直接返回 `ToolResult.Error`，
+   错误证据进入硬门禁反馈下一轮重试，模型可换安全命令继续——不存在 pending approval 上浮路径。
    `AutoApprovalRulesFactory` 仅 Allow 才自动批准。
 
 ### 2. `/loop` 从提示词技能下沉为运行时有界循环
@@ -136,7 +135,7 @@ agent 对上一轮产出**零记忆**，不回显就会重复已完成的动作�
 - GOAL 侧捎带修掉一处 fail-open 判定缺陷（会静默放行未完成子目标）与 fresh context 失忆问题。
 - `LoopAgent` / `LoopEvaluator` 是实验性 API（`MAAI001`），此前的循环语义**零测试覆盖**
   （`GoalWorkflowRuntimeTests` 用 `FakeStepExecutionService` 整条替换掉子目标执行路径）。
-  本轮新增 `GoalSubGoalLoopTests`（10 例）与 `IterativeLoopServiceTests`（9 例）锚定循环语义，
+  本轮新增 `GoalSubGoalLoopTests`（12 例）与 `IterativeLoopServiceTests`（10 例）锚定循环语义，
   并对 fail-open 判定与"无证据判通过"两道守卫做了反证。
 - 成本：`/loop` 带来一条 Builtin 命令与一个配置键（命令计数：Builtin 22、斜杠命令总数 44）；
   DI 注册面快照随之更新（`ServiceRegistrationSnapshot.approved.txt`）。
@@ -145,8 +144,7 @@ agent 对上一轮产出**零记忆**，不回显就会重复已完成的动作�
 
 ## 源码取证索引
 
-> 版本说明：MAF 侧行数/成员以 `dotnet-1.22.0`（pinned 包；本地 checkout `dotnet-1.22.0-6-g669c8b95e` 在其上无差异）为准。
-> `Harness/Loop/**` 在 `1.21.0..HEAD` 无差异，可直接按路径查；引用 `ToolApproval/**` 的结论见
+> 版本说明：当前 pinned 包为 `1.24.0`（见 `src/Directory.Packages.props`）；本地 checkout 在 `Harness/Loop/**` 上无差异，可直接按路径查；引用 `ToolApproval/**` 的结论见
 > [子代理派工边界](./0011-background-agents-delegation-boundary.md) 证据 2 与 [MAF 集成边界](./0007-maf-integration-boundaries.md)。
 
 | 主题 | 位置 |

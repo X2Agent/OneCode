@@ -1,4 +1,7 @@
+using System.Text;
 using OneCode.Infrastructure;
+using OneCode.Infrastructure.Persistence;
+using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Automation.Cron;
 
@@ -27,7 +30,7 @@ public static class CronPaths
     /// </summary>
     public static bool IsDurableCronEnabled()
         => string.Equals(
-            Environment.GetEnvironmentVariable("ONECODE_DURABLE_CRON"),
+            Environment.GetEnvironmentVariable(CoreConstants.EnvVars.DurableCron),
             "true",
             StringComparison.OrdinalIgnoreCase);
 
@@ -39,15 +42,13 @@ public static class CronPaths
         => id.Length > 0 && id.All(c => char.IsLetterOrDigit(c) || c == '-');
 
     /// <summary>
-    /// Atomically write content to a file via temp-file + <c>File.Move(overwrite: true)</c>.
+    /// Atomically write content to a file via <see cref="DurableFile.WriteAtomicAsync"/>.
     /// Prevents half-written files if the process crashes mid-write.
     /// </summary>
     public static async Task WriteAtomicAsync(string path, string content, CancellationToken ct)
     {
         var dir = Path.GetDirectoryName(path);
         if (dir is not null) Directory.CreateDirectory(dir);
-        var tempPath = path + ".tmp";
-        await File.WriteAllTextAsync(tempPath, content, ct).ConfigureAwait(false);
-        File.Move(tempPath, path, overwrite: true);
+        await DurableFile.WriteAtomicAsync(path, Encoding.UTF8.GetBytes(content), ct).ConfigureAwait(false);
     }
 }

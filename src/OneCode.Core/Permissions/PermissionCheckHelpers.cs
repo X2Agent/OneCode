@@ -82,11 +82,9 @@ public static class PermissionCheckHelpers
         JsonElement toolInput,
         ToolPermissionContext context)
     {
-        // 1. 只读工具 / 只读 Shell → Allow
         if (IsReadOnlyTool(toolName, toolInput))
             return PermissionCheckResult.Allow;
 
-        // 2. 文件写入工具 → 路径校验后 Allow
         if (ToolNames.FileWriteTools.Contains(toolName))
         {
             var pathResult = ValidatePath(toolName, toolInput, context);
@@ -133,7 +131,6 @@ public static class PermissionCheckHelpers
         if (shortcut is not null)
             return shortcut;
 
-        // 3. Shell 工具：区分危险 vs 常规
         if (IsShellTool(toolName, toolInput))
         {
             if (IsDestructiveShell(toolName, toolInput))

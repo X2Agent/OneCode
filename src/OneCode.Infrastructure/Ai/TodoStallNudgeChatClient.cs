@@ -20,7 +20,7 @@ namespace OneCode.Infrastructure.Ai;
 /// </para>
 /// </remarks>
 public sealed class TodoStallNudgeChatClient(IChatClient inner, int stallThreshold = TodoStallNudgeChatClient.StallThreshold)
-    : IChatClient
+    : DelegatingChatClient(inner)
 {
     /// <summary>自上次待办变更起累计这么多次工具调用即持续提醒：4 次调用足以完成单步的并行检索与落盘。</summary>
     internal const int StallThreshold = 4;
@@ -32,24 +32,17 @@ public sealed class TodoStallNudgeChatClient(IChatClient inner, int stallThresho
         "Never batch multiple steps' todos_complete calls at the end of the run, and do NOT repeat searches or fetches " +
         "whose results are already in this conversation.";
 
-    private readonly IChatClient _inner = inner;
-
-    public Task<ChatResponse> GetResponseAsync(
+    public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
-        => _inner.GetResponseAsync(PrepareMessages(messages), options, cancellationToken);
+        => base.GetResponseAsync(PrepareMessages(messages), options, cancellationToken);
 
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
-        => _inner.GetStreamingResponseAsync(PrepareMessages(messages), options, cancellationToken);
-
-    public object? GetService(Type serviceType, object? serviceKey = null)
-        => _inner.GetService(serviceType, serviceKey);
-
-    void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
+        => base.GetStreamingResponseAsync(PrepareMessages(messages), options, cancellationToken);
 
     private IList<ChatMessage> PrepareMessages(IEnumerable<ChatMessage> messages)
     {

@@ -118,9 +118,8 @@ public sealed record MainAgentRunOptions
     public Func<string, bool>? IsToolAllowed { get; init; }
 
     /// <summary>
-    /// When true, MainAgentRunner must not wrap an interactive ApprovalBroker (ForQuery). Used by
-    /// controlled Build: tool permissions were confirmed up-front at the plan gate, so attempt
-    /// execution must never suspend on an in-process TaskCompletionSource approval dialog.
+    /// 为 true 时，MainAgentRunner 不包装交互式 ApprovalBroker（ForQuery），直接走底层权限检查。
+    /// 供 Goal 子目标与后台 Cron 等无人值守执行路径使用。
     /// </summary>
     public bool SuppressToolApproval { get; init; }
 
@@ -143,6 +142,18 @@ public sealed record MainAgentRunOptions
     /// null → BudgetGuard 硬停短路。
     /// </summary>
     public Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded { get; init; }
+
+    /// <summary>
+    /// 转换为无人值守运行选项（禁用交互式审批弹窗与预算询问挂起），供 Goal 子目标等非交互执行路径复用。
+    /// </summary>
+    public MainAgentRunOptions AsUnattended()
+        => this with
+        {
+            ApprovalBroker = null,
+            SuppressToolApproval = true,
+            OnPermissionPrompt = null,
+            OnBudgetExceeded = null,
+        };
 }
 
 /// <summary>

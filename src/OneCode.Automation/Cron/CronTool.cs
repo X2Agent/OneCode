@@ -93,6 +93,8 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
             j.Durable,
             j.Paused,
             j.LastRunAt,
+            j.LastStatus,
+            j.LastError,
             j.NextRunAt,
         });
 

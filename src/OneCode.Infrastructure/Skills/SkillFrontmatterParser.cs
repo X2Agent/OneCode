@@ -66,8 +66,7 @@ public static partial class SkillFrontmatterParser
             body,
             metadata?.ArgumentHint?.Trim(),
             argumentNames,
-            metadata?.UserInvocable ?? true,
-            metadata?.DisableModelInvocation ?? false);
+            metadata?.UserInvocable ?? true);
         return true;
     }
 }

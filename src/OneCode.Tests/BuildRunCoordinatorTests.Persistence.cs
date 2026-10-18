@@ -1,4 +1,4 @@
-// BuildRunCoordinatorTests partial：JsonBuildRunStore 持久化与 claim/fencing（原文件按职责区块的纯文本搬移）
+// BuildRunCoordinatorTests partial：JsonBuildRunStore 持久化与 claim/fencing
 using OneCode.Core.Build;
 using OneCode.Core.Domain;
 using OneCode.Infrastructure.Build;

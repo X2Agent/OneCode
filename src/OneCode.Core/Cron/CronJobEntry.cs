@@ -31,4 +31,10 @@ public sealed class CronJobEntry
     public long CreatedAt { get; set; }
     public long? LastRunAt { get; set; }
     public long? NextRunAt { get; set; }
+
+    /// <summary>最近一次触发的执行状态（"ok" 或 "error"）。</summary>
+    public string? LastStatus { get; set; }
+
+    /// <summary>最近一次触发失败时的错误摘要（成功时为 null）。</summary>
+    public string? LastError { get; set; }
 }

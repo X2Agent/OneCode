@@ -23,5 +23,6 @@ public interface IChatClientFactory
         ILoggerFactory? loggerFactory = null,
         int? ollamaNumCtx = null,
         int streamMaxRetries = 6,
-        int streamIdleTimeoutSeconds = 180);
+        int streamIdleTimeoutSeconds = 180,
+        double? ollamaTemperature = null);
 }

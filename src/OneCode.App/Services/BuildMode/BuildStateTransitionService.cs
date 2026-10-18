@@ -10,12 +10,7 @@ public sealed class BuildStateTransitionService
     private static readonly IReadOnlyDictionary<BuildRunState, IReadOnlySet<BuildRunState>> s_transitions =
         new Dictionary<BuildRunState, IReadOnlySet<BuildRunState>>
         {
-            [BuildRunState.Created] = Set(BuildRunState.Intake, BuildRunState.Cancelled),
-            [BuildRunState.Intake] = Set(BuildRunState.Assessing, BuildRunState.Cancelled),
-            [BuildRunState.Assessing] = Set(BuildRunState.Clarifying, BuildRunState.ScopeConfirmed, BuildRunState.Blocked, BuildRunState.Cancelled),
-            [BuildRunState.Clarifying] = Set(BuildRunState.ScopeConfirmed, BuildRunState.Blocked, BuildRunState.Cancelled),
-            [BuildRunState.ScopeConfirmed] = Set(BuildRunState.Planning, BuildRunState.Cancelled),
-            [BuildRunState.Planning] = Set(BuildRunState.Planned, BuildRunState.Blocked, BuildRunState.Cancelled),
+            [BuildRunState.Created] = Set(BuildRunState.Planned, BuildRunState.Cancelled),
             [BuildRunState.Planned] = Set(BuildRunState.Implementing, BuildRunState.Blocked, BuildRunState.Cancelled),
             [BuildRunState.Implementing] = Set(BuildRunState.Verifying, BuildRunState.Recovering, BuildRunState.Failed, BuildRunState.Blocked, BuildRunState.Cancelled, BuildRunState.LimitReached, BuildRunState.BudgetExceeded),
             // Verifying/Recovering 同样要能转入 LimitReached/BudgetExceeded：CompleteAsync 先把

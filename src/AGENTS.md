@@ -240,8 +240,9 @@ if (!string.IsNullOrEmpty(assistantText))
 
 #### 2.5 注释语言
 
-- **XML doc 注释（`///`）** — 中文或英文均可，保持项目一致
-- **行内注释（`//`）** — 英文优先（代码是英文环境），复杂业务逻辑可用中文标注
+- **所有注释（`///` 与 `//`）一律使用中文**，不得整段写成英文。
+- 代码标识符、类型名、命令名、配置键、URL、路径等技术名词保留原文，用反引号或 `<c>` 包裹；**叙述部分必须是中文**，不做中英混写（例如「用于读取 `IMemoryEntryStore` 实现」而非「used to read ... 实现」）。
+- 改动某文件时，其中的英文注释一并改写为中文，不保留中英双语版本。
 
 #### 2.6 简化检查清单
 
@@ -769,14 +770,14 @@ var maxTurns = options.MaxTurns ?? 100;  // ← 为什么默认 100？
 | 配置 JSON 字段名 | [Core.Constants.ConfigKeys](OneCode.Core/Constants.cs) | `ApiKey`, `Model`, `Provider`, `MaxTurns` |
 | Model Provider 标识 | [Core.Constants.ModelProviders](OneCode.Core/Constants.cs) | `Anthropic`, `OpenAI`, `Ollama` |
 | 会话默认值 | [Core.Constants.Session](OneCode.Core/Constants.cs) | `MaxTurnsDefault`, `MaxBudgetTokensDefault` |
-| Permission 模式 | [Core.Constants.PermissionModes](OneCode.Core/Constants.cs) | `Default` |
-| 消息类型 | [Core.Constants.MessageTypes](OneCode.Core/Constants.cs) | `Assistant` |
 | HttpClient 注册名 | [Infrastructure.Constants.HttpClientNames](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
 | 子目录名 | [Infrastructure.Constants.Subdirs](OneCode.Infrastructure/Config/Constants.cs) | `Skills`, `Prompts`, `Events` |
 | 超时/阈值 | [Infrastructure.Constants.Timeouts](OneCode.Infrastructure/Config/Constants.cs) | `McpRegistry`, `WebSearch` |
 | 应用文件信息 | [Infrastructure.Constants.App](OneCode.Infrastructure/Config/Constants.cs) | `SettingsFileName` |
 
 > **注：** 工具执行限制（如 `MaxResultSizeChars`、`MaxOutputChars`）当前散落在 App 层工具类内部私有常量中，尚未集中到 Infrastructure 层。新增此类常量时，建议集中到 `Infrastructure.Constants.Tools` 子类。
+>
+> Permission 模式的 wire 值（`"default"` 等）与消息 role（`"assistant"` 等）**不设单值常量类**：前者由 `ConfigModels` 的 `BuiltInDefault` 与 `PermissionsCommand` 的别名表各自拥有，后者在使用点就地书写（导出协议、会话存储、TUI 配色语义不同，强行共用一个常量只会制造假耦合）。判定标准见 §10.3。
 
 ```csharp
 // ✅ 正确：使用 Core 层常量（引用时使用别名避免命名冲突）

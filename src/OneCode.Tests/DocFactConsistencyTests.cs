@@ -365,6 +365,7 @@ public sealed class DocFactConsistencyTests
         var count = HookInterceptionPoints.Open.Count;
 
         AssertDeclaredCount(HooksDocFile, @"(\d+) 种拦截点", count, "拦截点数");
+        AssertDeclaredCount(ReadmeCnFile, @"(\d+) 种开放钩子拦截点", count, "拦截点数");
     }
 
     /// <summary>
@@ -445,8 +446,6 @@ public sealed class DocFactConsistencyTests
             "被移除的钳制会让非法配置退化成永不触发的阈值，文档不得再描述该公式");
     }
 
-    // ---------------------------------------------------------------- 辅助
-
     /// <summary>操作性文档——其中的 API 名与路径是"施工图"，必须与代码一致。</summary>
     private static IReadOnlyList<string> OperativeDocs() =>
     [
@@ -473,6 +472,10 @@ public sealed class DocFactConsistencyTests
         "docs/adr/0009-background-responses-assessment.md",
         "docs/adr/0010-agent-loop-boundaries.md",
         "docs/adr/0011-background-agents-delegation-boundary.md",
+        "docs/adr/0012-decision-model-integration-jev.md",
+        "docs/adr/0013-ui-surface-strategy.md",
+        "docs/adr/0014-crash-recovery-boundary.md",
+        "docs/adr/0015-plan-run-closeout-and-research-budget.md",
         "docs/sub-agents.md",
         "docs/background-services.md",
         "docs/compact-thresholds.md",
@@ -481,6 +484,7 @@ public sealed class DocFactConsistencyTests
         "docs/settings.md",
         "docs/skills.md",
         "docs/commands.md",
+        "docs/keybindings.md",
         "docs/maf/integration-guide.md",
     ];
 

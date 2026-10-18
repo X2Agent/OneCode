@@ -194,7 +194,7 @@ public sealed class AgentStatusBar : View
         if (w <= 0) return false;
 
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
+        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
         AddStr(new string(' ', w));
 
         // Measure right-side Mode Tag first to establish strict boundary
@@ -222,29 +222,32 @@ public sealed class AgentStatusBar : View
     internal List<LeftItem> BuildLeftItems()
     {
         List<LeftItem> items = [];
-        // Activity / Spinner（必显，文案按固定显示宽度截断；无进展提示优先于基础 activity）
+        // Activity / Spinner（必显，文案按固定显示宽度截断；无进展提示优先于基础 activity；
+        // 正常忙碌态用 InProgress 语义色，仅 stall watchdog 触发时用 Warning 色）
         if (_busy)
         {
             var activity = TextWidthHelper.TruncateByWidth(_stallOverride ?? _activity, ActivityMaxWidth);
-            items.Add(new LeftItem("", $"{_spinner.CurrentFrame} {activity}", TuiPalette.Warning, Droppable: false));
+            var spinnerColor = _stallOverride is not null ? TuiPalette.Warning : TuiPalette.InProgress;
+            items.Add(new LeftItem("", $"{_spinner.CurrentFrame} {activity}", spinnerColor, Droppable: false));
         }
 
         // Model name（必显，原样显示；超宽由 TryAddSegment 按显示宽度截断兜底）
-        items.Add(new LeftItem(items.Count == 0 ? "" : " · ", _model, TuiPalette.FgPrimary, Droppable: false));
+        items.Add(new LeftItem(items.Count == 0 ? "" : " · ", _model, TuiPalette.FgSecondary, Droppable: false));
 
         // 以下均为可丢弃条目：空间不足时从尾部整条移除。
+        // 常规空闲状态收敛为 FgSecondary/FgMuted，仅在告警或异常时点亮语义色。
         if (_sandbox != "Normal")
-            items.Add(new LeftItem(" · ", $"\U0001f512 {_sandbox}", TuiPalette.Info, Droppable: true));
+            items.Add(new LeftItem(" · ", $"\U0001f512 {_sandbox}", TuiPalette.FgSecondary, Droppable: true));
 
         // 活跃子代理徽标：与 LSP/MCP 指示器同级行为（窄终端整条让位），N=0 隐藏。
         if (_activeSubagentCount > 0)
-            items.Add(new LeftItem(" · ", $"agents: {_activeSubagentCount}", TuiPalette.Info, Droppable: true));
+            items.Add(new LeftItem(" · ", $"agents: {_activeSubagentCount}", TuiPalette.FgSecondary, Droppable: true));
 
         if (_lspServerCount > 0)
         {
             var serverColor = _lspErrorCount > 0
                 ? TuiPalette.Error
-                : (_lspWarningCount > 0 ? TuiPalette.Warning : TuiPalette.StatusOk);
+                : (_lspWarningCount > 0 ? TuiPalette.Warning : TuiPalette.FgSecondary);
             items.Add(new LeftItem(" · ", $"LSP: {_lspServerCount}s", serverColor, Droppable: true));
 
             if (_lspWarningCount > 0)
@@ -258,11 +261,11 @@ public sealed class AgentStatusBar : View
             if (mcp.Connecting > 0)
             {
                 var text = mcp.Expected > 0 ? $"MCP: 连接中 {mcp.Connected}/{mcp.Expected}" : "MCP: 连接中";
-                items.Add(new LeftItem(" · ", text, TuiPalette.Info, Droppable: true));
+                items.Add(new LeftItem(" · ", text, TuiPalette.FgSecondary, Droppable: true));
             }
             else if (mcp.Connected > 0)
             {
-                items.Add(new LeftItem(" · ", $"MCP: {mcp.Connected}s", TuiPalette.Info, Droppable: true));
+                items.Add(new LeftItem(" · ", $"MCP: {mcp.Connected}s", TuiPalette.FgSecondary, Droppable: true));
                 if (mcp.ToolCount > 0)
                     items.Add(new LeftItem(" · ", $"{mcp.ToolCount}t", TuiPalette.FgMuted, Droppable: true));
             }
@@ -329,7 +332,7 @@ public sealed class AgentStatusBar : View
                 if (!string.IsNullOrEmpty(truncated))
                 {
                     Move(col, 0);
-                    SetAttribute(new Attribute(fg, TuiPalette.BgInput));
+                    SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
                     AddStr(truncated);
                     col += TextWidthHelper.GetDisplayWidth(truncated);
                 }
@@ -338,7 +341,7 @@ public sealed class AgentStatusBar : View
         }
 
         Move(col, 0);
-        SetAttribute(new Attribute(fg, TuiPalette.BgInput));
+        SetAttribute(new Attribute(fg, TuiPalette.BgPrimary));
         AddStr(text);
         col += width;
         return true;
@@ -363,8 +366,8 @@ public sealed class AgentStatusBar : View
             _ => TuiPalette.FgSecondary,
         };
         SetAttribute(_modeFlash
-            ? new Attribute(modeColor, TuiPalette.BgInput)
-            : new Attribute(TuiPalette.BgInput, modeColor));
+            ? new Attribute(modeColor, TuiPalette.BgPrimary)
+            : new Attribute(TuiPalette.BgPrimary, modeColor));
         AddStr(modeTag);
     }
 

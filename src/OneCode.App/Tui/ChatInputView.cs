@@ -14,11 +14,27 @@ namespace OneCode.App.Tui;
 /// </summary>
 public sealed partial class ChatInputView : View
 {
-    /// <summary>编辑区固定可见行数（不含分隔线）。</summary>
+    /// <summary>编辑区默认可见行数（不含分隔线）。</summary>
     public const int EditorLines = 3;
 
-    /// <summary>输入区固定总高度（1 行分隔线 + <see cref="EditorLines"/>）= 4。</summary>
+    /// <summary>编辑区动态伸缩最小可见行数（不含分隔线）。</summary>
+    public const int MinEditorLines = 2;
+
+    /// <summary>编辑区动态伸缩最大可见行数（不含分隔线）。</summary>
+    public const int MaxEditorLines = 6;
+
+    /// <summary>输入区默认总高度（1 行分隔线 + <see cref="EditorLines"/>）= 4。</summary>
     public const int FixedHeight = 1 + EditorLines;
+
+    /// <summary>当前编辑区可见行数（2–6 行自适应，默认 <see cref="EditorLines"/>）。</summary>
+    public int CurrentEditorLines { get; private set; } = EditorLines;
+
+    /// <summary>当前输入区总高度（1 行分隔线 + <see cref="CurrentEditorLines"/>）。</summary>
+    public int CurrentHeight => 1 + CurrentEditorLines;
+
+    /// <summary>将编辑区内容行数钳制到 [2, 6] 范围（DESIGN.md 动态输入高度规范）。</summary>
+    public static int ComputeEditorLines(int lineCount)
+        => Math.Clamp(lineCount, MinEditorLines, MaxEditorLines);
 
     private readonly IApplication _app;
     private readonly WorkingModeController _modeController;
@@ -69,6 +85,17 @@ public sealed partial class ChatInputView : View
 
     // Guard flag: suppress TextChanged-triggered completion during programmatic text changes
     private bool _suppressCompletion;
+
+    // Inline transcript search mode state (Ctrl+F / ContextSearch)
+    private bool _isSearchMode;
+    private string _preSearchDraft = string.Empty;
+    private string _searchStatusText = string.Empty;
+
+    /// <summary>当前是否处于 Ctrl+F 会话内搜索模式。</summary>
+    public bool IsSearchMode => _isSearchMode;
+
+    /// <summary>输入区总高度变化事件（参数为新的 <see cref="CurrentHeight"/>）。</summary>
+    public event Action<int>? DynamicHeightChanged;
 
     public event Action<string>? Submitted;
     public event Action? QuitRequested;
@@ -125,6 +152,27 @@ public sealed partial class ChatInputView : View
     /// <summary>侧栏（Plan 计划卡）页级向下滚动（Shift+PageDown）。</summary>
     public event Action? SidebarPageDownRequested;
 
+    /// <summary>侧栏（Plan 计划卡）行级向上微调滚动（Alt+Up）。</summary>
+    public event Action? SidebarScrollUpRequested;
+
+    /// <summary>侧栏（Plan 计划卡）行级向下微调滚动（Alt+Down）。</summary>
+    public event Action? SidebarScrollDownRequested;
+
+    /// <summary>切换对话流最近一条可折叠详情块的展开状态（Ctrl+E，chat:toggleLastDetails）。</summary>
+    public event Action? ToggleLastDetailsRequested;
+
+    /// <summary>会话内搜索词实时变化（Ctrl+F 搜索模式下输入变化时触发）。</summary>
+    public event Action<string>? SearchQueryChanged;
+
+    /// <summary>会话内搜索跳转到下一个匹配项（Search 上下文 Enter）。</summary>
+    public event Action? SearchNextRequested;
+
+    /// <summary>会话内搜索跳转到上一个匹配项（Search 上下文 Shift+Enter）。</summary>
+    public event Action? SearchPreviousRequested;
+
+    /// <summary>会话内搜索关闭（Search 上下文 Esc）。</summary>
+    public event Action? SearchDismissed;
+
     public event Action<bool, int>? CompletionStateChanged;
     public FrameView CompletionFrame => _completionFrame;
     public int SelectedSuggestionIndex => _completionList.SelectedItem ?? -1;
@@ -135,7 +183,6 @@ public sealed partial class ChatInputView : View
         IApplication app,
         WorkingModeController modeController,
         IReadOnlyList<SlashCommandEntry> commands,
-        Func<IReadOnlyCollection<string>> toolNameProvider,
         KeybindingResolver? keyResolver = null,
         KeybindingContextManager? keyContextManager = null,
         OneCode.Core.IO.IClipboardService? clipboard = null,
@@ -151,7 +198,7 @@ public sealed partial class ChatInputView : View
         _keyContextManager = keyContextManager ?? new KeybindingContextManager();
         _clipboard = clipboard;
 
-        var typeaheadEngine = new TypeaheadCompletionEngine(commands, Environment.CurrentDirectory, toolNameProvider, sessionCandidatesProvider);
+        var typeaheadEngine = new TypeaheadCompletionEngine(commands, Environment.CurrentDirectory, sessionCandidatesProvider);
 
         _completion = new ChatCompletionController(commands, typeaheadEngine);
         // History source: current conversation's user prompts. Falls back to empty
@@ -209,6 +256,7 @@ public sealed partial class ChatInputView : View
         _suppressCompletion = false;
         // 程序化整体替换不触发 ContentsChanged，需显式对账附件生命周期。
         _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
+        UpdateDynamicHeight();
         SetNeedsDraw();
     }
 
@@ -253,6 +301,21 @@ public sealed partial class ChatInputView : View
     private void UpdatePlaceholder()
     {
         var text = CurrentText;
+        if (_isSearchMode)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                _placeholderLabel.Text = "输入关键词搜索对话 (Enter 下一个 · Shift+Enter 上一个 · Esc 退出)";
+                _placeholderLabel.Visible = true;
+            }
+            else
+            {
+                _placeholderLabel.Visible = false;
+            }
+            _placeholderLabel.SetNeedsDraw();
+            return;
+        }
+
         if (string.IsNullOrEmpty(text) && _suggestions.Count > 0 && !_isBusy)
         {
             _placeholderLabel.Text = _suggestions[_suggestionIndex];
@@ -269,6 +332,73 @@ public sealed partial class ChatInputView : View
     {
         _attachmentRegistry.Clear();
         _input.Text = string.Empty;
+        UpdateDynamicHeight();
+    }
+
+    /// <summary>进入 Ctrl+F 会话内搜索模式：压入 Search 上下文，暂存当前草稿。</summary>
+    public void BeginSearchMode()
+    {
+        if (_isSearchMode)
+        {
+            FocusInput();
+            return;
+        }
+
+        _completion.Hide();
+        _preSearchDraft = CurrentText;
+        _isSearchMode = true;
+        _searchStatusText = string.Empty;
+        _keyContextManager.PushContext(KeybindingDefaults.ContextSearch);
+        SetInputText(string.Empty);
+        UpdatePlaceholder();
+        _separatorLabel.SetNeedsDraw();
+        SetNeedsDraw();
+        FocusInput();
+    }
+
+    /// <summary>退出 Ctrl+F 会话内搜索模式：弹出 Search 上下文，恢复原输入草稿并清除搜索高亮。</summary>
+    public void EndSearchMode()
+    {
+        if (!_isSearchMode)
+            return;
+
+        _isSearchMode = false;
+        _searchStatusText = string.Empty;
+        _keyContextManager.PopContext(KeybindingDefaults.ContextSearch);
+        SetInputText(_preSearchDraft);
+        _preSearchDraft = string.Empty;
+        UpdatePlaceholder();
+        _separatorLabel.SetNeedsDraw();
+        SetNeedsDraw();
+        SearchDismissed?.Invoke();
+    }
+
+    /// <summary>更新行内搜索状态提示（如 "2/5" 或 "无匹配"）。</summary>
+    public void SetSearchMatchStatus(int totalMatches, int currentIndex)
+    {
+        _searchStatusText = totalMatches > 0
+            ? $"[{currentIndex + 1}/{totalMatches}]"
+            : (string.IsNullOrEmpty(CurrentText) ? string.Empty : "[无匹配]");
+        _separatorLabel.SetNeedsDraw();
+        SetNeedsDraw();
+    }
+
+    private void UpdateDynamicHeight()
+    {
+        var lineCount = _isSearchMode
+            ? MinEditorLines
+            : Math.Max(EditorLines, _input?.LineCount ?? EditorLines);
+        var targetEditorLines = ComputeEditorLines(lineCount);
+        if (targetEditorLines == CurrentEditorLines)
+            return;
+
+        CurrentEditorLines = targetEditorLines;
+        Height = CurrentHeight;
+        if (_input is not null)
+            _input.Height = CurrentEditorLines;
+        DynamicHeightChanged?.Invoke(CurrentHeight);
+        SetNeedsLayout();
+        SetNeedsDraw();
     }
 
     /// <summary>
@@ -290,10 +420,18 @@ public sealed partial class ChatInputView : View
     {
         // 生命周期对账：剔除占位符已随文本编辑消失的附件（含 Editor 内部撤销）。
         _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
+        UpdateDynamicHeight();
 
         if (_suppressCompletion) return;
 
         var t = _input.Text ?? string.Empty;
+        if (_isSearchMode)
+        {
+            UpdatePlaceholder();
+            SearchQueryChanged?.Invoke(t);
+            return;
+        }
+
         var firstLine = t.Contains('\n') ? t[..t.IndexOf('\n')] : t;
 
         // Extract the last word (space-delimited, respecting quotes) to detect
@@ -330,6 +468,7 @@ public sealed partial class ChatInputView : View
         _suppressCompletion = true;
         _input.InsertTextAtCursor("\n");
         _suppressCompletion = false;
+        UpdateDynamicHeight();
         SuperView?.SetNeedsDraw();
     }
 
@@ -341,6 +480,7 @@ public sealed partial class ChatInputView : View
         _suppressCompletion = false;
         // 程序化整体替换不触发 ContentsChanged，需显式对账附件生命周期。
         _attachmentRegistry.PruneMissing(_input.Text ?? string.Empty);
+        UpdateDynamicHeight();
     }
 
     /// <summary>

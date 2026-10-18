@@ -117,6 +117,7 @@ internal static class QueryStreamHelpers
             MaxBudgetTokens = toolAssembler.ResolveMaxBudgetTokens(),
             HistorySeedBoundary = request.HistorySeedBoundary,
             SeedTodoTasks = request.PrescribedBuildPlan?.Tasks,
+            SuppressToolApproval = request.SuppressToolApproval,
         };
 
     public static CacheSafeParams CreateCacheSafeParams(

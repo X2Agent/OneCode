@@ -375,8 +375,6 @@ Run tests to verify.
             "唯一失败原因必须是调研证据检查（无文件路径/code block/技术栈关键词），而非长度或结构检查");
     }
 
-    // helpers
-
     /// <summary>
     /// PlanContentSafetyScanner 是 internal 类，通过反射调用 Scan 方法。
     /// </summary>

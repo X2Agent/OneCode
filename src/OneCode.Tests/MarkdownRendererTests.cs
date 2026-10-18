@@ -33,17 +33,17 @@ public sealed class MarkdownRendererTests
         lines.Should().Contain(l => l.Text.Contains("└─"));
     }
 
-    // 代码块头部不再渲染 [ copy ] 按钮——窄面板中它挤占代码列宽，且点击复制
-    // 在侧边栏场景不可用。回归防护：确保 copy 标签彻底移除。
     [Fact]
-    public void Render_FencedCodeBlock_HasNoCopyButton()
+    public void Render_FencedCodeBlock_RendersCompactCopyIconAndCopyTag()
     {
         var md = "```csharp\nvar x = 1;\n```";
         var lines = MarkdownRenderer.Render(md);
 
-        lines.Should().NotContain(l => l.Text.Contains("copy"));
-        lines.Should().NotContain(l => l.Tag != null,
-            "代码块头部不再挂载点击交互标签");
+        lines.Should().NotContain(l => l.Text.Contains("copy"),
+            "代码块头部使用单字符 ⧉ 图标而非挤占宽度的 [ copy ] 按钮");
+        lines[0].Text.Should().Contain(TuiGlyphs.CopyIcon);
+        lines[0].Tag.Should().BeOfType<CodeBlockCopyTag>()
+            .Which.CodeContent.Should().Be("var x = 1;");
     }
 
     // 窄面板（<60 列）中表格改用记录式渲染：每行一条记录、列名前缀、值换行不截断

@@ -55,8 +55,6 @@ public sealed class DryRunTests : IDisposable
         File.Exists(file).Should().BeFalse("dry_run must not create file");
     }
 
-    // Helpers
-
     private string Write(string name, string content)
     {
         var path = Path.Combine(_tmpDir, name);

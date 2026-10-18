@@ -17,9 +17,9 @@ namespace OneCode.Infrastructure.Ai;
 /// M.E.AI 的 OpenAIChatClient 在消息转换时会丢弃 <see cref="TextReasoningContent"/>，
 /// 因此必须在 HTTP 层补写。
 /// </remarks>
-public sealed class ReasoningPassbackChatClient(IChatClient inner) : IChatClient
+public sealed class ReasoningPassbackChatClient(IChatClient inner) : DelegatingChatClient(inner)
 {
-    public async Task<ChatResponse> GetResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -29,7 +29,7 @@ public sealed class ReasoningPassbackChatClient(IChatClient inner) : IChatClient
         ReasoningPassbackContext.Scope = ReasoningPassbackContext.Capture(snapshot);
         try
         {
-            return await inner.GetResponseAsync(snapshot, options, cancellationToken).ConfigureAwait(false);
+            return await base.GetResponseAsync(snapshot, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -37,7 +37,7 @@ public sealed class ReasoningPassbackChatClient(IChatClient inner) : IChatClient
         }
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -46,7 +46,7 @@ public sealed class ReasoningPassbackChatClient(IChatClient inner) : IChatClient
         ReasoningPassbackContext.Scope = ReasoningPassbackContext.Capture(snapshot);
         try
         {
-            await foreach (var update in inner.GetStreamingResponseAsync(snapshot, options, cancellationToken)
+            await foreach (var update in base.GetStreamingResponseAsync(snapshot, options, cancellationToken)
                 .ConfigureAwait(false))
             {
                 yield return update;
@@ -57,11 +57,6 @@ public sealed class ReasoningPassbackChatClient(IChatClient inner) : IChatClient
             ReasoningPassbackContext.Scope = null;
         }
     }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) =>
-        inner.GetService(serviceType, serviceKey);
-
-    void IDisposable.Dispose() => (inner as IDisposable)?.Dispose();
 }
 
 /// <summary>AsyncLocal 侧信道：同一异步流内从装饰器向 HTTP handler 传递快照。</summary>

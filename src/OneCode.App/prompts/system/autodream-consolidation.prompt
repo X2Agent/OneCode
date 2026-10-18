@@ -28,7 +28,7 @@ Below are the condensed `User` and `Assistant` turns from the active conversatio
    - If you are merging multiple fragmented keys or renaming a key into a cleaner canonical key, list
      the old keys in `"supersedes": ["old-key-1", "old-key-2"]` so the host atomically removes them.
    - If an existing memory was contradicted or obsoleted by recent work, emit a `"delete"` action for it.
-   - Never attempt to modify or delete entries under `### Manual entries` (`manual:*`).
+   - Never attempt to modify or delete entries under `### User memories` (`manual:*`).
 3. Promote only what is verified. Never promote an unverified inference to a `user`-scope preference.
 4. Output **incremental changes** as a JSON array. Each change is either an `"upsert"` (add or update) or
    a `"delete"` (remove an outdated entry).

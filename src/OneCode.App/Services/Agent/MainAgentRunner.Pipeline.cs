@@ -1,4 +1,3 @@
-using OneCode.Infrastructure.Ai;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -27,7 +26,7 @@ public partial class MainAgentRunner
         long? budgetBaselineTokens = null,
         CancellationToken ct = default)
     {
-        var (compactionStrategy, providerId) = await _compactionBuilder
+        var (compactionStrategy, providerId, contextWindow) = await _compactionBuilder
             .BuildAsync(options.ModelId, ct).ConfigureAwait(false);
 
         var contextProviders = await _contextPipeline
@@ -43,7 +42,7 @@ public partial class MainAgentRunner
 
         var handle = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
-            ChatClient = _chatClient is MaxOutputTokensDecorator ? _chatClient : new MaxOutputTokensDecorator(_chatClient),
+            ChatClient = _chatClient,
             Name = "main-agent",
             ChatOptions = BuildChatOptions(options),
             LoggerFactory = _loggerFactory,

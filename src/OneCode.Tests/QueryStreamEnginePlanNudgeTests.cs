@@ -128,8 +128,6 @@ public sealed class QueryStreamEnginePlanNudgeTests
             "finalized 快照必须保留本轮请求解析出的 Plan 能力集");
     }
 
-    // ---------------------------------------------------------------- helpers
-
     private static void WriteWithUsage(ChannelWriter<object> writer, string text, long inputTokens, long outputTokens)
     {
         writer.TryWrite(new AgentResponseUpdate

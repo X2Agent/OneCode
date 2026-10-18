@@ -14,21 +14,6 @@ public sealed class BackgroundRunTool
     private readonly IWorkingDirectoryAccessor _wd;
     private readonly ILogger<BackgroundRunTool> _logger;
 
-    /// <summary>
-    /// Compiled deny-list from <see cref="DangerousCommandPatterns.Layer0HardDeny"/>,
-    /// aligned with BashTool (both dialects) safety infrastructure.
-    /// </summary>
-    private static readonly System.Text.RegularExpressions.Regex[] DenyPatterns =
-        DangerousCommandPatterns.Layer0HardDeny
-            .Select(p => new System.Text.RegularExpressions.Regex(
-                p.Pattern,
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
-                TimeSpan.FromSeconds(2)))
-            .ToArray();
-
-    private static readonly string[] DenyPatternNames =
-        DangerousCommandPatterns.Layer0HardDeny.Select(p => p.Name).ToArray();
-
     public BackgroundRunTool(ITaskService taskService, IWorkingDirectoryAccessor wd, ILogger<BackgroundRunTool> logger)
     {
         _taskService = taskService; _wd = wd; _logger = logger;
@@ -47,19 +32,9 @@ public sealed class BackgroundRunTool
         if (string.IsNullOrWhiteSpace(description))
             return ToolResult.Error("Error: description is required for task tracking");
 
-        // 应用与 BashTool 相同的 deny-list
-        for (var i = 0; i < DenyPatterns.Length; i++)
-        {
-            try
-            {
-                if (DenyPatterns[i].IsMatch(command))
-                    return ToolResult.Error($"[SAFETY] Dangerous command pattern detected: '{DenyPatternNames[i]}'. Command blocked.");
-            }
-            catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
-            {
-                return ToolResult.Error($"[SAFETY] Command pattern check timed out (possible ReDoS). Command blocked.");
-            }
-        }
+        var safetyCheck = OneCode.Infrastructure.Middleware.Invariants.BashCommandInvariant.CheckCommand(command);
+        if (!safetyCheck.Allowed)
+            return ToolResult.Error(safetyCheck.Reason!);
 
         cwd ??= _wd.WorkingDirectory;
 

@@ -1,4 +1,3 @@
-using CoreConstants = OneCode.Core.Constants;
 using OneCode.App.Session;
 
 
@@ -50,7 +49,7 @@ public sealed class ExportCommand(ISessionManager sessionManager) : Command
                     ToolUseBlock tub => new { type = "tool_use", id = tub.Id, name = tub.Name, input = tub.Input },
                     _ => new { type = "unknown" }
                 }).ToList();
-                messages.Add(new { role = CoreConstants.MessageTypes.Assistant, content = blocks });
+                messages.Add(new { role = "assistant", content = blocks });
             }
             else if (msg is ToolResultMessage trm)
                 messages.Add(new { role = "tool_result", tool_use_id = trm.ToolUseId, content = trm.Content });

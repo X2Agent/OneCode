@@ -131,8 +131,6 @@ public sealed class DeleteToolTests : IDisposable
         Directory.Exists(_tmpDir).Should().BeTrue();
     }
 
-    // Helpers
-
     private string Write(string relativeName, string content)
     {
         var path = Path.IsPathRooted(relativeName)

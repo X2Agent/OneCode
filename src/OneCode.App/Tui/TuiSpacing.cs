@@ -37,8 +37,8 @@ internal static class TuiSpacing
     // 消息流缩进
     public const int MessageContentIndent = 2;
 
-    /// <summary>消息头时间戳与右侧应用内滚动条之间的安全间距。</summary>
-    public const int MessageTimestampRightPadding = Sm;
+    /// <summary>消息头时间戳右侧额外预留列数（ChatTranscriptView.ContentWidth 已预留 1 列滚动条/右边距，此处为 0 以对齐状态栏右缘）。</summary>
+    public const int MessageTimestampRightPadding = 0;
 
     /// <summary>
     /// Fallback width when the viewport has not been measured yet (e.g. before

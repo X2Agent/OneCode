@@ -69,6 +69,24 @@ public sealed class MessageListViewTests
         view.IsAutoScroll.Should().BeTrue();
     }
 
+    [Fact]
+    public void ToggleLastDetails_ExpandsAndCollapsesMostRecentCollapsibleBlock()
+    {
+        var view = new MessageListView();
+        var thinkingTag = new ThinkingLineTag("deep reasoning line 1\ndeep reasoning line 2", IsExpanded: false);
+        view.AppendLines([
+            Line("user prompt"),
+            FormattedLine.FromSegmentsWithTag([new LineSegment("▸ Thought:", Terminal.Gui.Drawing.Color.Gray)], thinkingTag),
+            Line("assistant reply"),
+        ]);
+
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().Contain(l => l.Contains("deep reasoning line 1", StringComparison.Ordinal));
+
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().NotContain(l => l.Contains("deep reasoning line 1", StringComparison.Ordinal));
+    }
+
     private static FormattedLine Line(string text) =>
         FormattedLine.Plain(text, Terminal.Gui.Drawing.Color.White);
 }

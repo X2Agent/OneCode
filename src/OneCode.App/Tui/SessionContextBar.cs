@@ -156,7 +156,7 @@ public sealed class SessionContextBar : View
         if (w <= 0) return false;
 
         Move(0, 0);
-        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
+        SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
         AddStr(new string(' ', w));
 
         var rightSegs = BuildRightSegments(w);
@@ -179,9 +179,9 @@ public sealed class SessionContextBar : View
         if (col + 3 + TextWidthHelper.GetDisplayWidth(displayWs) <= maxLeftCol || col == 1)
         {
             Move(col, 0);
-            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
             AddStr("\U0001f4c1 ");
-            SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
+            SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
             AddStr(displayWs);
             col += 3 + TextWidthHelper.GetDisplayWidth(displayWs); // emoji 2 列 + 空格 1 列
         }
@@ -193,13 +193,13 @@ public sealed class SessionContextBar : View
             if (col + branchWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr("\U0001f33f ");
                 col += 3; // emoji 2 列 + 空格 1 列
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr(_branch);
                 col += TextWidthHelper.GetDisplayWidth(_branch);
             }
@@ -208,13 +208,13 @@ public sealed class SessionContextBar : View
                 var availBranch = maxLeftCol - col - 6;
                 var shortBranch = TextWidthHelper.TruncateByWidth(_branch, availBranch);
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Accent, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr("\U0001f33f ");
                 col += 3; // emoji 2 列 + 空格 1 列
-                SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr(shortBranch);
                 col += TextWidthHelper.GetDisplayWidth(shortBranch);
             }
@@ -227,13 +227,13 @@ public sealed class SessionContextBar : View
             if (col + wtWidth <= maxLeftCol)
             {
                 Move(col, 0);
-                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary));
                 AddStr(" \u00b7 ");
                 col += 3;
-                SetAttribute(new Attribute(TuiPalette.Info, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr("\U0001f4e6 ");
                 col += 3; // emoji 2 列 + 空格 1 列
-                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput));
+                SetAttribute(new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary));
                 AddStr(_worktree);
                 col += TextWidthHelper.GetDisplayWidth(_worktree);
             }
@@ -245,7 +245,7 @@ public sealed class SessionContextBar : View
             Move(rightCol, 0);
             foreach (var (text, color) in rightSegs)
             {
-                SetAttribute(new Attribute(color, TuiPalette.BgInput));
+                SetAttribute(new Attribute(color, TuiPalette.BgPrimary));
                 AddStr(text);
             }
         }
@@ -290,7 +290,7 @@ public sealed class SessionContextBar : View
             var pct = Math.Min(100, (int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero));
             var pctColor = pct >= 80 ? TuiPalette.Error
                 : pct >= 50 ? TuiPalette.Warning
-                : TuiPalette.StatusOk;
+                : TuiPalette.FgSecondary;
 
             const int barWidth = 10;
             var filledWidth = (int)Math.Round(ratio * barWidth, MidpointRounding.AwayFromZero);

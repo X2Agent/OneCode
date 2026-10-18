@@ -75,7 +75,7 @@ public sealed partial class ChatInputView
             Y = -15,
             Width = Dim.Fill(),
             Height = 16,
-            Title = " commands (Tab 切换 · Enter 选择 · Esc 关闭) ",
+            Title = ChatCompletionController.CommandsPopupTitle,
             CanFocus = false,
         };
         _completionFrame.Add(_completionList);
@@ -111,14 +111,25 @@ public sealed partial class ChatInputView
         }
 
         _separatorLabel.Width = width;
-        _separatorLabel.SetScheme(TuiStyles.MakeScheme(
-            HasInputFocus ? TuiPalette.Accent : TuiPalette.FgMuted,
-            TuiPalette.BgInput));
+        if (_isSearchMode)
+        {
+            var statusPart = string.IsNullOrEmpty(_searchStatusText) ? "" : $" {_searchStatusText}";
+            var prefix = $"── 🔍 搜索{statusPart} (Enter ↓ · Shift+Enter ↑ · Esc 退出) ";
+            _separatorLabel.Text = prefix + new string((char)0x2500, 300);
+            _separatorLabel.SetScheme(TuiStyles.MakeScheme(TuiPalette.InProgress, TuiPalette.BgInput));
+        }
+        else
+        {
+            _separatorLabel.Text = new string((char)0x2500, 300);
+            _separatorLabel.SetScheme(TuiStyles.MakeScheme(
+                TuiPalette.Border,
+                TuiPalette.BgInput));
+        }
         var editorWidth = Math.Max(1, width - 2);
         _input.X = 1;
         _input.Y = 1;
         _input.Width = editorWidth;
-        _input.Height = EditorLines;
+        _input.Height = CurrentEditorLines;
         _placeholderLabel.X = 1;
         _placeholderLabel.Y = 1;
         _placeholderLabel.Width = editorWidth;

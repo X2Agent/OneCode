@@ -18,7 +18,7 @@ public sealed class RetryOnOverloadChatClient(
     IChatClient inner,
     ILogger<RetryOnOverloadChatClient>? logger = null,
     int maxRetries = 6,
-    TimeSpan? streamIdleTimeout = null) : IChatClient
+    TimeSpan? streamIdleTimeout = null) : DelegatingChatClient(inner)
 {
     private static readonly TimeSpan DefaultRetryDelay = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(120);
@@ -29,7 +29,6 @@ public sealed class RetryOnOverloadChatClient(
     private const int CircuitBreakerMinimumThroughput = 3;
     private static readonly TimeSpan CircuitBreakerDuration = TimeSpan.FromSeconds(60);
 
-    private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     private readonly ILogger<RetryOnOverloadChatClient>? _logger = logger;
     private readonly int _maxRetries = maxRetries;
     private readonly TimeSpan _streamIdleTimeout = streamIdleTimeout ?? DefaultStreamIdleTimeout;
@@ -86,19 +85,17 @@ public sealed class RetryOnOverloadChatClient(
             })
             .Build();
 
-    public void Dispose() => _inner.Dispose();
-
-    public async Task<ChatResponse> GetResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         return await _pipeline.ExecuteAsync(
-            async ct => await _inner.GetResponseAsync(messages, options, ct).ConfigureAwait(false),
+            async ct => await base.GetResponseAsync(messages, options, ct).ConfigureAwait(false),
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -161,7 +158,7 @@ public sealed class RetryOnOverloadChatClient(
                     },
                     attemptCts, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
-                var source = _inner.GetStreamingResponseAsync(messages, options, attemptCts.Token);
+                var source = base.GetStreamingResponseAsync(messages, options, attemptCts.Token);
                 var enumerator = source.GetAsyncEnumerator(attemptCts.Token);
                 var sawChunk = false;
                 try
@@ -282,9 +279,6 @@ public sealed class RetryOnOverloadChatClient(
             writer.TryComplete();
         }
     }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) =>
-        _inner.GetService(serviceType, serviceKey);
 
     private static bool IsRateLimitError(Exception? ex) =>
         ex switch

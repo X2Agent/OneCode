@@ -14,7 +14,7 @@ public sealed record SlashCommandEntry(
     string? ArgumentHint = null);
 
 /// <summary>
-/// Manages command and file-path completion for <see cref="ChatInputView"/>.
+/// 管理 <see cref="ChatInputView"/> 的斜杠命令、工作区文件与会话 ID 补全状态。
 /// 文本度量辅助见 <see cref="CompletionTextMetrics"/>。
 /// </summary>
 internal sealed class ChatCompletionController
@@ -37,8 +37,7 @@ internal sealed class ChatCompletionController
     }
 
     /// <summary>
-    /// Replaces the command list used for slash-completion at runtime.
-    /// Call after dynamic commands (skills, MCP) are loaded or refreshed.
+    /// 运行时替换斜杠命令列表（如技能、MCP 动态命令加载或刷新后调用）。
     /// </summary>
     public void UpdateCommands(IReadOnlyList<SlashCommandEntry> commands)
     {
@@ -46,16 +45,20 @@ internal sealed class ChatCompletionController
         _typeaheadEngine?.UpdateCommands(commands);
     }
 
-    // Public state
+    internal const string CommandsPopupTitle = " commands (Tab 切换 · Enter 选择 · Esc 关闭) ";
+    internal const string FilesPopupTitle = " files (Tab 切换 · Enter 选择 · Esc 关闭) ";
+    internal const string SessionsPopupTitle = " sessions (Tab 切换 · Enter 选择 · Esc 关闭) ";
+    internal const string EmptyWorkspaceFilesHint = "  （工作区暂无可关联文件）";
+    internal const string NoMatchingFilesHint = "  （无匹配文件）";
+
     public bool IsCompletionActive => _isCompletionVisible;
     public int SelectedIndex => _selectedIndex;
     public IReadOnlyList<SlashCommandEntry> FilteredCommands => _filtered;
     public List<string>? GenericCompletions => _genericCompletions;
+    public string PopupTitle { get; private set; } = CommandsPopupTitle;
 
-    /// <summary>Fires when visibility or height of the completion popup changes. Bool=true means visible.</summary>
+    /// <summary>当补全弹窗可见性或高度变化时触发（首个参数为是否可见，第二个参数为高度）。</summary>
     public event Action<bool, int>? CompletionStateChanged;
-
-    // Slash-command completion
 
     /// <summary>
     /// 分隔行标记：Name 以此常量开头表示这是一个分组标题，不可被选中。
@@ -203,6 +206,7 @@ internal sealed class ChatCompletionController
 
         _genericCompletions = null;
         _selectedIndex = NextSelectable(0, forward: true);
+        PopupTitle = CommandsPopupTitle;
 
         var height = Math.Min(_filtered.Count + 2, 18);
         ShowPopup(displayItems, height);
@@ -232,49 +236,58 @@ internal sealed class ChatCompletionController
         return 0;
     }
 
-    // Generic (file path / tool name) completion
+    // 通用补全（@ 工作区文件 / 会话 ID / 普通文件路径）
 
     public void TryTypeaheadCompletion(string currentLine)
     {
         if (_typeaheadEngine is null) { Hide(); return; }
 
         _lastCompletionInput = currentLine;
-        var completions = _typeaheadEngine.GetCompletions(currentLine);
-        if (completions.Count > 0)
-            ShowGenericCompletion(completions);
-        else
-            Hide();
+        var items = _typeaheadEngine.GetCompletionItems(currentLine);
+        if (items.Count > 0)
+        {
+            ShowGenericCompletion(items);
+            return;
+        }
+
+        if (TypeaheadCompletionEngine.TryExtractAtFileQuery(currentLine, out var query))
+        {
+            ShowAtEmptyHintPopup(query);
+            return;
+        }
+
+        Hide();
     }
 
-    private void ShowGenericCompletion(List<string> completions)
+    private void ShowGenericCompletion(List<(string Display, string Insert)> items)
     {
-        _genericCompletions = completions;
+        _filtered = [];
+        _genericDisplayItems = items.Select(i => i.Display).ToList();
+        _genericCompletions = items.Select(i => i.Insert).ToList();
         _selectedIndex = 0;
-
-        // Use the typeahead engine's display items (file name only, not full prefix)
-        // so the popup shows clean entries like "readme.txt" instead of "hello @readme.txt".
-        if (_typeaheadEngine is not null)
-        {
-            var items = _typeaheadEngine.GetCompletionItems(
-                _lastCompletionInput ?? string.Empty);
-            _genericDisplayItems = items.Select(i => i.Display).ToList();
-            _genericCompletions = items.Select(i => i.Insert).ToList();
-        }
-        else
-        {
-            _genericDisplayItems = completions
-                .Select(c => c.Length > 60 ? c[..60] : c)
-                .ToList();
-        }
+        var input = _lastCompletionInput ?? string.Empty;
+        PopupTitle = TypeaheadCompletionEngine.IsSessionIdCompletionInput(input)
+            ? SessionsPopupTitle
+            : TypeaheadCompletionEngine.IsSlashCommandCompletionInput(input)
+                ? CommandsPopupTitle
+                : FilesPopupTitle;
 
         var height = Math.Min(_genericCompletions.Count + 2, 12);
         ShowPopup(_genericDisplayItems, height);
     }
 
-    /// <summary>Stores the last input that triggered completion, for display extraction.</summary>
-    private string? _lastCompletionInput;
+    private void ShowAtEmptyHintPopup(string query)
+    {
+        var hint = string.IsNullOrEmpty(query) ? EmptyWorkspaceFilesHint : NoMatchingFilesHint;
+        _filtered = [];
+        _genericDisplayItems = [hint];
+        _genericCompletions = [];
+        _selectedIndex = 0;
+        PopupTitle = FilesPopupTitle;
+        ShowPopup(_genericDisplayItems, height: 3);
+    }
 
-    // Navigation
+    private string? _lastCompletionInput;
 
     public void CycleNext()
     {
@@ -284,7 +297,7 @@ internal sealed class ChatCompletionController
             _selectedIndex = (_selectedIndex + 1) % Math.Max(1, count);
             return;
         }
-        // Slash-command mode: skip separator rows.
+        // 斜杠命令模式：跳过分组分隔行与续行。
         var n = _filtered.Count;
         if (n == 0) return;
         do
@@ -301,7 +314,7 @@ internal sealed class ChatCompletionController
             _selectedIndex = (_selectedIndex - 1 + count) % Math.Max(1, count);
             return;
         }
-        // Slash-command mode: skip separator rows.
+        // 斜杠命令模式：跳过分组分隔行与续行。
         var n = _filtered.Count;
         if (n == 0) return;
         do
@@ -310,12 +323,8 @@ internal sealed class ChatCompletionController
         } while (IsNonSelectable(_filtered[_selectedIndex]));
     }
 
-    // Accept / Hide
-
     /// <summary>
-    /// Returns the accepted text, or null if nothing was selected.
-    /// For generic completions, returns the completed string.
-    /// For slash commands, returns "/commandName ".
+    /// 返回当前选中的补全插入文本并关闭弹窗；无有效选中项时返回 null。
     /// </summary>
     public string? Accept()
     {
@@ -334,7 +343,6 @@ internal sealed class ChatCompletionController
         if (_selectedIndex < 0 || _selectedIndex >= _filtered.Count) { Hide(); return null; }
 
         var selected = _filtered[_selectedIndex];
-        // Separator rows should never be accepted; treat as no-op.
         if (IsNonSelectable(selected)) { return null; }
         Hide();
         return $"/{selected.Name} ";
@@ -349,8 +357,6 @@ internal sealed class ChatCompletionController
         _lastCompletionInput = null;
         CompletionStateChanged?.Invoke(false, 0);
     }
-
-    // Internal popup management
 
     public IReadOnlyList<string>? CurrentDisplayItems { get; private set; }
 

@@ -649,6 +649,26 @@ public sealed class ChatTranscriptViewTests
         toolIdx.Should().BeGreaterThan(planIdx, "后续流式工具调用不得覆盖已提交的计划摘要块");
     }
 
+    [Fact]
+    public void FindPrevious_CyclesBackwardsAcrossSearchMatches()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        view.AddSystem("alpha target one");
+        view.AddSystem("middle line");
+        view.AddSystem("beta target two");
+
+        var (total, firstIdx) = view.SearchAndScroll("target");
+        total.Should().Be(2);
+        firstIdx.Should().Be(0);
+
+        // Jumping previous from index 0 wraps around to the last match (index 1)
+        var (_, prevIdx) = view.FindPrevious();
+        prevIdx.Should().Be(1);
+
+        var (_, backToFirst) = view.FindPrevious();
+        backToFirst.Should().Be(0);
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         var count = 0;

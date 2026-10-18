@@ -18,13 +18,13 @@
 
 ## 1. 概述
 
-OneCode 共有 **5 个长循环后台服务** + **3 个启动加载服务** + **4 个 UI 定时器**：
+OneCode 共有 **5 个长循环后台服务** + **3 个启动加载服务** + **6 个 UI 定时器**：
 
 | 类别 | 机制 | 数量 | 说明 |
 |------|------|------|------|
 | 长循环后台服务 | `BackgroundService` | 5 个 | 周期性轮询或事件驱动，进程生命周期内常驻 |
 | 启动加载服务 | `IHostedService` | 3 个 | 仅启动时执行一次，停止时清理资源 |
-| UI 定时器 | `IApplication.AddTimeout` | 4 个 | Terminal.Gui 主循环节拍，非业务调度 |
+| UI 定时器 | `IApplication.AddTimeout` | 6 个 | Terminal.Gui 主循环节拍，非业务调度 |
 
 [AutoDreamService](#5-autodream-记忆整合) 是标准 `BackgroundService`，随宿主生命周期自动启停，同时支持外部 `Trigger()` 信号触发，记忆统一写入 `MEMORY.md`。
 
@@ -37,15 +37,15 @@ OneCode 共有 **5 个长循环后台服务** + **3 个启动加载服务** + **
 后台服务分布在两个层：
 
 ```
-OneCode.Automation  ← 仅依赖 Core 抽象的后台调度/启动加载层
+OneCode.Automation  ← 不依赖 App 的后台调度/启动加载层（可依赖 Core 与 Infrastructure）
 OneCode.App         ← 依赖 App 业务编排类型的后台服务
 ```
 
-下沉到 Automation 的硬性条件：**仅依赖 Core 抽象**（如 `ICronParser`、`IModelCatalogCache`、`YoloRuleStore`）。一旦服务依赖了 App 层类型（MAF Agent、`ToolCatalog`、`PromptManager` 等），就必须留在 App 层。
+下沉到 Automation 的硬性条件：**不得依赖 App 层类型**（MAF Agent、`ToolCatalog`、`PromptManager` 等）；依赖 Core 抽象与 Infrastructure 基础设施（如 `PathsHelper`、`DurableFile`、`ICronParser`、`IModelCatalogCache`、`YoloRuleStore`）是允许的，依赖方向为 App → Automation → Infrastructure → Core。一旦服务依赖了 App 层类型，就必须留在 App 层。
 
 ### 2.2 为什么不强行统一到一层
 
-以 AutoDreamService 为例，它依赖 `IChatClient`、`ToolCatalog`、`PromptManager`、`ModelManager`、`IMemoryEntryStore` 等 5+ 个 App 层服务。若要下沉到 Automation，需要把这些都抽成 Core 接口，会让 Core 沦为"接口垃圾场"，违反项目"不为统一而强行抽接口"的明确决策。
+以 AutoDreamService 为例，它通过 `AutoDreamAgentDependencies` 与 `AutoDreamStorageDependencies` 依赖 `IChatClient`、`IModelManager`、`IPromptManager`、`IMemoryService`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor`、`ISessionManager` 等多个服务（含 App 层会话与提示词编排）。若要下沉到 Automation，需要把这些都抽成 Core 接口，会让 Core 沦为"接口垃圾场"，违反项目"不为统一而强行抽接口"的明确决策。
 
 **结论：物理位置保持分层，通过统一生命周期抽象和注册模式来实现一致性。**
 
@@ -90,7 +90,7 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 |------|-----|
 | 文件 | [OneCode.Automation/ModelCatalog/ModelCatalogRefreshService.cs](../src/OneCode.Automation/ModelCatalog/ModelCatalogRefreshService.cs) |
 | 类型 | `BackgroundService` |
-| 执行时机 | `StartAsync` 同步加载磁盘缓存 → `ExecuteAsync` 启动即检查（若 stale）→ 之后 **24 小时检查** |
+| 执行时机 | `StartAsync` 仅在 catalog 为空时尝试加载磁盘缓存 → `ExecuteAsync` 启动即检查（若 stale）→ 之后 **24 小时检查** |
 | 职责 | 维护 models.dev 快照，缓存 7 天过期，过期则从远程刷新 |
 | 依赖 | `IModelCatalogCache`、`IModelCatalog`（Core） |
 
@@ -153,8 +153,8 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.App/Services/AutoDream/AutoDreamService.cs](../src/OneCode.App/Services/AutoDream/AutoDreamService.cs) |
 | 类型 | `BackgroundService`（Singleton + HostedService 双注册） |
 | 执行时机 | `BUILD` 任务正常完成且未回滚时（`QueryStreamEngine.FinalizeAsync` → `NotifyTaskCompleted()`）+ 手动 `/memory autodream trigger` |
-| 职责 | 经 C# 零 Token 增量快检后启动轻量 Agent 整理**会话工作记忆与当前项目历史会话**，增量变更 JSON 合并写入 `MEMORY.md` |
-| 依赖 | `IChatClient`、`ToolCatalog`、`PromptManager`、`IModelManager`、`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor`、`ITextSearchService`、`IMemoryService` |
+| 职责 | 经 C# 零 Token 增量快检后启动单轮无工具 Agent 整理**会话工作记忆与当前项目活动会话**，增量变更 JSON 合并写入 `MEMORY.md` |
+| 依赖 | `AutoDreamAgentDependencies`（`IChatClient`、`IModelManager`、`IPromptManager`、`IMemoryService?`）、`AutoDreamStorageDependencies`（`IMemoryEntryStore`、`IConfigManager`、`IWorkingDirectoryAccessor`、`ISessionManager?`） |
 
 注册模式说明：`AddSingleton<AutoDreamService>()` + `AddSingleton<IAutoDreamService>(...)` + `AddHostedService(sp => sp.GetRequiredService<AutoDreamService>())`，
 确保既可通过 `IAutoDreamService` / `AutoDreamService` 发送信号，又让 `BackgroundService.ExecuteAsync` 随宿主自动启停。
@@ -169,8 +169,8 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs](../src/OneCode.App/Services/PlanMode/PlanExecutionRecoveryService.cs) |
 | 类型 | `BackgroundService`（注册于 `src/OneCode.App/Services/PlanMode/PlanWorkflowServiceCollectionExtensions.cs`） |
 | 执行时机 | `PeriodicTimer` 每 **5 秒**扫描 + `AttachSession` 时立即触发一次 |
-| 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing` 状态与持久化 BuildRun 对账后由幂等派发器续跑；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
-| 依赖 | `IPlanAggregateStore`、`IPlanWorkflowApplicationService`、`IBuildRunStore`、`IPlanAgentRunDispatcher` |
+| 职责 | 扫描持久化的 Plan 执行工作流并恢复：`StartingExecution` 状态重试启动；`Executing` 状态与持久化 BuildRun 对账后由幂等派发器续跑；旧进程遗留的 `FinalizingPlanRun` 经同一 `PlanRunCloser` 补做收口（推进到待审批）；BuildRun 缺失/身份不匹配/与已批准计划不一致时按协议失败 |
+| 依赖 | `IPlanAggregateStore`、`IPlanWorkflowApplicationService`、`IBuildRunStore`、`IPlanAgentRunDispatcher`、`PlanRunCloser` |
 
 会话门控：TUI 启动时通过 `AttachSession` 挂接交互会话；未挂接或会话未加载时仅保留持久化恢复状态，不执行派发。扫描经 `SemaphoreSlim(1,1)` 串行化，单工作流恢复失败仅记 Warning，不影响其余工作流。
 
@@ -196,7 +196,9 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 |--------|------|------|------|
 | `SpinnerController` | [OneCode.App/Tui/SpinnerController.cs](../src/OneCode.App/Tui/SpinnerController.cs) | 帧间隔 | Braille spinner 帧动画 |
 | `AgentStatusBar` 模式闪烁 | [OneCode.App/Tui/AgentStatusBar.cs](../src/OneCode.App/Tui/AgentStatusBar.cs) | 400ms，一次性 | 模式切换时的高亮闪烁，到时清除标记 |
+| `AgentStatusBar` 停滞监测（Stall Watchdog） | [OneCode.App/Tui/AgentStatusBar.cs](../src/OneCode.App/Tui/AgentStatusBar.cs) | 5s 周期 | 监测流式无响应时长（≥45s 显示已等待秒数） |
 | 流式预览重建 | [OneCode.App/Tui/ChatTranscriptView.Streaming.cs](../src/OneCode.App/Tui/ChatTranscriptView.Streaming.cs) | 16ms（约 60 FPS 上限），一次性 | 合并同一节拍窗口内的多次 token 到达，把每 token 重排的 O(n²) 降为每窗口一次 |
+| 窗口尺寸变化重排防抖 | [OneCode.App/Tui/ChatTranscriptView.cs](../src/OneCode.App/Tui/ChatTranscriptView.cs) | 40ms，一次性 | 合并拖拽终端边缘产生的高频 `SubViewsLaidOut` 事件，减少 Markdown 重排次数 |
 | 启动首帧调度 | [OneCode.App/Tui/OneCodeToplevel.cs](../src/OneCode.App/Tui/OneCodeToplevel.cs) | `TimeSpan.Zero`，一次性 | 界面就绪后补一次欢迎页、MCP 状态栏刷新与焦点设置 |
 
 均通过 `IApplication.AddTimeout` 注册，没有业务调度：不轮询后台状态，不替代 `BackgroundService`。
@@ -226,11 +228,11 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 │                    OneCode.App                               │
 │  ┌──────────────────────▼──────────────────────────────┐   │
 │  │                CronJobExecutor                       │   │
-│  │  - SemaphoreSlim 串行化（防与 TUI 主循环重叠）        │   │
+│  │  - SemaphoreSlim 串行化（防并发触发重叠）            │   │
 │  │  - 构建/缓存系统提示词                                │   │
-│  │  - 确保前台会话存在                                   │   │
-│  │  - WorkingMode.Goal（无人值守）执行 prompt           │   │
-│  │  - 排空事件流至完成                                   │   │
+│  │  - 独立后台隔离会话（unattended: true，不污染前台）   │   │
+│  │  - WorkingMode.Build（SuppressToolApproval）执行     │   │
+│  │  - 排空事件流至完成并发送通知                         │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -264,21 +266,22 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 | `CreatedAt` | long | 创建时间（Unix 秒） |
 | `LastRunAt` | long? | 上次执行时间 |
 | `NextRunAt` | long? | 下次执行时间 |
+| `LastStatus` | string? | 上次执行结果（`ok` / `error`；执行中不写入该字段） |
+| `LastError` | string? | 上次执行失败的错误摘要 |
 
-### 4.4 持久化策略
+### 4.4 持久化策略与进程生命周期边界
 
-- **默认会话级**：`Durable = false`，仅存在于内存，进程退出即失
-- **持久化需显式启用**：`ONECODE_DURABLE_CRON=true` + `durable=true`，写入 `~/.onecode/cron/{id}.json`
-- **上限**：单进程最多 50 个 job
+- **宿主生命周期绑定**：当前 `CronSchedulerService` 寄宿在 TUI 进程 `IHost` 内（无独立后台守护进程；跨进程常驻调度由 [TUI 极致化路线图](./plan/tui-roadmap.md) P2 `onecode daemon` 承接）。用户退出 TUI 时宿主停止，调度器随之停止。
+- **默认会话级**：`Durable = false`，仅存在于内存，进程退出即失。
+- **持久化需显式启用**：`ONECODE_DURABLE_CRON=true` + `durable=true`，通过 `DurableFile.WriteAtomicAsync` 原子写入 `~/.onecode/cron/{id}.json`。当 TUI 下次启动时，`ReloadJobs()` 会重新加载磁盘上的持久化任务，并对离线期间已到期的任务（`now >= nextRun`）在启动后首个轮询周期（≤30 秒）触发一次补跑。
+- **上限**：单进程最多 50 个 job。
 
-### 4.5 执行隔离
+### 4.5 执行隔离与无人值守保护
 
-`CronJobExecutor` 使用 `SemaphoreSlim` 串行化执行，确保 cron 触发的运行不会与 TUI 主循环在同一个 `ForegroundConversation` 上重叠。
-
-### 4.6 执行策略
-
-Cron 触发的任务以 `WorkingMode.Goal` 执行——无人值守下模型可自主分解子任务并迭代验证（`CronJobExecutor.ExecuteJobAsync`）。
-Plan 模式下提交的计划会进入持久化 `AwaitingApproval`，必须由用户审批，不适合无人值守场景，因此 Cron 不使用 Plan 模式。
+- **会话隔离**：`CronJobExecutor` 使用独立的后台隔离会话执行定时任务，**不读取也不写入**用户正在交互的 `ForegroundConversation`，彻底消除后台定时任务污染前台聊天历史或抢占前台会话状态的问题。
+- **串行与超时门控**：`CronJobExecutor` 使用 `SemaphoreSlim` 串行化 Cron 触发，并为单次任务附加独立超时控制。
+- **禁止交互审批挂死**：Cron 任务以无人值守模式运行（`SuppressToolApproval = true`），不挂接交互式 `ApprovalBroker`，未授权工具直接 fail-closed 返回错误，绝不会因等待弹窗审批而死锁后台队列。
+- **状态记录与通知**：每次触发后回写 `LastStatus` / `LastError`，并通过 `INotifierService` 发送完成或失败通知。
 
 ---
 
@@ -386,7 +389,7 @@ AutoDream **默认开启**，开箱即用。如需关闭，在 `settings.json` �
 新增后台服务
     │
     ▼
-仅依赖 Core 抽象？
+不依赖 App 层类型？
     │
     ├─ 是 → OneCode.Automation
     │       使用 AddXxx 扩展方法注册

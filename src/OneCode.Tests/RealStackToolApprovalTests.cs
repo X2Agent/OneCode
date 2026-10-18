@@ -223,8 +223,6 @@ public sealed class RealStackToolApprovalTests
         }
     }
 
-    // Helpers
-
     private static IReadOnlyList<ToolApprovalRequestContent> ApprovalRequests(AgentResponse response) =>
         [.. response.Messages.SelectMany(m => m.Contents).OfType<ToolApprovalRequestContent>()];
 

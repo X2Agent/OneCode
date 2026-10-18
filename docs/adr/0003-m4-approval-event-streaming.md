@@ -69,7 +69,7 @@ R1 原型（2026-07-09）采用"双路径并行"策略：事件推送用于 UX �
 | `MainAgentRunner.cs` | `BuildChatOptions` 不再包装危险工具；该职责集中于 `AgentPipelineBuilder` 的 `ToolApprovalMarker` |
 | `TuiEventMapper.cs` | 新增 Main 路径 `ApprovalRequestEvent` → `TuiApprovalRequest` 映射，桥接 ResponseSource |
 | `OneCodeToplevel.Events.cs` | `DispatchEvent` 消费 `TuiApprovalRequest`，`HandleApprovalRequestAsync` 异步处理 |
-| `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 headless 工作模式实现无审批 UI 的只读策略（`workingMode: WorkingMode.Goal`） |
+| `CronJobExecutor.cs` | 移除 `canUseTool` + `ReadOnlyHandler`，改用 headless 无人值守模式实现无审批 UI（`workingMode: WorkingMode.Build` + `unattended: true`，审批通道置空） |
 | `QueryStreamEngine.cs` / `IConversationRunner.cs` / `QueryStreamService.cs` | 移除 `canUseTool` 参数；`ApprovalRequestEvent` 透传后移至 `StreamingSession.Digest`（`QueryStreamEngine` 消费） |
 | 原 `ServiceCollectionExtensions.Business.cs`（已解散，现位于各领域注册类，如 `src/OneCode.App/Services/Agent/AgentServiceCollectionExtensions.cs`） | 移除 `IApprovalUi` DI 注册 |
 | `PipelineSecurityContext` / `AgentPipelineOptionsFactory` | 移除 `ApprovalUi` 字段 |
@@ -81,16 +81,15 @@ R1 原型（2026-07-09）采用"双路径并行"策略：事件推送用于 UX �
 1. **所有路径统一事件驱动**：Main 路径（流式 + 非流式）通过事件推送审批请求，无同步阻塞调用
 2. **事件即决策通道**：TUI 必须通过 `ResponseSource` 回传决策，否则审批无法完成——Main 路径经 `IApprovalBroker`（`MainAgentRunner` 构造 `ApprovalBroker.ForQuery(...)`，`HandleToolApprovalAsync` 调 `IApprovalBroker.RequestAsync`，见 `OneCode.Core/Permissions/IApprovalBroker.cs`）；**无固定超时**，仅依赖 `ct` 取消（对 UI 异常/内部取消 fail-closed Deny，对调用方取消选择传播）
 3. **ResponseSource 一次性设置**：`TaskCompletionSource` 只能设置一次结果，重复设置会被忽略
-4. **Cron 路径无审批 UI**：headless cron 运行依赖 `WorkingMode.Goal` 在权限检查层直接 Deny 写入工具，不触发审批事件（Plan 会进入持久化 AwaitingApproval，不适合无人值守）
+4. **Cron 路径无审批 UI**：headless cron 以 `WorkingMode.Build` + `unattended: true` 运行，审批通道置空（`SuppressToolApproval`），因此不触发审批事件；工具是否允许由权限检查层决定
 5. **危险工具判别为运行时分类**：`ToolNames.FileWriteTools` / `ReadOnlyTools` + `IsReadOnlyShell` / `IsDestructiveShell` 分类器 + `AutoAllowFileWriteAndShell`，标记经 `ToolApprovalMarker` 在管道构建期完成；只读工具不在危险集合
 
 ## 测试
 
-5 个 M4 单测覆盖：
+`MafM4ApprovalEventTests` 的 3 个用例覆盖：
 - 事件映射正确性（`ApprovalRequestEvent` → `TuiApprovalRequest`）
 - 回调桥接（AllowAlways / Deny 决策回传）
 - 异常传播（TUI 设置异常 → 原始事件收到异常）
-- 初始状态验证（ResponseSource 初始化为未完成）
 
 全量 1468 测试通过，0 回归（较 R1 原型减少 1 个，因合并了 `BuildChatOptions` 的两个冗余测试为单个）。
 

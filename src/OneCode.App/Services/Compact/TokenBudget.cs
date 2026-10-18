@@ -45,21 +45,23 @@ public static class TokenBudget
     }
 
     /// <summary>
-    /// 输出预留：仅本地 Ollama 按窗口比例收敛（与 <c>CompactionStrategyFactory</c> 同一规则），
-    /// 其余 provider 保持固定 <see cref="ReservedOutputTokens"/>。
-    /// <paramref name="modelManager"/> 缺失时无从判断 provider，按云端规则处理。
+    /// 输出预留：仅本地 Ollama 按窗口比例收敛（与 <c>CompactionStrategyFactory</c> 共用同一规则），
+    /// 其余 provider 保持固定 <paramref name="desired"/>。
+    /// <paramref name="modelInfo"/> 缺失时无从判断 provider，按云端规则处理。
     /// </summary>
-    private static int ResolveOutputReservation(string? model, IModelManager? modelManager, int contextWindow)
-    {
-        var isLocalOllama = string.Equals(
-            modelManager?.Resolve(model)?.ProviderId,
+    public static int ResolveOutputReservation(ModelInfo? modelInfo, int contextWindow, int desired = ReservedOutputTokens)
+        => IsLocalOllama(modelInfo)
+            ? ModelContextDefaults.ResolveOutputReservation(contextWindow, desired)
+            : desired;
+
+    public static bool IsLocalOllama(ModelInfo? modelInfo)
+        => string.Equals(
+            modelInfo?.ProviderId,
             CoreConstants.ModelProviders.Ollama,
             StringComparison.OrdinalIgnoreCase);
 
-        return isLocalOllama
-            ? ModelContextDefaults.ResolveOutputReservation(contextWindow, ReservedOutputTokens)
-            : ReservedOutputTokens;
-    }
+    private static int ResolveOutputReservation(string? model, IModelManager? modelManager, int contextWindow)
+        => ResolveOutputReservation(modelManager?.Resolve(model), contextWindow, ReservedOutputTokens);
 
     private static int EstimateMessageTokens(Message message, ITokenEstimator tokenEstimator) => message switch
     {

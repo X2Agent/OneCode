@@ -22,13 +22,12 @@ public sealed class ChatBlockRenderersTests
     }
 
     [Fact]
-    public void RenderBuildRunPanel_Planning_HidesInternalStateAndQuestions()
+    public void RenderBuildRunPanel_Planned_HidesInternalState()
     {
         var state = new TuiBuildRunState(
             new OneCode.Core.Build.BuildRunId("br-1"),
-            OneCode.Core.Build.BuildRunState.Planning,
+            OneCode.Core.Build.BuildRunState.Planned,
             4,
-            ["明确目标", "确认验收"],
             0,
             1,
             TerminalReason: null);
@@ -39,9 +38,7 @@ public sealed class ChatBlockRenderersTests
         lines.Should().ContainSingle();
         text.Should().Contain("正在准备执行");
         text.Should().NotContain("br-1");
-        text.Contains("Planning", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
-        text.Should().NotContain("明确目标");
-        text.Should().NotContain("确认验收");
+        text.Contains("Planned", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
     }
 
     [Theory]
@@ -58,7 +55,6 @@ public sealed class ChatBlockRenderersTests
             new OneCode.Core.Build.BuildRunId("br-1"),
             state,
             5,
-            [],
             1,
             1,
             OneCode.Core.Workflows.RunTerminalReason.AgentException,
@@ -76,7 +72,6 @@ public sealed class ChatBlockRenderersTests
             new OneCode.Core.Build.BuildRunId("br-dag"),
             OneCode.Core.Build.BuildRunState.Implementing,
             8,
-            [],
             CompletedTasks: 2,
             TotalTasks: 5,
             ActiveTasks: 1,
@@ -95,7 +90,6 @@ public sealed class ChatBlockRenderersTests
             new OneCode.Core.Build.BuildRunId("br-replay"),
             OneCode.Core.Build.BuildRunState.Verifying,
             8,
-            [],
             2,
             3);
 
@@ -121,9 +115,8 @@ public sealed class ChatBlockRenderersTests
             DateTimeOffset.Parse("2026-07-31T10:00:00+00:00", CultureInfo.InvariantCulture));
         var state = new TuiBuildRunState(
             new OneCode.Core.Build.BuildRunId("br-scope"),
-            OneCode.Core.Build.BuildRunState.Planning,
+            OneCode.Core.Build.BuildRunState.Planned,
             5,
-            [],
             Scope: scope);
 
         var lines = ChatBlockRenderers.RenderBuildRunPanel(state);
@@ -152,7 +145,6 @@ public sealed class ChatBlockRenderersTests
             new OneCode.Core.Build.BuildRunId("br-narrow"),
             OneCode.Core.Build.BuildRunState.Verifying,
             12,
-            [],
             2,
             3,
             Scope: scope,

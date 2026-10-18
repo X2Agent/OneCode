@@ -34,8 +34,8 @@ if defined ONECODE_VERSION (
     echo ▸ 指定版本: !VERSION!
 ) else (
     echo ▸ 正在检测最新版本...
-    :: 使用 PowerShell 获取 GitHub API；失败时必须中止，禁止静默回退到不存在的版本。
-    for /f "delims=" %%v in ('powershell -NoProfile -Command "$headers=@{'Accept'='application/vnd.github+json';'User-Agent'='onecode-installer';'X-GitHub-Api-Version'='2022-11-28'}; (Invoke-RestMethod -Uri 'https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/releases/latest' -Headers $headers -ErrorAction Stop).tag_name" 2^>nul') do set "VERSION=%%v"
+    :: 使用 PowerShell 获取 GitHub API（支持 GITHUB_TOKEN/GH_TOKEN），限流时回退到 /releases/latest 302 重定向解析。
+    for /f "delims=" %%v in ('powershell -NoProfile -Command "$headers=@{'Accept'='application/vnd.github+json';'User-Agent'='onecode-installer';'X-GitHub-Api-Version'='2022-11-28'}; $t=if($env:GITHUB_TOKEN){$env:GITHUB_TOKEN}elseif($env:GH_TOKEN){$env:GH_TOKEN}else{$null}; if($t){$headers['Authorization']='Bearer '+$t}; try { $v=(Invoke-RestMethod -Uri 'https://api.github.com/repos/%REPO_OWNER%/%REPO_NAME%/releases/latest' -Headers $headers -ErrorAction Stop).tag_name; if($v){$v; exit} } catch {}; $req=[System.Net.HttpWebRequest]::Create('https://github.com/%REPO_OWNER%/%REPO_NAME%/releases/latest'); $req.Method='HEAD'; $req.AllowAutoRedirect=$false; $req.UserAgent='onecode-installer'; try{$resp=[System.Net.HttpWebResponse]$req.GetResponse()}catch [System.Net.WebException]{$resp=[System.Net.HttpWebResponse]$_.Exception.Response}; if($resp -and $resp.Headers['Location'] -match '/releases/tag/([^/?#]+)'){ $Matches[1] }" 2^>nul') do set "VERSION=%%v"
     if not defined VERSION (
         echo ✗ 无法获取 %REPO_OWNER%/%REPO_NAME% 的最新 Release!
         exit /b 1

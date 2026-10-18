@@ -232,36 +232,12 @@ public sealed class CreatePlanTool(
 }
 
 /// <summary>
-/// Scans plan content for forbidden patterns. Retained as a defense-in-depth utility.
-///
-/// <para>
-/// 两层防御机制：
-/// </para>
-/// <list type="number">
-///   <item>
-///     <b>机制级防御（新增）</b>：从 plan markdown 中提取 <c>```sh</c> / <c>```bash</c> /
-///     <c>```shell</c> / <c>```ps1</c> code block 中的命令，逐条用
-///     <see cref="OneCode.Core.Permissions.DangerousCommandPatterns.Layer0HardDeny"/>
-///     检查。比纯正则更结构化——即使 LLM 用变量拼接、间接调用等方式在 markdown 中
-///     写入危险命令，只要 code block 中的命令文本匹配 Layer0 模式就会被拦截。
-///   </item>
-///   <item>
-///     <b>正则文本扫描（保留）</b>：扫描 plan 全文中的破坏性命令短语、权限提升请求、
-///     prompt injection 指标。模式来源为 <see cref="DangerousCommandPatterns.Layer0HardDeny"/>
-///     （单一事实源，消除重复维护）+ 特权/注入专用模式（文本语义，非命令）。
-///   </item>
-/// </list>
-///
-/// <para>
-/// Catches prompt-injected plans that try to:
-/// - execute destructive shell commands (rm -rf /, git push --force, curl|sh)
-/// - disable safety invariants or switch to BypassPermissions/Yolo
-/// - instruct the agent to ignore previous instructions or auto-approve
-/// </para>
-///
-/// This does NOT replace the safety invariants (which still run on every tool
-/// call after exit). Its purpose is to block the privilege-escalation path where
-/// a prompt-injected LLM writes a malicious plan and auto-exits Plan mode.
+/// Scans plan content for forbidden patterns before Plan mode exits.
+/// Two layers: commands extracted from fenced <c>sh</c>/<c>bash</c>/<c>ps1</c> blocks are checked
+/// against <see cref="OneCode.Core.Permissions.DangerousCommandPatterns.Layer0HardDeny"/>, and a regex
+/// sweep covers destructive phrasing, privilege-escalation requests and prompt-injection markers.
+/// Blocks the path where an injected model writes a malicious plan and auto-exits Plan mode; it does not
+/// replace the per-tool safety invariants that still run after exit.
 /// </summary>
 internal static partial class PlanContentSafetyScanner
 {
@@ -380,46 +356,11 @@ internal static partial class PlanContentSafetyScanner
 internal sealed record PlanScanResult(bool IsSuspicious, IReadOnlyList<string> MatchedPatterns);
 
 /// <summary>
-/// 机制级质量门槛——SubmitPlan 时强制校验 plan 内容质量。
-///
-/// <para>
-/// plan.prompt 的 Phase 4（定稿并提交）指令是"指令级防御"（软约束），
-/// LLM 可能被 injection 误导或误判阶段，在未完成 Phase 1-3 调研时提前退出。
-/// 本类提供"机制级防御"（硬约束）：退出前强制校验 plan 内容满足最低质量门槛，
-/// 不满足则拒绝退出并返回具体的失败原因，指导 LLM 补充。
-/// </para>
-///
-/// <para>
-/// 三项检查（全部通过才允许退出）：
-/// <list type="bullet">
-///   <item><b>最小长度</b>：plan 内容 ≥ 100 字符。防止"空 plan 退出"。</item>
-///   <item><b>结构完整性</b>：至少一个 markdown 标题（<c>#</c>）。确保 plan 是结构化文档而非流水账。</item>
-///   <item><b>调研证据</b>（自适应，支持现有项目/Greenfield/混合场景）：
-///     <list type="bullet">
-///       <item><b>现有项目场景</b>：引用至少一个文件路径（<c>src/</c>、<c>.cs</c>、<c>.py</c> 等）或包含 code block。</item>
-///       <item><b>新项目/Greenfield 场景</b>：引用技术栈关键词（React/Vue/Django/Spring/.NET 等）。
-///         架构决策关键词（项目结构/架构设计等）作为补充证据但不强制——技术栈选择本身就暗示了架构决策。</item>
-///     </list>
-///   </item>
-/// </list>
-/// </para>
-///
-/// <para>
-/// <b>关于硬编码正则的设计权衡</b>：
-/// <list type="bullet">
-///   <item><b>为何硬编码</b>：这是机制级安全防御，不应因配置缺失或配置错误而失效。
-///     硬编码保证了零配置开箱即用，且模式集中管理、易于审计。</item>
-///   <item><b>已知局限</b>：无法覆盖所有技术栈/语言/命名约定。当前模式覆盖了主流场景，
-///     对于边缘场景（如内部私有框架、非主流语言）可能误拒。</item>
-///   <item><b>未来演进</b>：若需配置化，可通过 <c>IOptions&lt;PlanQualityGateOptions&gt;</c> 注入额外模式，
-///     但默认模式必须保留（作为不可绕过的底线）。配置只能"增加"模式，不能"减少"。</item>
-/// </list>
-/// </para>
-///
-/// <para>
-/// 设计权衡：质量门槛不检查"plan 内容是否正确"（那是用户审批环节的职责），
-/// 只检查"plan 内容是否具备最低结构化质量"。这避免了过度 restrictive 导致合理 plan 被拒。
-/// </para>
+/// SubmitPlan 的机制级质量门槛：拒绝缺少最低结构的 plan，弥补 prompt 指令可被 injection 绕过的问题。
+/// 三项检查全部通过才允许退出——最小长度、至少一个 markdown 标题、调研证据
+/// （现有项目看文件路径或 code block，新项目看技术栈关键词）。
+/// 模式硬编码，避免配置缺失导致门槛失效；代价是对非主流技术栈可能误拒。
+/// 本类不判断 plan 内容是否正确，那属于用户审批环节。
 /// </summary>
 internal static partial class PlanContentQualityGate
 {

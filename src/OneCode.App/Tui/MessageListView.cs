@@ -12,13 +12,10 @@ public sealed partial class MessageListView : View
     private readonly List<LineEntry> _lines = new();
     private readonly OneCode.Core.IO.IClipboardService? _clipboard;
     private readonly ScrollState _scroll;
+    private readonly ScrollBarController _scrollBar;
     private readonly IApplication? _app;
     private int _toolDetailLayoutWidth;
     private int _streamingPreviewStart = -1;
-    /// <summary>滚动条拖动进行中：Grab 后所有鼠标事件路由到本视图。</summary>
-    private bool _scrollBarDragging;
-    /// <summary>按下点相对拇指顶部的偏移（行）——拖动时保持抓取点不跳动。</summary>
-    private int _scrollBarGrabOffset;
 
     public int TotalLines => _lines.Count;
     public IReadOnlyList<string> RenderedLines => _lines.Select(static l => l.Text).ToArray();
@@ -76,6 +73,11 @@ public sealed partial class MessageListView : View
             () => Viewport.Height,
             () => _lines.Count,
             onNeedsDraw: () => SetNeedsDraw());
+        _scrollBar = new ScrollBarController(
+            _scroll,
+            _app,
+            () => _lines.Count,
+            () => Viewport.Height);
         CanFocus = false;
         TabStop = TabBehavior.NoStop;
         Width = Dim.Fill();
@@ -476,16 +478,15 @@ public sealed partial class MessageListView : View
     protected override bool OnMouseEvent(Mouse mouse)
     {
         // 滚动条拖动中：Grab 后事件持续到达（坐标可能已在视口外），松开时结束。
-        if (_scrollBarDragging)
+        if (_scrollBar.IsDragging)
         {
             if (mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased))
             {
-                _scrollBarDragging = false;
-                _app?.Mouse?.UngrabMouse();
+                _scrollBar.EndDrag();
                 return true;
             }
             if (mouse.Position is { } dragPos)
-                ApplyScrollBarDrag(dragPos.Y);
+                _scrollBar.ApplyDrag(dragPos.Y);
             return true;
         }
 
@@ -494,7 +495,7 @@ public sealed partial class MessageListView : View
             && pos.X == Viewport.Width - 1
             && mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed))
         {
-            BeginScrollBarDrag(pos.Y);
+            _scrollBar.BeginDrag(this, pos.Y);
             return true;
         }
 
@@ -510,12 +511,18 @@ public sealed partial class MessageListView : View
             return true;
         }
 
-        // Tool line click-to-expand/collapse
-        if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+        // Tool / thinking / error line click-to-expand/collapse, or code block header click-to-copy
+        if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) && mouse.Position is { } clickPos)
         {
-            var clickedLineIdx = mouse.Position.Value.Y + _scroll.ScrollOffset;
+            var clickedLineIdx = clickPos.Y + _scroll.ScrollOffset;
             if (clickedLineIdx >= 0 && clickedLineIdx < _lines.Count)
             {
+                if (_lines[clickedLineIdx].Tag is CodeBlockCopyTag copyTag)
+                {
+                    if (_clipboard is not null)
+                        _ = _clipboard.TryCopyTextAsync(copyTag.CodeContent);
+                    return true;
+                }
                 if (_lines[clickedLineIdx].Tag is ToolLineTag tag)
                 {
                     ToggleToolExpansion(clickedLineIdx, tag);
@@ -538,61 +545,13 @@ public sealed partial class MessageListView : View
     }
 
     /// <summary>
-    /// 在滚动条列按下：拇指上原地抓取；轨道上点击即跳转（拇指中心对准点击行）
-    /// 并以该位置为拖动起点。
-    /// </summary>
-    private void BeginScrollBarDrag(int pressY)
-    {
-        var (thumbSize, thumbPos) = ComputeScrollBarGeometry(_lines.Count, Viewport.Height, _scroll.ScrollOffset);
-        if (thumbSize == 0)
-            return;
-
-        _scrollBarGrabOffset = pressY >= thumbPos && pressY < thumbPos + thumbSize
-            ? pressY - thumbPos
-            : thumbSize / 2;
-        if (pressY < thumbPos || pressY >= thumbPos + thumbSize)
-            ApplyScrollBarDrag(pressY);
-
-        _scrollBarDragging = true;
-        _app?.Mouse?.GrabMouse(this);
-    }
-
-    private void ApplyScrollBarDrag(int dragY)
-    {
-        var viewport = Viewport;
-        var (thumbSize, _) = ComputeScrollBarGeometry(_lines.Count, viewport.Height, _scroll.ScrollOffset);
-        if (thumbSize == 0)
-            return;
-
-        var thumbTop = dragY - _scrollBarGrabOffset;
-        _scroll.ScrollToOffset(ScrollOffsetFromThumbTop(thumbTop, thumbSize, viewport.Height, _lines.Count));
-    }
-
-    /// <summary>
-    /// 滚动条几何：拇指尺寸与顶部行。纯函数——绘制（<see cref="MessageListView.Rendering.DrawScrollIndicator"/>）
-    /// 与拖动命中判断共用同一份计算，两边不会漂移。无滚动需求（内容不超视口）时 thumbSize 为 0。
+    /// 滚动条几何：拇指尺寸与顶部行。纯函数——绘制与拖动命中判断共用同一份计算。
     /// </summary>
     internal static (int ThumbSize, int ThumbPos) ComputeScrollBarGeometry(
         int lineCount, int viewportHeight, int scrollOffset)
-    {
-        if (lineCount <= 0 || viewportHeight <= 0 || lineCount <= viewportHeight)
-            return (0, 0);
-
-        var thumbSize = Math.Max(1, viewportHeight * viewportHeight / lineCount);
-        var scrollRange = lineCount - viewportHeight;
-        var thumbPos = (int)((float)scrollOffset / scrollRange * (viewportHeight - thumbSize));
-        return (thumbSize, Math.Clamp(thumbPos, 0, viewportHeight - thumbSize));
-    }
+        => ScrollBarController.ComputeGeometry(lineCount, viewportHeight, scrollOffset);
 
     /// <summary>拇指顶部行 → 滚动偏移（拖动的反算）。纯函数。</summary>
     internal static int ScrollOffsetFromThumbTop(int thumbTop, int thumbSize, int viewportHeight, int lineCount)
-    {
-        if (lineCount <= viewportHeight || viewportHeight <= 0)
-            return 0;
-        var scrollRange = lineCount - viewportHeight;
-        var trackRange = viewportHeight - thumbSize;
-        if (trackRange <= 0)
-            return 0;
-        return Math.Clamp((int)Math.Round((float)thumbTop / trackRange * scrollRange), 0, scrollRange);
-    }
+        => ScrollBarController.ScrollOffsetFromThumbTop(thumbTop, thumbSize, viewportHeight, lineCount);
 }

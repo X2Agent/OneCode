@@ -9,7 +9,7 @@
 **所在层**：`OneCode.Infrastructure.Agent.CompactionPipelineBuilder`（产品策略由 App 层 `CompactionStrategyFactory` 构建，经 `HarnessAgentOptions.CompactionStrategy` 交给 Harness 挂载唯一 provider）
 **注入方式**：由 Harness 在 `HarnessAgent.BuildInnerAgent` 中经 `AsBuilder().UseAIContextProviders(CompactionProvider)` 注入到 ChatClient 管道，而非 agent-level context provider。产品侧不自行构建 provider——两处各挂一份会让同一次模型调用被压缩两次。
 **持久化**：压缩状态自动持久化在 `AgentSession.StateBag` 中，由 `AgentSessionPersistence` 的 mafSession 持久化机制携带，支持跨进程恢复。
-**生效范围**：一个会话里压缩只在**第一次服务调用**上执行，之后跳过，直到历史发生结构性改动。`HarnessAgent` 强制 `RequirePerServiceCallChatHistoryPersistence = true`，该装饰器在框架自管历史的路径上把哨兵值 `_agent_local_chat_history` 写入 `ChatClientAgentSession.ConversationId`；`CompactionProvider` 把「`ConversationId` 非空」解读为「历史由远端服务托管」并整个跳过压缩。`ConversationId` 的 setter 是 internal 且拒绝空值，产品侧无法在内存里复位，只能从持久化快照剔除：`MafSessionInvalidator` 在 `/compact`（full / partial）与 `/checkpoint restore` 后定向剔除哨兵，因此**每次结构性历史改动都会重新武装一次压缩**。这是框架现状而非产品可配置项，由 [`HarnessCompactionActivationTests`](../../src/OneCode.Tests/HarnessCompactionActivationTests.cs)（框架行为）与 [`MafSessionInvalidatorTests`](../../src/OneCode.Tests/MafSessionInvalidatorTests.cs)（剔除定向性）守卫。因此长会话的上下文控制实际由两条腿承担：首次调用的压缩 + 0.70 告警提示用户执行 `/compact`。
+**生效范围**：会话内的**每次服务调用前**，`CompactionProvider` 均会在 ChatClient 管道中对本地会话历史执行压缩评估（由 [`HarnessCompactionActivationTests`](../src/OneCode.Tests/HarnessCompactionActivationTests.cs) 守卫）。当会话历史发生结构性改动（显式 `/compact` full/partial 或 `/checkpoint restore`）时，`MafSessionInvalidator` 会从持久化的 `mafSession` 快照中定向剔除旧会话历史与 `_agent_local_chat_history` 哨兵（保留 Todo、FileMemory 等非历史状态），使下一轮运行从裁剪后的产品历史重新播种（由 [`MafSessionInvalidatorTests`](../src/OneCode.Tests/MafSessionInvalidatorTests.cs) 守卫）。
 
 ### 阈值计算
 
@@ -21,9 +21,10 @@
 | 配置方法 | 角色 | ToolResult 折叠 | LLM 摘要 | 截断兜底 |
 |----------|------|----------------|----------|----------|
 | `BuildForMainAgent` | 主 Agent | 0.50 | 0.70 | 0.85 |
-| `BuildForWorkerAgent` | Worker / Forked 子 Agent | 0.40 | 0.60 | 0.80 |
+| `BuildForWorkerAgent` | Worker / 通用子 Agent | 0.40 | 0.60 | 0.80 |
+| `BuildForWorkerAgent`（`readOnlyResearch: true`） | Explore / Plan 只读研究子 Agent | `min(0.40 × inputBudget, 40,000)` | `min(0.60 × inputBudget, 80,000)` | `min(0.80 × inputBudget, 120,000)` |
 
-- Worker 阈值更激进：子 Agent 上下文更短、生命周期更短。
+- Worker 阈值更激进：子 Agent 上下文更短、生命周期更短；只读研究子 Agent（`Explore` / `Plan`）额外叠加 `40K / 80K / 120K` 绝对 token 上限，在大窗模型下提前折叠大文件读取与搜索输出。
 - 模型上下文窗口与最大输出 token 由 `CompactionStrategyFactory` 从 `IModelManager` 解析（主 Agent 输出上限缺省 8,192，Worker 缺省 4,096，可被 `maxOutputTokensOverride` 覆盖）。
   窗口按守卫式读取：`0` 视作「未解析出窗口」，回落到 catalog / 128,000 默认值，不会作为有效窗口传给严格校验。
 - 输出预留仅对**本地 Ollama** 收敛为 `min(缺省值, 窗口 / 4)`：本地小窗口（4K~8K）装不下固定 8,192，而预留 ≥ 窗口会被装配校验直接拒绝。窗口 ≥ 32,768 时结果与固定预留一致；其余 provider 保持原值，云端预算不受影响。
@@ -65,8 +66,8 @@
 | 维度 | MAF in-pipeline（CompactionProvider） | App 层（AutoCompactService） |
 |------|---------------------------------------|------------------------------|
 | 所在层 | Infrastructure / App（Builder） | App |
-| 触发时机 | 会话第一次服务调用（pipeline 中，`CompactionProvider` 在模型调用前执行）；此后因哨兵值被写入 `ConversationId` 而跳过，直到结构性历史改动（`/compact`、`/checkpoint restore`）剔除哨兵后重新武装 | agent turn 结束后 |
-| 触发阈值 | 按上下文窗口比例（Main 0.5/0.7/0.85，Worker 0.4/0.6/0.8，逐层按剩余 groups 重算，严格 `>`） | 0.70 历史规模告警（不压缩） |
+| 触发时机 | 每次服务调用前（ChatClient 管道内由 `CompactionProvider` 执行）；结构性历史改动（`/compact`、`/checkpoint restore`）由 `MafSessionInvalidator` 剔除旧状态以重新播种 | agent turn 结束后 |
+| 触发阈值 | 按上下文窗口比例（Main 0.5/0.7/0.85，Worker 0.4/0.6/0.8，只读研究子代理叠加 40K/80K/120K 上限，逐层按剩余 groups 重算，严格 `>`） | 0.70 历史规模告警（不压缩） |
 | 是否调用 LLM | L2 Summarization 调用 | 否 |
 | 用户感知 | 无（静默压缩） | 0.70 时提示执行 `/compact`（历史规模提示，非模型输入口径） |
 | 配置 | 零配置（比例自适应） | 零配置 |

@@ -82,13 +82,12 @@ public sealed partial class OneCodeToplevel : Window
         var keyResolver = ctx.KeyResolver ?? new KeybindingResolver();
         keyResolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
         var keyContextManager = ctx.KeyContextManager ?? new KeybindingContextManager();
-        var toolNameProvider = ctx.GetToolNames ?? (() => []);
 
         _shell = new ReplShell(
             new ReplShellEnvironment(app, ctx.GetModel(), ctx.Clipboard, ctx.GitHelper),
             modeController,
             new ReplShellKeyServices(keyResolver, keyContextManager),
-            new ReplShellInputSources(ctx.SlashCommands, toolNameProvider, ctx.GetSessionUserPrompts, ctx.GetSessionCandidates));
+            new ReplShellInputSources(ctx.SlashCommands, ctx.GetSessionUserPrompts, ctx.GetSessionCandidates));
         _transcriptPresenter = new TranscriptEventPresenter(_shell.Transcript);
         _shell.ChatInput.Submitted += OnUserSubmitted;
         _shell.ChatInput.QuitRequested += OnQuitRequested;

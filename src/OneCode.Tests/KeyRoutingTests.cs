@@ -453,6 +453,6 @@ public sealed class KeyRoutingTests
             new ReplShellEnvironment(app, "test-model"),
             new WorkingModeController(),
             new ReplShellKeyServices(resolver, keyContextManager),
-            new ReplShellInputSources([], () => []));
+            new ReplShellInputSources([]));
     }
 }

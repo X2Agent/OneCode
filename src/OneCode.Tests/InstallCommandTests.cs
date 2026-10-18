@@ -322,8 +322,6 @@ public sealed class InstallCommandTests : IDisposable
         root.Should().Be(Path.Combine(expectedParent, ".onecode", "skills"));
     }
 
-    // Helpers
-
     /// <summary>
     /// Creates an InstallCommand with a no-op IGitHelper. Suitable for local-directory
     /// tests that never trigger a git clone.

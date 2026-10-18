@@ -43,27 +43,50 @@ detect_platform() {
 # ── 获取最新版本 ──────────────────────────────────────────────────
 get_latest_version() {
     local api_url="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-    local response version
+    local latest_url="${GITHUB_BASE}/releases/latest"
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    local response="" version="" effective_url=""
 
     if command -v curl &>/dev/null; then
+        local auth_args=()
+        if [ -n "$token" ]; then
+            auth_args=(-H "Authorization: Bearer ${token}")
+        fi
         response=$(curl -fsSL \
             -H "Accept: application/vnd.github+json" \
             -H "User-Agent: onecode-installer" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$api_url")
+            "${auth_args[@]}" \
+            "$api_url" 2>/dev/null || true)
     elif command -v wget &>/dev/null; then
+        local auth_args=()
+        if [ -n "$token" ]; then
+            auth_args=(--header="Authorization: Bearer ${token}")
+        fi
         response=$(wget -qO- \
             --header="Accept: application/vnd.github+json" \
             --header="User-Agent: onecode-installer" \
             --header="X-GitHub-Api-Version: 2022-11-28" \
-            "$api_url")
+            "${auth_args[@]}" \
+            "$api_url" 2>/dev/null || true)
     else
         err "需要 curl 或 wget"; exit 1
     fi
 
     version=$(printf '%s' "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+
+    # 回退方案：当匿名 API 触发 403 限流时，通过 /releases/latest 302 重定向 URL 解析最新 tag
     if [ -z "$version" ]; then
-        err "GitHub latest release 响应不包含 tag_name: ${REPO_OWNER}/${REPO_NAME}"
+        if command -v curl &>/dev/null; then
+            effective_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+        elif command -v wget &>/dev/null; then
+            effective_url=$(wget -S --spider "$latest_url" 2>&1 | sed -n 's/.*Location:[[:space:]]*\([^[:space:]]*\).*/\1/p' | tail -n 1)
+        fi
+        version=$(printf '%s' "$effective_url" | sed -n 's#.*/releases/tag/\([^/?#]*\).*#\1#p' | head -n 1)
+    fi
+
+    if [ -z "$version" ]; then
+        err "无法获取 ${REPO_OWNER}/${REPO_NAME} 的最新 Release 版本（API 与重定向回退均失败）"
         exit 1
     fi
 

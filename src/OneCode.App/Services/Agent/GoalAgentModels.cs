@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using OneCode.Core.Goals;
-using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
@@ -9,10 +8,8 @@ namespace OneCode.App.Services.Agent;
 /// </summary>
 public sealed record GoalRunOptions
 {
-    /// <summary>用户输入的高层目标。</summary>
     public required string Goal { get; init; }
 
-    /// <summary>工作目录。</summary>
     public required string WorkingDirectory { get; init; }
 
     /// <summary>
@@ -28,12 +25,6 @@ public sealed record GoalRunOptions
 
     /// <summary>可用工具列表。</summary>
     public required IList<AITool> Tools { get; init; }
-
-    /// <summary>
-    /// 共享编辑事务（可选）。所有子目标共用同一事务，失败时由调用方决定是否回滚。
-    /// 默认 null 时由 Goal 工作流 Runtime 为每个子目标创建独立事务。
-    /// </summary>
-    public EditTransaction? SharedTransaction { get; init; }
 
     /// <summary>
     /// 编排事件回调。当设置时，子目标执行期间的工具调用（ToolStart/ToolDone）
@@ -75,13 +66,11 @@ public sealed record GoalItem
     /// <summary>子目标序号（从 1 开始）。</summary>
     public int Id { get; init; }
 
-    /// <summary>子目标描述（做什么）。</summary>
     public string Description { get; set; } = "";
 
     /// <summary>成功标准（如何量化验证）。</summary>
     public string SuccessCriteria { get; set; } = "";
 
-    /// <summary>当前状态。</summary>
     public GoalStatus Status { get; set; } = GoalStatus.Pending;
 
     /// <summary>
@@ -133,19 +122,10 @@ public sealed record GoalItem
 /// </summary>
 public enum GoalStatus
 {
-    /// <summary>等待执行。</summary>
     Pending,
-
-    /// <summary>正在执行。</summary>
     InProgress,
-
-    /// <summary>已完成。</summary>
     Completed,
-
-    /// <summary>已失败。</summary>
     Failed,
-
-    /// <summary>已跳过（前置条件不满足或策略性跳过）。</summary>
     Skipped,
 }
 

@@ -92,7 +92,8 @@
 | Alt | `alt` / `opt` / `option` | `alt+enter` |
 | Shift | `shift` | `shift+tab` |
 | Meta | `meta` | `meta+p` |
-| Cmd/Super | `cmd` / `command` / `super` / `win` | `cmd+shift+f` |
+| Cmd/Super | `cmd` / `command` / `super` / `win` | `cmd+shift+f`（解析器接受，但 Terminal.Gui 不暴露 Super，绑定不会命中） |
+| Ctrl（别名） | `control` | `control+k` |
 
 | 特殊键 | 写法 |
 |---|---|
@@ -105,6 +106,7 @@
 | 方向键 | `up` / `down` / `left` / `right` |
 | 翻页 | `pageup` / `pagedown` / `pgup` / `pgdn` |
 | Home/End | `home` / `end` |
+| 其它别名 | `ins`（Insert）、`wheelup` / `wheeldown`、箭头字形 `↑` `↓` `←` `→` |
 
 ---
 
@@ -119,6 +121,7 @@
 | `Autocomplete` | 自动补全菜单可见时（由输入视图 push/pop） |
 | `Diff` | Diff 审查视图聚焦时（解析时并入活跃集合） |
 | `Selector` | 内联选择器（权限提示 / Plan 审批）接管键盘时 |
+| `Search` | 会话内搜索条激活时（`Ctrl+F` 打开，`Esc` 退出） |
 
 ---
 
@@ -141,7 +144,7 @@
 
 | 快捷键 | 动作 | 说明 |
 |---|---|---|
-| `Escape` | `chat:cancel` | 模型响应时中断 agent；空闲时无操作 |
+| `Escape` | `chat:cancel` | 模型响应时中断 agent；空闲且输入框非空时清空输入文本；空闲且输入为空时无操作 |
 | `Enter` | `chat:submit` | 提交消息 |
 | `Up` | `history:previous` | 上一条历史输入 |
 | `Down` | `history:next` | 下一条历史输入 |
@@ -154,8 +157,22 @@
 | `PageUp` | `chat:pageUp` | 对话区向上翻页 |
 | `PageDown` | `chat:pageDown` | 对话区向下翻页 |
 | `Ctrl+Left` / `Ctrl+Right` | `chat:suggestionPrevious/Next` | 占位建议循环（占位符可见时） |
+| `Ctrl+E` | `chat:toggleLastDetails` | 展开或折叠最近一条详情块（工具/思考/错误） |
+| `Ctrl+F` | `chat:find` | 打开会话内搜索条 |
 | `Shift+PageUp` | `sidebar:pageUp` | 计划侧栏向上翻页（侧栏未显示时无操作） |
 | `Shift+PageDown` | `sidebar:pageDown` | 计划侧栏向下翻页 |
+| `Alt+Up` | `sidebar:scrollUp` | 计划侧栏向上微调滚动（行级，3行） |
+| `Alt+Down` | `sidebar:scrollDown` | 计划侧栏向下微调滚动（行级，3行） |
+
+### Search（会话内搜索）
+
+在聊天输入区按 `Ctrl+F` 进入行内搜索模式后生效：
+
+| 快捷键 | 动作 | 说明 |
+|---|---|---|
+| `Enter` | `chat:findNext` | 跳转到下一个搜索匹配项 |
+| `Shift+Enter` / `Alt+Enter` | `chat:findPrevious` | 跳转到上一个搜索匹配项 |
+| `Escape` | `chat:findDismiss` | 关闭搜索条、恢复原输入草稿并清除高亮 |
 
 ### Autocomplete（自动补全）
 
@@ -190,30 +207,19 @@
 
 ---
 
-## 保留行为
+## 保留行为（硬编码按键）
 
-以下按键行为不经 `KeybindingResolver`，由组件直接处理，无法通过配置文件重映射：
+以下按键行为不经 `KeybindingResolver`，由 TUI 组件直接处理，无法通过配置文件重映射：
 
 | 按键 | 行为 | 处理位置 | 保留原因 |
 |---|---|---|---|
 | `Esc` 关闭 Overlay | 关闭居中浮层（设置/恢复会话/Diff 详情等） | `OverlayHost.cs` | 关闭必须永远可用，不受重映射影响 |
 | `Tab`（空输入 + 占位建议） | 接受占位建议 | `ChatInputView.Keys.cs` | 行为依赖运行时状态（是否有建议），非单一动作 |
-| `Tab`（斜杠前缀，补全未激活） | 打开命令补全列表 | `ChatInputView.Keys.cs` | 同上（补全未激活时 `Autocomplete` 上下文不在场） |
+| `Tab`（斜杠前缀或末词含 `@`，补全未激活） | 打开斜杠命令补全或 `@` 文件路径补全列表 | `ChatInputView.Keys.cs` | 同上（补全未激活时 `Autocomplete` 上下文不在场；补全激活后由 `autocomplete:accept` 接管） |
+| `Tab`（其他状态） | 在空闲时切换工作模式（BUILD → PLAN → GOAL；agent run 活跃期间忽略） | `ChatInputView.Keys.cs` | 与补全/占位建议共享 `Tab` 键位的多路状态分支 |
 | `↑↓ PgUp PgDn Home End`（导航/Diff 视图聚焦时） | 原生滚动 | `MessageListView` / `DiffView` OnKeyDown 之前 | 滚动是视图基础能力；可交互跳转已由 diff:* 覆盖 |
 | `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch | 斜杠命令入口 |
 | `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch | 斜杠命令入口 |
-
----
-
-## 硬编码按键
-
-以下按键行为不经过 `KeybindingResolver`，由 TUI 组件直接处理，无法通过配置文件重映射：
-
-| 按键 | 行为 | 处理位置 |
-|---|---|---|
-| `Tab` | 空输入时接受占位建议；其他情况在空闲时切换工作模式（agent run 活跃期间不切换，按键被忽略；补全激活时 `Autocomplete` 上下文接管为 `autocomplete:accept`） | `ChatInputView.Keys.cs` |
-| `/find <keyword>` | 搜索会话 transcript 并跳转匹配 | `FindCommand` / TUI Dispatch |
-| `/diff` | 打开 Git 变更审查覆盖层（无参数时） | `DiffCommand` / TUI Dispatch |
 
 ---
 
@@ -227,7 +233,7 @@
 
 | 快捷键 | 原因 | 严重级别 |
 |---|---|---|
-| `Ctrl+D` | 保留为应用退出键（`app:exit`），任何上下文不得占用（含 Chat 翻页） | Error |
+| `Ctrl+D` | 默认绑定为应用退出（`app:exit`）。改绑不会被硬性阻止，但会产生 Error 级警告；设为 `null` 可解绑（代价是失去快捷退出） | Error |
 | `Ctrl+M` | 与 Enter 等价（终端均发送 CR），终端协议硬编码 | Error |
 
 ### 终端保留
@@ -337,7 +343,7 @@
 |---|---|---|
 | 修改后快捷键未生效 | JSON 格式错误 | 运行 `/keybindings list`，查看输出末尾的验证警告 |
 | 配置文件被忽略 | 缺少 `bindings` 数组 | 确保顶层有 `"bindings": [...]` |
-| 绑定到保留键无效 | 保留键被硬编码 | 查看上方「保留快捷键」章节 |
+| 绑定到保留键报警告 | 该键由终端或宿主硬编码，改绑可能不生效 | 查看上方「保留快捷键」章节；`Ctrl+D` 等键改绑只警告、不阻止 |
 | 和弦序列无响应 | 超过 1000ms 超时 | 连续按键时缩短间隔 |
 | Shift+Enter 无效 | 终端不支持 kitty 协议 | 使用 `Alt+Enter` 作为换行备用 |
 

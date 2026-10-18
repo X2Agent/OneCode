@@ -3,26 +3,12 @@ using Microsoft.Agents.AI;
 namespace OneCode.App.Services.Compact;
 
 /// <summary>
-/// 使 <c>mafSession</c> 中**与消息历史相关的状态**失效，避免双源分叉。
-/// 在 App 层任何结构性删除/清空消息后必须调用。
+/// 使 <c>mafSession</c> 中与消息历史相关的状态失效，避免会话转录与框架会话分叉。
+/// 任何结构性删除或清空消息后必须调用。
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>为什么不是整体删除。</b> <c>mafSession</c> 里除了消息历史，还装着与历史无关的 provider 状态
-/// （会话待办清单、工作记忆的 WorkingFolder 等）。整体删除会让这些状态在每次 compact 后丢失：
-/// 待办清单被清空、工作记忆目录指针被重置，而用户看到的对话历史只是被压缩，并没有重置会话。
-/// </para>
-/// <para>
-/// <b>为什么仍然需要失效。</b> 压缩索引与 InMemory 消息历史都按位置引用具体消息；
-/// 消息被替换后继续使用旧状态会让模型重新看到已被压缩掉的内容。因此这些键必须丢弃，
-/// 由 provider 在下次调用时按新历史重建。
-/// </para>
-/// <para>
-/// 失效范围不止 <c>stateBag</c>：会话**根**上的本地历史哨兵 <c>_agent_local_chat_history</c> 一并剔除。
-/// 哨兵是为旧历史写入的运行时簿记戳（让 <c>FunctionInvokingChatClient</c> 按服务托管语义清空迭代间累积历史），
-/// 结构性历史变更后丢弃，由 per-service-call 装饰器在恢复后的第一次服务调用重新打戳。
-/// 详见 <see cref="LocalHistorySentinel"/> 的说明。
-/// </para>
+/// 只丢弃按位置绑定消息的键；待办清单、工作记忆目录等与历史无关的 provider 状态必须跨 compact 存活。
+/// 会话根上的本地历史哨兵也一并剔除，由 per-service-call 装饰器在下次调用重新打戳。
 /// </remarks>
 public static class MafSessionInvalidator
 {
@@ -41,11 +27,9 @@ public static class MafSessionInvalidator
     ///   </description></item>
     ///   <item><description><c>InMemoryChatHistoryProvider</c> — MAF 默认内存历史的状态键。</description></item>
     ///   <item><description>
-    ///     <c>compaction</c> — 迁移前的压缩状态键。旧装配显式传 <c>"compaction"</c> 作为
-    ///     <c>CompactionProvider</c> 的 stateKey；改为由 Harness 挂载后键名变为策略类型名，
-    ///     旧键不再被任何 provider 读取。
-    ///     政策是一次性丢弃、按新历史重建，不做旧格式转换：旧值同样是按消息位置绑定的分组索引，
-    ///     跨装配版本转换没有可信的等价映射。留在快照里只会让每次保存携带一段永不使用的索引。
+    ///     <c>compaction</c> — 遗留压缩状态键，当前无写入方，仅用于失效时清除。
+    ///     其值是按消息位置绑定的分组索引，跨装配版本没有可信的等价映射，
+    ///     因此一次性丢弃、按新历史重建，不做格式转换。
     ///   </description></item>
     /// </list>
     /// 不在列表中的键（会话待办、工作记忆目录、工具审批的 standing rules）与消息位置无关，
@@ -60,8 +44,7 @@ public static class MafSessionInvalidator
     ];
 
     /// <summary>
-    /// 迁移前 <c>CompactionProvider</c> 的状态键（旧装配显式传入的固定字符串）。
-    /// 仅用于在失效时清除遗留状态，不再有写入方。
+    /// 遗留 <c>CompactionProvider</c> 状态键。仅用于在失效时清除，当前无写入方。
     /// </summary>
     private const string LegacyCompactionStateKey = "compaction";
 
@@ -79,13 +62,11 @@ public static class MafSessionInvalidator
     /// <c>HarnessAgent</c> 强制 per-service-call 历史持久化，该装饰器在第一次服务调用后把哨兵写入
     /// <c>ChatClientAgentSession.ConversationId</c>（序列化在会话**根**上，不在 <c>stateBag</c> 里）。
     /// </para>
-/// <para>
-/// <b>为什么失效时一并丢弃</b>：哨兵由旧历史的服务调用写入，属于随历史一起失效的运行时簿记状态；
-/// 结构性变更后丢弃，per-service-call 装饰器会在恢复后的第一次服务调用重新打戳，恢复会话与新建会话
-/// 行为对齐。MAF 1.24 起 <c>CompactionProvider</c> 已不因哨兵跳过压缩——升级前「保留哨兵会让 compact
-/// 后的会话永久失去自动压缩」是剔除的原始动机，现已解除。<c>ConversationId</c> 的 setter 是 internal
-/// 且拒绝空值，产品侧只能从持久化快照里剔除。
-/// </para>
+    /// <para>
+    /// <b>为什么失效时一并丢弃</b>：哨兵由旧历史的服务调用写入，属于随历史一起失效的运行时簿记状态；
+    /// 结构性变更后丢弃，per-service-call 装饰器会在恢复后的第一次服务调用重新打戳，恢复会话与新建会话
+    /// 行为对齐。<c>ConversationId</c> 的 setter 是 internal 且拒绝空值，产品侧只能从持久化快照里剔除。
+    /// </para>
     /// <para>
     /// 行为由 <c>HarnessCompactionActivationTests</c> 守卫（含「去掉装饰器后每次服务调用都压缩」的反证）。
     /// </para>

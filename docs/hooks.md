@@ -48,7 +48,7 @@ Hook 系统通过 `~/.onecode/hooks.json` 与 `<cwd>/.onecode/hooks.json` 声明
 2. **执行器策略模式**：每种 `HookType` 对应一个 `IHookExecutor` 实现，新增执行器只需实现接口 + DI 注册
 3. **拦截点 × Matcher 二维过滤**：拦截点决定何时触发，matcher 决定是否匹配（如 `tool_name == "Bash"`）
 4. **优先级串行执行**：同一拦截点下多个 hook 按 priority 升序串行执行，结果聚合
-5. **安全优先**：工作区不受信任或策略禁用时一律不触发；pre 类拦截点异常 fail-closed
+5. **安全优先**：工作区不受信任时一律不触发；pre 类拦截点异常 fail-closed
 6. **可观测可调试**：`/hooks` 命令实时展示注册项、策略状态与拦截点清单
 
 ### 2.2 Hook 的生命周期
@@ -210,12 +210,12 @@ OneCode 运行时
 
 | 拦截点 | 触发时机 | matcher 字段 | 可选值 | 可阻断 |
 |------|---------|-------------|--------|--------|
-| `input` | 外部输入进入 agent run 前（不写会话历史） | 无 matcher | — | ✅ deny |
+| `input` | 交互式输入进入 agent run 前（`StreamInteractiveAsync`，被阻断时不写会话历史） | 无 matcher | — | ✅ deny |
 | `pre_model_call` | 一次模型请求发送前 | `model_id`（glob） | 模型标识（如 `gpt-*` / `claude-*`） | ❌（纯审计） |
 | `post_model_call` | 一次模型完整响应返回后（工具调用执行前） | `model_id`（glob） | 同上 | ❌（纯审计） |
 | `pre_tool_call` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / `todos_*`（Harness 待办工具） / `mcp__*`（MCP 工具名为 `mcp__{server}__{tool}`）等 | ✅ deny |
 | `post_tool_call` | 工具调用成功或失败返回后 | `tool_name`（glob） | 同上 | ❌ |
-| `output` | 最终响应交付调用方前 | 无 matcher | — | ✅ deny |
+| `output` | 流式生成完毕、最终响应完成收尾前（不缓冲流式 token delta，deny 时发射 `ErrorEvent` 并以 `RunTerminalReason.Blocked` 终结本轮） | 无 matcher | — | ✅ deny |
 
 > **model 节点是纯审计语义**：`pre_model_call` / `post_model_call` 的裁决结果（含 exit code 2）被丢弃，
 > 不阻断、不改写模型调用——需要阻断的策略应挂在 `input` / `pre_tool_call` / `output`。
@@ -224,9 +224,9 @@ OneCode 运行时
 
 | 退出码 | 语义 | stdout / stderr 行为 |
 |--------|------|---------------------|
-| `0` | 成功 | stdout 为 JSON 则解析为 `HookResult`；非 JSON 作为 `Message` |
-| `2` | 阻断（deny） | stderr 显示给模型或用户，阻止后续操作 |
-| 其他 | 非阻断错误 | stderr 仅显示给用户，不阻止后续操作 |
+| `0` | 成功（或 JSON 显式阻断） | stdout 为 JSON 则解析为 `HookResult`（含 `blockingError` 时触发阻断，含 `additionalContext` 时在 `input` 节点并入本轮输入）；非 JSON 降级存入 `HookResult.Message`（仅作诊断载荷，不向 TUI 聊天流输出） |
+| `2` | 阻断（deny） | stderr 封装为 `BlockingError`，在 `input` / `pre_tool_call` / `output` 节点阻止后续操作并向模型或用户报错 |
+| 其他 | 非阻断错误 | stderr 记入 `HookResult.Message`（`Outcome = NonBlockingError`），不阻止后续操作，也不打断或污染 TUI 对话流 |
 
 **边界（刻意不做）**：
 
@@ -266,7 +266,7 @@ OneCode 运行时
 
 ```json
 {
-  "point": "PreToolCall",
+  "point": "pre_tool_call",
   "sessionId": "abc123",
   "cwd": "/home/user/project",
   "toolName": "Bash",
@@ -279,8 +279,8 @@ OneCode 运行时
 
 ```json
 {
-  "message": "展示给用户的消息",
-  "additionalContext": "注入到本轮输入的额外信息（仅 input 拦截点消费）"
+  "additionalContext": "注入到本轮输入的额外信息（仅 input 拦截点消费）",
+  "message": "可选诊断文本（仅保留在聚合结果中，不写入 TUI 对话流）"
 }
 ```
 
@@ -877,7 +877,7 @@ public class MyPlugin
 
 ### 9.3 Once Hook
 
-`once: true` 的 hook 执行一次后自动从 Registry 移除，适合"仅首次触发"的场景（如初始化提示）。
+`once: true` 的 hook 成功执行（`Success` 或 `Blocking`）后自动从 Registry 移除，适合"仅首次触发"的场景（如初始化提示）。异常、取消、执行器缺失视为未完成，保留待下次触发。
 
 ---
 

@@ -33,7 +33,6 @@ public static class EditGuardMiddleware
 
             var toolName = ctx.Function.Name;
 
-            // --- Pre: Edit requires an existing target file ---
             if (enforceEditTargetExists && ToolNames.IsFileEditTool(toolName))
             {
                 var parameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, toolName, logger);
@@ -68,7 +67,6 @@ public static class EditGuardMiddleware
 
             var result = await next(ctx, ct).ConfigureAwait(false);
 
-            // --- Post: verification (source edits threshold) ---
             if (verificationProvider is null)
                 return result;
 

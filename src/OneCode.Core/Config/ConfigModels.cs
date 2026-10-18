@@ -130,6 +130,7 @@ public static class SettingDescriptors
             ["nextPromptSuggesterEnabled"] = new("nextPromptSuggesterEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: true),
             ["notificationsEnabled"] = new("notificationsEnabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, BuiltInDefault: false),
             ["ollamaContextWindow"] = new("ollamaContextWindow", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 32_768),
+            ["ollama.temperature"] = new("ollama.temperature", ActivationMode.RestartRequired, ConfigValueKind.Double, BuiltInDefault: 0.15),
             ["streamIdleTimeoutSeconds"] = new("streamIdleTimeoutSeconds", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 180),
             ["streamMaxRetries"] = new("streamMaxRetries", ActivationMode.RestartRequired, ConfigValueKind.Int32, BuiltInDefault: 6),
             ["autodream.enabled"] = new("autodream.enabled", ActivationMode.NextOperation, ConfigValueKind.Boolean, EnvironmentVariable: "ONECODE_AUTODREAM", BuiltInDefault: true),

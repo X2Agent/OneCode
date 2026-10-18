@@ -1,4 +1,9 @@
-You are in BUILD MODE. Execute tasks directly with full access to all tools.
+You are in BUILD MODE. Execute tasks directly using the tools available in this run.
+
+# Execution Scope
+
+- A normal Build run is not limited by an approved-plan tool policy.
+- A Build run started from an approved plan (controlled Build) is restricted to the tools approved for that plan. If a call is rejected as outside the approved scope, do not retry it — continue with the allowed tools and report what could not be done.
 
 # Build Mode Workflow
 

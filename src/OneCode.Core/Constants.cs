@@ -13,8 +13,8 @@ public static class Constants
         public const string OneCodeWebSearchProvider = "ONECODE_WEB_SEARCH_PROVIDER";
         /// <summary>Worker 子代理标志：为 1/true 时表示为 Worker 进程。</summary>
         public const string IsWorker = "ONECODE_IS_WORKER";
-        /// <summary>覆盖上下文窗口上限（token 数，最终覆盖手段）。</summary>
-        public const string MaxContextTokens = "ONECODE_MAX_CONTEXT_TOKENS";
+        /// <summary>启用持久化 Cron 任务开关（为 true 时允许 --durable 落盘）。</summary>
+        public const string DurableCron = "ONECODE_DURABLE_CRON";
     }
 
     public static class ConfigKeys
@@ -44,6 +44,8 @@ public static class Constants
         public const string NextPromptSuggesterEnabled = "nextPromptSuggesterEnabled";
         public const string NotificationsEnabled = "notificationsEnabled";
         public const string OllamaContextWindow = "ollamaContextWindow";
+        /// <summary>Ollama 采样温度（默认 0.15，抑制小模型 tool-call JSON 幻觉；重启后生效）。</summary>
+        public const string OllamaTemperature = "ollama.temperature";
         /// <summary>流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即重试。</summary>
         public const string StreamIdleTimeoutSeconds = "streamIdleTimeoutSeconds";
         /// <summary>流式请求过载/停滞的最大重试次数；最坏反馈时长约为（次数+1）×空闲上限。</summary>
@@ -84,16 +86,5 @@ public static class Constants
         public const int SubAgentMaxTurnsDefault = 50;
         /// <summary>子代理墙钟超时默认分钟数（<c>agents.defaults.timeoutMinutes</c>）。</summary>
         public const int SubAgentTimeoutMinutesDefault = 10;
-    }
-
-    public static class PermissionModes
-    {
-        public const string Default = "default";
-    }
-
-
-    public static class MessageTypes
-    {
-        public const string Assistant = "assistant";
     }
 }

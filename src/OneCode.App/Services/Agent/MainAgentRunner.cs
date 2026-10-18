@@ -104,7 +104,7 @@ public partial class MainAgentRunner(
             "conversationId", options.ConversationId?.ToString() ?? string.Empty);
 
         var cwd = options.WorkingDirectory ?? Environment.CurrentDirectory;
-        // 共享事务：由调用方管理生命周期（GOAL 模式多子目标共用）。
+        // 外部传入事务：由调用方管理生命周期（如受控 Build attempt 或 Goal 子目标）。
         // 独立事务：本方法内部创建，成功时 commit，异常时 dispose 回滚。
         var ownsTransaction = options.SharedTransaction is null;
         var transaction = options.SharedTransaction ?? new EditTransaction(

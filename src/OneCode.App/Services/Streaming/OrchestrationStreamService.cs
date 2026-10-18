@@ -71,97 +71,22 @@ public sealed class OrchestrationStreamService(
                 + $"（分支 {workspace.WorktreeBranch}，基于 {workspace.TargetBranch}）");
         }
 
-        if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        await foreach (var evt in ExecuteGoalWorkflowStreamAsync(
+            goalRun,
+            session.SystemPrompt,
+            currentModelId,
+            systemPromptHash,
+            toolCapabilityHash,
+            serializerOptions,
+            tools,
+            budget,
+            originalWorkingDirectory,
+            effectiveWorktreeDir,
+            session,
+            imagePaths,
+            ct).ConfigureAwait(false))
         {
-            await session.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
-            yield return new TuiWorkingDirectoryChanged(effectiveWorktreeDir);
-        }
-
-        try
-        {
-            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-            });
-            var options = new GoalRunOptions
-            {
-                Goal = goalRun.Goal,
-                WorkingDirectory = effectiveWorktreeDir,
-                SystemPrompt = session.SystemPrompt,
-                ModelId = currentModelId,
-                Tools = tools,
-                MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
-                Budget = budget.ToGoalBudget(),
-                OrchestrationEventSink = orchEvt =>
-                {
-                    if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
-                        && mapped is not TuiTextDelta)
-                    {
-                        mergedChannel.Writer.TryWrite(mapped);
-                    }
-                },
-                ImagePaths = imagePaths,
-            };
-            var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
-                options,
-                mergedChannel.Writer,
-                static () => new EditTransaction(),
-                PromptOnBudgetExhausted: true));
-            var runTask = Task.Run(async () =>
-            {
-                try
-                {
-                    using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(effectiveWorktreeDir);
-                    var result = await goalWorkflowHost.RunNextAsync(
-                        goalRun,
-                        currentModelId,
-                        systemPromptHash,
-                        toolCapabilityHash,
-                        runtime,
-                        serializerOptions,
-                        ct: ct).ConfigureAwait(false);
-                    var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
-                        ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
-                    mergedChannel.Writer.TryWrite(ToGoalResult(final));
-                    mergedChannel.Writer.TryWrite(new TuiDone(
-                        InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                        OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                        TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
-                        TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
-                        SessionId: final.SessionId,
-                        TransactionRolledBack: false,
-                        ValidationFailureSummary: final.FailureSummary));
-                    _ = result;
-                }
-                catch (OperationCanceledException)
-                {
-                    // 取消即正常收尾，不再向下游写入错误。
-                }
-                catch (Exception ex)
-                {
-                    mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
-                }
-                finally
-                {
-                    mergedChannel.Writer.TryComplete();
-                }
-            }, ct);
-
-            await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                yield return evt;
-            await runTask.ConfigureAwait(false);
-        }
-        finally
-        {
-            if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
-            {
-                await session.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-
-        if (!string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
-        {
-            yield return new TuiWorkingDirectoryChanged(originalWorkingDirectory);
+            yield return evt;
         }
     }
 
@@ -200,34 +125,80 @@ public sealed class OrchestrationStreamService(
         var originalWorkingDirectory = session?.SessionManager.WorkingDirectory ?? goalRun.WorkingDirectory;
         var effectiveWorktreeDir = GoalWorkspacePathResolver.ResolveEffectiveWorkingDirectory(goalRun);
 
-        if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        await foreach (var evt in ExecuteGoalWorkflowStreamAsync(
+            goalRun,
+            systemPrompt,
+            currentModelId,
+            systemPromptHash,
+            toolCapabilityHash,
+            serializerOptions,
+            tools,
+            budget,
+            originalWorkingDirectory,
+            effectiveWorktreeDir,
+            session,
+            imagePaths: null,
+            ct).ConfigureAwait(false))
         {
-            await session.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
+            yield return evt;
+        }
+    }
+
+    /// <summary>
+    /// 共享 Goal 工作流流式执行骨架（首次启动与 Checkpoint 恢复共用）：
+    /// 负责 worktree 切换与恢复、TUI 事件通道合并、GoalWorkflowHost 执行世代驱动与终态事件写回。
+    /// </summary>
+    private async IAsyncEnumerable<TuiEvent> ExecuteGoalWorkflowStreamAsync(
+        GoalRun goalRun,
+        string systemPrompt,
+        string currentModelId,
+        string systemPromptHash,
+        string toolCapabilityHash,
+        JsonSerializerOptions serializerOptions,
+        List<AITool> tools,
+        ModeBudgetSettings budget,
+        string originalWorkingDirectory,
+        string effectiveWorktreeDir,
+        InteractiveSession? session,
+        IReadOnlyList<string>? imagePaths,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var switchWorkingDir = session is not null
+            && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase);
+
+        if (switchWorkingDir)
+        {
+            await session!.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
             yield return new TuiWorkingDirectoryChanged(effectiveWorktreeDir);
         }
 
         try
         {
-            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions { SingleReader = true });
-            var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
-                new GoalRunOptions
+            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+            });
+            var options = new GoalRunOptions
+            {
+                Goal = goalRun.Goal,
+                WorkingDirectory = effectiveWorktreeDir,
+                SystemPrompt = systemPrompt,
+                ModelId = currentModelId,
+                Tools = tools,
+                MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
+                Budget = budget.ToGoalBudget(),
+                OrchestrationEventSink = orchEvt =>
                 {
-                    Goal = goalRun.Goal,
-                    WorkingDirectory = effectiveWorktreeDir,
-                    SystemPrompt = systemPrompt,
-                    ModelId = currentModelId,
-                    Tools = tools,
-                    MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
-                    Budget = budget.ToGoalBudget(),
-                    OrchestrationEventSink = orchEvt =>
+                    if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
+                        && mapped is not TuiTextDelta)
                     {
-                        if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
-                            && mapped is not TuiTextDelta)
-                        {
-                            mergedChannel.Writer.TryWrite(mapped);
-                        }
-                    },
+                        mergedChannel.Writer.TryWrite(mapped);
+                    }
                 },
+                ImagePaths = imagePaths,
+            };
+            var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
+                options,
                 mergedChannel.Writer,
                 static () => new EditTransaction(),
                 PromptOnBudgetExhausted: true));
@@ -245,14 +216,15 @@ public sealed class OrchestrationStreamService(
                         serializerOptions,
                         ct: ct).ConfigureAwait(false);
                     var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
-                        ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after resume.");
+                        ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
                     mergedChannel.Writer.TryWrite(ToGoalResult(final));
                     mergedChannel.Writer.TryWrite(new TuiDone(
-                        checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                        checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                        final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
-                        final.Executions.Sum(execution => execution.Attempts),
+                        InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
+                        OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
+                        TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
+                        TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
                         SessionId: final.SessionId,
+                        TransactionRolledBack: false,
                         ValidationFailureSummary: final.FailureSummary));
                 }
                 catch (OperationCanceledException)
@@ -268,19 +240,20 @@ public sealed class OrchestrationStreamService(
                     mergedChannel.Writer.TryComplete();
                 }
             }, ct);
+
             await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
                 yield return evt;
             await runTask.ConfigureAwait(false);
         }
         finally
         {
-            if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+            if (switchWorkingDir)
             {
-                await session.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+                await session!.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
-        if (session is not null && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        if (switchWorkingDir)
         {
             yield return new TuiWorkingDirectoryChanged(originalWorkingDirectory);
         }

@@ -443,8 +443,6 @@ public sealed class CommandPromptTests : IDisposable
         prompt.AllowedTools.Should().Contain("Write(docs/design.md)");
     }
 
-    // Helpers
-
     private static PromptManager CreatePromptManager(string name, string template)
     {
         var pm = new PromptManager();

@@ -124,8 +124,6 @@ public sealed class ToolApprovalMarkerTests
         ToolApprovalMarker.Apply([function], metadata: null).Should().ContainSingle().Which.Should().BeSameAs(function);
     }
 
-    // Helpers
-
     private static ToolMetadataRegistry CreateMetadata(string toolName, ToolApprovalMode mode)
     {
         var registry = new ToolMetadataRegistry();

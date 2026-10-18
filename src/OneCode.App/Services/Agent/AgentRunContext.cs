@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using OneCode.App.Query;
 
 namespace OneCode.App.Services.Agent;
 
@@ -81,6 +82,88 @@ public static class OneCodeAgentRunContext
     public readonly struct WorkingDirectoryScope(string? previous) : IDisposable
     {
         public void Dispose() => WorkingDirectoryOverrideSlot.Value = previous;
+    }
+}
+
+/// <summary>
+/// 统一保存与恢复主代理/受控 attempt 运行期的全部 AsyncLocal ambient 上下文，
+/// 消除 <c>QueryStreamEngine</c> 与 <c>ControlledBuildAttemptRuntime</c> 之间重复的 try/finally 样板。
+/// </summary>
+public readonly struct AgentRunAmbientScope : IDisposable
+{
+    private readonly string? _previousBuildRunId;
+    private readonly string? _previousRunId;
+    private readonly string? _previousConversationId;
+    private readonly ToolCapabilitySet? _previousCapabilities;
+    private readonly ChannelWriter<object>? _previousSubagentWriter;
+    private readonly RunSeal? _previousPlanSeal;
+
+    private AgentRunAmbientScope(
+        string? previousBuildRunId,
+        string? previousRunId,
+        string? previousConversationId,
+        ToolCapabilitySet? previousCapabilities,
+        ChannelWriter<object>? previousSubagentWriter,
+        RunSeal? previousPlanSeal)
+    {
+        _previousBuildRunId = previousBuildRunId;
+        _previousRunId = previousRunId;
+        _previousConversationId = previousConversationId;
+        _previousCapabilities = previousCapabilities;
+        _previousSubagentWriter = previousSubagentWriter;
+        _previousPlanSeal = previousPlanSeal;
+    }
+
+    /// <summary>快照当前全部 ambient 值（供外层 try/finally 先快照、后按分支 Apply）。</summary>
+    public static AgentRunAmbientScope CaptureCurrent()
+        => new(
+            OneCodeAgentRunContext.CurrentBuildRunId,
+            OneCodeAgentRunContext.CurrentRunId,
+            ToolActivationContext.CurrentConversationId,
+            ToolActivationContext.CurrentCapabilities,
+            OneCodeAgentRunContext.SubagentEventWriter,
+            OneCodeAgentRunContext.PlanSubmissionSeal);
+
+    /// <summary>快照当前 ambient 值并立即写入新上下文，Dispose 时全量恢复。</summary>
+    public static AgentRunAmbientScope Enter(
+        string? buildRunId,
+        string? runId,
+        string? conversationId,
+        ToolCapabilitySet? capabilities,
+        ChannelWriter<object>? subagentWriter = null,
+        RunSeal? planSubmissionSeal = null)
+    {
+        var scope = CaptureCurrent();
+        Apply(buildRunId, runId, conversationId, capabilities, subagentWriter, planSubmissionSeal);
+        return scope;
+    }
+
+    /// <summary>应用本轮运行期的 ambient 上下文。</summary>
+    public static void Apply(
+        string? buildRunId,
+        string? runId,
+        string? conversationId,
+        ToolCapabilitySet? capabilities,
+        ChannelWriter<object>? subagentWriter = null,
+        RunSeal? planSubmissionSeal = null)
+    {
+        OneCodeAgentRunContext.CurrentBuildRunId = buildRunId;
+        OneCodeAgentRunContext.CurrentRunId = runId;
+        OneCodeAgentRunContext.PlanSubmissionSeal = planSubmissionSeal;
+        ToolActivationContext.CurrentConversationId = conversationId;
+        ToolActivationContext.CurrentCapabilities = capabilities;
+        if (subagentWriter is not null)
+            OneCodeAgentRunContext.SubagentEventWriter = subagentWriter;
+    }
+
+    public void Dispose()
+    {
+        OneCodeAgentRunContext.CurrentBuildRunId = _previousBuildRunId;
+        OneCodeAgentRunContext.CurrentRunId = _previousRunId;
+        ToolActivationContext.CurrentConversationId = _previousConversationId;
+        ToolActivationContext.CurrentCapabilities = _previousCapabilities;
+        OneCodeAgentRunContext.SubagentEventWriter = _previousSubagentWriter;
+        OneCodeAgentRunContext.PlanSubmissionSeal = _previousPlanSeal;
     }
 }
 

@@ -65,7 +65,7 @@ src/
 │
 ├── OneCode.Core/                # 纯接口与领域模型（168 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
 │   ├── Permissions/            #   权限系统（7 种模式 + Bash/PowerShell 分类器）
-│   ├── Hooks/                  #   11 种钩子事件 + 3 种执行器
+│   ├── Hooks/                  #   6 种开放钩子拦截点 + 3 种执行器
 │   ├── Keybindings/            #   按键绑定系统
 │   ├── Commands/               #   命令抽象
 │   └── Domain/                 #   领域模型
@@ -125,8 +125,8 @@ src/
 |---|------|:------:|---------|
 | 1 | Plan Mode 规划优先模式 | 95% | `PlanModeService` + `SubmitPlan` 工具；批准后由受控 Build run 按 MAF 待办执行 |
 | 2 | Subagents 并行子 Agent | 97% | `AgentTool` + `ParallelAgentsTool` + `ForkedAgentRunner` |
-| 3 | Skills 斜杠命令工作流 | 92% | `BundledSkills`（9 个内置）+ 文件/MCP 技能 |
-| 4 | Hooks 生命周期扩展 | 95% | 11 事件 × 3 执行器（Command / Notification / Http） |
+| 3 | Skills 斜杠命令工作流 | 92% | `BundledSkills`（8 个内置）+ 文件/MCP 技能 |
+| 4 | Hooks 生命周期扩展 | 95% | 6 种开放拦截点 × 3 执行器（Command / Notification / Http） |
 | 5 | MCP Servers 外部服务集成 | 90% | `McpConnectionManager`（5 种传输协议） |
 | 6 | AGENTS.md 目录级约束 | 88% | 8 个 AGENTS.md 约束文档（仓库 / src / 各项目） |
 | 7 | Memory 跨会话记忆 | 95% | `MemoryService` + `AutoDreamService` |
@@ -346,14 +346,16 @@ HarnessAgent
 
 ### 三种工作模式
 
-| 模式 | 行为特征 | 适用场景 | 视觉色系 |
-|------|----------|----------|----------|
-| **BUILD** | 用户输入 → Agent 直接分析并执行 | 小改动、探索性任务、快速修复 | 绿色 |
-| **PLAN** | 用户输入 → Agent 生成计划卡片 → 用户批准 → 执行 | 复杂重构、多步骤任务 | 蓝色 |
-| **GOAL** | Agent 自主分解目标、迭代执行、AI 验证完成度 | 开放式高层目标 | 青色 |
+| 模式 | 行为特征 | 默认权限规则 | 适用场景 | 视觉色系 |
+|------|----------|--------------|----------|----------|
+| **BUILD** | 自由提问直接执行；从 PLAN 批准计划后转入受控 Build：沿用同一套交互式审批规则，但可用工具按批准策略收窄，并走计划快照与收口验证 | `Default`（只读工具直接通过，写文件与非只读 Shell 弹窗审批，支持「允许本次 / 始终允许 / 本次会话全部允许」） | 代码实现、问题修复、已批准计划落地 | 绿色 |
+| **PLAN** | 只读调研（读工具、只读 Shell 与规划辅助工具）后生成结构化计划卡片，经用户批准后切入 BUILD 执行 | `Plan`（只读 + 规划辅助工具放行，写文件与非只读 Shell 拒绝） | 复杂重构、多步骤任务 | 蓝色 |
+| **GOAL** | 在隔离 Git Worktree 中自主分解子目标、逐子目标独立事务与 Git 检查点、硬门禁 + Judge 验收后合入；每条用户消息作为一个 GoalRun 的目标 | `GoalAuto`（工作区内读写与常规开发命令直接放行，破坏性高危 Shell 拦截拒绝） | 开放式高层目标 | 青色 |
+
+> **GOAL 前置条件**：新建 GoalRun 要求目标目录是 Git 仓库且工作区无未提交改动；运行期目标分支 HEAD 或工作区指纹漂移会导致发布失败。同会话已有非终态 GoalRun 时不能换目标；中断运行用 `/resume` 恢复（要求 Goal 定义未变化）。
 
 **模式切换方式**：
-- `Tab`（输入框内）→ 循环 BUILD → PLAN → GOAL
+- `Tab`（输入框内，空闲时）→ 循环 BUILD → PLAN → GOAL；run 活跃期间忽略，补全/占位建议/选择器优先
 
 ### 权限与安全系统
 
@@ -398,7 +400,7 @@ HarnessAgent
 
 ### Hook 系统
 
-11 种钩子事件覆盖全生命周期（PreToolUse / PostToolUse / Notification / UserPromptSubmit / SessionStart / Stop / StopFailure / PreCompact / PostCompact / SessionEnd / GoalStageInvoke），3 种执行器（Command / Notification / Http）。退出码 `2` 可阻断工具调用。
+6 种开放钩子拦截点覆盖核心执行边界（`input` / `output` / `pre_tool_call` / `post_tool_call` / `pre_compact` / `post_compact`），3 种执行器（Command / Notification / Http）。退出码 `2` 可阻断工具调用或输入输出。
 
 ### MCP 集成
 

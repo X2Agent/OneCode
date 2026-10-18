@@ -35,8 +35,6 @@ public sealed class NotificationProviderDefinitionLoaderTests : IDisposable
     private static NotificationProviderDefinitionLoader CreateSut() =>
         new(NullLogger<NotificationProviderDefinitionLoader>.Instance);
 
-    // ---------- 基础路径 ----------
-
     [Fact]
     public void Load_MissingFile_ReturnsNotFound()
     {
@@ -89,8 +87,6 @@ public sealed class NotificationProviderDefinitionLoaderTests : IDisposable
 
         result.Providers.Should().ContainKey("dingtalk");
     }
-
-    // ---------- 校验与降级 ----------
 
     [Fact]
     public void Load_NonHttpsUrl_SkipsWithWarning()
@@ -174,8 +170,6 @@ public sealed class NotificationProviderDefinitionLoaderTests : IDisposable
         def.Signing!.Encoding.Should().Be(ProviderSignatureEncoding.Hex);
         def.Signing.Placement.Should().Be(ProviderSignaturePlacement.Header);
     }
-
-    // ---------- Bootstrap 三层合并（内置 < 用户 < 项目，整条替换） ----------
 
     [Fact]
     public void Bootstrap_ThreeLayers_DefinitionWholeReplacedHigherLayerWins()

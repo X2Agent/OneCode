@@ -156,6 +156,6 @@ public sealed class ModeSwitchKeybindingTests
             new ReplShellEnvironment(app, "test-model"),
             new WorkingModeController(),
             new ReplShellKeyServices(resolver, keyContextManager),
-            new ReplShellInputSources(slashCommands ?? [], () => []));
+            new ReplShellInputSources(slashCommands ?? []));
     }
 }

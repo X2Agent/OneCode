@@ -1,26 +1,9 @@
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Base type for all TUI-layer events consumed by OneCodeToplevel.
-///
-/// QueryEvent → TuiEvent 映射表
-///
-/// | QueryEvent                | TuiEvent                   | 说明 |
-/// |---------------------------|----------------------------|------|
-/// | TextDeltaEvent            | TuiTextDelta               | 流式文本增量 |
-/// | ThinkingDeltaEvent        | TuiThinkingDelta           | thinking 增量（可见时透传） |
-/// | ToolStartEvent            | TuiToolStart               | 工具开始（名称+ID） |
-/// | ToolDoneEvent             | TuiToolDone                | 工具完成（结果/错误） |
-/// | PermissionCheckEvent      | TuiPermissionCheck         | 权限请求（审批/拒绝） |
-/// | ToolPoolReadyEvent        | TuiToolPoolReady           | 工具池初始化完成 |
-/// | TurnStartedEvent          | TuiTurnStarted             | 轮次开始 |
-/// | TurnCompletedEvent        | TuiTurnCompleted           | 轮次结束（含工具调用标记） |
-/// | DoneEvent                 | TuiDone                    | 查询完成（含token统计和终止原因） |
-///
-/// 映射规则：
-/// - 每个 QueryEvent 必须有唯一 TuiEvent 映射
-/// - 缺失映射的 QueryEvent 显式标记为待补充，不能静默丢弃
-/// - TuiError 是 TUI 内部错误，不对应任何 QueryEvent
+/// 所有 TUI 层事件的基类，由 OneCodeToplevel 消费。
+/// 每个 QueryEvent 必须有唯一的 TuiEvent 映射；缺失映射的事件显式标记，不得静默丢弃。
+/// <see cref="TuiError"/> 是 TUI 内部错误，没有对应的 QueryEvent。
 /// </summary>
 public abstract record TuiEvent;
 
@@ -63,12 +46,8 @@ public sealed record TuiToolPoolReady(int TotalTools, int ReadOnlyTools, int Mcp
 public sealed record TuiMcpServersChanged : TuiEvent;
 
 /// <summary>
-/// 查询完成 — 含 token 统计和终止原因。
-/// TerminalReason 表示运行终止的具体原因（正常完成、轮次上限、预算超支、取消、验证失败等）。
-/// TransactionRolledBack=true 表示文件变更已回滚（验证失败或取消时）。
-/// SessionId: Goal 模式下的 Checkpoint 会话 ID，
-/// 用户可凭此 ID 通过 /resume 恢复中断的执行。
-/// 为 null 表示非 Goal 模式或分解失败未产生会话。
+/// 已批准计划的 Build run 开始 — 携带计划标识、修订号与内容哈希。
+/// 与 <see cref="TuiWorkflowRunEnded"/> 配对使用。
 /// </summary>
 public sealed record TuiWorkflowRunStarted(
     string PlanId,
@@ -86,7 +65,6 @@ public sealed record TuiBuildRunState(
     OneCode.Core.Build.BuildRunId RunId,
     OneCode.Core.Build.BuildRunState State,
     long SequenceNumber,
-    IReadOnlyList<string> ClarificationQuestions,
     int CompletedTasks = 0,
     int TotalTasks = 0,
     OneCode.Core.Workflows.RunTerminalReason? TerminalReason = null,
@@ -100,6 +78,14 @@ public sealed record TuiBuildRunState(
 
 public sealed record TuiBuildDelivery(OneCode.Core.Build.BuildRunResult Result) : TuiEvent;
 
+/// <summary>
+/// 查询完成 — 含 token 统计和终止原因。
+/// TerminalReason 表示运行终止的具体原因（正常完成、轮次上限、预算超支、取消、验证失败等）。
+/// TransactionRolledBack=true 表示文件变更已回滚（验证失败或取消时）。
+/// SessionId: Goal 模式下的 Checkpoint 会话 ID，
+/// 用户可凭此 ID 通过 /resume 恢复中断的执行。
+/// 为 null 表示非 Goal 模式或分解失败未产生会话。
+/// </summary>
 public sealed record TuiDone(
     int InputTokens,
     int OutputTokens,

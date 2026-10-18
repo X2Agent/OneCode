@@ -132,8 +132,6 @@ public sealed class WriteToolTests : IDisposable
         result.Content.Should().Contain(content.Length.ToString(CultureInfo.InvariantCulture));
     }
 
-    // Helpers
-
     private IWorkingDirectoryAccessor CreateWd()
     {
         var wd = Substitute.For<IWorkingDirectoryAccessor>();

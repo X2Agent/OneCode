@@ -2,14 +2,16 @@ using System.Text;
 using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using OneCode.App.Query;
 using OneCode.App.Tui;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
-/// W4-C: MAF LoopAgent wiring for a single sub-goal（DelegateLoopEvaluator；
-/// 反馈注入由 LoopAgent 的聚合反馈日志承担——LoopAgentOptions 无 FeedbackMessageTemplate 选项）。
+/// W4-C: MAF LoopAgent wiring for a single sub-goal（原生多评估器管道：
+/// <c>[hardGateEvaluator, semanticJudgeEvaluator]</c> 按序短路评估；
+/// 反馈注入由 LoopAgent 的聚合反馈日志承担）。
 /// </summary>
 internal sealed class GoalSubGoalLoop(
     GoalSubGoalHardGate hardGate,
@@ -54,26 +56,11 @@ internal sealed class GoalSubGoalLoop(
 
             var usageTracker = new StreamingTurnUsageTracker();
 
-            // 用 DelegateLoopEvaluator 包装自定义评估逻辑。
-            // LoopAgent 把评估器返回的 Feedback 追加进聚合反馈日志并随下一轮输入重发
-            //（框架硬编码行为），实现"执行→评估→反馈注入重试"循环，无需手写 for 循环。
-            var evaluator = new DelegateLoopEvaluator(async (loopContext, evalCt) =>
+            // Evaluator 1：确定性硬门禁（先于 AI Judge；未通过时由 LoopAgent 原生短路，不调模型）。
+            var hardGateEvaluator = new DelegateLoopEvaluator(async (loopContext, evalCt) =>
             {
                 loopContext.AdditionalProperties.TryAdd(RunStateKey, state);
                 state.Iterations = loopContext.Iteration;
-
-                var lastOutputBuilder = new StringBuilder();
-                foreach (var message in loopContext.LastResponse.Messages)
-                {
-                    if (message.Role != ChatRole.Assistant) continue;
-                    foreach (var content in message.Contents)
-                    {
-                        if (content is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
-                        {
-                            lastOutputBuilder.Append(textContent.Text);
-                        }
-                    }
-                }
 
                 // OpenAI 兼容流式端点（如 StepFun）会在每个 SSE chunk 上附带当轮累计 UsageContent，
                 // LoopAgent.LastResponse.Usage 会将同一轮所有 chunk 的 UsageContent 重复累加导致虚增百倍。
@@ -82,13 +69,12 @@ internal sealed class GoalSubGoalLoop(
                 state.InputTokens += iterInput;
                 state.OutputTokens += iterOutput;
 
-                var lastOutput = lastOutputBuilder.ToString();
+                var lastOutput = loopContext.LastResponse.Text ?? string.Empty;
                 state.FinalOutputText = lastOutput;
 
                 _logger.LogInformation("Sub-goal {Id} iteration {Iteration}/{Max}: {Description}",
                     goal.Id, state.Iterations, GoalLoopDefaults.MaxAttemptsPerSubGoal, goal.Description);
 
-                // 确定性验证先于 AI Judge。硬门禁未通过时不调用模型，直接把真实证据回注下一轮。
                 var iterationToolExecutions = toolExecutions.Skip(state.EvaluatedToolExecutions).ToList();
                 state.EvaluatedToolExecutions = toolExecutions.Count;
                 var hardValidation = await _hardGate.ValidateAsync(
@@ -106,15 +92,20 @@ internal sealed class GoalSubGoalLoop(
                         goal.Id,
                         state.Iterations,
                         hardValidation.Feedback);
-                    // P0：迭代重试对用户可见——硬验证未过、真实证据回注下一轮。
                     eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
                         $"子目标 #{goal.Id} · 第 {state.Iterations}/{GoalLoopDefaults.MaxAttemptsPerSubGoal} 轮未通过验证，反馈注入重试"));
                     return LoopEvaluation.Continue(BuildFeedback(hardValidation.Feedback, lastOutput));
                 }
 
-                // AI Judge 只负责语义覆盖，并必须读取真实证据摘要。
+                return LoopEvaluation.Stop();
+            });
+
+            // Evaluator 2：AI 语义验收（仅当 Evaluator 1 Stop 放行后由 LoopAgent 调用）。
+            var semanticJudgeEvaluator = new DelegateLoopEvaluator(async (loopContext, evalCt) =>
+            {
+                var lastOutput = state.FinalOutputText ?? string.Empty;
                 var (isCompleted, feedback, judgeInTokens, judgeOutTokens) = await _judge.EvaluateSubGoalAsync(
-                    hardValidation.Evidence, goal, evalCt, options.WorkingDirectory).ConfigureAwait(false);
+                    state.FinalEvidence!, goal, evalCt, options.WorkingDirectory).ConfigureAwait(false);
                 state.InputTokens += judgeInTokens;
                 state.OutputTokens += judgeOutTokens;
 
@@ -128,17 +119,15 @@ internal sealed class GoalSubGoalLoop(
                 _logger.LogInformation("Sub-goal {Id} iteration {Iteration} not completed, feedback: {Feedback}",
                     goal.Id, state.Iterations, feedback ?? "(none)");
 
-                // P0：AI Judge 判定未完成——继续迭代对用户可见。
                 eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
                     $"子目标 #{goal.Id} · 第 {state.Iterations}/{GoalLoopDefaults.MaxAttemptsPerSubGoal} 轮未完成，继续迭代"));
 
-                // Continue(feedback) → LoopAgent 将本轮反馈追加到聚合反馈日志供下一轮迭代使用
                 return LoopEvaluation.Continue(BuildFeedback(feedback, lastOutput));
             });
 
             var loopAgent = new LoopAgent(
                 innerAgent,
-                evaluator,
+                [hardGateEvaluator, semanticJudgeEvaluator],
                 new LoopAgentOptions
                 {
                     MaxIterations = GoalLoopDefaults.MaxAttemptsPerSubGoal,
@@ -152,7 +141,7 @@ internal sealed class GoalSubGoalLoop(
             // 已设置），此处不再放一条 System 消息。
             var messages = new List<ChatMessage>
             {
-                BuildUserMessage(userPrompt, options.ImagePaths),
+                QueryStreamHelpers.BuildUserMessage(userPrompt, options.ImagePaths, _logger),
             };
 
             _logger.LogInformation("Sub-goal {Id} executing with LoopAgent (max {Max} iterations): {Description}",
@@ -252,41 +241,6 @@ internal sealed class GoalSubGoalLoop(
         builder.AppendLine("## 仍未满足");
         builder.Append(outcome);
         return builder.ToString();
-    }
-
-    private ChatMessage BuildUserMessage(string prompt, IReadOnlyList<string>? imagePaths)
-    {
-        if (imagePaths is not { Count: > 0 })
-            return new ChatMessage(ChatRole.User, prompt);
-
-        List<AIContent> contents = [];
-        if (!string.IsNullOrEmpty(prompt))
-            contents.Add(new TextContent(prompt));
-
-        foreach (var path in imagePaths)
-        {
-            try
-            {
-                var bytes = File.ReadAllBytes(path);
-                var ext = Path.GetExtension(path).ToLowerInvariant();
-                var mediaType = ext switch
-                {
-                    ".jpg" or ".jpeg" => "image/jpeg",
-                    ".gif" => "image/gif",
-                    ".webp" => "image/webp",
-                    ".bmp" => "image/bmp",
-                    _ => "image/png",
-                };
-                contents.Add(new DataContent(bytes, mediaType));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to load goal image attachment {Path}", path);
-                contents.Add(new TextContent($"[Failed to load image: {Path.GetFileName(path)}]"));
-            }
-        }
-
-        return new ChatMessage(ChatRole.User, contents);
     }
 }
 

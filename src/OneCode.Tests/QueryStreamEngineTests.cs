@@ -484,8 +484,6 @@ public sealed partial class QueryStreamEngineTests
         Risk = "Low",
     };
 
-    // Helpers
-
     private static async Task<MainAgentRunResult> WaitForCancellationAsync(CancellationToken ct)
     {
         await Task.Delay(Timeout.Infinite, ct);

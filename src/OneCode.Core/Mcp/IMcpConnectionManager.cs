@@ -9,7 +9,7 @@ namespace OneCode.Core.Mcp;
 /// LLM tool catalog and the /mcp commands read from the same connection pool.
 /// </summary>
 /// <remarks>
-/// 成员数超过 src/AGENTS.md §11.2 的"接口 ≤5 成员"原则：本接口是连接池运行时状态的
+/// 成员数超过「接口不超过五个成员」的拆分原则：本接口是连接池运行时状态的
 /// 单一真相源（工具目录、/mcp 命令、状态栏、TUI 配置页共同消费），拆分为多个视图接口
 /// 会迫使各消费方注入多个实现引用并割裂事件订阅语义，属规范允许的评审豁免。
 /// </remarks>

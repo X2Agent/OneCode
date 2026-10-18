@@ -378,8 +378,6 @@ public sealed partial class McpConnectionManager : IMcpConnectionManager
         return new McpConnectionSummary(_startupConnector.ExpectedCount, connected, _inFlight.Count, failed, toolCount);
     }
 
-    // Helpers
-
     private const int MaxFunctionNameLength = 64;
 
     /// <summary>

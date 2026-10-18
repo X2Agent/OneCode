@@ -128,8 +128,6 @@ public sealed class GuardedSummarizationCompactionStrategyTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    // Helpers
-
     private static async Task<bool> RunAsync(
         IChatClient client,
         CompactionMessageIndex index,

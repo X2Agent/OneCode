@@ -46,7 +46,7 @@ public sealed partial class BuildRunCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task BeginOrResumeAsync_PersistsObservablePlanningSequence()
+    public async Task BeginOrResumeAsync_PersistsPlannedStateDirectly()
     {
         var store = new JsonBuildRunStore(_root);
         var provider = Substitute.For<IWorkspaceFingerprintProvider>();
@@ -67,18 +67,8 @@ public sealed partial class BuildRunCoordinatorTests : IDisposable
 
         run.State.Should().Be(BuildRunState.Planned);
         run = await ApprovePlanAsync(sut, run);
-        observed.Should().ContainInOrder(
-            BuildRunState.Intake,
-            BuildRunState.Assessing,
-            BuildRunState.ScopeConfirmed,
-            BuildRunState.Planning,
-            BuildRunState.Planned);
-        events.Select(item => item.ToState).Should().ContainInOrder(
-            BuildRunState.Intake,
-            BuildRunState.Assessing,
-            BuildRunState.ScopeConfirmed,
-            BuildRunState.Planning,
-            BuildRunState.Planned);
+        observed.Should().Equal(BuildRunState.Planned);
+        events.Select(item => item.ToState).Should().Equal(BuildRunState.Planned);
     }
 
     [Fact]
@@ -143,73 +133,18 @@ public sealed partial class BuildRunCoordinatorTests : IDisposable
         repeated.Version.Should().Be(first.Version);
     }
 
-    [Theory]
-    [InlineData(BuildRunState.Intake)]
-    [InlineData(BuildRunState.Assessing)]
-    public async Task BeginOrResumeAsync_PreExecutionCheckpoint_ContinuesDeterministically(
-        BuildRunState checkpointState)
-    {
-        var store = new InMemoryBuildRunStore();
-        var sut = CreateCoordinator(store, "fingerprint-a");
-        var now = DateTimeOffset.UtcNow;
-        var conversationId = SessionId.NewId();
-        var run = new BuildRun
-        {
-            Id = BuildRunId.New(),
-            ConversationId = conversationId,
-            State = checkpointState,
-            IntakePrompt = "Fix Foo.cs line 42 and run FooTests.",
-            WorkingDirectory = Path.GetTempPath(),
-            WorkspaceFingerprint = "fingerprint-a",
-            SequenceNumber = checkpointState == BuildRunState.Intake ? 1 : 2,
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        await store.SaveAsync(run, 0, TestContext.Current.CancellationToken);
-
-        var resumed = await sut.BeginOrResumeAsync(
-            conversationId,
-            "continue",
-            Path.GetTempPath(),
-            TestContext.Current.CancellationToken);
-
-        resumed.State.Should().Be(BuildRunState.Planned);
-        resumed = await ApprovePlanAsync(sut, resumed);
-        resumed.State.Should().Be(BuildRunState.Implementing);
-        resumed.Scope.Should().NotBeNull();
-        resumed.Plan.Should().NotBeNull();
-        resumed.Plan!.Tasks.Should().ContainSingle(task => task.Id == "implementation",
-            "无 prescribed plan 时派生的 quick-fix 计划只含单个 implementation 任务");
-    }
-
     [Fact]
-    public async Task BeginOrResumeAsync_PlanningCheckpoint_DoesNotDuplicatePersistentTask()
+    public async Task BeginOrResumeAsync_RepeatedCallOnPlannedRun_DoesNotDuplicatePersistentTask()
     {
         var store = new InMemoryBuildRunStore();
         var tasks = new TaskService();
         var sut = CreateCoordinator(store, "fingerprint-a", tasks);
-        var now = DateTimeOffset.UtcNow;
         var conversationId = SessionId.NewId();
-        var run = new BuildRun
-        {
-            Id = BuildRunId.New(),
-            ConversationId = conversationId,
-            State = BuildRunState.Planning,
-            IntakePrompt = "Fix Foo.cs line 42 and run FooTests.",
-            Scope = new BuildScopeSnapshot(
-                "Fix Foo.cs",
-                ["Foo.cs"],
-                [],
-                [],
-                [new AcceptanceCriterion("a1", "Tests pass", true)],
-                "user",
-                now),
-            WorkingDirectory = Path.GetTempPath(),
-            WorkspaceFingerprint = "fingerprint-a",
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        await store.SaveAsync(run, 0, TestContext.Current.CancellationToken);
+        var run = await sut.BeginOrResumeAsync(
+            conversationId,
+            "Fix Foo.cs line 42 and run FooTests.",
+            Path.GetTempPath(),
+            TestContext.Current.CancellationToken);
 
         var resumed = await sut.BeginOrResumeAsync(
             conversationId,
@@ -393,7 +328,6 @@ public sealed partial class BuildRunCoordinatorTests : IDisposable
         new(
             store,
             provider,
-            new RequirementAssessmentService(),
             new BuildStateTransitionService(),
             new BuildTaskLinker(taskService ?? new TaskService()),
             Substitute.For<ILogger<BuildRunCoordinator>>());

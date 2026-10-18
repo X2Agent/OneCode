@@ -1,13 +1,13 @@
 namespace OneCode.Core.Lsp;
 
 /// <summary>
-/// Represents a code symbol found during indexing.
+/// 索引过程中发现的代码符号。
 /// </summary>
-/// <param name="Name">Symbol name (class name, method name, etc.).</param>
-/// <param name="Kind">Kind of symbol (class, method, interface, enum, etc.).</param>
-/// <param name="FilePath">Absolute path to the file containing this symbol.</param>
-/// <param name="Line">1-based line number where the symbol is declared.</param>
-/// <param name="Column">1-based column where the symbol starts.</param>
+/// <param name="Name">符号名（类名、方法名等）。</param>
+/// <param name="Kind">符号种类（类、方法、接口、枚举等）。</param>
+/// <param name="FilePath">符号所在文件的绝对路径。</param>
+/// <param name="Line">符号声明所在行号，从 1 开始。</param>
+/// <param name="Column">符号起始列号，从 1 开始。</param>
 public sealed record CodeSymbol(
     string Name,
     string Kind,
@@ -16,50 +16,45 @@ public sealed record CodeSymbol(
     int Column);
 
 /// <summary>
-/// Search result for a symbol lookup.
+/// 符号查找结果。<c>RelevanceScore</c> 为 1.0 表示精确匹配。
 /// </summary>
-/// <param name="Symbol">The matched symbol.</param>
-/// <param name="RelevanceScore">Relevance score (1.0 = exact match).</param>
 public sealed record CodeSymbolMatch(CodeSymbol Symbol, double RelevanceScore);
 
 /// <summary>
-/// Code symbol indexing service — scans source files and builds
-/// an inverted index for fast symbol lookups.
+/// 代码符号索引服务：扫描源文件并建立倒排索引，用于快速查找符号。
 /// </summary>
 public interface ICodeIndexService
 {
-    /// <summary>Whether the index is currently being built.</summary>
+    /// <summary>索引当前是否正在构建。</summary>
     bool IsIndexing { get; }
 
-    /// <summary>Total number of indexed symbols.</summary>
+    /// <summary>已索引的符号总数。</summary>
     int SymbolCount { get; }
 
-    /// <summary>Last indexing completion time, or null if never indexed.</summary>
+    /// <summary>最近一次索引完成时间；从未索引时为 null。</summary>
     DateTimeOffset? LastIndexedAt { get; }
 
     /// <summary>
-    /// Build or rebuild the full index for the given root directory.
+    /// 为指定根目录构建或重建完整索引。
     /// </summary>
     Task BuildIndexAsync(string rootDirectory, CancellationToken ct = default);
 
     /// <summary>
-    /// Update the index for changed files (add, modify, remove).
+    /// 按变更文件更新索引（新增、修改、删除）。
     /// </summary>
     Task UpdateFilesAsync(IEnumerable<string> changedFiles, IEnumerable<string>? removedFiles = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Search for symbols matching the given query.
-    /// Returns results ordered by relevance (exact match > prefix match > substring match).
+    /// 查找匹配查询的符号，结果按相关度排序（精确匹配 &gt; 前缀匹配 &gt; 子串匹配）。
     /// </summary>
-    /// <param name="query">Symbol name to search (partial match supported).</param>
-    /// <param name="maxResults">Maximum number of results to return.</param>
+    /// <param name="query">要查找的符号名，支持部分匹配。</param>
+    /// <param name="maxResults">返回结果的最大数量。</param>
     /// <param name="kindFilter">
-    /// Optional symbol kind filter (e.g. "class", "method", "interface", "enum", "function").
-    /// Case-insensitive. When null, all kinds are returned.
+    /// 可选的符号种类过滤（如 <c>class</c>、<c>method</c>、<c>interface</c>、<c>enum</c>、<c>function</c>），
+    /// 不区分大小写；为 null 时返回全部种类。
     /// </param>
     /// <param name="pathScope">
-    /// Optional directory or file path prefix filter (absolute or relative to the indexed root).
-    /// Only symbols whose file path starts with this prefix are returned.
+    /// 可选的目录或文件路径前缀过滤（绝对路径或相对索引根），仅返回文件路径以该前缀开头的符号。
     /// </param>
     IReadOnlyList<CodeSymbolMatch> Search(
         string query,
@@ -68,7 +63,7 @@ public interface ICodeIndexService
         string? pathScope = null);
 
     /// <summary>
-    /// Clear the current index.
+    /// 清空当前索引。
     /// </summary>
     void Clear();
 }

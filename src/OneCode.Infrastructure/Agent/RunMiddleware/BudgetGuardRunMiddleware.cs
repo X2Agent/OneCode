@@ -8,45 +8,12 @@ using System.Runtime.CompilerServices;
 namespace OneCode.Infrastructure.Agent.RunMiddleware;
 
 /// <summary>
-/// Agent Run 级预算守卫中间件 — 在 MAF Agent Run 层执行 <b>pre-execution</b> 预算检查，
-/// 当 <see cref="ITokenLedger"/> 累计可计费 token（<see cref="UsageMath.BillableTokens(long, long, long, long)"/> 口径）
-/// 已达到或超过 <c>MaxBudgetTokens</c> 时短路返回错误响应，不发起 LLM 调用，从而防止失控循环继续消耗。
-///
-/// <para>
-/// <b>三层中间件定位</b>（MAF 1.13 官方设计）：
-/// <list type="bullet">
-///   <item>Agent Run（本中间件）：pre-execution 预算门控 — 位于 <see cref="UsageTrackingRunMiddleware"/> 外层</item>
-///   <item>Function Calling：工具调用层（权限/Hook/验证等）</item>
-///   <item>IChatClient：模型推理层</item>
-/// </list>
-/// 本中间件注册为 Agent Run 最外层，确保在任何 LLM 调用前进行预算检查。
-/// </para>
-///
-/// <para>
-/// <b>分级策略</b>：70%/90% 时经 <c>onBudgetWarning</c> 回调发预警（按级别去重递升）；
-/// 100% 时若提供 <c>onBudgetExceeded</c> 回调（交互模式）则询问用户三选一——
-/// 追加预算继续（上限加倍放行本轮）/ 收尾总结（注入最后一个收尾 turn 后正常结束）/
-/// 直接停止；未提供 handler（GOAL、cron 等无人值守路径）则硬停短路。
-/// </para>
-///
-/// <para>
-/// <b>短路行为</b>：当预算超支且无人接管时：
-/// <list type="bullet">
-///   <item>非流式：返回包含预算超支提示文本的 <see cref="AgentResponse"/>，<c>Usage</c> 为 null</item>
-///   <item>流式：yield 单个 <see cref="AgentResponseUpdate"/>（文本内容为预算超支提示），然后结束</item>
-/// </list>
-/// 调用方（如 <c>MainAgentRunner</c>）通过 <c>response.Text</c> 或 update 文本感知预算耗尽。
-/// </para>
-///
-/// <para>
-/// <b>与 UsageTrackingRunMiddleware 的协作</b>：
-/// <list type="bullet">
-///   <item>BudgetGuard（外层）：pre-execution 检查 → 短路或放行</item>
-///   <item>UsageTracking（内层）：post-execution 记录 → 写入 ITokenLedger</item>
-/// </list>
-/// 当 BudgetGuard 放行后，UsageTracking 记录本次 run 的实际 usage；
-/// 下一次 run 时 BudgetGuard 读取更新后的 <see cref="ITokenLedger.GetTotalTokens"/> 进行检查。
-/// </para>
+/// Agent Run 级预算守卫：在模型调用前检查 <see cref="ITokenLedger"/> 的累计可计费 token
+/// （<see cref="UsageMath.BillableTokens(long, long, long, long)"/> 口径），达到 <c>MaxBudgetTokens</c>
+/// 时短路返回，不发起 LLM 调用。
+/// 70%/90% 触发预警；100% 时有交互 handler 则询问用户（追加 / 收尾 / 停止），
+/// 无人值守路径（GOAL、cron）直接硬停。流式与非流式分别返回超支提示，<c>Usage</c> 为 null。
+/// 与 <see cref="UsageTrackingRunMiddleware"/> 的分工：本中间件在外层做事前检查，后者在内层做事后记账。
 /// </summary>
 public static class BudgetGuardRunMiddleware
 {

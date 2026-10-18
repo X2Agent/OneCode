@@ -17,8 +17,6 @@ public sealed class DeclarativeNotificationProviderTests
     private static readonly DateTimeOffset FixedNow = DateTimeOffset.FromUnixTimeMilliseconds(1_767_225_600_000);
     private const string DingtalkSecret = "SEC922a15c5d51353d6cf2d3e26e2be1e12ea6a5b60fe335de8a3b5d757d30ffabb";
 
-    // ---------- 钉钉签名向量 ----------
-
     [Fact]
     public async Task SendAsync_DingtalkPreset_SignatureMatchesOfficialAlgorithm()
     {
@@ -73,8 +71,6 @@ public sealed class DeclarativeNotificationProviderTests
         var expectedSign = Uri.EscapeDataString(Convert.ToBase64String(hmac.ComputeHash([])));
         handler.LastRequest!.RequestUri!.Query.Should().Be($"?timestamp={timestamp}&sign={expectedSign}");
     }
-
-    // ---------- body / headers 渲染 ----------
 
     [Fact]
     public async Task SendAsync_BodyTemplate_RendersTextIntoStringLeafOnly()
@@ -238,8 +234,6 @@ public sealed class DeclarativeNotificationProviderTests
         handler.LastRequest!.RequestUri!.Query.Should().NotContain("sign");
         handler.LastRequest.RequestUri.Query.Should().NotContain("timestamp");
     }
-
-    // ---------- Helpers ----------
 
     private static DeclarativeNotificationProvider CreateDingtalkProvider(TestingHttpHandler handler) =>
         new(

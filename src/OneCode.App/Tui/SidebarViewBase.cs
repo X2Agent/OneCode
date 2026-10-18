@@ -116,7 +116,6 @@ internal abstract class SidebarViewBase : View
     /// <summary>当前滚动偏移（行）——供测试与诊断读取。</summary>
     public int ScrollOffset => _content.ScrollOffset;
 
-    /// <summary>是否处于贴底跟随状态。</summary>
     public bool IsAutoScroll => _content.IsAutoScroll;
 
     /// <summary>侧栏内容按视口高度向上翻页（Shift+PageUp）。</summary>
@@ -124,6 +123,12 @@ internal abstract class SidebarViewBase : View
 
     /// <summary>侧栏内容按视口高度向下翻页（Shift+PageDown）。</summary>
     public void PageDown() => _content.PageDown();
+
+    /// <summary>侧栏内容向上微调滚动（Alt+Up，默认 3 行）。</summary>
+    public void ScrollUp(int lines = 3) => _content.ScrollUp(lines);
+
+    /// <summary>侧栏内容向下微调滚动（Alt+Down，默认 3 行）。</summary>
+    public void ScrollDown(int lines = 3) => _content.ScrollDown(lines);
 
     /// <summary>Clears content while keeping the sidebar chrome (header + separator).</summary>
     public void ClearContent()

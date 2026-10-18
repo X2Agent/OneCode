@@ -22,7 +22,6 @@ public sealed class SkillCatalogTests : IDisposable
             argument-hint: <issue>
             argument-names: [issue]
             user-invocable: true
-            disable-model-invocation: true
             ---
             Investigate {issue}. Frontmatter must not leak.
             """;
@@ -31,7 +30,7 @@ public sealed class SkillCatalogTests : IDisposable
         skill.Name.Should().Be("diagnose");
         skill.ArgumentHint.Should().Be("<issue>");
         skill.ArgumentNames.Should().Equal("issue");
-        skill.DisableModelInvocation.Should().BeTrue();
+        skill.UserInvocable.Should().BeTrue();
         skill.Body.Should().NotContain("frontmatter:").And.NotContain("name: diagnose");
         SkillCatalog.Render(skill, ["null reference"]).Should().Contain("Investigate null reference.");
     }

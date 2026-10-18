@@ -44,7 +44,7 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 
 ### 4. 代码现状（2026-09-30 实测）
 
-- `using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 之外 23 文件（装配层 9 + 引擎层 14），是 P0 解耦的工作量底盘；
+- `using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 之外约 25 个文件，是 P0 解耦的工作量底盘；
 - 有利面：`Terminal.Gui` 依赖封闭在 `Tui/`；`IConversationRunner`/QueryEvent 流 public；会话事件溯源**全局**存储
   （`FileSessionEventStore` 挂 `PathsHelper.UserHome`，跨项目 attach 天然可行）；Automation 已在无 TUI 上下文运行；
 - 已有地基：`SessionContextBar`（每会话项目/分支/用量身份行）、Plan 侧边栏、`/resume`、`ApprovalBroker`、
@@ -86,7 +86,7 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 
 | ID | 事项 | 阶段 | 状态 |
 |---|---|---|---|
-| U1 | P0 引擎解耦（O1 23 文件分类处置 + O5 注册段拆分） | P0，立即 | 待立项 |
+| U1 | P0 引擎解耦（O1 Tui 命名空间泄漏文件分类处置 + O5 注册段拆分） | P0，立即 | 待立项 |
 | U2 | P1 多会话并行 + tab + `onecode sessions/attach` + `TranscriptEventBuffer` | P1 | 待立项 |
 | U3 | P2 `onecode daemon` + OS 通知器 + 安装脚本（托盘可选） | P2 | 待立项 |
 | U4 | P3 产物卡 + 三平台 open helper + 图片能力检测内联 | P3 | 待立项 |
@@ -110,7 +110,7 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 - opencode：`opencode.ai`（2.0 迁移指南、shared-server 架构）
 - Claude Code 桌面端：`code.claude.com/docs`、2026-08-28 跨端 `/resume` 公告
 - Codex App：`developers.openai.com/codex/app`
-- 代码证据：`using OneCode.App.Tui` 泄漏 23 文件实测（`grep -rl "using OneCode.App.Tui" src/OneCode.App` 排除 `Tui/`），
+- 代码证据：`using OneCode.App.Tui` 泄漏约 25 文件实测（`grep -rl "using OneCode.App.Tui" src/OneCode.App` 排除 `Tui/`），
   清单见路线图 §3.1；`src/OneCode.App/Query/IConversationRunner.cs`、`src/OneCode.App/Session/FileSessionEventStore.cs`
   （全局存储挂 `PathsHelper.UserHome`）、`src/OneCode.Automation/Cron/CronSchedulerService.cs`（主进程宿主缺口）、
   `src/OneCode.App/Services/Agent/ApprovalBroker.cs`、`src/OneCode.App/Commands/KeybindingsCommand.cs`

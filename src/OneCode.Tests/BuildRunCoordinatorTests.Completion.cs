@@ -1,4 +1,4 @@
-// BuildRunCoordinatorTests partial：运行完成与提交确认（原文件按职责区块的纯文本搬移）
+// BuildRunCoordinatorTests partial：运行完成与提交确认
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;

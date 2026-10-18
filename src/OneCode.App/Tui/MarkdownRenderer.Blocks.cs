@@ -41,9 +41,9 @@ internal static partial class MarkdownRenderer
         //   indent(2) + │(1) + space(1) + code(innerWidth) + space(1) + │(1)
         var maxInner = Math.Max(10, viewWidth - 6);
 
-        // Header minimum inner width fits the language label plus minimal dashes.
+        // Header minimum inner width fits the language label, copy icon, plus minimal dashes.
         var langDisplayWidth = TextWidthHelper.GetDisplayWidth(lang);
-        var headerMinInner = string.IsNullOrEmpty(lang) ? 2 : langDisplayWidth + 3;
+        var headerMinInner = string.IsNullOrEmpty(lang) ? 5 : langDisplayWidth + 6;
 
         var innerWidth = Math.Max(maxCodeWidth, headerMinInner);
         if (innerWidth > maxInner) innerWidth = maxInner;
@@ -51,28 +51,32 @@ internal static partial class MarkdownRenderer
         // Target total display width (including indent) — body and header must match this
         var totalWidth = innerWidth + 6;
 
-        // Build header parts
+        // Build header parts (with right-aligned ⧉ copy icon)
         var headerLeft = $"  {TuiGlyphs.BorderTopLeft}{TuiGlyphs.BorderHorizontal} ";
         var headerLang = string.IsNullOrEmpty(lang) ? "" : lang;
         var headerLangSep = string.IsNullOrEmpty(lang) ? "" : $" {TuiGlyphs.BorderHorizontal} ";
+        var headerCopy = $" {TuiGlyphs.CopyIcon} ";
         var headerRight = $"{TuiGlyphs.BorderHorizontal}{TuiGlyphs.BorderTopRight}";
 
         // Compute display width of all fixed parts (everything except the filler dashes)
         var fixedDisplayWidth = TextWidthHelper.GetDisplayWidth(headerLeft)
                               + TextWidthHelper.GetDisplayWidth(headerLang)
                               + TextWidthHelper.GetDisplayWidth(headerLangSep)
+                              + TextWidthHelper.GetDisplayWidth(headerCopy)
                               + TextWidthHelper.GetDisplayWidth(headerRight);
         var dashCount = Math.Max(0, totalWidth - fixedDisplayWidth);
         var dashes = new string(TuiGlyphs.BorderHorizontal[0], dashCount);
 
-        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerRight}";
+        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerCopy}{headerRight}";
         List<LineSegment> headerSegments = [
             new(headerLeft, TuiPalette.Border),
             new(headerLang, TuiPalette.Accent),
             new(headerLangSep + dashes, TuiPalette.Border),
+            new(headerCopy, TuiPalette.FgMuted),
             new(headerRight, TuiPalette.Border),
         ];
-        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
+        var copyTag = new CodeBlockCopyTag(string.Join("\n", codeLines));
+        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments, tag: copyTag));
 
         // Code body lines — 超宽行按 innerWidth 硬换行成多行盒内片段，
         // 否则右侧边框被推出视口、代码尾部不可见。

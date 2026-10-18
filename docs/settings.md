@@ -25,7 +25,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 4. **用户级** `settings.json`：`~/.onecode/settings.json`
 5. **内置默认值**
 
-所有业务组件只读取统一的 `ConfigSnapshot`，不再自行读取 `ONECODE_API_KEY`、`ONECODE_MODEL` 等环境变量。
+业务组件通常只读取统一的 `ConfigSnapshot`，不再自行读取 `ONECODE_API_KEY`、`ONECODE_MODEL` 等环境变量。例外：AutoDream 的门控开关（`ONECODE_REMOTE`、`ONECODE_AUTODREAM`）由服务自身直接读取且优先于 `settings.json`（见 [后台服务](background-services.md) §5.6）。
 
 配置写入采用显式作用域 Patch，只修改目标文件中本次提交涉及的键；不会把项目值或环境变量值复制进用户配置。
 
@@ -49,7 +49,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 |---|---|---|
 | 立即生效 | `showThinking`、`trustedDirectories`、`allowedDirectories`、`hasTrustAccepted` | 保存后立即更新当前进程 |
 | 下次操作生效 | `model`、`fastModel`、`permissionMode`、思考参数、`maxTurns`、`maxBudgetTokens`、`webSearchProvider`、通知、`autodream.*`、`goal.*`、`agents.*` | 不影响正在执行的请求，下一次操作读取新快照 |
-| 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow`、`streamIdleTimeoutSeconds`、`streamMaxRetries` | `IChatClient` 构造时固化，重启后应用 |
+| 重启后生效 | `provider`、`baseUrl`、`apiKey`、`ollamaContextWindow`、`ollama.temperature`、`streamIdleTimeoutSeconds`、`streamMaxRetries` | `IChatClient` 构造时固化，重启后应用 |
 
 ---
 
@@ -80,10 +80,10 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 
 | 键 | 类型 | 默认值 | 级别 | 作用 |
 |---|---|---|---|---|
-| `permissionMode` | `string` | `default` | 全局 | 权限策略模式，见下表 |
+| `permissionMode` | `string` | `default` | 全局 / 项目级 | 权限策略模式，见下表 |
 | `trustedDirectories` | `string[]` | `[]` | 全局 | 已信任项目列表，首次进入时不再弹信任提示。存储用户已确认信任的目录，子目录隐式继承 |
-| `allowedDirectories` | `string[]` | `[]` | 项目级 | 工作区允许访问的额外目录白名单（路径遍历防护）。工具可读写 cwd 外的这些目录。通过 `/add-dir --persist` 写入项目级配置 |
-| `hasTrustAccepted` | `bool` | `false` | 全局 | 是否已接受当前项目根目录信任 |
+| `allowedDirectories` | `string[]` | `[]` | 全局 / 项目级（另有会话级） | 工作区允许访问的额外目录白名单（路径遍历防护）。工具可读写 cwd 外的这些目录。`/add-dir --persist` 写入项目级；`/add-dir` 写入会话级 |
+| `hasTrustAccepted` | `bool` | `false` | 全局 | **全局信任开关**：为 `true` 时信任一切目录、跳过所有项目信任提示；不是「当前项目已信任」的记录 |
 
 > **trustedDirectories vs allowedDirectories**：
 > - `trustedDirectories`：**信任记忆**。记住用户已确认信任的项目目录，避免重复弹窗。全局存储，不参与运行时路径校验。
@@ -95,13 +95,13 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 
 | 值 | 说明 |
 |---|---|
-| `default` | 默认模式，所有敏感操作需用户确认 |
+| `default` | BUILD 模式默认档位：只读工具与只读 Shell 直接放行，写文件（`Write`/`Edit`/`Delete`）与非只读 Shell 弹窗请求用户审批（无论直接切到 BUILD 提问还是从 PLAN 批准计划转入 BUILD，均走一致审批规则） |
 | `bypassPermissions` | 跳过所有权限检查（危险，仅限可信环境；Layer 0 安全不变量仍生效） |
-| `plan` | 持久化"启动即 PLAN 工作模式"：交互启动时经 WorkingModeBridge 进入完整计划工作流 |
+| `plan` | 持久化"启动即 PLAN 工作模式"：只读 + 规划辅助白名单放行，写操作拒绝；交互启动时经 WorkingModeBridge 进入完整计划工作流 |
 | `auto` | YOLO 自动分类模式，启用 LLM 安全分类器自动判断 |
-| `acceptEdits` | 文件写入 + 常规 Shell 自动放行 |
-| `dontAsk` | 不询问，直接拒绝危险操作 |
-| `goalAuto` | 供 GOAL 模式使用：自主执行不中断，危险 Shell 直接 Deny |
+| `acceptEdits` | 文件写入 + 常规 Shell 自动放行，危险 Shell 按规则评估或弹窗审批 |
+| `dontAsk` | 不询问，直接拒绝需审批操作 |
+| `goalAuto` | GOAL 模式自动派生：工作区内读写与常规开发命令自动放行，破坏性高危 Shell 直接 Deny |
 
 > `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述成员均可手写；
 > 未识别的值会回落为 `default`。`goalAuto` 是 GOAL 工作模式在运行期派生的内部值——
@@ -122,7 +122,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 - **计量口径（可计费 token）**：`可计费 = 非缓存输入 + 输出 + 缓存写入 + 缓存读 × 10%`。
   缓存读是对同一段上下文的重复计费（真实价格约为非缓存输入的一折），按全额累计会让长会话
   每轮请求把整个上下文重算一遍而误触熔断；按 10% 折算既贴近真实成本，又保留对失控循环
-  （纯缓存命中打转）的检测能力。`/cost` 与状态栏展示的仍是原始四维计数，仅熔断判断用可计费口径。
+  （纯缓存命中打转）的检测能力。`/status` 与状态栏展示的仍是原始四维计数，仅熔断判断用可计费口径。
 - **模式语义**：BUILD 模式按 run 独立计量——run 启动时对当前累计做快照，预算只衡量本次计划
   执行的增量消耗（Plan 阶段的调研不占用 Build 的额度）；PLAN / GOAL 模式维持会话级累计。
 - **调整方法**：`settings.json`（项目级 / 用户级）或运行时 `/config`（下一次 run 生效）；
@@ -163,6 +163,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `ollamaContextWindow` | `int` | `32768` | Ollama 请求的 `num_ctx` 上下文窗口；重启后生效 |
+| `ollama.temperature` | `double` | `0.15` | Ollama 采样温度（并固定 `top_p=0.9, top_k=40, repeat_penalty=1.1` 以抑制小模型 tool-call JSON 幻觉）；重启后生效 |
 | `streamIdleTimeoutSeconds` | `int` | `180` | 流式 chunk 间空闲停滞判定上限（秒）：收到过数据后连续无新 chunk 超过该时长即判定连接停滞并重试；重启后生效 |
 | `streamMaxRetries` | `int` | `6` | 流式请求过载/停滞的最大重试次数（最坏反馈时长约为（次数+1）×空闲上限）；重启后生效 |
 
@@ -173,6 +174,8 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 > （`num_ctx` 随重启生效，预算侧跟随配置快照）。
 
 ### Goal 模式预算
+
+> **运行前置**：新建 GoalRun 要求目标目录是 Git 仓库且工作区无未提交改动；运行在隔离 worktree 中执行，完成并通过硬门禁后 cherry-pick 合入。发布时目标分支 HEAD 必须仍等于启动基线，且工作区指纹不得漂移。
 
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
@@ -291,7 +294,7 @@ AutoDream **默认开启**，在 `BUILD` 模式任务正常完成时通过零 To
 >
 > | 环境变量 | 作用 |
 > |---|---|
-> | `ONECODE_MAX_CONTEXT_TOKENS` | 最终覆盖手段：显式指定上下文窗口上限（正整数），优先于模型目录/默认值解析 |
+> | `ONECODE_DURABLE_CRON` | 持久化 Cron 总开关；为 `true` 时 `--durable` 任务才会落盘（`CronPaths.IsDurableCronEnabled`，见 [后台服务](background-services.md) §4.4） |
 
 ---
 
@@ -390,18 +393,19 @@ Hook 策略由独立的 Hook 子系统管理，不属于 `settings.json` 配置�
 | `maxBudgetTokens` | `ConfigKeys.MaxBudgetTokens` | `AppSettings.MaxBudgetTokens` |
 | `webSearchProvider` | `ConfigKeys.WebSearchProvider` | `AppSettings.WebSearchProvider` |
 | `webSearchApiKeys.tavily` | `ConfigKeys.TavilyApiKey` | `AppSettings.TavilyApiKey` |
-| `effortValue` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`ConfigCommand`、`StatusCommand`、`TuiHostConfigurator`、`ThinkingParamsResolver`（经 `AppState`） |
-| `thinkingEnabled` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
-| `showThinking` | —（字面量） | `InteractiveModeExecutor`、`ThinkCommand`、`TuiHostConfigurator` |
+| `effortValue` | —（字面量） | `SettingsOverlay`、`TuiHostConfigurator`、`ThinkingParamsResolver`、`InteractiveBootstrapService`、`ConfigCommand`、`ThinkCommand`、`StatusCommand`（经 `AppState`） |
+| `thinkingEnabled` | —（字面量） | `SettingsOverlay`、`TuiHostConfigurator`、`ThinkingParamsResolver`、`InteractiveBootstrapService`、`ConfigCommand`、`ThinkCommand`、`StatusCommand`（经 `AppState`） |
+| `showThinking` | —（字面量） | `SettingsOverlay`、`TuiHostConfigurator`、`InteractiveBootstrapService`、`ConfigCommand`、`ThinkCommand`、`StatusCommand`（经 `AppState`） |
 | `nextPromptSuggesterEnabled` | `ConfigKeys.NextPromptSuggesterEnabled` | `AppSettings.NextPromptSuggesterEnabled` |
 | `notificationsEnabled` | `ConfigKeys.NotificationsEnabled` | `AppSettings.NotificationsEnabled` |
 | `ollamaContextWindow` | `ConfigKeys.OllamaContextWindow` | `AppSettings.OllamaContextWindow` |
+| `ollama.temperature` | `ConfigKeys.OllamaTemperature` | `AppSettings.OllamaTemperature` |
 | `streamIdleTimeoutSeconds` | `ConfigKeys.StreamIdleTimeoutSeconds` | `AppSettings.StreamIdleTimeoutSeconds` |
 | `streamMaxRetries` | `ConfigKeys.StreamMaxRetries` | `AppSettings.StreamMaxRetries` |
 | `agents.defaults.maxTurns` | `ConfigKeys.AgentsDefaultMaxTurns` | `ForkedAgentRunner`（子代理默认最大轮次；未配置时按角色回退 `Session.SubAgentMaxTurns*` 常量） |
 | `agents.defaults.timeoutMinutes` | `ConfigKeys.AgentsDefaultTimeoutMinutes` | `ForkedAgentRunner`（子代理超时分钟数；内置默认 `Session.SubAgentTimeoutMinutesDefault` = 10） |
 | `autodream.*` | —（字面量） | `AutoDreamService` |
-| `goal.*` | `ConfigKeys.GoalMax*` | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService`、`LoopCommand` 调用） |
+| `goal.*` | `ConfigKeys.GoalMax*` | `ModeBudgetSettings.FromSettings`（由 `OrchestrationStreamService` 调用） |
 | `loop.maxIterations` | `ConfigKeys.LoopMaxIterations` | `ModeBudgetSettings.FromSettings`（`/loop`）；可经 `settings.json`、`/config set`、`/loop --max` 设置，超上限由 `ModeBudgetSettings.MaxLoopIterationsUpperBound` 夹取 |
 
 > **配置元数据真相源**：`src/OneCode.Core/Config/ConfigModels.cs` 中的 `SettingDescriptors`。新增配置项时必须同时声明生效模式、密钥属性和项目作用域权限，并更新本文档。

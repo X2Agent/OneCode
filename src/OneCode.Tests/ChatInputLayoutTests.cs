@@ -24,4 +24,16 @@ public sealed class ChatInputLayoutTests
         ChatInputView.EditorLines.Should().Be(3);
         ChatInputView.FixedHeight.Should().Be(4);
     }
+
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(2, 2)]
+    [InlineData(3, 3)]
+    [InlineData(5, 5)]
+    [InlineData(6, 6)]
+    [InlineData(10, 6)]
+    public void ChatInput_ComputeEditorLines_ClampsBetweenTwoAndSix(int lineCount, int expected)
+    {
+        ChatInputView.ComputeEditorLines(lineCount).Should().Be(expected);
+    }
 }

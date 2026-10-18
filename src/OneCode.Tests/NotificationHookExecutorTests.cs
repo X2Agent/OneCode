@@ -301,8 +301,6 @@ public sealed class NotificationHookExecutorTests
             Arg.Any<CancellationToken>());
     }
 
-    // Helpers
-
     private static NotificationHookExecutor CreateSut(params INotificationProvider[] providers)
     {
         var factory = Substitute.For<IHttpClientFactory>();

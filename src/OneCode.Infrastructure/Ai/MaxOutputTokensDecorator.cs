@@ -20,13 +20,14 @@ namespace OneCode.Infrastructure.Ai;
 /// GoalDecomposer 与 GoalSubGoalJudge 共享同一保护，业务层无需硬编码输出上限。
 /// </para>
 /// </remarks>
-public sealed class MaxOutputTokensDecorator(IChatClient inner) : DelegatingChatClient(inner)
+public sealed class MaxOutputTokensDecorator(IChatClient inner, int? contextWindow = null) : DelegatingChatClient(inner)
 {
     private const int RecoveryLimit = 3;
 
     /// <summary>
     /// 默认与升级后的输出预算上限。推理模型可能把 4K/8K 级默认输出预算全部耗在 reasoning 上
-    /// （finishReason=length 且零文本零工具调用），65536 是产出可见内容所需的量级。
+    /// （finishReason=length 且零文本零工具调用），65536 是产出可见内容所需的量级；
+    /// 当已知模型上下文窗口小于该值时自动按窗口上限钳制，防止把输出上限拉到超过模型总窗口。
     /// </summary>
     public const int EscalatedMaxTokens = 65_536;
     private const string RecoveryPrompt =
@@ -34,14 +35,20 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner) : DelegatingChat
         Output token limit hit. Resume directly — no apology, no recap. Continue from exactly where you left off.
         """;
 
+    private int ResolveEscalationCap() =>
+        contextWindow is > 0
+            ? Math.Min(EscalatedMaxTokens, Math.Max(1, contextWindow.Value - 1))
+            : EscalatedMaxTokens;
+
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var cap = ResolveEscalationCap();
         var messageList = messages.ToList();
-        var workingOptions = WithDefaultMaxOutputTokens(options);
-        var escalated = workingOptions.MaxOutputTokens >= EscalatedMaxTokens;
+        var workingOptions = WithDefaultMaxOutputTokens(options, cap);
+        var escalated = workingOptions.MaxOutputTokens >= cap;
         var recoveryCount = 0;
 
         while (true)
@@ -54,7 +61,7 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner) : DelegatingChat
 
             if (!escalated)
             {
-                workingOptions.MaxOutputTokens = EscalatedMaxTokens;
+                workingOptions.MaxOutputTokens = cap;
                 escalated = true;
                 continue;
             }
@@ -66,7 +73,8 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner) : DelegatingChat
             if (!string.IsNullOrWhiteSpace(partialText))
                 messageList.Add(new ChatMessage(ChatRole.Assistant, partialText));
             messageList.Add(new ChatMessage(ChatRole.User, RecoveryPrompt));
-            workingOptions.MaxOutputTokens = EscalatedMaxTokens;
+            if (workingOptions.MaxOutputTokens is null || workingOptions.MaxOutputTokens < cap)
+                workingOptions.MaxOutputTokens = cap;
             recoveryCount++;
         }
     }
@@ -78,18 +86,21 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner) : DelegatingChat
     {
         // 流式路径同样注入默认输出上限，但不在此处做中途 continuation（流式响应消费完毕后才暴露 FinishReason，
         // 零输出 Length 重试由 MainAgentRunner 在流结束后处理）。
-        return base.GetStreamingResponseAsync(messages, WithDefaultMaxOutputTokens(options), cancellationToken);
+        return base.GetStreamingResponseAsync(
+            messages,
+            WithDefaultMaxOutputTokens(options, ResolveEscalationCap()),
+            cancellationToken);
     }
 
     /// <summary>
     /// 克隆调用方 <see cref="ChatOptions"/> 并在未指定上限且未开启显式 Reasoning 时填入默认输出上限，
     /// 绝不原地修改调用方传入的实例。
     /// </summary>
-    internal static ChatOptions WithDefaultMaxOutputTokens(ChatOptions? options)
+    internal static ChatOptions WithDefaultMaxOutputTokens(ChatOptions? options, int defaultCap = EscalatedMaxTokens)
     {
         var clone = options?.Clone() ?? new ChatOptions();
         if (clone.MaxOutputTokens is null && clone.Reasoning?.Effort is null)
-            clone.MaxOutputTokens = EscalatedMaxTokens;
+            clone.MaxOutputTokens = defaultCap;
         return clone;
     }
 }

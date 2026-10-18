@@ -6,7 +6,7 @@ namespace OneCode.Core.Mcp;
 /// so that App-layer consumers do not depend on SDK types.
 /// </summary>
 /// <remarks>
-/// 成员数超过 src/AGENTS.md §11.2 的"接口 ≤5 成员"原则：传输建立（stdio/sse/http/自定义
+/// 成员数超过「接口不超过五个成员」的拆分原则：传输建立（stdio/sse/http/自定义
 /// transport）与协议操作（tools/resources）构成同一客户端抽象的内聚能力面，按传输或
 /// 操作拆分会迫使连接层按传输类型注入不同接口，复杂度不降反升，属规范允许的评审豁免。
 /// </remarks>

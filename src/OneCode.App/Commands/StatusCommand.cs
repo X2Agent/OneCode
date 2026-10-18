@@ -183,11 +183,6 @@ public sealed class StatusCommand(
         // 与 /status stats 和 AutoCompactService 使用同一数据源。
         var maxTokens = TokenBudget.GetMaxContextTokens(model, modelManager);
 
-        // 环境变量 ONECODE_MAX_CONTEXT_TOKENS 仍可作为最终覆盖手段保留
-        if (int.TryParse(
-            Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.MaxContextTokens), out var envMax) && envMax > 0)
-            maxTokens = envMax;
-
         var usedTokens = (usage?.InputTokens ?? 0) + (usage?.OutputTokens ?? 0);
         var pct = maxTokens > 0 ? (double)usedTokens / maxTokens : 0;
         var barLen = 30;

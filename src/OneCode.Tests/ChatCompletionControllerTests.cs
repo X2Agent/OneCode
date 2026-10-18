@@ -129,4 +129,105 @@ public sealed class ChatCompletionControllerTests
 
         controller.IsCompletionActive.Should().BeFalse();
     }
+
+    [Fact]
+    public void PopupTitle_SwitchesBetweenCommandsFilesAndSessionsByMode()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"onecode-popup-title-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "README.md"), "# readme");
+            var commands = new[]
+            {
+                new SlashCommandEntry("help", "Show help", CommandSource.Builtin),
+            };
+            var engine = new TypeaheadCompletionEngine(
+                commands,
+                tempDir,
+                sessionCandidatesProvider: () =>
+                [
+                    new OneCode.App.Session.SessionCandidate("4f8a90c1e0d244ef8dba35b2588c0424", "会话", "build", 3),
+                ]);
+            var controller = new ChatCompletionController(commands, engine);
+
+            controller.UpdateCompletionList("/he");
+            controller.IsCompletionActive.Should().BeTrue();
+            controller.PopupTitle.Should().Be(ChatCompletionController.CommandsPopupTitle);
+
+            controller.TryTypeaheadCompletion("@READ");
+            controller.IsCompletionActive.Should().BeTrue();
+            controller.PopupTitle.Should().Be(ChatCompletionController.FilesPopupTitle);
+
+            controller.TryTypeaheadCompletion("/session switch 4f");
+            controller.IsCompletionActive.Should().BeTrue();
+            controller.PopupTitle.Should().Be(ChatCompletionController.SessionsPopupTitle);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryTypeaheadCompletion_EmptyWorkspaceBareAt_ShowsEmptyHintAndAcceptReturnsNull()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"onecode-empty-at-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var commands = new[]
+            {
+                new SlashCommandEntry("help", "Show help", CommandSource.Builtin),
+            };
+            var engine = new TypeaheadCompletionEngine(commands, tempDir);
+            var controller = new ChatCompletionController(commands, engine);
+
+            // 先触发一次斜杠命令补全，验证后续进入空目录 @ 提示时不会残留旧命令被误 Accept
+            controller.UpdateCompletionList("/help");
+            controller.IsCompletionActive.Should().BeTrue();
+
+            controller.TryTypeaheadCompletion("@");
+
+            controller.IsCompletionActive.Should().BeTrue();
+            controller.PopupTitle.Should().Be(ChatCompletionController.FilesPopupTitle);
+            controller.CurrentDisplayItems.Should().Equal(ChatCompletionController.EmptyWorkspaceFilesHint);
+
+            controller.CycleNext();
+            controller.SelectedIndex.Should().Be(0);
+
+            controller.Accept().Should().BeNull();
+            controller.IsCompletionActive.Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryTypeaheadCompletion_AtQueryWithNoMatches_ShowsNoMatchingFilesHint()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"onecode-nomatch-at-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "README.md"), "# readme");
+            var engine = new TypeaheadCompletionEngine([], tempDir);
+            var controller = new ChatCompletionController([], engine);
+
+            controller.TryTypeaheadCompletion("@zzz");
+
+            controller.IsCompletionActive.Should().BeTrue();
+            controller.PopupTitle.Should().Be(ChatCompletionController.FilesPopupTitle);
+            controller.CurrentDisplayItems.Should().Equal(ChatCompletionController.NoMatchingFilesHint);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

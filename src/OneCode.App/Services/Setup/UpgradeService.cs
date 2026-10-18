@@ -32,7 +32,6 @@ public sealed class UpgradeService(
     /// </summary>
     public async Task<UpgradeResult> PerformUpgradeAsync(CancellationToken ct = default)
     {
-        // 1. 检查版本
         var check = await _releaseNotesService.CheckLatestVersionAsync(ct).ConfigureAwait(false);
 
         if (check.LatestVersion is null)
@@ -46,7 +45,6 @@ public sealed class UpgradeService(
         var targetVersion = check.LatestVersion;
         var currentVersion = check.CurrentVersion ?? "unknown";
 
-        // 2. 确保当前是正式安装(非 dotnet run 开发环境)
         var currentExePath = Environment.ProcessPath;
         if (currentExePath is null)
             return UpgradeResult.Failed("无法确定当前可执行文件路径(Environment.ProcessPath 为 null)。");
@@ -59,6 +57,9 @@ public sealed class UpgradeService(
                 $"当前进程 '{currentExeName}' 不是正式安装的 OneCode,无法自动升级。\n"
                 + "请通过安装脚本安装后再使用 /upgrade --apply。");
         }
+
+        // 清理上次升级残留的同目录 .old 可执行文件
+        CleanupStaleOldExecutable(currentExePath);
 
         // 3. 确定资产 URL
         var rid = GetRuntimeIdentifier();
@@ -208,12 +209,36 @@ public sealed class UpgradeService(
     }
 
     /// <summary>
-    /// 原地替换当前安装目录中的文件。
-    /// Windows: 正在运行的 exe 不能直接覆盖,但可以重命名。
-    ///   策略: 重命名当前 exe → .old → 复制新 exe → 复制资源 → 尝试删除 .old。
-    /// Unix: 可以直接覆盖正在运行的 exe(进程持有 inode,文件名替换不影响)。
+    /// 清理上次升级残留的同目录 <c>.old</c> 旧版可执行文件。
+    /// Windows 下升级时运行中的旧进程持有 <c>.old</c> 句柄，待新进程启动或下次升级时即可安全删除。
     /// </summary>
-    private async Task ReplaceInstallAsync(
+    public void CleanupStaleOldExecutable(string? exePath = null)
+        => TryCleanupStaleOldExecutable(exePath ?? Environment.ProcessPath, _logger);
+
+    /// <summary>静态清理入口，供 <see cref="AppStartupService"/> 启动预热与升级流程共用。</summary>
+    public static void TryCleanupStaleOldExecutable(string? exePath, ILogger? logger = null)
+    {
+        var target = exePath is { Length: > 0 } p ? p + ".old" : null;
+        if (string.IsNullOrEmpty(target) || !File.Exists(target))
+            return;
+
+        try
+        {
+            File.Delete(target);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogDebug(ex, "Could not delete stale old executable {OldExePath}", target);
+        }
+    }
+
+    /// <summary>
+    /// 原地替换当前安装目录中的文件。
+    /// Windows: 正在运行的 exe 不能直接覆盖，且跨卷移动到 %TEMP% 会失败或锁死临时目录；
+    ///   策略: 在同目录内将当前 exe 原地重命名为 <c>.old</c> → 复制新 exe → 复制资源 → 尝试清理 <c>.old</c>。
+    /// Unix: 同目录重命名保持正在运行的 inode 完整，随后写入新文件并尝试删除 <c>.old</c>。
+    /// </summary>
+    internal async Task ReplaceInstallAsync(
         string sourceDir,
         string installDir,
         string currentExePath,
@@ -227,14 +252,15 @@ public sealed class UpgradeService(
         Directory.CreateDirectory(backupDir);
         List<(string Target, string Backup)> backedUpFiles = [];
         List<string> createdFiles = [];
-        var backupExePath = Path.Combine(backupDir, sourceExeName);
+        var inPlaceOldExePath = currentExePath + ".old";
+
+        CleanupStaleOldExecutable(currentExePath);
 
         try
         {
-            // Rename the old executable first. This keeps the running Unix inode intact and
-            // avoids truncating the only launchable copy when the new copy runs out of space.
-            File.Move(currentExePath, backupExePath);
-            backedUpFiles.Add((currentExePath, backupExePath));
+            // Rename the old executable in-place within installDir (avoids cross-volume move
+            // failures on Windows and prevents locking tempDir with a running process handle).
+            File.Move(currentExePath, inPlaceOldExePath, overwrite: true);
 
             File.Copy(sourceExePath, currentExePath);
             createdFiles.Add(currentExePath);
@@ -269,7 +295,7 @@ public sealed class UpgradeService(
                     var backupParent = Path.GetDirectoryName(backup);
                     if (!string.IsNullOrEmpty(backupParent))
                         Directory.CreateDirectory(backupParent);
-                    File.Copy(target, backup);
+                    File.Copy(target, backup, overwrite: true);
                     backedUpFiles.Add((target, backup));
                 }
                 else
@@ -291,6 +317,9 @@ public sealed class UpgradeService(
                         File.Delete(createdFile);
                 }
 
+                if (File.Exists(inPlaceOldExePath))
+                    File.Move(inPlaceOldExePath, currentExePath, overwrite: true);
+
                 foreach (var (target, backup) in backedUpFiles.AsEnumerable().Reverse())
                 {
                     if (File.Exists(backup))
@@ -311,6 +340,9 @@ public sealed class UpgradeService(
 
             throw;
         }
+
+        // 升级成功后尝试立即清理 .old（Unix 下立即生效；Windows 下若当前进程正占用则静默留待下次启动清理）
+        CleanupStaleOldExecutable(currentExePath);
     }
 }
 

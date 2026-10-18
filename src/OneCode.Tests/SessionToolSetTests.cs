@@ -239,8 +239,6 @@ public sealed class SessionToolSetTests
 
     // Snapshot for Sub-Agent Isolation
 
-    // Helpers
-
     /// <summary>
     /// Creates a minimal ToolCatalog + ToolMetadataRegistry with test tools:
     /// Always: Read, Write, LS

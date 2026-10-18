@@ -15,9 +15,7 @@ public static partial class ChatBlockRenderers
     {
         var (glyph, message, color) = state.State switch
         {
-            BuildRunState.Created or BuildRunState.Intake or BuildRunState.Assessing
-                => (TuiGlyphs.InProgress, "正在分析任务…", TuiPalette.ModeBuildFg),
-            BuildRunState.ScopeConfirmed or BuildRunState.Planning or BuildRunState.Planned
+            BuildRunState.Created or BuildRunState.Planned
                 => (TuiGlyphs.InProgress, "正在准备执行…", TuiPalette.ModeBuildFg),
             BuildRunState.Implementing when state.TotalTasks > 0
                 => (TuiGlyphs.InProgress, $"正在执行任务（{state.CompletedTasks}/{state.TotalTasks}）…", TuiPalette.ModeBuildFg),

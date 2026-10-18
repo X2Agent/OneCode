@@ -39,8 +39,8 @@ internal static class TuiStyles
     public static Attribute ThinkingLine => new(TuiPalette.Thinking, TuiPalette.BgPrimary);
     public static Attribute SpinnerColor => new(TuiPalette.Accent, TuiPalette.BgPrimary);
 
-    // Chat input region — 背景与状态栏一致（BgInput），使底部区域视觉连贯，
-    // 与消息区（BgPrimary）只保留微弱分层，不形成突兀色块。
+    // Chat input region — 使用中性微亮深灰（BgInput #111111），
+    // 与消息区及上下状态栏（BgPrimary #0A0A0A）形成柔和的输入层视觉区隔。
     public static Scheme ChatInput => new()
     {
         Normal = new Attribute(TuiPalette.FgPrimary, TuiPalette.BgInput),
@@ -50,14 +50,14 @@ internal static class TuiStyles
         Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput),
     };
 
-    // Status bar
+    // Status bar — 融入主画布背景（BgPrimary），仅将输入框突显为独立微亮层。
     public static Scheme StatusBar => new()
     {
-        Normal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
-        Focus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
-        HotNormal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
-        HotFocus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgInput),
-        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgInput),
+        Normal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary),
+        Focus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary),
+        HotNormal = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary),
+        HotFocus = new Attribute(TuiPalette.FgSecondary, TuiPalette.BgPrimary),
+        Disabled = new Attribute(TuiPalette.FgMuted, TuiPalette.BgPrimary),
     };
 
     // Completion popup

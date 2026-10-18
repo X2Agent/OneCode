@@ -1,4 +1,4 @@
-// QueryStreamEngineTests partial：持久化 Build 尝试（完成 / 恢复 / 缺计划失败 / 工具暴露）（原文件按职责区块的纯文本搬移）
+// QueryStreamEngineTests partial：持久化 Build 尝试（完成 / 恢复 / 缺计划失败 / 工具暴露）
 using System.Collections.Immutable;
 using System.Threading.Channels;
 using OneCode.App.Query;
@@ -44,7 +44,6 @@ public sealed partial class QueryStreamEngineTests
             var coordinator = new BuildRunCoordinator(
                 buildStore,
                 fingerprint,
-                new RequirementAssessmentService(),
                 new BuildStateTransitionService(),
                 new BuildTaskLinker(taskService),
                 Substitute.For<ILogger<BuildRunCoordinator>>());
@@ -128,7 +127,6 @@ public sealed partial class QueryStreamEngineTests
             persisted.ApprovedToolPolicy.Should().NotBeNull();
             persisted.PlanApprovalSource.Should().Be("plan-mode-approval");
             events.OfType<BuildRunStateEvent>().Select(item => item.State).Should().ContainInOrder(
-                BuildRunState.Planning,
                 BuildRunState.Planned,
                 BuildRunState.Implementing,
                 BuildRunState.Verifying,

@@ -25,7 +25,60 @@ internal static class ConversationMessageMapper
                 result.Add(mapped);
         }
 
+        CloseUnresolvedToolCalls(result, logger);
         return result;
+    }
+
+    /// <summary>
+    /// 闭合回放历史中缺失 <see cref="FunctionResultContent"/> 的未闭合工具调用（例如上次运行中途中断、
+    /// 或空 <see cref="ToolResultMessage"/> 被跳过）：为缺失的 <c>CallId</c> 补插合成 <c>[TOOL ERROR]</c>
+    /// 结果消息，防止 MAF <c>ChatMessageGroups</c> 原子组无限延伸吞噬后续轮次，同时避免上游 API
+    /// 因孤儿 <c>tool_calls</c> 返回 HTTP 400。
+    /// </summary>
+    private static void CloseUnresolvedToolCalls(List<ChatMessage> history, ILogger? logger)
+    {
+        for (var i = 0; i < history.Count; i++)
+        {
+            if (history[i].Role != ChatRole.Assistant)
+                continue;
+
+            var calls = history[i].Contents.OfType<FunctionCallContent>()
+                .Where(static c => !string.IsNullOrEmpty(c.CallId))
+                .ToList();
+            if (calls.Count == 0)
+                continue;
+
+            var resolvedIds = new HashSet<string>(StringComparer.Ordinal);
+            var j = i + 1;
+            while (j < history.Count && history[j].Role == ChatRole.Tool)
+            {
+                foreach (var res in history[j].Contents.OfType<FunctionResultContent>())
+                {
+                    if (!string.IsNullOrEmpty(res.CallId))
+                        resolvedIds.Add(res.CallId);
+                }
+                j++;
+            }
+
+            foreach (var call in calls)
+            {
+                if (resolvedIds.Contains(call.CallId))
+                    continue;
+
+                logger?.LogWarning(
+                    "Synthesizing error FunctionResultContent for unclosed tool call '{ToolName}' (callId={CallId}) in replayed history",
+                    call.Name,
+                    call.CallId);
+                history.Insert(
+                    j,
+                    new ChatMessage(
+                        ChatRole.Tool,
+                        [new FunctionResultContent(
+                            call.CallId,
+                            $"[TOOL ERROR] Tool '{call.Name}' did not complete or its result was missing from transcript.")]));
+                j++;
+            }
+        }
     }
 
     public static ChatMessage? TryMap(Message message, ILogger? logger = null) => message switch

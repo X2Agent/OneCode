@@ -135,6 +135,10 @@ public sealed class ForkedAgentRunner(
                 profile,
                 BuildContextProviderOptions(parameters, cwd));
 
+            // MAF 不释放交给它的 AIContextProviders，而 skills 等 provider 是每 run 新建的。
+            // fork 不经过主代理管道的租约，必须在这里自行持有并释放（含取消、异常与超时路径）。
+            using var providerLease = AgentContextProviderLease.Track(contextProviders);
+
             _logger.LogInformation(
                 "Forked agent '{Label}' (profile={Profile}) armed with {Count} tools, cwd={Cwd}",
                 parameters.ForkLabel, profile, tools.Count, cwd);

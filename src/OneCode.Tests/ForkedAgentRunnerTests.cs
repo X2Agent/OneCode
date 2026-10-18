@@ -109,6 +109,24 @@ public sealed class ForkedAgentRunnerTests
     }
 
     [Fact]
+    public void WorkerSharedProviders_AreReleasableByLease()
+    {
+        // fork 不经过主代理管道的租约，必须自己 Track/Dispose。这里验证前提：
+        // Worker 的 shared providers 里确实有每 run 新建且可释放的实例（skills）。
+        var modeProvider = new PermissionModeProvider(TestConfigManager.Create());
+        var pipeline = CreateContextPipeline(modeProvider);
+
+        var providers = pipeline.BuildShared(
+            PipelineProfile.Worker,
+            new AgentContextProviderOptions { WorkingDirectory = Path.GetTempPath() });
+
+        using var lease = AgentContextProviderLease.Track(providers);
+
+        lease.Count.Should().BeGreaterThan(0,
+            "Worker 每 run 构建 skills provider；若这里为 0，说明能力集或工厂接线变了，fork 的释放逻辑会失效");
+    }
+
+    [Fact]
     public void BuildContextProviderOptions_CarriesControllerWorkingMode_NotNull()
     {
         // Plan 模式的 fork worker 必须把模式带给共享 provider：CodeAct provider 在

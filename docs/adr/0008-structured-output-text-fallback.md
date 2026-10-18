@@ -6,12 +6,12 @@
 
 ## 语境
 
-OneCode 有三处「模型输出 → JSON」消费点：
+OneCode 有两处「模型输出 → JSON」消费点（其中 `GoalDecomposer` 含 decompose / replan / sub-decompose 三个调用点）：
 
 | 位置 | 形态 | 类型 |
 |---|---|---|
 | `Services/Agent/GoalDecomposer.cs` | 直连 chat client（decompose / replan / sub-decompose 三个调用点） | `GoalPlan` |
-| `Services/AutoDream/AutoDreamService.cs` | **带 Read/Glob/Grep 工具循环的 Agent** + 会话 | `List<ConsolidationChange>` |
+| `Services/AutoDream/AutoDreamService.cs` | **单轮无工具（`tools: []`）整合 `HarnessAgent`** + 会话 | `List<ConsolidationChange>` |
 
 三处此前都是手搓的 prompt-only JSON：提示词内写 JSON 契约，模型返回后用手写提取器
 （`ExtractJsonBlock` / `ExtractJsonObject` / `ExtractJsonArray`）+ 围栏容错反序列化。
@@ -61,11 +61,7 @@ response_format 能力协商在 `StructuredChatCall` 内每次调用完成）。
 
 ## 边界与禁令
 
-1. **带工具循环的 Agent 不设 `ResponseFormat`**。`AutoDreamService` 的整合 Agent 有意保持 prompt-only：
-   schema 会约束工具循环内**每条**助手消息，模型无法在工具调用之间自由叙述，与现有行为有实质差异；
-   且其输出已有 `SanitizeKey/Value` 消毒、50 条配额与「记 Warning 返回 0」的完整降级链，schema 增益有限。
-   MAF 自身的 judge 消费方（`AIJudgeLoopEvaluator`）也是「无工具、无会话」的直连调用。工具循环 Agent
-   采用结构化输出须单独论证。
+1. **带工具循环的 Agent 不设 `ResponseFormat`；`AutoDreamService` 保持 prompt-only 文本解析**。带工具循环的 Agent 若设 `ResponseFormat`，schema 会约束工具循环内**每条**助手消息，模型无法在工具调用之间自由叙述；而 `AutoDreamService` 的整合 Agent 虽已收敛为单轮无工具（`tools: []`）调用，但其输出已有 `ExtractJsonArray`、`SanitizeKey/Value` 消毒、50 条配额与「记 Warning 返回 0」的完整降级链，有意保持 prompt-only。MAF 自身的 judge 消费方（`AIJudgeLoopEvaluator`）也是「无工具、无会话」的直连调用。Agent 路径采用结构化输出须单独论证。
 2. **结构化路径不得旁路调用方归一化**。类型化结果与文本降级结果必须同样受调用方的
    产品契约约束（清洗/去空、条数上限、空结果 fail-closed 等归一化对两条路径一致生效）。
 3. **文本解析器是兼容层，不是死代码**。`ExtractJsonBlock` / `ExtractJsonObject` / `ExtractJsonArray`

@@ -23,26 +23,26 @@ public sealed record TuiQueryServices(
     Func<string, CancellationToken, Task<CommandDispatchResult?>>? TryResolvePromptCommand = null,
     Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamCommandPrompt = null,
     Func<string, WorkflowResumeKind, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamResumeWorkflow = null,
-    /// <summary><c>/loop</c> 有界确定性循环的流式入口。</summary>
+    // /loop 有界确定性循环的流式入口。
     Func<string, string?, int, CancellationToken, IAsyncEnumerable<TuiEvent>>? StreamLoop = null,
     InputQueue? InputQueue = null,
     Func<CancellationToken, Task<TuiBuildRunState?>>? ReplayCurrentBuildRun = null,
-    /// <summary>MCP 预连接收尾等待（首条消息前的有界窗口，≤5s）。</summary>
+    // MCP 预连接收尾等待（首条消息前的有界窗口，≤5s）。
     Func<CancellationToken, Task>? WaitForMcpPreconnect = null);
 
-/// <summary>Current session and workspace dependencies.</summary>
+/// <summary>当前会话与工作区依赖。</summary>
 public sealed record TuiSessionServices(
     Func<IReadOnlyList<string>>? GetSessionUserPrompts = null,
     Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? GetSessionCandidates = null,
     OneCode.Core.Commands.IGitHelper? GitHelper = null);
 
-/// <summary>LSP / MCP status and diagnostic subscriptions.</summary>
+/// <summary>LSP / MCP 状态与诊断订阅服务。</summary>
 public sealed record TuiDiagnosticServices(
     Func<IReadOnlyList<LspServerStatus>>? GetLspServerStatus = null,
     Func<IReadOnlyList<LspDiagnostic>>? GetLspDiagnostics = null,
     Action<Action>? SubscribeDiagnosticsChanged = null,
     Action<Action>? UnsubscribeDiagnosticsChanged = null,
-    /// <summary>MCP 连接池三态快照（状态栏 + 欢迎页诊断）。</summary>
+    // MCP 连接池三态快照（状态栏 + 欢迎页诊断）。
     Func<McpConnectionSummary>? GetMcpConnectionSummary = null,
     Action<Action>? SubscribeMcpServersChanged = null,
     Action<Action>? UnsubscribeMcpServersChanged = null);
@@ -60,7 +60,6 @@ public sealed record TuiRuntimeServices(
     TrustService? TrustService = null,
     ImagePipeline? ImagePipeline = null,
     OneCode.Core.IO.IClipboardService? Clipboard = null,
-    Func<IReadOnlyCollection<string>>? GetToolNames = null,
     Func<bool>? GetShowThinking = null,
     Action<TuiEvent>? EmitEvent = null);
 
@@ -122,7 +121,6 @@ public sealed record TuiContext(
     public TrustService? TrustService => Runtime.TrustService;
     public ImagePipeline? ImagePipeline => Runtime.ImagePipeline;
     public IClipboardService? Clipboard => Runtime.Clipboard;
-    public Func<IReadOnlyCollection<string>>? GetToolNames => Runtime.GetToolNames;
     public Func<bool>? GetShowThinking => Runtime.GetShowThinking;
     public Action<TuiEvent>? EmitEvent => Runtime.EmitEvent;
 

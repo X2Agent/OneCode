@@ -112,8 +112,6 @@ public sealed class ResumeCommandTests
         result.Should().NotBeOfType<CommandResult.ResumeWorkflowResult>();
     }
 
-    // Helpers
-
     private static Task<IGoalRunStore> CreateGoalStoreWithSessions(params string[] sessionIds)
     {
         var runs = sessionIds.Select((sid, index) => new GoalRun

@@ -24,7 +24,7 @@ internal static class TuiPalette
         ["fg-secondary"] = "#8B949E",
         ["fg-muted"] = "#6B7280",
         ["bg-primary"] = "#0A0A0A",
-        ["bg-input"] = "#0F1218",
+        ["bg-input"] = "#111111",
         ["bg-terminal"] = "#0D1117",
         ["bg-terminal-header"] = "#161B22",
         ["bg-card"] = "#111111",
@@ -97,9 +97,9 @@ internal static class TuiPalette
     /// <summary>主背景。#0A0A0A。</summary>
     public static readonly Color BgPrimary = new(0x0A, 0x0A, 0x0A);
 
-    /// <summary>输入区与底部固定栏（状态栏/上下文栏/待办横条）背景。#0F1218——
-    /// 与消息区（BgPrimary）只保留微弱分层。</summary>
-    public static readonly Color BgInput = new(0x0F, 0x12, 0x18);
+    /// <summary>输入区与待办横条背景。#111111——
+    /// 中性微亮深灰，与消息区（BgPrimary #0A0A0A）只保留微弱分层。</summary>
+    public static readonly Color BgInput = new(0x11, 0x11, 0x11);
 
     /// <summary>终端背景。#0D1117。</summary>
     public static readonly Color BgTerminal = new(0x0D, 0x11, 0x17);

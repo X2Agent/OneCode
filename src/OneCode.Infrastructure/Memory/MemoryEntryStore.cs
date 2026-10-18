@@ -4,40 +4,13 @@ using OneCode.Core.Tools;
 namespace OneCode.Infrastructure.Memory;
 
 /// <summary>
-/// File-based implementation of <see cref="IMemoryEntryStore"/>.
+/// <see cref="IMemoryEntryStore"/> 的文件实现，按作用域读写 <c>MEMORY.md</c>。
 /// </summary>
 /// <remarks>
-/// <para>
-/// Each scope maps to a directory containing <c>MEMORY.md</c>:
-/// <list type="bullet">
-/// <item><see cref="MemoryScope.User"/> → <c>~/.onecode/memory/MEMORY.md</c></item>
-/// <item><see cref="MemoryScope.Project"/> → <c>{cwd}/.onecode/memory/MEMORY.md</c> (resolved
-///   at call time via <see cref="IWorkingDirectoryAccessor"/>, so <c>/cd</c> changes take effect)</item>
-/// </list>
-/// </para>
-///
-/// <para><b>File format</b> (see <see cref="SerializeEntries"/> for the writer):</para>
-/// <code>
-/// ---
-/// last_updated: 2024-07-16T10:00:00Z
-/// entry_count: 2
-/// ---
-///
-/// ## fact:build-command
-///
-/// - source: autodream
-/// - category: fact
-/// - created_at: 2024-07-15T10:00:00Z
-/// - updated_at: 2024-07-16T10:00:00Z
-/// - expires_at: 2024-10-14T10:00:00Z
-///
-/// Build with `dotnet build src/OneCode.sln`. Typical duration ~45s.
-/// </code>
-///
-/// <para>
-/// <b>Thread safety</b>: writes are guarded by a per-directory <see cref="SemaphoreSlim"/>.
-/// Atomic file replacement (temp + rename) ensures readers never see a partial write.
-/// </para>
+/// 用户级映射到 <c>~/.onecode/memory/MEMORY.md</c>；项目级在调用时经 <see cref="IWorkingDirectoryAccessor"/>
+/// 解析 <c>{cwd}/.onecode/memory/MEMORY.md</c>，因此 <c>/cd</c> 会即时生效。
+/// 写入由按目录的 <see cref="SemaphoreSlim"/> 串行化，临时文件加重命名保证读方不会看到半写状态。
+/// 文件格式见记忆模块总览文档。
 /// </remarks>
 public sealed partial class MemoryEntryStore(
     IWorkingDirectoryAccessor wdAccessor,

@@ -23,8 +23,13 @@ public sealed partial class ChatTranscriptView : View
     private readonly List<Func<int, IReadOnlyList<FormattedLine>>> _committedJournal = [];
     private int _trailingBannerJournalIndex = -1;
     private bool _contentRerenderRequested;
+    private object? _resizeRerenderTimer;
+    private const int ResizeRerenderDebounceMs = 40;
 
     public MessageListView MessageView => _messageView;
+
+    /// <summary>切换最近一条可折叠详情块（工具调用 / 思考块 / 错误详情）的展开状态（Ctrl+E）。</summary>
+    public bool ToggleLastDetails() => _messageView.ToggleLastDetails();
 
     /// <summary>
     /// Content column width for wrapping — tracks the live viewport so chat
@@ -68,6 +73,7 @@ public sealed partial class ChatTranscriptView : View
 
     public void Clear()
     {
+        CancelResizeRerenderTimer();
         CancelPendingStreamingRebuild();
         _stream.Clear();
         _isWelcomeShowing = false;
@@ -366,22 +372,23 @@ public sealed partial class ChatTranscriptView : View
         if (resumeStreaming)
             FlushStreamingBeforeCommittedBlock();
 
+        var memoized = MemoizeByWidth(renderAtWidth);
         var spacing = withSpacing && _messageView.TotalLines > 0;
         if (spacing)
         {
-            _committedJournal.Add(width =>
+            _committedJournal.Add(MemoizeByWidth(width =>
             {
                 List<FormattedLine> lines = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
-                lines.AddRange(renderAtWidth(width));
+                lines.AddRange(memoized(width));
                 return lines;
-            });
+            }));
         }
         else
         {
-            _committedJournal.Add(renderAtWidth);
+            _committedJournal.Add(memoized);
         }
 
-        var current = renderAtWidth(ContentWidth);
+        var current = memoized(ContentWidth);
         if (spacing)
             _messageView.AppendLine("", TuiPalette.BgPrimary);
         _messageView.AppendLines(current);
@@ -451,10 +458,9 @@ public sealed partial class ChatTranscriptView : View
         // 预留 1 列滚动条，与 MessageListView 绘制期 contentWidth 对齐。
         _messageView.ReflowExpandedToolDetails(Math.Max(0, newWidth - 1));
 
-        // 终端 resize 后已提交内容按新宽度整体重排。不重排时，旧宽度下折行的
-        // 消息/工具结果在更窄的视口中行尾被直接裁切（展开的工具 JSON 最明显）。
-        // 侧边栏开合路径已单独调用 RequestContentRerender；终端 resize 此前遗漏。
-        RequestContentRerender();
+        // 终端 resize 后已提交内容按新宽度整体重排（40ms 防抖避免连续拖拽/resize 卡顿）。
+        // 侧边栏开合路径已单独调用 RequestContentRerender；终端 resize 走防抖重排。
+        ScheduleResizeRerender();
 
         // Re-render welcome screen so logo / text re-center in the new width
         if (_isWelcomeShowing)
@@ -462,6 +468,54 @@ public sealed partial class ChatTranscriptView : View
 
         _messageView.SetNeedsDraw();
         SetNeedsDraw();
+    }
+
+    private void ScheduleResizeRerender()
+    {
+        CancelResizeRerenderTimer();
+        var token = _app.AddTimeout(TimeSpan.FromMilliseconds(ResizeRerenderDebounceMs), () =>
+        {
+            _resizeRerenderTimer = null;
+            RequestContentRerender();
+            return false;
+        });
+
+        if (token is null)
+        {
+            // 测试替身未启用定时器时同步回退，确保单测在同一次绘制遍中生效
+            RequestContentRerender();
+        }
+        else
+        {
+            _resizeRerenderTimer = token;
+        }
+    }
+
+    private void CancelResizeRerenderTimer()
+    {
+        if (_resizeRerenderTimer is not null)
+        {
+            _app.RemoveTimeout(_resizeRerenderTimer);
+            _resizeRerenderTimer = null;
+        }
+    }
+
+    private static Func<int, IReadOnlyList<FormattedLine>> MemoizeByWidth(
+        Func<int, IReadOnlyList<FormattedLine>> renderAtWidth)
+    {
+        int w1 = -1, w2 = -1;
+        IReadOnlyList<FormattedLine>? r1 = null, r2 = null;
+        return width =>
+        {
+            if (width == w1 && r1 is not null) return r1;
+            if (width == w2 && r2 is not null) return r2;
+            var result = renderAtWidth(width);
+            w2 = w1;
+            r2 = r1;
+            w1 = width;
+            r1 = result;
+            return result;
+        };
     }
 
     /// <summary>

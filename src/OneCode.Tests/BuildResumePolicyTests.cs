@@ -104,10 +104,6 @@ public sealed class BuildResumePolicyTests
 
     [Theory]
     [InlineData(BuildRunState.Accepting, BuildResumeAction.ConfirmCommit)]
-    [InlineData(BuildRunState.Intake, BuildResumeAction.ContinueAssessment)]
-    [InlineData(BuildRunState.Assessing, BuildResumeAction.ContinueAssessment)]
-    [InlineData(BuildRunState.ScopeConfirmed, BuildResumeAction.PrepareFromScope)]
-    [InlineData(BuildRunState.Planning, BuildResumeAction.PrepareFromScope)]
     [InlineData(BuildRunState.Planned, BuildResumeAction.ParkAtGate)]
     [InlineData(BuildRunState.Implementing, BuildResumeAction.ParkAtGate)]
     [InlineData(BuildRunState.Verifying, BuildResumeAction.ParkAtGate)]
@@ -122,16 +118,5 @@ public sealed class BuildResumePolicyTests
 
         BuildResumePolicy.Evaluate(run, null, Fingerprint)
             .Action.Should().Be(expected);
-    }
-
-    [Fact]
-    public void Evaluate_ClarifyingWithPersistedPlan_ResumesPrescribedPlan()
-    {
-        // 旧检查点可能在计划契约强制前进入 Clarifying；带计划的 Clarifying 直接进执行准备，
-        // 不让用户对同一份计划重复批准
-        var run = Run(BuildRunState.Clarifying, plan: Plan("s", "t1"));
-
-        BuildResumePolicy.Evaluate(run, null, Fingerprint)
-            .Action.Should().Be(BuildResumeAction.ResumePrescribedPlan);
     }
 }

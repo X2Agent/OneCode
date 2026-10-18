@@ -76,20 +76,38 @@ public sealed partial class ReplShell
         return false;
     }
 
+    private int ReservedBottomRows =>
+        TuiSpacing.SessionContextBarHeight
+        + TuiSpacing.StatusBarHeight
+        + TuiSpacing.StatusBarTopGap
+        + TuiSpacing.ChatInputContextGap
+        + _chatInput.CurrentHeight;
+
+    private void ApplyBottomStackLayout()
+    {
+        _chatInput.Height = _chatInput.CurrentHeight;
+        _chatInput.Y = Pos.AnchorEnd(_chatInput.CurrentHeight + _chatInput.BottomOffset);
+        _agentStatusBar.Y = Pos.Top(_chatInput) - 1;
+        ApplyTodoStripLayout();
+        SetNeedsLayout();
+        SetNeedsDraw();
+    }
+
     private void ApplyTodoStripLayout()
     {
         var rows = _todoStrip.RequiredRows;
         _todoStripRows = rows;
         _todoStrip.Visible = rows > 0;
+        var reservedBottom = ReservedBottomRows;
         if (rows > 0)
         {
             _todoStrip.Height = rows;
-            _todoStrip.Y = Pos.AnchorEnd(TuiSpacing.ContentZoneReservedBottom + rows);
+            _todoStrip.Y = Pos.AnchorEnd(reservedBottom + rows);
         }
 
-        // 横条从内容区底部"借"行：内容区下边界随横条行数下移，
+        // 横条从内容区底部"借"行：内容区下边界随横条行数及输入区动态高度下移，
         // 对话列宽度不变（仅高度变化，不需要按新宽度重排换行）。
-        _contentZone.Height = Dim.Fill(TuiSpacing.ContentZoneReservedBottom + rows);
+        _contentZone.Height = Dim.Fill(reservedBottom + rows);
         _todoStrip.SetNeedsDraw();
     }
 }

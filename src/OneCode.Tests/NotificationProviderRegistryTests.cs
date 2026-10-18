@@ -86,8 +86,6 @@ public sealed class NotificationProviderRegistryTests
         registry.Names.Should().BeEquivalentTo(["shared", "compiled1"]);
     }
 
-    // ---------- Helpers ----------
-
     private static NotificationProviderRegistry CreateRegistry(
         IEnumerable<INotificationProvider> compiled,
         Dictionary<string, NotificationProviderDefinition>? definitions = null)

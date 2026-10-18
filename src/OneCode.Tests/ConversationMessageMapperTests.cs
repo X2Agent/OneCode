@@ -71,4 +71,24 @@ public sealed class ConversationMessageMapperTests
         call.CallId.Should().Be("call-9");
         call.Name.Should().Be("Read");
     }
+
+    [Fact]
+    public void ToChatHistory_UnclosedToolCall_SynthesizesErrorFunctionResultToKeepAtomicGroupClosed()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Message[] transcript =
+        [
+            new UserMessage("u1", "edit file", now),
+            new AssistantMessage("a1", [new ToolUseBlock("call-unclosed", "Edit", "{corrupt")], now),
+            new UserMessage("u2", "next turn", now),
+        ];
+
+        var history = ConversationMessageMapper.ToChatHistory(transcript);
+
+        history.Should().HaveCount(4);
+        history[2].Role.Should().Be(ChatRole.Tool);
+        var synthesized = history[2].Contents.OfType<FunctionResultContent>().Single();
+        synthesized.CallId.Should().Be("call-unclosed");
+        synthesized.Result?.ToString().Should().Contain("[TOOL ERROR]");
+    }
 }

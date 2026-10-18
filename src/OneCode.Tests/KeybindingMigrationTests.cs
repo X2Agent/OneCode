@@ -71,6 +71,30 @@ public sealed class KeybindingMigrationTests
         shell.ChatInput.SelectedSuggestionIndex.Should().Be(before + 1, "循环仍发生");
     }
 
+    [Fact]
+    public void DispatchInputKey_AtFileCompletion_TabCyclesAndEnterAcceptsFileWithTrailingSpace()
+    {
+        var shell = CreateShell();
+        shell.ChatInput.SetInputText("@");
+
+        // 首次 Tab：打开 @ 文件补全列表，标题切换为 files
+        shell.ChatInput.DispatchInputKey(Key.Tab);
+        shell.ChatInput.IsCompletionActive.Should().BeTrue();
+        shell.ChatInput.CompletionFrame.Title.Should().Be(ChatCompletionController.FilesPopupTitle);
+        shell.ChatInput.SelectedSuggestionIndex.Should().Be(0);
+
+        // 第二次 Tab：在 @ 文件补全列表中循环切换到下一项，不得关闭弹窗或切换工作模式
+        shell.ChatInput.DispatchInputKey(Key.Tab);
+        shell.ChatInput.IsCompletionActive.Should().BeTrue();
+        shell.ModeController.Mode.Should().Be(WorkingMode.Build);
+        shell.ChatInput.SelectedSuggestionIndex.Should().Be(1);
+
+        // 按 Enter 一次即确认选中文件（附带尾随空格）并关闭弹窗
+        shell.ChatInput.DispatchInputKey(Key.Enter);
+        shell.ChatInput.IsCompletionActive.Should().BeFalse();
+        shell.ChatInput.CurrentText.Should().StartWith("@").And.EndWith(" ");
+    }
+
     // —— InlineSelector：selector:* 迁移 ——
 
     [Fact]
@@ -190,7 +214,6 @@ public sealed class KeybindingMigrationTests
             new WorkingModeController(),
             new ReplShellKeyServices(resolver, keyContextManager),
             new ReplShellInputSources(
-                [new SlashCommandEntry("help", "帮助"), new SlashCommandEntry("hello", "测试命令二")],
-                () => []));
+                [new SlashCommandEntry("help", "帮助"), new SlashCommandEntry("hello", "测试命令二")]));
     }
 }

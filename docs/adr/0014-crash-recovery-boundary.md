@@ -3,7 +3,7 @@
 **状态**: Accepted
 **日期**: 2026-10-12
 **关联**: [代理循环能力边界](./0010-agent-loop-boundaries.md)（`/loop` 的 EditTransaction 回滚）、
-[子代理派工体系](../sub-agents.md)（fork 自建事务 / Goal SharedTransaction）
+[子代理派工体系](../sub-agents.md)（fork 自建事务 / Goal 子目标独立事务与工作树检查点）
 
 ---
 

@@ -29,6 +29,7 @@ public sealed partial class ChatInputView
                 SetNeedsDraw();
                 return;
             }
+            _completionFrame.Title = _completion.PopupTitle;
             _completionFrame.Visible = true;
             if (_completion.CurrentDisplayItems is { } items)
             {

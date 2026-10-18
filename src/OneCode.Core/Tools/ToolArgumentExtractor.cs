@@ -1,19 +1,9 @@
 namespace OneCode.Core.Tools;
 
 /// <summary>
-/// 统一的工具参数提取器。
-///
-/// 存在意义：文件编辑工具的路径参数在运行时存在多种命名约定和多种入参类型，
-/// 历史上各中间件/权限层各自实现 <c>ExtractPath</c>，导致：
-/// 1. 命名不一致——工具参数名是 <c>filePath</c>，
-///    而提取方查 <c>path</c>/<c>file_path</c>，名字对不上，路径永远提取不到。
-/// 2. 类型不一致——运行时中间件收到的 <c>ctx.Arguments</c> 实际是
-///    <c>AIFunctionArguments</c>（继承自 <c>Dictionary&lt;string, object?&gt;</c>），
-///    并非 <see cref="JsonElement"/>，但部分中间件仅判 <c>arguments is JsonElement</c>，
-///    导致提取逻辑根本进不去。
-///
-/// 本类作为单一事实源，统一处理上述差异。所有需要从工具参数中提取路径/命令/URL
-/// 的中间件和权限组件均应引用此类，不得再各自实现。
+/// 工具参数提取的单一事实源。运行时参数名与入参类型都不统一（<c>filePath</c> / <c>path</c> /
+/// <c>file_path</c>；<c>AIFunctionArguments</c> / <see cref="JsonElement"/>），各中间件与权限组件
+/// 必须经由本类提取路径、命令或 URL，不得各自实现。
 /// </summary>
 public static class ToolArgumentExtractor
 {

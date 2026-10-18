@@ -89,6 +89,38 @@ public sealed partial class ChatInputView
         // Reuse the already-resolved action for the rest of the switch
         var action = earlyAction;
 
+        // ── Search 上下文动作（Ctrl+F 会话内搜索模式激活时优先拦截） ──
+        if (action == KeybindingDefaults.ActionChatFindDismiss)
+        {
+            EndSearchMode();
+            e.Handled = true;
+            return;
+        }
+        if (action == KeybindingDefaults.ActionChatFindNext)
+        {
+            SearchNextRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+        if (action == KeybindingDefaults.ActionChatFindPrevious)
+        {
+            SearchPreviousRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+        if (action == KeybindingDefaults.ActionChatFind)
+        {
+            BeginSearchMode();
+            e.Handled = true;
+            return;
+        }
+        if (action == KeybindingDefaults.ActionChatToggleLastDetails)
+        {
+            ToggleLastDetailsRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+
         // Newline MUST be checked before plain Enter.
         // 短文本提问模式下 newline 映射 = 回到上一题；其余情况插入换行。
         if (action == KeybindingDefaults.ActionChatNewline)
@@ -191,7 +223,8 @@ public sealed partial class ChatInputView
                 e.Handled = true;
                 return;
             }
-            if (text.StartsWith('/') || _completion.IsCompletionActive)
+            var lastWord = ExtractLastWord(text);
+            if (text.StartsWith('/') || lastWord.Contains('@') || _completion.IsCompletionActive)
             {
                 HandleTab();
             }
@@ -355,10 +388,12 @@ public sealed partial class ChatInputView
         }
     }
 
-    /// <summary>侧栏（Plan 计划卡）翻页动作判定。</summary>
+    /// <summary>侧栏（Plan 计划卡）翻页与行级微调滚动动作判定。</summary>
     private static bool IsSidebarScrollAction(string? action)
         => action is KeybindingDefaults.ActionSidebarPageUp
-            or KeybindingDefaults.ActionSidebarPageDown;
+            or KeybindingDefaults.ActionSidebarPageDown
+            or KeybindingDefaults.ActionSidebarScrollUp
+            or KeybindingDefaults.ActionSidebarScrollDown;
 
     private void DispatchSidebarScroll(string? action)
     {
@@ -369,6 +404,12 @@ public sealed partial class ChatInputView
                 break;
             case KeybindingDefaults.ActionSidebarPageDown:
                 SidebarPageDownRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionSidebarScrollUp:
+                SidebarScrollUpRequested?.Invoke();
+                break;
+            case KeybindingDefaults.ActionSidebarScrollDown:
+                SidebarScrollDownRequested?.Invoke();
                 break;
         }
     }
@@ -411,21 +452,27 @@ public sealed partial class ChatInputView
 
     private void HandleTab()
     {
-        var text = _input.Text?.ToString() ?? string.Empty;
-        if (!text.StartsWith('/'))
+        if (_completion.IsCompletionActive)
         {
-            _completion.Hide();
+            _completion.CycleNext();
+            _completionList.SelectedItem = _completion.SelectedIndex;
             return;
         }
 
-        if (!_completion.IsCompletionActive)
+        var text = _input.Text?.ToString() ?? string.Empty;
+        if (text.StartsWith('/'))
         {
             _completion.UpdateCompletionList(text);
             return;
         }
 
-        _completion.CycleNext();
-        _completionList.SelectedItem = _completion.SelectedIndex;
+        if (ExtractLastWord(text).Contains('@'))
+        {
+            _completion.TryTypeaheadCompletion(text);
+            return;
+        }
+
+        _completion.Hide();
     }
 
     /// <summary>

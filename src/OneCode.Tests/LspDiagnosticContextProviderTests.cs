@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Lsp;
@@ -97,7 +96,7 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
 
         var context = await InvokeProvideAIContext(provider);
 
-        (context.Messages ?? []).Should().BeEmpty();
+        context.Instructions.Should().BeNullOrEmpty();
     }
 
     // Severity filtering: Information/Hint are intentionally excluded
@@ -113,7 +112,7 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
 
         var context = await InvokeProvideAIContext(provider);
 
-        (context.Messages ?? []).Should().BeEmpty();
+        context.Instructions.Should().BeNullOrEmpty();
     }
 
     // File under working directory → injected with file/severity/line summary
@@ -128,14 +127,12 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
 
         var context = await InvokeProvideAIContext(provider);
 
-        context.Messages.Should().HaveCount(1);
-        var msg = context.Messages.First();
-        msg.Role.Should().Be(ChatRole.System);
-        msg.Text.Should().Contain("Code.cs");
-        msg.Text.Should().Contain("ERROR");
-        msg.Text.Should().Contain("L2"); // 0-based line 1 → 1-based L2
-        msg.Text.Should().Contain("CS1002: ; expected");
-        msg.Text.Should().Contain("csc");
+        context.Instructions.Should().NotBeNullOrEmpty();
+        context.Instructions.Should().Contain("Code.cs");
+        context.Instructions.Should().Contain("ERROR");
+        context.Instructions.Should().Contain("L2"); // 0-based line 1 → 1-based L2
+        context.Instructions.Should().Contain("CS1002: ; expected");
+        context.Instructions.Should().Contain("csc");
     }
 
     [Fact]
@@ -148,12 +145,10 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
 
         var context = await InvokeProvideAIContext(provider);
 
-        context.Messages.Should().HaveCount(1);
-        var msg = context.Messages.First();
-        msg.Role.Should().Be(ChatRole.System);
-        msg.Text.Should().Contain("WARN");
-        msg.Text.Should().Contain("Legacy.cs");
-        msg.Text.Should().Contain("L5");
+        context.Instructions.Should().NotBeNullOrEmpty();
+        context.Instructions.Should().Contain("WARN");
+        context.Instructions.Should().Contain("Legacy.cs");
+        context.Instructions.Should().Contain("L5");
     }
 
     // Path boundary: diagnostics outside the working directory are not injected
@@ -168,6 +163,6 @@ public sealed class LspDiagnosticContextProviderTests : IDisposable
 
         var context = await InvokeProvideAIContext(provider);
 
-        (context.Messages ?? []).Should().BeEmpty();
+        context.Instructions.Should().BeNullOrEmpty();
     }
 }

@@ -15,7 +15,7 @@ public sealed class WorkingModeBridge : IDisposable
     private readonly IPermissionModeProvider _permissionModeProvider;
     private readonly IPlanModeService _planMode;
     private readonly ILogger<WorkingModeBridge>? _logger;
-    private PermissionMode? _prePlanAdvancedMode;
+    private PermissionMode? _preGoalMode;
     private bool _disposed;
 
     public WorkingModeBridge(
@@ -67,27 +67,32 @@ public sealed class WorkingModeBridge : IDisposable
         switch (mode)
         {
             case WorkingMode.Plan:
-                // Remember an advanced CLI override so leaving Plan restores it instead of
-                // silently downgrading to AcceptEdits.
-                var current = _permissionModeProvider.CurrentMode;
-                _prePlanAdvancedMode = IsCliAdvancedPermissionMode(current) ? current : null;
+                // PlanModeService.EnterPlanMode() 自身作为进入 Plan 前权限模式的唯一事实源。
                 _planMode.EnterPlanMode();
                 _logger?.LogDebug("WorkingModeBridge: entered PLAN mode");
                 break;
 
             case WorkingMode.Goal:
-                ExitPlanIfNeeded();
-                _prePlanAdvancedMode = null;
+                var restoredBeforeGoal = ExitPlanIfNeeded();
+                var currentBeforeGoal = restoredBeforeGoal ?? _permissionModeProvider.CurrentMode;
+                if (IsBuildCompatiblePermissionMode(currentBeforeGoal))
+                    _preGoalMode = currentBeforeGoal;
                 _permissionModeProvider.SetCurrentMode(PermissionMode.GoalAuto);
                 _logger?.LogDebug("WorkingModeBridge: entered GOAL mode (PermissionMode.GoalAuto)");
                 break;
 
             case WorkingMode.Build:
                 var restored = ExitPlanIfNeeded();
-                var buildMode = restored is { } restoredMode && IsCliAdvancedPermissionMode(restoredMode)
-                    ? restoredMode
-                    : _prePlanAdvancedMode ?? PermissionMode.AcceptEdits;
-                _prePlanAdvancedMode = null;
+                var preGoal = _preGoalMode;
+                _preGoalMode = null;
+                var current = _permissionModeProvider.CurrentMode;
+                var buildMode = IsBuildCompatiblePermissionMode(restored)
+                    ? restored!.Value
+                    : IsBuildCompatiblePermissionMode(preGoal)
+                        ? preGoal!.Value
+                        : IsBuildCompatiblePermissionMode(current)
+                            ? current
+                            : PermissionMode.Default;
                 _permissionModeProvider.SetCurrentMode(buildMode);
                 _logger?.LogDebug("WorkingModeBridge: entered BUILD mode ({PermissionMode})", buildMode);
                 break;
@@ -122,6 +127,17 @@ public sealed class WorkingModeBridge : IDisposable
     /// </summary>
     internal static bool IsCliAdvancedPermissionMode(PermissionMode? mode) =>
         mode is PermissionMode.BypassPermissions
+            or PermissionMode.Auto
+            or PermissionMode.DontAsk;
+
+    /// <summary>
+    /// 判断指定的 <see cref="PermissionMode"/> 是否为可直接在 BUILD 模式生效的用户权限档位
+    /// （排除由工作模式派生的 <see cref="PermissionMode.Plan"/> 与 <see cref="PermissionMode.GoalAuto"/>）。
+    /// </summary>
+    private static bool IsBuildCompatiblePermissionMode(PermissionMode? mode) =>
+        mode is PermissionMode.Default
+            or PermissionMode.AcceptEdits
+            or PermissionMode.BypassPermissions
             or PermissionMode.Auto
             or PermissionMode.DontAsk;
 

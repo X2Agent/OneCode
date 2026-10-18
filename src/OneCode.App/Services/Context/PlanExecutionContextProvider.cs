@@ -1,5 +1,4 @@
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using OneCode.App.Query;
 using OneCode.App.Services.PlanMode;
 using OneCode.Core.PlanMode;
@@ -41,7 +40,7 @@ public sealed class PlanExecutionContextProvider(
 
         return new AIContext
         {
-            Messages = [new ChatMessage(ChatRole.System, PlanExecutionProtocol.BuildHandoffContext(snapshot))],
+            Instructions = PlanExecutionProtocol.BuildHandoffContext(snapshot),
         };
     }
 }

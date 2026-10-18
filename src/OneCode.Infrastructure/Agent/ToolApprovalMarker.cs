@@ -4,33 +4,11 @@ using OneCode.Core.Tools;
 namespace OneCode.Infrastructure.Agent;
 
 /// <summary>
-/// Marks product tools that require an approval boundary with MAF's
-/// <see cref="ApprovalRequiredAIFunction"/> so the framework's approval protocol actually runs for them.
+/// 为产品工具挂上 <see cref="ApprovalRequiredAIFunction"/>，让 MAF 真正发起审批请求。
+/// 缺少标记时 <c>Ask</c> 决策会静默退化为直接执行。
+/// 在管道构建时与每次请求时各执行一次（后者覆盖框架注入的工具），仅在具备审批机制的通路上生效；
+/// 已带标记的工具跳过，因为按名称匹配无法识别重复包装。
 /// </summary>
-/// <remarks>
-/// <para>
-/// <b>Why this exists.</b> The product permission layer decides Allow / Deny / Ask, but that decision
-/// alone does not make the agent runtime ask anyone: a tool must carry
-/// <see cref="ApprovalRequiredAIFunction"/> for <c>FunctionInvokingChatClient</c> to surface a
-/// <see cref="ToolApprovalRequestContent"/> instead of invoking it. Without this marker an <c>Ask</c>
-/// decision silently degrades into "execute anyway", because the permission middleware treats
-/// <c>Ask</c> as a pass-through to the approval layer — which then has nothing to approve.
-/// </para>
-/// <para>
-/// <b>Where it runs.</b> At pipeline build time for the tools the product catalog hands to the agent,
-/// and once more per request through <see cref="ToolApprovalMarkingContextProvider"/> for tools the
-/// framework's context providers inject after that point (Harness todo list / working memory). Both
-/// calls are gated on the path actually having approval machinery (<c>EnableToolApproval</c>): marking
-/// tools on a path with no <c>ToolApprovalAgent</c> and no interactive bridge would make the framework
-/// convert every function call in the batch into an unresolvable approval request.
-/// </para>
-/// <para>
-/// <b>Idempotent.</b> Tools that already carry the marker are left alone, so provider-supplied tools
-/// (skills, file access, shell executors) are not double-wrapped, and the build-time pass is not
-/// repeated by the per-request pass. MAF's auto-approval rules match by tool <i>name</i>, so double
-/// wrapping would not be detected by name alone — the marker lookup is the only reliable check.
-/// </para>
-/// </remarks>
 public static class ToolApprovalMarker
 {
     /// <summary>

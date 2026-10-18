@@ -217,7 +217,20 @@ public sealed class HookExecutionServiceTests
 
         registry.GetAll().Should().ContainSingle("执行异常视为未完成，once hook 应保留待下次触发");
     }
-    // helpers
+
+    [Fact]
+    public void HookSerializerContext_SerializesPointAsProtocolWireName()
+    {
+        foreach (var point in HookInterceptionPoints.All)
+        {
+            var payload = MakePayload(point, "Bash");
+            var json = System.Text.Json.JsonSerializer.Serialize(payload, HookSerializerContext.Default.HookPayload);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            doc.RootElement.GetProperty("point").GetString()
+                .Should().Be(HookInterceptionPoints.ToWireName(point));
+        }
+    }
 
     private static (HookExecutionService sut, HookRegistry registry, IHookExecutor executor) CreateSut(
         bool trusted)

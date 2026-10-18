@@ -44,6 +44,9 @@ internal static class TuiGlyphs
     /// <summary>复制图标（⧉），用于代码块标题栏的复制按钮。U+29C9 TWO JOINED SQUARES，兼容性好且宽度为 1 cell。</summary>
     public const string CopyIcon = "⧉";
 
+    /// <summary>流式输出尾部光标（▌），用于实时 token 预览末尾指示生成位置。</summary>
+    public const string StreamingCursor = "▌";
+
     // 角色与状态指示
     public const string RoleBullet = "●";
 

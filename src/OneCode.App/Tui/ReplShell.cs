@@ -40,7 +40,6 @@ public sealed record ReplShellKeyServices(
 /// <summary>ReplShell 的输入与显示数据源（由宿主注入的动态 provider）。</summary>
 public sealed record ReplShellInputSources(
     IReadOnlyList<SlashCommandEntry> SlashCommands,
-    Func<IReadOnlyCollection<string>> ToolNameProvider,
     Func<IReadOnlyList<string>>? HistoryProvider = null,
     Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? SessionCandidatesProvider = null,
     Func<bool>? GetShowThinking = null);
@@ -104,7 +103,6 @@ public sealed partial class ReplShell : View
             _app,
             _modeController,
             inputSources.SlashCommands,
-            inputSources.ToolNameProvider,
             _keyResolver,
             _keyContextManager,
             _clipboard,
@@ -136,9 +134,41 @@ public sealed partial class ReplShell : View
         _chatInput.PageUpRequested += () => _transcript.MessageView.PageUp();
         _chatInput.PageDownRequested += () => _transcript.MessageView.PageDown();
 
-        // Shift+PageUp/PageDown — scroll the active plan sidebar (page-level)
+        // Shift+PageUp/PageDown and Alt+Up/Down — scroll the active plan sidebar
         _chatInput.SidebarPageUpRequested += () => ActiveSidebar?.PageUp();
         _chatInput.SidebarPageDownRequested += () => ActiveSidebar?.PageDown();
+        _chatInput.SidebarScrollUpRequested += () => ActiveSidebar?.ScrollUp();
+        _chatInput.SidebarScrollDownRequested += () => ActiveSidebar?.ScrollDown();
+
+        // Ctrl+E — toggle the most recent collapsible details block in the transcript
+        _chatInput.ToggleLastDetailsRequested += () => _transcript.ToggleLastDetails();
+
+        // Ctrl+F — inline transcript search bar
+        _chatInput.SearchQueryChanged += query =>
+        {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                _transcript.ClearSearchHighlight();
+                _chatInput.SetSearchMatchStatus(0, -1);
+                return;
+            }
+            var (total, idx) = _transcript.SearchAndScroll(query);
+            _chatInput.SetSearchMatchStatus(total, idx);
+        };
+        _chatInput.SearchNextRequested += () =>
+        {
+            var (total, idx) = _transcript.FindNext();
+            _chatInput.SetSearchMatchStatus(total, idx);
+        };
+        _chatInput.SearchPreviousRequested += () =>
+        {
+            var (total, idx) = _transcript.FindPrevious();
+            _chatInput.SetSearchMatchStatus(total, idx);
+        };
+        _chatInput.SearchDismissed += () => _transcript.ClearSearchHighlight();
+
+        // Dynamic 2-6 row input height reflows the bottom stack and content zone
+        _chatInput.DynamicHeightChanged += _ => ApplyBottomStackLayout();
 
         // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan 面板）。
         _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
@@ -181,7 +211,7 @@ public sealed partial class ReplShell : View
         _contentZone.Add(_transcript);
 
         _transcript.X = 1; _transcript.Y = 0;
-        _transcript.Width = Dim.Fill() - 1; _transcript.Height = Dim.Fill();
+        _transcript.Width = Dim.Fill(); _transcript.Height = Dim.Fill();
 
         // Plan sidebar — right-docked, hidden until a plan exists. When visible
         // it shrinks the transcript width (ApplySidebarLayout); once shown it
@@ -348,8 +378,8 @@ public sealed partial class ReplShell : View
         }
 
         _transcript.Width = sidebarWidth > 0
-            ? Dim.Fill() - sidebarWidth - 1
-            : Dim.Fill() - 1;
+            ? Dim.Fill() - sidebarWidth
+            : Dim.Fill();
         _transcript.SetNeedsLayout();
         _transcript.NotifyLayoutChanged();
         SetNeedsLayout();

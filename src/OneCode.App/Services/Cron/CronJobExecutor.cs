@@ -1,42 +1,40 @@
 using OneCode.Core.Config;
 using OneCode.App.Query;
-using OneCode.App.Session;
 using OneCode.Automation.Cron;
 using OneCode.App.Services.Mcp;
-using OneCode.Core.Models;
+using OneCode.App.Services.Notifier;
 
 namespace OneCode.App.Services.Cron;
 
 /// <summary>
-/// App-layer implementation of <see cref="ICronJobExecutor"/>. Wraps the previously inline
-/// trigger logic of <c>CronSchedulerService.TriggerJobAsync</c>: resolve model id → build
-/// (cached) system prompt → ensure foreground conversation → submit prompt under a read-only
-/// tool permission policy → drain event stream to completion.
+/// App-layer implementation of <see cref="ICronJobExecutor"/>. Resolves the configured model,
+/// builds (and caches) the system + harness prompts, and submits the prompt to
+/// <see cref="IConversationRunner"/> in an isolated unattended session (<c>unattended: true</c>).
 /// </summary>
 /// <remarks>
 /// 依赖 <see cref="IConversationRunner"/> 接口而非具体实现：cron 只需要
 /// "跑一段 prompt"的能力，不需要会话持久化/hook/token 统计等交互式职责。该抽象也是
 /// 保持构造图为 DAG 的关键一环（见 <see cref="IConversationRunner"/> 备注）。
 ///
-/// Serialised by <see cref="_gate"/> so a cron-triggered run never overlaps the TUI main
-/// loop's run on the same <see cref="SessionManager.ForegroundConversation"/>.
+/// 每次触发在独立会话 ID 与 <c>SuppressToolApproval = true</c> 下运行，既不污染用户的前台会话历史，
+/// 也不会在无 UI 消费方的情况下因交互式审批弹窗而永久死锁。通过 <see cref="_gate"/> 串行化后台触发。
 /// </remarks>
 public sealed class CronJobExecutor(
     ILogger<CronJobExecutor> logger,
     IConversationRunner runner,
-    ISessionManager sessionManager,
     PromptConfigBuilder promptConfigBuilder,
     McpStartupPreconnector preconnector,
     IConfigManager configManager,
-    IModelManager modelManager) : ICronJobExecutor
+    INotifierService? notifier = null) : ICronJobExecutor, IDisposable
 {
+    private static readonly TimeSpan DefaultJobTimeout = TimeSpan.FromMinutes(15);
+
     private readonly ILogger<CronJobExecutor> _logger = logger;
     private readonly IConversationRunner _runner = runner;
-    private readonly ISessionManager _sessionManager = sessionManager;
     private readonly PromptConfigBuilder _promptConfigBuilder = promptConfigBuilder;
     private readonly McpStartupPreconnector _preconnector = preconnector;
     private readonly IConfigManager _configManager = configManager;
-    private readonly IModelManager _modelManager = modelManager;
+    private readonly INotifierService? _notifier = notifier;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _cachedSystemPrompt;
     private string? _cachedHarnessPrompt;
@@ -61,38 +59,38 @@ public sealed class CronJobExecutor(
                 return;
             }
 
-            // Build (and cache) the system prompt once, including the skills provider
-            // rebuild. MCP 预连接已移出 PromptConfigBuilder（Plan B）——cron 是非交互
-            // 路径，这里显式等待预连接完成后再构建，保证工具目录与 skills 覆盖 MCP。
-            // The first build is uncancellable (prompt pipeline doesn't honour the
-            // token), but subsequent await points below DO honour `ct` so a host
-            // shutdown still surfaces promptly.
             await _preconnector.EnsureConnectedAsync(ct).ConfigureAwait(false);
             _cachedSystemPrompt ??= await _promptConfigBuilder.BuildSystemPromptAsync(
                 ct).ConfigureAwait(false);
-            // Harness fragment is cached with the body: MAF needs both halves and cron has no
-            // InteractiveSession carrying them. Missing file throws — same fail-fast as interactive.
             _cachedHarnessPrompt ??= await _promptConfigBuilder.LoadHarnessAsync(
                 ct).ConfigureAwait(false);
 
-            // Ensure a foreground conversation exists before submitting.
-            await _sessionManager.EnsureActiveSessionAsync(
-                new ConversationOptions(Environment.CurrentDirectory, modelId),
-                ct).ConfigureAwait(false);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(DefaultJobTimeout);
 
-            // Cron 任务无人值守，应使用 Goal 模式（自主分解+迭代验证）。
-            // Plan 模式提交后进入持久化 AwaitingApproval，必须由用户审批，
-            // 因此不适合作为无人值守 Cron 的执行模式。
-            await foreach (var _ in _runner.StreamQueryAsync(
-                prompt, _cachedSystemPrompt, modelId, ct: ct,
-                workingMode: WorkingMode.Goal,
-                harnessPrompt: _cachedHarnessPrompt).ConfigureAwait(false))
+            string? runError = null;
+            await foreach (var evt in _runner.StreamQueryAsync(
+                prompt,
+                _cachedSystemPrompt,
+                modelId,
+                ct: timeoutCts.Token,
+                workingMode: WorkingMode.Build,
+                harnessPrompt: _cachedHarnessPrompt,
+                unattended: true).ConfigureAwait(false))
             {
-                // Cron runs are headless; events are not surfaced to a TUI.
+                if (evt is ErrorEvent err)
+                    runError = err.Message;
+            }
+
+            var preview = prompt.Length > 50 ? prompt[..50] + "..." : prompt;
+            if (!string.IsNullOrEmpty(runError))
+            {
+                await NotifyIfEnabledAsync("OneCode Cron 任务失败", runError, ct).ConfigureAwait(false);
+                throw new InvalidOperationException(runError);
             }
 
             var elapsed = DateTimeOffset.UtcNow - startedAt;
-            var preview = prompt.Length > 50 ? prompt[..50] + "..." : prompt;
+            await NotifyIfEnabledAsync("OneCode Cron 任务完成", preview, ct).ConfigureAwait(false);
             _logger.LogInformation(
                 "Cron job executed in {Seconds:F1}s: {Prompt}",
                 elapsed.TotalSeconds, preview);
@@ -102,4 +100,13 @@ public sealed class CronJobExecutor(
             _gate.Release();
         }
     }
+
+    private async Task NotifyIfEnabledAsync(string title, string message, CancellationToken ct)
+    {
+        if (_notifier is not { IsSupported: true }) return;
+        if (_configManager.Current.Effective.NotificationsEnabled == false) return;
+        await _notifier.SendNotificationAsync(title, message, ct).ConfigureAwait(false);
+    }
+
+    public void Dispose() => _gate.Dispose();
 }

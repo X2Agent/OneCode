@@ -14,8 +14,6 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class WorkflowKernelVocabularyTests
 {
-    // ---------- RunTerminalReasonMap ----------
-
     [Theory]
     [InlineData(GoalRunState.Completed, RunTerminalReason.Completed)]
     [InlineData(GoalRunState.Paused, RunTerminalReason.BudgetExceeded)]

@@ -179,8 +179,7 @@ public sealed class MessageFlowRenderer
         List<FormattedLine> lines = [];
         var barColor = TuiPalette.GetModeBarColor(CurrentMode);
         var timeStr = $"{time}";
-        const int scrollbarWidth = 1;
-        var reservedRightWidth = scrollbarWidth + TuiSpacing.MessageTimestampRightPadding;
+        var reservedRightWidth = TuiSpacing.MessageTimestampRightPadding;
         var firstLineWidth = Math.Max(
             1,
             CurrentWidth - reservedRightWidth - ContentIndent - timeStr.Length - 1);
@@ -465,8 +464,6 @@ public sealed class MessageFlowRenderer
                 lines.Add(FormattedLine.Plain($"{Indent}  {w}", TuiPalette.FgSecondary));
         }
     }
-
-    // Helpers
 
     /// <summary>Makes a tool-call inline row: ▸ Name  args   ✓/✗/◈
     /// Uses a right-pointing triangle (▸) — clickable to expand/collapse tool details.

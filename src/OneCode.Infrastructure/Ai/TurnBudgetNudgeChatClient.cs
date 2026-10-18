@@ -20,10 +20,9 @@ namespace OneCode.Infrastructure.Ai;
 /// token 版 BudgetGuard 分级预警。
 /// </para>
 /// </summary>
-public sealed class TurnBudgetNudgeChatClient(IChatClient inner, int maxTurns, AgentPipelineMetrics metrics) : IChatClient
+public sealed class TurnBudgetNudgeChatClient(IChatClient inner, int maxTurns, AgentPipelineMetrics metrics)
+    : DelegatingChatClient(inner)
 {
-    private readonly IChatClient _inner = inner;
-
     /// <summary>提醒触发比例：达到轮数上限的 80% 即提醒（业界对失控循环的主修法）。</summary>
     internal const double NudgeRatio = 0.8;
 
@@ -44,22 +43,17 @@ public sealed class TurnBudgetNudgeChatClient(IChatClient inner, int maxTurns, A
         : int.MaxValue;
     private bool _nudged;
 
-    public Task<ChatResponse> GetResponseAsync(
+    public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
-        => _inner.GetResponseAsync(PrepareMessages(messages), options, cancellationToken);
+        => base.GetResponseAsync(PrepareMessages(messages), options, cancellationToken);
 
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
-        => _inner.GetStreamingResponseAsync(PrepareMessages(messages), options, cancellationToken);
-
-    public object? GetService(Type serviceType, object? serviceKey = null)
-        => _inner.GetService(serviceType, serviceKey);
-
-    void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
+        => base.GetStreamingResponseAsync(PrepareMessages(messages), options, cancellationToken);
 
     /// <summary>
     /// 计数并在达到阈值时于请求末尾追加提醒（仅一次）。克隆消息列表——注入的消息

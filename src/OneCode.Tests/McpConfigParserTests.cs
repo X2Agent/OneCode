@@ -114,8 +114,6 @@ public sealed class McpConfigParserTests : IDisposable
         }
     }
 
-    // ===== GetPath project 作用域路径解析（读写一致性防回归）=====
-
     [Fact]
     public void GetPath_Project_ResolvesNearestAncestorConfig()
     {
@@ -179,8 +177,6 @@ public sealed class McpConfigParserTests : IDisposable
         McpConfigFileStore.GetPath("user", @"C:\nonexistent\working\directory")
             .Should().Be(userPath);
     }
-
-    // ===== 工具白名单（tools 字段）=====
 
     [Fact]
     public async Task Parse_ToolsArray_PopulatesEnabledTools()

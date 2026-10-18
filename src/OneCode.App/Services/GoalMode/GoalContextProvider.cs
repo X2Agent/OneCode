@@ -1,6 +1,5 @@
 // MAAI001 suppressed: AIContextProvider uses experimental MAF APIs
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using OneCode.App.Services.Context;
 using System.Text;
 
@@ -40,7 +39,7 @@ public sealed class GoalContextProvider(IPermissionModeProvider modeProvider, Go
 
         return ValueTask.FromResult(new AIContext
         {
-            Messages = [new ChatMessage(ChatRole.System, message)],
+            Instructions = message,
         });
     }
 
@@ -76,9 +75,9 @@ public sealed class GoalContextProvider(IPermissionModeProvider modeProvider, Go
             sb.AppendLine();
         }
 
-        if (snap.SharedTransactionHint)
+        if (snap.CompletedSummaries.Count > 0)
         {
-            sb.AppendLine("NOTE: All sub-goals share the same edit transaction. Files edited in earlier sub-goals are already modified — verify current state before editing.");
+            sb.AppendLine("NOTE: Sub-goals execute sequentially in the same isolated workspace. Files modified in earlier completed sub-goals are already on disk — verify current file state before editing.");
         }
 
         return sb.ToString();
@@ -131,5 +130,4 @@ public sealed record GoalContextSnapshot(
     int TotalGoals,
     IReadOnlyList<(int Id, string Description, string Summary)> CompletedSummaries,
     IReadOnlyList<(int Id, string Description, string Gap)> FailedSummaries,
-    bool SharedTransactionHint,
     int CurrentGoalDepth = 0);

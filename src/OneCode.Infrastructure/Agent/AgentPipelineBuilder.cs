@@ -300,8 +300,9 @@ public static class AgentPipelineBuilder
             ChatOptions = chatOptions,
             AIContextProviders = BuildContextProviders(options),
             // Main hands in TranscriptChatHistoryProvider (session transcript bridge);
-            // single-turn paths (forked / Goal sub-goals) keep the InMemory default.
-            ChatHistoryProvider = options.ChatHistoryProvider ?? new InMemoryChatHistoryProvider(),
+            // single-turn paths (forked / Goal sub-goals) pass null so HarnessAgent natively
+            // creates InMemoryChatHistoryProvider(compactionStrategy.AsChatReducer()).
+            ChatHistoryProvider = options.ChatHistoryProvider,
             ToolApprovalAgentOptions = harnessToolApproval,
             DisableToolAutoApproval = !options.PipelineOptions.EnableToolApproval,
             // 轮数上限 + 1：预留一轮收尾（工具预算触发后模型至少还有一次无工具迭代可产出总结）。
@@ -418,7 +419,7 @@ public static class AgentPipelineBuilder
         // sensitive-file access regardless of role or profile.
         builder = builder.Use(
             SafetyInvariantMiddleware.Create(
-                OneCodeToolMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
+                SafetyInvariantMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
                 loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
 
         if (options.HookExecutionService is not null)

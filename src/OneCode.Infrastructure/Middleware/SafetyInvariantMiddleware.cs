@@ -1,5 +1,6 @@
 using OneCode.Core.Domain;
 using OneCode.Core.Tools;
+using OneCode.Infrastructure.Middleware.Invariants;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -11,6 +12,14 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public static class SafetyInvariantMiddleware
 {
+    /// <summary>创建默认的 Layer 0 安全不变量集合。</summary>
+    public static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(string workingDirectory) =>
+    [
+        new FileSystemInvariant(workingDirectory),
+        new BashCommandInvariant(),
+        new ResourceInvariant(),
+    ];
+
     /// <summary>创建 MAF 中间件委托。</summary>
     public static Func<AIAgent, FunctionInvocationContext,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,

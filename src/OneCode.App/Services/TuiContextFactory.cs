@@ -120,7 +120,6 @@ public sealed class TuiContextFactory(
             TrustService: tuiDeps.TrustService,
             ImagePipeline: tuiDeps.ImagePipeline,
             Clipboard: clipboard,
-            GetToolNames: () => catalog.ToolCatalog.GetVisibleToolNames(),
             GetShowThinking: () => catalog.AppState.Current.ShowThinking,
             EmitEvent: evt => emitEvent?.Invoke(evt));
 

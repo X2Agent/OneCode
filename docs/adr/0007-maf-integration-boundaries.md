@@ -23,7 +23,7 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 | Harness 压缩「双挂」 | 主路径未设 token 参数，本就不启用 → 降为【防御性关闭】 |
 | ParallelDag 可用 MAF Concurrent「等价替换」 | 真并行 DAG 由 `ParallelAgents` 工具承接，不以 MAF Concurrent 等价替换 → 【保留】 |
 | MCP WebSocket / InProcess / Registry「冷代码可删」 | 均有实际调用方 → 【保留】，判断作废 |
-| ToolApproval「现存双挂」 | 已有 `harnessOwnsToolApproval` 挡住 → 【禁止回归】，非现存 bug |
+| ToolApproval「现存双挂」 | 由 `EnableToolApproval` 单一开关控制：无交互 broker 时不构造 `ToolApprovalAgentOptions`，并置 `DisableToolAutoApproval` → 【禁止回归】，非现存 bug |
 
 误判的根源是：**这些边界只存在于一份尚无决策记录地位的计划文档里**。本 ADR 把仍有效的边界判定
 提升为 ADR，使规划文档可以归档、而边界不至于随之流失。
@@ -41,7 +41,7 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 | Todo | Harness `TodoProvider`（`todos_*`），按 profile 启用 | 宿主执行记录（Worker 状态、后台任务、Build 依赖）仍归 `ITaskService` / `BuildTaskLinker`；`TaskTool` 只保留 get/list/stop/output，不再提供普通清单的 create/update |
 | AgentMode | 宿主模式 + Main `ModeInstructionProvider` | 不恢复 LLM `mode_set` 形成双状态；子代理由角色/profile 约束 |
 | FileMemory | Harness `FileMemoryProvider`（`file_memory_*`），store 根绑定项目 | 仅 Main 启用；Worker/Explore/Plan 关闭（只读 Agent 不应有写面）。长期 MEMORY.md + `MemoryContextProvider` 仍是治理后的知识，两者分目录共存 |
-| AgentSkills | 官方 `AgentSkillsProviderBuilder` + 文件/内联/MCP/runner | 双入口共用 `SkillDiscovery` 的发现规则；runner 有超时/输出上限/进程树清理；宿主通过 `AgentContextProviderLease` 释放每 run 的 provider |
+| AgentSkills | 官方 `AgentSkillsProviderBuilder` + 文件/内联/MCP/runner | 双入口共享目录清单：斜杠侧由 `SkillDiscovery` 发现，模型侧由 MAF `UseFileSkills` 发现（规则同构，需同步维护）；runner 有超时/输出上限/进程树清理；宿主通过 `AgentContextProviderLease` 释放每 run 的 provider |
 | WebSearch | 产品 AIFunction 搜索后端链（Tavily + DuckDuckGo 两个 `IWebSearchProvider`） | 关闭默认 hosted tool；两个提供方的适配都在 Infrastructure |
 | Compaction | Harness 策略入口（`HarnessAgentOptions.CompactionStrategy`） | 产品提供策略（比例、formatter、摘要守卫、prompt），Harness 挂载唯一 provider；不再双挂 |
 | HarnessInstructions | MAF 合成：通用片段 → `HarnessInstructions`，主体 → `ChatOptions.Instructions` | 产品保留加载、覆盖、渲染与缺失 fail-fast；`PromptComposer` 不再拼接 |
@@ -66,8 +66,6 @@ OneCode 站在 Microsoft Agent Framework（MAF，NuGet `Microsoft.Agents.AI*`）
 
 真并行 DAG 的产品承接者是 `ParallelAgents` 工具（MAF `AddFanOutEdge` / `AddFanInBarrierEdge`，编译期 Kahn 查环）。
 若未来重建多成员编排，不得以「等价替换」为名引入 MAF Concurrent 而绕过产品闸。
-> `ParallelAgents` 工具（MAF `AddFanOutEdge` / `AddFanInBarrierEdge`，编译期 Kahn 查环）。若未来重建多成员编排，
-> 不得以「等价替换」为名引入 MAF Concurrent 而绕过产品闸。
 
 **禁止**：把并行 DAG「等价替换」为 MAF Concurrent 工作流。多成员误配保持「单成员断言 + 日志」。
 
@@ -115,9 +113,8 @@ Agent 工具路径已站在 MAF 上（`ListAgentToolsWithTasksAsync` + `UseMcpSk
 
 ### 5.1 版本敏感行为与升级复查
 
-**项目引用的 NuGet 为 `1.22.0`，本地 `agent-framework/` 是该发布再前进 6 个提交**
-（`git describe --tags` = `dotnet-1.22.0-6-g669c8b95e`）。二者基线已对齐，但 checkout 仍非逐字等同发布包——
-版本敏感断言以「**1.22.0 包行为 + 发布 tag 源码**」双证为准，不得仅凭 HEAD 源码为发布包行为作证。
+**项目引用的 NuGet 为 `1.24.0`，本地 `agent-framework/` checkout 基线为 `dotnet-1.22.0-6-g669c8b95e`**。
+版本敏感断言以「**1.24.0 真实包行为 + 源码核对**」双证为准，不得仅凭本地 checkout 源码为发布包行为作证（详见 [MAF C# 接入指引 §1.1](../maf/integration-guide.md)）。
 
 **包与目录不等同**：`Microsoft.Agents.AI.Harness` 包只有 `HarnessAgent.cs` / `HarnessAgentOptions.cs` /
 `ChatClientHarnessExtensions.cs` / `FeatureIndex.cs`；被使用的默认 provider（Todo / AgentMode / FileMemory /
@@ -130,8 +127,7 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
 有版本对应证据；不向其他模块外推。`Harness/**` 整体与 `Skills/**` **不能**标【已核对】——其中 `ToolApproval/**` 与
 `AgentMode/**` 在该区间有改动，见下。
 
-**同一 range 内确有改动（结论以 `dotnet-1.22.0` 为准——pinned 包与本地 checkout 同处该基线；
-`dotnet-1.21.0` tag 是升级前旧行为，仅作 diff 对照）**：
+**同一 range 内确有改动（结论已在 `1.24.0` 正式包上通过行为测试锁定；`dotnet-1.21.0` tag 是升级前旧行为，仅作 diff 对照）**：
 
 - `dotnet/src/Microsoft.Agents.AI/ChatClient/` 的审批协议实现被 `[BREAKING]` 改写：
   `ApprovalResponseBindingChatClient` 共 139 行变动（+112/-27）重写、`ApprovalNotRequiredFunctionBypassingChatClient`
@@ -153,7 +149,7 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
   模式工具」变成官方开关——与 §1 的「AgentMode 归宿主」同向，升级后可评估用它替代自建 opt-out。
 - `OpenTelemetryAgent.cs` / `AgentExtensions.cs` 亦有变化，**agent 级遥测结论同样版本敏感**。
 
-**升级复查必做**（升级 MAF 版本时逐条执行；当前 pinned 为 `dotnet-1.22.0`）：
+**升级复查必做**（升级 MAF 版本时逐条执行；当前 pinned 为 `1.24.0`）：
 
 1. 重跑「暂停 → 恢复 → 审批响应绑定」与「只回显响应、不回放请求」两组用例——注意 1.22.0（`#8432`）同时改写了
    `ToolApprovalAgent` 与 `ApprovalResponseBindingChatClient` 两侧的"已浮出"登记语义，用例必须覆盖上限轮与排队出队两条路径。
@@ -191,7 +187,7 @@ provider 次序与状态 key、source/provider/client 所有权不误释放共�
 - 自研 chat history 循环（交给 `ChatHistoryProvider`；Main 路径经 `TranscriptChatHistoryProvider` 读写两侧桥接会话转录——per-service-call 哨兵要求 provider 实现回写，只读实现会让多轮工具调用的请求出现孤儿 tool 消息；宿主不注入历史消息、也不清空框架历史）
 - 再实现「自家 Harness 运行时」
 - 在 Harness 已拥有 compaction 时再从产品侧挂一个 `CompactionProvider`（现由 `HarnessAgentOptions.CompactionStrategy` 单一入口保证，**禁止回归**）
-- 在 Harness 已拥有 approval 时再挂一套 `UseToolApproval`（现有 `harnessOwnsToolApproval` 已挡住，**禁止回归**）
+- 在 Harness 已拥有 approval 时再挂一套审批中间件（现由 `EnableToolApproval` 单一开关与 `DisableToolAutoApproval` 保证，**禁止回归**）
 - 启用实验性 `FileAccess` / `BackgroundAgents`（除非单独立项）
 - **手写提供商线协议键**：向 `ChatOptions.AdditionalProperties` / `ChatMessage.AdditionalProperties` 塞
   提供商私有键（`cache_control`、`thinking`、`reasoning_effort` …）来「实现」缓存或推理参数（见 §7）

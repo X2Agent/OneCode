@@ -38,8 +38,8 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 2. **单一读取入口**：通过 `MemoryContextProvider`（继承 `ReadOnlyAIContextProviderBase`）经 `AIContext.Instructions` 注入有效记忆的**完整正文**（剥离内部管理属性，受 `8,000` 字符总预算约束），无需二次调用检索工具。
 3. **三道防线防记忆爆炸**：
    - 写入端：AutoDream 整合代理挂载 `MemoryContextProvider` 读取既有记忆，同名 Key 原地 `upsert`、使用 `supersedes` 合并替换碎片化旧 Key、使用 `delete` 清理失效条目；
-   - 存储端：自动记忆默认 30 天（`720h`）TTL 过期，单作用域硬上限 `MaxEntries = 50`（豁免 `manual` 后按 `UpdatedAt` 淘汰最旧条目）；
-   - 读取端：`MaxMemoryContextChars = 8_000` 字符预算兜底（按 `manual` 优先 → `Project` 优先于 `User` → `UpdatedAt` 降序）。
+   - 存储端：自动记忆默认 30 天（`720h`）TTL 过期，单作用域硬上限 `MaxEntries = 50`（按 `source == "manual"` 豁免手动条目后，按 `UpdatedAt` 淘汰最旧自动条目）；
+   - 读取端：`MaxMemoryContextChars = 8_000` 字符预算兜底（先输出手动记忆分区、再输出自动记忆分区，各分区内按 `Project` 优先于 `User` → `UpdatedAt` 降序）。
 4. **任务完成驱动**：仅在 `BUILD` 模式任务正常完成且未回滚时由 `QueryStreamEngine.FinalizeAsync` 触发后台增量整合，无定时空转轮询。
 
 ---
@@ -114,7 +114,7 @@ OneCode 的记忆模块旨在让 Agent **跨会话、跨项目地积累与复用
 
 **注意事项**：
 - 手动编辑时保持 `## {key}` 作为条目分隔符；解析器仅消费已知元数据键（`source`、`category`、`created_at`、`updated_at`、`expires_at`），正文中的普通 `- key: value` 列表会被完整保留
-- 手动添加的条目使用 `manual:` 前缀的 Key，受安全闸保护不会被 AutoDream 覆盖或删除
+- 手动添加的条目使用 `manual:` 前缀的 Key 且写入 `source: manual`：AutoDream 写入闸（`AutoDreamMemoryApplier`）同时拦截 `manual:` Key 前缀与 `source == "manual"` 防止覆盖或删除，存储淘汰闸（`PruneAsync`）按 `source == "manual"` 豁免手动条目；若直接手改 `MEMORY.md` 新增永久条目，请同时保留 `manual:` Key 前缀与 `- source: manual` 元数据
 - Agent 不通过工具直接写 `MEMORY.md`——所有程序化写入经 `IMemoryEntryStore` 或 AutoDream 清洗管线
 
 ---

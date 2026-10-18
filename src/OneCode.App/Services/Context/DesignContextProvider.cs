@@ -1,6 +1,5 @@
 // MAAI001 suppressed: AIContextProvider uses experimental MAF APIs
 using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 using OneCode.App.Session;
 using OneCode.Infrastructure.Config;
 using System.Text;
@@ -81,7 +80,7 @@ public sealed class DesignContextProvider(
 
         return new AIContext
         {
-            Messages = [new ChatMessage(ChatRole.System, sb.ToString())],
+            Instructions = sb.ToString(),
         };
     }
 

@@ -3,88 +3,63 @@ using System.Text.RegularExpressions;
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Provides typeahead completion suggestions for the REPL prompt.
-/// Supports four completion modes:
-///   1. Slash commands (/command → /config, /help, ...)
-///   2. File paths  (read "path → read "path/to/file.cs")
-///   3. Tool names   (@Tool → @WebFetch, @Read, ...)
-///   4. Session ids  (/session switch 4f, /close 4f → full 32-char id insertion)
+/// 为 REPL 输入框提供实时补全建议，支持四种补全模式：
+///   1. 会话 ID（<c>/session switch 4f</c>、<c>/close 4f</c> → 补全完整 32 位 ID）
+///   2. 斜杠命令（<c>/command</c> → <c>/config</c>、<c>/help</c> 等）
+///   3. <c>@</c> 工作区文件关联（<c>@</c> 或 <c>@query</c> → 扁平列出工作区文件相对路径并实时模糊过滤）
+///   4. 普通文件路径（<c>read "path</c> → <c>read "path/to/file.cs"</c>）
 /// </summary>
 public sealed partial class TypeaheadCompletionEngine(
     IReadOnlyList<SlashCommandEntry> commands,
     string workingDirectory,
-    Func<IReadOnlyCollection<string>> toolNameProvider,
     Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? sessionCandidatesProvider = null)
 {
+    private const int MaxAtFileResults = 15;
+    private const int MaxScannedFiles = 2000;
+    private const int MaxScanDepth = 6;
+
     private IReadOnlyList<SlashCommandEntry> _commands = commands;
     private readonly string _workingDirectory = workingDirectory;
-    private readonly Func<IReadOnlyCollection<string>> _toolNameProvider = toolNameProvider;
     private readonly Func<IReadOnlyList<OneCode.App.Session.SessionCandidate>>? _sessionCandidatesProvider = sessionCandidatesProvider;
 
-    private IReadOnlyCollection<string> GetToolNames()
-        => _toolNameProvider.Invoke();
-
     /// <summary>
-    /// Replaces the command list used for slash-completion at runtime (e.g. after skills/MCP refresh).
+    /// 运行时替换斜杠命令列表（如技能或 MCP 动态命令刷新后）。
     /// </summary>
     public void UpdateCommands(IReadOnlyList<SlashCommandEntry> commands)
         => _commands = commands;
 
     /// <summary>
-    /// Detect the completion mode and return matching suggestions.
-    /// Returns empty list if no completions are available.
+    /// 检测当前输入的补全模式并返回匹配的插入文本列表；无匹配时返回空列表。
     /// </summary>
     public List<string> GetCompletions(string input)
     {
         if (string.IsNullOrEmpty(input))
             return [];
 
-        // Mode 0: Session id arguments (/session switch|delete <prefix>, /close <prefix>).
-        // Matched before other modes: the input starts with '/', but the trailing
-        // id prefix does not, so mode 1 would never fire for these lines anyway.
+        // 模式 0：会话 ID 参数（/session switch|delete <prefix>、/close <prefix>）。
         if (TryGetSessionIdItems(input, out var sessionItems))
             return sessionItems.Select(i => i.Insert).ToList();
 
-        // Mode 1: Slash commands — check the last word, not just the whole input.
-        // This lets "/help" work even after other text like "hello /help".
+        // 模式 1：斜杠命令——检查最后一个词，支持行中触发（如 "hello /help"）。
         var lastWord = ExtractLastWord(input);
         if (lastWord.StartsWith('/'))
             return GetCommandCompletions(lastWord);
 
-        // Mode 2: @Tool references or @file path references
-        if (input.EndsWith('@'))
-        {
-            var fileSuggestions = GetWorkingDirEntries(input, "");
-            var toolSuggestions = GetToolNames()
-                .Select(t => $"{input}{t}")
-                .ToList();
-            fileSuggestions.AddRange(toolSuggestions);
-            return fileSuggestions;
-        }
-
+        // 模式 2：@ 工作区文件关联补全（裸 @ 或 @<查询词>）
         var lastAt = input.LastIndexOf('@');
-        if (lastAt >= 0 && lastAt < input.Length - 1)
+        if (lastAt >= 0)
         {
             var prefix = input[..lastAt];
             var query = input[(lastAt + 1)..];
             if (!query.Contains(' '))
             {
-                // File path completions first (more commonly used after @)
                 var fileMatches = GetAtFileCompletions(prefix, query);
-
-                var toolMatches = GetToolNames()
-                    .Where(t => t.StartsWith(query, StringComparison.OrdinalIgnoreCase))
-                    .Select(t => $"{prefix}@{t} ")
-                    .ToList();
-
-                fileMatches.AddRange(toolMatches);
-
                 if (fileMatches.Count > 0)
                     return fileMatches;
             }
         }
 
-        // Mode 3: File paths (when text contains quote or path-like patterns)
+        // 模式 3：普通文件路径（包含引号或路径分隔符特征时）
         if (TryGetFilePathCompletion(input, out var pathCompletions))
             return pathCompletions;
 
@@ -92,10 +67,7 @@ public sealed partial class TypeaheadCompletionEngine(
     }
 
     /// <summary>
-    /// Returns display items for the completion popup.
-    /// Each item is (display text, insertion text).
-    /// The display text is what the user sees (e.g. just "readme.txt"),
-    /// while the insertion text is what gets placed into the input (e.g. "hello @readme.txt").
+    /// 返回补全弹窗的（展示文本, 插入文本）元组列表。
     /// </summary>
     public List<(string Display, string Insert)> GetCompletionItems(string input)
     {
@@ -109,12 +81,6 @@ public sealed partial class TypeaheadCompletionEngine(
         return completions.Select(c => (ExtractDisplayText(input, c), c)).ToList();
     }
 
-    /// <summary>
-    /// Session-id completion: input like "/session switch 4f", "/session delete 4f"
-    /// or "/close 4f" (cursor at the id argument). Popup shows short id + title +
-    /// mode/message count; accepting inserts the full 32-char id (the whole line
-    /// is replaced, matching generic-completion semantics).
-    /// </summary>
     private bool TryGetSessionIdItems(string input, out List<(string Display, string Insert)> items)
     {
         items = [];
@@ -143,24 +109,48 @@ public sealed partial class TypeaheadCompletionEngine(
     [GeneratedRegex(@"^/(?:session (?:switch|delete)|close)\s+(?<id>\S*)$")]
     private static partial Regex SessionIdArgumentRegex();
 
-    /// <summary>
-    /// Extracts a human-friendly display string from a completion result.
-    /// For @-prefixed completions, shows only the part after the last @ (the file/tool name).
-    /// For slash commands, shows the full "/command" string.
-    /// For file paths, shows the path without any input prefix.
-    /// </summary>
+    internal static bool IsSessionIdCompletionInput(string input)
+        => !string.IsNullOrEmpty(input) && SessionIdArgumentRegex().IsMatch(input);
+
+    internal static bool IsSlashCommandCompletionInput(string input)
+        => !string.IsNullOrEmpty(input) && !IsSessionIdCompletionInput(input) && ExtractLastWord(input).StartsWith('/');
+
+    // 与 GetCompletions 的模式判定顺序一致：会话 ID / 斜杠命令优先，其余看最后一个 @。
+    internal static bool IsAtFileInput(string input)
+        => TryExtractAtFileQuery(input, out _);
+
+    internal static bool TryExtractAtFileQuery(string input, out string query)
+    {
+        query = string.Empty;
+        if (string.IsNullOrEmpty(input)
+            || IsSessionIdCompletionInput(input)
+            || ExtractLastWord(input).StartsWith('/'))
+        {
+            return false;
+        }
+
+        var lastAt = input.LastIndexOf('@');
+        if (lastAt < 0)
+            return false;
+
+        var candidate = input[(lastAt + 1)..];
+        if (candidate.Contains(' '))
+            return false;
+
+        query = candidate;
+        return true;
+    }
+
     private static string ExtractDisplayText(string input, string completion)
     {
-        // Slash commands: display as-is
         if (completion.StartsWith('/'))
             return completion;
 
-        // @-prefixed completions: show only the part after the last @
+        // @ 文件补全只展示最后一个 @ 之后的相对路径（去掉插入文本末尾附带的空格）
         var lastAt = completion.LastIndexOf('@');
         if (lastAt >= 0)
-            return completion[(lastAt + 1)..];
+            return completion[(lastAt + 1)..].TrimEnd();
 
-        // Quoted path completions: show without surrounding text
         if (completion.StartsWith('"'))
         {
             var endQuote = completion.LastIndexOf('"');
@@ -168,8 +158,6 @@ public sealed partial class TypeaheadCompletionEngine(
                 return completion[1..endQuote];
         }
 
-        // For other path completions, try to show just the last segment
-        // (the part that was actually completed, not the user's existing input)
         if (input.Length > 0 && completion.StartsWith(input, StringComparison.Ordinal))
         {
             var suffix = completion[input.Length..];
@@ -184,9 +172,7 @@ public sealed partial class TypeaheadCompletionEngine(
     {
         var query = input.TrimStart('/').ToLowerInvariant();
 
-        // Phase 1: Exact name prefix match (highest priority).
-        // When the user types /status, only /status should match — not /hooks
-        // just because its description contains the word "status".
+        // 第一阶段：命令名前缀精确匹配优先，避免 /status 因描述包含单词而误命中 /hooks。
         var nameMatches = _commands
             .Where(c => string.IsNullOrEmpty(query)
                 || c.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase))
@@ -196,9 +182,7 @@ public sealed partial class TypeaheadCompletionEngine(
         if (nameMatches.Count > 0)
             return nameMatches;
 
-        // Phase 2: Description fallback (only when no name prefix matched).
-        // Match whole words in the description, not arbitrary substrings, to avoid
-        // false positives like /status matching /hooks (description contains "status").
+        // 第二阶段：仅当无命令名前缀命中时，回退到描述整词匹配。
         if (string.IsNullOrEmpty(query))
             return _commands.Select(c => $"/{c.Name}").ToList();
 
@@ -212,83 +196,156 @@ public sealed partial class TypeaheadCompletionEngine(
     }
 
     /// <summary>
-    /// Complete file paths after @ symbol, supporting @src/foo or @./relative patterns.
+    /// 扁平列出工作区文件相对路径并按查询词实时模糊过滤（只返回文件，不返回目录，附带尾随空格以便一次回车选中）。
     /// </summary>
     private List<string> GetAtFileCompletions(string prefix, string query)
     {
         try
         {
-            var dir = Path.GetDirectoryName(query);
-            if (string.IsNullOrEmpty(dir))
-                dir = _workingDirectory;
-            else if (!Path.IsPathRooted(dir))
-                dir = Path.Combine(_workingDirectory, dir);
-
-            if (!Directory.Exists(dir))
+            if (!Directory.Exists(_workingDirectory))
                 return [];
 
-            var fileName = Path.GetFileName(query);
-            var entries = Directory.GetFileSystemEntries(dir)
-                .Select(p => Path.GetFileName(p))
-                .Where(f => string.IsNullOrEmpty(fileName) || f.StartsWith(fileName, StringComparison.OrdinalIgnoreCase))
-                .Take(15)
-                .ToList();
+            var includeHiddenFiles = query.StartsWith('.')
+                || query.Contains("/.", StringComparison.Ordinal)
+                || query.Contains("\\.", StringComparison.Ordinal);
 
-            if (entries.Count == 0) return [];
-
-            var prefixDir = Path.GetDirectoryName(query) ?? "";
-            if (prefixDir.Length > 0)
-                prefixDir += Path.DirectorySeparatorChar;
-
-            return entries.Select(f =>
+            if (string.IsNullOrEmpty(query))
             {
-                var relativePath = prefixDir + f;
-                var fullPath = Path.Combine(_workingDirectory, relativePath);
-                var suffix = Directory.Exists(fullPath) ? Path.DirectorySeparatorChar.ToString() : "";
-                return $"{prefix}@{relativePath}{suffix}";
-            }).ToList();
+                return EnumerateWorkspaceFiles(includeHiddenFiles)
+                    .Take(MaxAtFileResults)
+                    .Select(f => $"{prefix}@{f.RelPath} ")
+                    .ToList();
+            }
+
+            var normalizedQuery = query.Replace('\\', '/').TrimStart('.', '/');
+            var isPathQuery = query.Contains('/') || query.Contains('\\');
+            var matches = new List<(string RelPath, string FileName, int Depth, int Tier)>();
+
+            foreach (var (relPath, fileName, depth) in EnumerateWorkspaceFiles(includeHiddenFiles))
+            {
+                var normalizedRel = relPath.Replace('\\', '/');
+                var tier = MatchWorkspaceFileTier(query, normalizedQuery, isPathQuery, fileName, normalizedRel);
+                if (tier > 0)
+                    matches.Add((relPath, fileName, depth, tier));
+            }
+
+            return matches
+                .OrderBy(m => m.Tier)
+                .ThenBy(m => m.Depth)
+                .ThenBy(m => m.FileName.Length)
+                .ThenBy(m => m.RelPath, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxAtFileResults)
+                .Select(m => $"{prefix}@{m.RelPath} ")
+                .ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Failed to enumerate workspace files for @ completion: {ex.Message}");
             return [];
         }
     }
 
-    private List<string> GetWorkingDirEntries(string prefix, string query)
+    private static int MatchWorkspaceFileTier(
+        string query,
+        string normalizedQuery,
+        bool isPathQuery,
+        string fileName,
+        string normalizedRel)
     {
-        try
+        if (!isPathQuery && fileName.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+            return 1;
+        if (normalizedQuery.Length > 0 && normalizedRel.StartsWith(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+            return 2;
+        if (!isPathQuery && fileName.Contains(query, StringComparison.OrdinalIgnoreCase))
+            return 3;
+        if (normalizedQuery.Length > 0 && normalizedRel.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+            return 4;
+        if (!isPathQuery && query.Length >= 2 && IsFuzzySubsequence(query, fileName))
+            return 5;
+        return 0;
+    }
+
+    private static readonly HashSet<string> IgnoredFuzzyDirs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", "bin", "obj", "node_modules", ".vs", ".idea", "dist", "out", "artifacts",
+    };
+
+    private IEnumerable<(string RelPath, string FileName, int Depth)> EnumerateWorkspaceFiles(bool includeHiddenFiles)
+    {
+        var queue = new Queue<(string FullDir, int Depth)>();
+        queue.Enqueue((_workingDirectory, 0));
+        var scannedFiles = 0;
+
+        while (queue.Count > 0 && scannedFiles < MaxScannedFiles)
         {
-            var entries = Directory.GetFileSystemEntries(_workingDirectory)
-                .Select(Path.GetFileName)
-                .Where(f => f is not null && !f.StartsWith('.'))
-                .Take(10)
-                .ToList();
-            return entries.Select(f => $"{prefix}{f}").ToList()!;
+            var (currentDir, depth) = queue.Dequeue();
+            if (depth > MaxScanDepth)
+                continue;
+
+            string[] files;
+            string[] subDirs;
+            try
+            {
+                files = Directory.GetFiles(currentDir);
+                Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                subDirs = depth < MaxScanDepth ? Directory.GetDirectories(currentDir) : [];
+                if (subDirs.Length > 1)
+                    Array.Sort(subDirs, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Skipped inaccessible directory '{currentDir}': {ex.Message}");
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                var name = Path.GetFileName(file);
+                if (!includeHiddenFiles && name.StartsWith('.'))
+                    continue;
+
+                scannedFiles++;
+                if (scannedFiles > MaxScannedFiles)
+                    break;
+
+                var relPath = Path.GetRelativePath(_workingDirectory, file);
+                yield return (relPath, name, depth);
+            }
+
+            foreach (var subDir in subDirs)
+            {
+                var dirName = Path.GetFileName(subDir);
+                if (!dirName.StartsWith('.') && !IgnoredFuzzyDirs.Contains(dirName))
+                    queue.Enqueue((subDir, depth + 1));
+            }
         }
-        catch
+    }
+
+    private static bool IsFuzzySubsequence(string query, string candidate)
+    {
+        var qi = 0;
+        for (var ci = 0; ci < candidate.Length && qi < query.Length; ci++)
         {
-            return [];
+            if (char.ToLowerInvariant(candidate[ci]) == char.ToLowerInvariant(query[qi]))
+                qi++;
         }
+        return qi == query.Length;
     }
 
     private bool TryGetFilePathCompletion(string input, out List<string> completions)
     {
         completions = [];
 
-        // Check if the last "word" looks like a path
         var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0)
             return false;
 
         var lastWord = words[^1];
 
-        // Don't treat words starting with '/' as paths — those are slash commands
-        // handled by GetCommandCompletions. Without this guard, "/he" would match
-        // the path-like pattern (contains '/') and trigger file completion.
+        // 以 '/' 开头的词属于斜杠命令，不作为文件路径处理。
         if (lastWord.StartsWith('/'))
             return false;
 
-        // Path-like patterns: contains / or \, or starts with . or ~  or is in quotes
         var isInQuotes = lastWord.StartsWith('"') && !lastWord.EndsWith('"');
         var isPathLike = lastWord.Contains('/') || lastWord.Contains('\\')
             || lastWord.StartsWith('.') || lastWord.StartsWith('~');
@@ -297,7 +354,6 @@ public sealed partial class TypeaheadCompletionEngine(
             return false;
 
         var pathPrefix = isInQuotes ? lastWord[1..] : lastWord;
-        var originalPrefix = isInQuotes ? "\"" + pathPrefix : pathPrefix;
 
         try
         {
@@ -334,14 +390,15 @@ public sealed partial class TypeaheadCompletionEngine(
 
             return completions.Count > 0;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Failed to complete file path '{pathPrefix}': {ex.Message}");
             return false;
         }
     }
 
     /// <summary>
-    /// Extracts the last space-delimited word from the input, respecting double-quoted segments.
+    /// 提取输入中最后一个以空格分隔的词（保留双引号包裹的片段）。
     /// </summary>
     private static string ExtractLastWord(string text)
     {

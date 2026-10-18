@@ -16,7 +16,6 @@ public static class BuildModeServiceCollectionExtensions
         services.AddSingleton<IBuildRunStore>(sp => sp.GetRequiredService<JsonBuildRunStore>());
         services.AddSingleton<IBuildRunEventStore>(sp => sp.GetRequiredService<JsonBuildRunStore>());
         services.AddSingleton<IWorkspaceFingerprintProvider, WorkspaceFingerprintProvider>();
-        services.AddSingleton<RequirementAssessmentService>();
         services.AddSingleton<BuildStateTransitionService>();
         services.AddSingleton<BuildTaskLinker>();
         services.AddSingleton<IBuildRunCoordinator, BuildRunCoordinator>();

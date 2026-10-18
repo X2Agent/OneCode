@@ -36,8 +36,6 @@ public sealed class CustomAgentTests : IDisposable
         File.WriteAllText(Path.Combine(dir, fileName), $"---\n{frontmatter}\n---\n{body}");
     }
 
-    // ---- 解析器 ----
-
     [Fact]
     public void Parse_ValidDefinition_ParsesAllFields()
     {
@@ -107,8 +105,6 @@ public sealed class CustomAgentTests : IDisposable
         act.Should().Throw<AgentDefinitionParseException>().WithMessage("*frontmatter*");
     }
 
-    // ---- 目录：覆盖、重扫、错误呈现 ----
-
     [Fact]
     public void Catalog_ProjectOverridesSameNameUserAgent()
     {
@@ -141,8 +137,6 @@ public sealed class CustomAgentTests : IDisposable
 
         catalog.LoadErrors.Should().Contain(e => e.Contains("broken.md") && e.Contains("description"));
     }
-
-    // ---- 解析（派工入口） ----
 
     [Fact]
     public void Resolve_BuiltinNames_PassThrough()
@@ -213,8 +207,6 @@ public sealed class CustomAgentTests : IDisposable
         definition.Should().NotBeNull();
     }
 
-    // ---- AgentTool 派工 ----
-
     private static ICacheSafeParamsProvider NullParams() => new FixedCacheSafeParamsProvider(null);
 
     private sealed class FixedCacheSafeParamsProvider(CacheSafeParams? current) : ICacheSafeParamsProvider
@@ -280,8 +272,6 @@ public sealed class CustomAgentTests : IDisposable
 
         description.Should().Contain("'reviewer' — reviews code");
     }
-
-    // ---- allowed_tools 交集（只减不增） ----
 
     [Fact]
     public void ApplyCustomAllowedTools_IntersectsAndNeverExpands()

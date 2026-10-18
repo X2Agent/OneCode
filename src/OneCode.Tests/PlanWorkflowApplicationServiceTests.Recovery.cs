@@ -1,4 +1,4 @@
-// PlanWorkflowApplicationServiceTests partial：可恢复工作流扫描与恢复调度（原文件按职责区块的纯文本搬移）
+// PlanWorkflowApplicationServiceTests partial：可恢复工作流扫描与恢复调度
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services;

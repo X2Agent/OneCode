@@ -92,6 +92,32 @@ public sealed partial class ChatTranscriptView
         return (matches.Count, nextIdx);
     }
 
+    /// <summary>
+    /// 继续搜索上次的关键词，跳转到上一个匹配项（Shift+Enter）。
+    /// 返回 (匹配总数, 当前匹配索引)。无上次搜索或无匹配时返回 (0, -1)。
+    /// </summary>
+    public (int TotalMatches, int CurrentIndex) FindPrevious()
+    {
+        if (string.IsNullOrEmpty(_lastSearchQuery))
+            return (0, -1);
+
+        Regex? regex = null;
+        var matches = _lastSearchIsRegex
+            ? _messageView.FindMatchesRegex(_lastSearchQuery, out regex)
+            : _messageView.FindMatches(_lastSearchQuery);
+        if (matches.Count == 0)
+            return (0, -1);
+
+        var prevIdx = (_lastSearchMatchIdx - 1 + matches.Count) % matches.Count;
+        var targetLine = matches[prevIdx];
+        _messageView.SetSearchHighlight(
+            _lastSearchQuery, matches, compiledRegex: regex);
+        _messageView.ScrollToLine(targetLine);
+        _lastSearchMatchIdx = prevIdx;
+
+        return (matches.Count, prevIdx);
+    }
+
     /// <summary>清除搜索高亮。</summary>
     public void ClearSearchHighlight()
     {

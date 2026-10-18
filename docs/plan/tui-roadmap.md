@@ -55,7 +55,7 @@
 
 | # | 障碍 | 改造方向 |
 |---|---|---|
-| O1 | Tui 命名空间泄漏 23 文件 | A 类收拢进 TUI 装配层；B 类把被引用的交互类型（`PlanCardPublisher`/`PlanCardDecision` 等）迁到 UI 无关层，残留 using 直删 |
+| O1 | Tui 命名空间泄漏约 25 文件 | A 类收拢进 TUI 装配层；B 类把被引用的交互类型（`PlanCardPublisher`/`PlanCardDecision` 等）迁到 UI 无关层，残留 using 直删 |
 | O2 | 审批应答经 `TaskCompletionSource<ApprovalDecision>` 回传（`QueryEventTypes.cs`） | TCS 本身 UI 无关，**不改**；attach 端经 `ApprovalBroker`（`Services/Agent/ApprovalBroker.cs`）同一待决面应答 |
 | O5 | `RegisterInteractiveServices` 注册 TUI 栈（`ServiceCollectionExtensions.*.cs`） | 拆分为 `RegisterInteractionCore`（UI 无关）+ `RegisterTuiServices`（Terminal.Gui 栈）；`OneCodeApp.Create` 串联，对外行为不变——这是 P2 守护进程复用同一组合根的前提 |
 
@@ -71,7 +71,7 @@ grep 复查 App 层引擎/编排/流式目录无 `using OneCode.App.Tui`（TUI �
 - **应用内 tab（一个进程 = 一个项目，tab = 该项目的会话）**：顶部 tab 条；每 tab 一套会话视图模型，
   底栏复用 `SessionContextBar`（已有项目/分支/轮次/用量身份行）；待审批的 tab 高亮，审批状态汇聚到 `AgentStatusBar`。
   切换键经 `KeybindingResolver` 注册（预案：`alt+1..9`、`alt+←/→`，走 `KeybindingContextManager` 上下文路由）。
-  新建/恢复会话从全局存储按当前项目过滤（`/resume` 已存在，改造成按项目分组的列表）。
+  新建/恢复会话从全局存储按当前项目过滤（`/session` 已存在，改造成按项目分组的列表；`/resume` 专用于恢复持久化的 Goal 任务）。
 - **跨项目交给终端**：每个项目一个终端 tab/窗口跑各自 cwd 的 `onecode`。**明确不做单进程多项目切换**
   （项目级配置作用域、工具 cwd 语义、内存隔离会互相污染，且终端多路复用器已把这件事做得很好）。
 
@@ -82,7 +82,7 @@ grep 复查 App 层引擎/编排/流式目录无 `using OneCode.App.Tui`（TUI �
 - **`onecode sessions`**：全局会话列表（会话存储本就是全局的），按项目分组，显示运行状态与未决审批。
 - **`onecode attach <id>`**：从另一终端接入运行中会话——`FileSessionEventStore` 回放到当前点
   （事件溯源已支持）+ 订阅增量；审批经 `ApprovalBroker` 同一待决面应答。
-- **事件缓冲**：App 层新增 `TranscriptEventBuffer`（有界环形缓冲，按序保存近期 `QueryEvent` 并支持不可变快照导出），
+- **事件缓冲**：`BackgroundSession.EventBuffer` 目前仅预留了属性槽位尚未启用；P1 在 App 层落地 `TranscriptEventBuffer`（有界环形缓冲，按序保存近期 `QueryEvent` 并支持不可变快照导出），
   会话级单生产者写入；attach 时从快照全量重建视图再接增量。
 - **执行权互斥**：任一时刻一个会话至多一个活跃查询执行者（前台 TUI、attach 端或 daemon 三者之一）；
   其余连接只读观察 + 可应答审批。会话级执行权锁（进程内锁 + 跨进程文件锁），冲突提交明确提示「该会话正在
@@ -98,7 +98,7 @@ grep 复查 App 层引擎/编排/流式目录无 `using OneCode.App.Tui`（TUI �
 
 ### 5.1 现状缺口
 
-`CronSchedulerService`（`src/OneCode.Automation/Cron/`）是主进程内的 hosted service——**TUI 一关定时任务就停**。
+`CronSchedulerService`（`src/OneCode.Automation/Cron/`）当前是寄宿在 TUI 主进程 `IHost` 内的 `BackgroundService`——**TUI 一关定时任务就停**（即使开启 `--durable` 将任务写入 `~/.onecode/cron/*.json`，也只能在用户下次重新启动 TUI 时由 `ReloadJobs` 补跑到期任务，无法在无 TUI 期间后台驻留触发）。本阶段引入独立 `onecode daemon` 进程正是为了彻底解决跨会话常驻调度问题。
 
 ### 5.2 设计
 

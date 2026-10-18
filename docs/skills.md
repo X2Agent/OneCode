@@ -8,7 +8,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 ## 技能来源与加载
 
-技能有**四个来源**，按优先级合并后通过 `SkillCommandSource`（`IDynamicCommandSource`）注册为动态斜杠命令：
+**斜杠命令面**有四个来源，按优先级合并后通过 `SkillCommandSource`（`IDynamicCommandSource`）注册为动态斜杠命令：
 
 | 来源 | 路径 | 作用域 |
 |---|---|---|
@@ -23,10 +23,11 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 
 同一目录内，共享技能（`SKILL.md`，模型也能看到）优先于仅供用户调用的顶层 `*.md`。
 
-> **发现规则单一来源**：模型入口与斜杠入口共用 `SkillDiscovery`。共享技能按 MAF 的规则发现
-> （递归查找 `SKILL.md`，深度上限 2，`SKILL.md` 所在目录即技能根，不再向下），
-> 顶层 `*.md` 保持为**仅供用户调用**的布局——MAF 不读它，提升它等于悄悄扩大模型可调用的技能范围。
-> 修复前两侧规则不同（一侧递归、一侧只看直接子目录），同一仓库可能对一侧可见、对另一侧不可见。
+> **两侧发现规则同构，但不是同一实现**：斜杠入口走 `SkillDiscovery`（`SkillCatalog` 唯一调用方）；
+> 模型入口把目录清单交给 MAF `UseFileSkills`，由 MAF 自行递归查找 `SKILL.md`。两侧共享的是
+> **目录清单**（`SkillCatalog.GetSkillDirectories()`），「深度上限 2、`SKILL.md` 所在目录即技能根」
+> 在 `SkillDiscovery` 中复刻——新增/修改发现规则时必须同时核对两处，否则会重新出现
+> 「一侧可见、另一侧不可见」。顶层 `*.md` 保持为**仅供用户调用**的布局——MAF 不读它。
 
 > **架构决策**：技能 provider 由 `SkillProviderFactory` 通过 MAF `AgentSkillsProviderBuilder` 自建
 > （文件技能 + 内置技能 + MCP 技能 + 自定义 script runner），而非使用 Harness 默认 `AgentSkillsProvider`
@@ -34,7 +35,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 > 并非技术上无法迁移；是否改用该入口须验证生命周期与总体维护收益。理由与边界见 [MAF 集成边界](./adr/0007-maf-integration-boundaries.md)。
 
 > **资源所有权**：provider 每 run 重建，MAF 的 `ChatClientAgent` 不释放交给它的 `AIContextProviders`，
-> 因此由 `AgentContextProviderLease` 在 run 结束后（含取消、异常、流提前结束）统一释放。
+> 因此主代理与 fork 两条路径都由 `AgentContextProviderLease` 在 run 结束后（含取消、异常、流提前结束）释放。
 > DI 单例不实现 `IDisposable`，不会被误释放。
 
 > **脚本执行边界**：`SubprocessScriptRunner` 有 2 分钟超时、30,000 字符 stdout 上限（失败时 stderr 上限
@@ -236,11 +237,11 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 自定义技能是一个 markdown 文件，放在 `~/.onecode/skills/`（用户级）或 `<项目>/.onecode/skills/`（项目级）下（`.agents`/`.cursor`/`.claude` 候选目录下的技能也会被发现，但安装/生成始终写入 `.onecode`）。支持两种目录结构：
 
 ```
-# 结构一：单文件
+# 结构一：单文件（仅供用户斜杠调用，MAF 不读取）
 ~/.onecode/skills/
   └── my-skill.md          # 未声明 name 时，文件名即技能名
 
-# 结构二：目录
+# 结构二：目录（共享技能，模型与斜杠命令均可发现）
 ~/.onecode/skills/
   └── my-skill/
       └── SKILL.md          # 未声明 name 时，目录名即技能名
@@ -256,8 +257,7 @@ OneCode 的 Skill 系统是一种轻量级的"斜杠命令工作流"：每个 sk
 | `description` | `/skills` 列表中的描述 | 文件体第一个非空行去掉前导 `#` 与空格 |
 | `argument-hint` | 参数提示（补全用） | 无 |
 | `argument-names` | 命名占位符 `{xxx}` 的参数名顺序 | 空（见[参数占位符](#参数占位符)） |
-| `user-invocable` | `false` 时不注册为斜杠命令 | `true` |
-| `disable-model-invocation` | 模型侧调用开关 | `false` |
+| `user-invocable` | `false` 时不注册为斜杠命令（配合 `SKILL.md` 目录布局可声明仅模型可调用的技能；若需声明仅用户可调用的技能，请使用顶层 `<name>.md` 单文件布局） | `true` |
 
 ### Markdown 内容
 

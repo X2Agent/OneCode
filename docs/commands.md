@@ -153,7 +153,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `url` | 位置参数 | — | 目标网站 URL（克隆模式）。必须是 `http://` / `https://` 公网地址，排除 localhost / 内网 |
+| `url` | 位置参数 | — | 目标网站 URL（克隆模式）。必须是 `http://` / `https://` 公网地址；localhost、`*.internal`/`*.local`、私有/回环 IP 字面量与整数形式地址都会被拒绝 |
 | `--force` | 标志 | — | 覆盖已存在的 `DESIGN.md` |
 | `--no-llm` | 标志 | — | 跳过 LLM，生成静态模板（含默认 design token） |
 | `--output <path>` | 标志 | `DESIGN.md` | 自定义输出路径 |
@@ -221,7 +221,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 /files
 ```
 
-无参数。扫描会话中工具调用涉及的 `file_path` / `path` / `filepath` 字段。
+无参数。扫描会话中工具调用涉及的 `filePath` / `file_path` / `path` 字段。
 
 ---
 
@@ -328,7 +328,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 |---|---|
 | `<任务>` | 要反复执行的任务描述；每轮以 fresh context 原样重放 |
 | `--check "<命令>"` | 确定性检查命令，**退出码 0 即为本轮通过**；输出与退出码会注入下一轮反馈 |
-| `--max <次数>` | 调用 agent 的硬上限；缺省取配置 `loop.maxIterations`（默认 3） |
+| `--max <次数>` | 调用 agent 的硬上限，取值 `1..20`；缺省取配置 `loop.maxIterations`（默认 3，同样被夹在 1..20） |
 
 **行为**：由 MAF `LoopAgent` + `DelegateLoopEvaluator` 驱动。每轮是一次完整 agent run（含工具调用），
 评估器只认确定性证据——先看 `--check` 命令退出码，未提供时退回构建/测试验证提供者。
@@ -390,7 +390,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 值 | 说明 |
 |---|---|
-| 无参数 | 显示当前模型和可用模型列表 |
+| 无参数 | 显示当前模型；可用模型多于一个时追加列表 |
 | `model-id` | 切换并持久化 |
 
 > **✅ 运行时立即生效**：`/model` 会同时更新内存中的 `AppState.MainLoopModel` 和配置文件，当前会话的下一次 LLM 调用即使用新模型。
@@ -571,6 +571,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `restore [name]` | 恢复到检查点（删除之后的消息，默认最后一个） |
 | `delete <name>` | 删除检查点 |
 
+> 所有 checkpoint 子命令都要求活跃会话；无活跃会话时直接报错，不会执行任何读盘操作。
 > 会话级 checkpoint（`save`/`list`/`restore`/`delete`）持久化到 session JSONL。
 > Goal 工作流的中断恢复不在此命令——用 `/resume`（跨进程持久，见下节）。
 
@@ -622,7 +623,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `keyword` | 位置参数 | 是 | 搜索关键词 |
+| `keyword` | 位置参数 | 条件必填 | 搜索关键词（未使用 `-r <正则>` 且非 `next` 时必填） |
 | `-r <正则>` | 旗标 | 否 | 按正则表达式搜索，如 `/find -r "TODO\(#\d+\)"` |
 | `next` | keyword 特殊值 | 否 | 跳到当前匹配的下一处 |
 
@@ -676,7 +677,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 子命令 | 说明 |
 |---|---|
-| 无参数 / `list` | 列出 `MEMORY.md` 持久化条目 |
+| 无参数 / `list` | 列出 `MEMORY.md` 持久化条目（需活跃会话；无会话时直接报错） |
 | `add [--user] <text>` | 写入 `MEMORY.md` 事实/偏好（默认可检索项目级；`--user` 为用户级） |
 | `remove` / `delete <n>` | 删除第 N 条持久化条目 |
 | `clear [--all]` | 清空项目级条目；`--all` 同时清空用户级 |
@@ -728,7 +729,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 > 与 `/checkpoint`（会话内消息快照）不同：本命令针对跨进程持久的工作流聚合（GoalRun + Durable Workflow Host），
 > 不依赖活跃会话；返回 `CommandResult.ResumeWorkflowResult`，由 TUI dispatch 层直接调用对应工作流的 resume 流。
-> 元数据：`Immediate = true`。
+>
+> 恢复要求 GoalRun 未到终态，且 Goal 定义（目标、模型、系统提示、工具能力）与持久化哈希一致；恢复后继续在原隔离 worktree 中执行。
 
 ---
 
@@ -765,7 +767,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 子命令 | 说明 |
 |---|---|
 | 无参数 | TUI：打开会话选择器；非 TUI：显示用法 |
-| `list` / `ls` | 列出所有会话（8 位短 id） |
+| `list` / `ls` | 列出会话（8 位短 id），最多显示 20 条；更多时只提示剩余数量 |
 | `new [name]` | 创建新会话（当前会话转入后台） |
 | `switch <id-prefix>` | 切换会话（id 前缀唯一命中即生效，歧义时列出候选） |
 | `delete <id-prefix> [--force]` | 从磁盘删除会话事件日志（两步确认：无 `--force` 时显示会话信息并要求带 `--force` 重输；前台/后台活跃会话须先 `/close` 再删） |
@@ -866,7 +868,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 - `git://github.com/user/skill-repo.git`
 - `git@github.com:user/skill-repo.git`（SSH）
 
-**skill 内容识别**：克隆后按 仓库根目录 → `skills/` 子目录 → 任意单一含 `.md` 的子目录 的顺序，取第一个含 `SKILL.md` 或任意 `.md` 文件的目录作为 skill 内容。仓库名（去除 `.git` 后缀）作为 skill 名称。
+**skill 内容识别**：克隆后按 仓库根目录 → `skills/` 子目录 → 其余子目录（按枚举顺序）的顺序，取第一个含 `SKILL.md` 或任意 `.md` 文件的目录作为 skill 内容。仓库名（去除 `.git` 后缀）作为 skill 名称。
 
 > `--list` / `list` 参数会提示使用 `/skills list`。
 
@@ -920,7 +922,7 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 选项 | 说明 |
 |---|---|
-| `--transport <stdio\|sse\|http\|ws>` | 传输协议（必填） |
+| `--transport <stdio\|sse\|http\|ws>` | 传输协议（必填）；`--type` 为等价别名 |
 | `--command <cmd>` | 启动命令（stdio） |
 | `--url <url>` | 服务地址（sse / http / ws） |
 | `--scope <project\|user>` | 配置作用域 |
@@ -1043,7 +1045,7 @@ AI 代码审查，支持严重级别、聚焦领域与结构化报告。
 | `--staged` | 仅 review staged 变更 |
 | `--all` | review staged + unstaged（`git diff HEAD`） |
 | `--base <ref>` | 对比指定分支 / commit |
-| `--severity <critical\|warning\|all>` | 过滤输出严重级别（默认 all） |
+| `--severity <critical\|warning\|all>` | 收窄报告范围（默认 all）：`critical` 只报功能缺陷，`warning` 加设计建议；由提示词约束模型输出，不是输出侧过滤 |
 | `--focus <security\|crashes\|performance\|style>` | 聚焦审查领域（省略时为三视角并行审查） |
 | `--no-edit` | 只报告不修复（仅单视角路径；三视角路径恒为只读报告） |
 | `--blame` | 附加 git blame 上下文 |
@@ -1105,7 +1107,7 @@ Design Suggestions，保留文件+行号证据）。报告尾部附各任务执�
 
 - **总命令数**：44 个
 - **隐藏命令**：`/gc-stats`；动态命令 `/mcp:<server>`（每服务器一条，由 `McpCommandSource` 生成）同样默认隐藏
-- **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`、`/new`、`/close`、`/resume`、`/keybindings`
+- **即时命令**（绕过 query 队列）：`/session`、`/find`、`/diff`、`/new`、`/close`、`/keybindings`
 - **带别名的命令**：
 
   | 命令 | 别名 |

@@ -19,7 +19,7 @@ public sealed class BashCommandInvariant : ISafetyInvariant
     /// <summary>Shell 类工具名称。</summary>
     private static readonly HashSet<string> ShellTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Bash", "Shell",
+        "Bash", "Shell", "BackgroundRun",
     };
 
     /// <summary>
@@ -34,6 +34,32 @@ public sealed class BashCommandInvariant : ISafetyInvariant
                 TimeSpan.FromSeconds(2))))
             .ToArray();
 
+    /// <summary>
+    /// 同步校验单条 Shell 命令是否命中 Layer 0 黑名单。供 <see cref="CheckAsync"/> 与
+    /// 直接工具入口（如 <c>BackgroundRunTool</c>）共用，消除重复正则定义。
+    /// </summary>
+    public static InvariantCheckResult CheckCommand(string command)
+    {
+        foreach (var (name, regex) in DangerousPatterns)
+        {
+            try
+            {
+                if (regex.IsMatch(command))
+                {
+                    return InvariantCheckResult.Deny(
+                        $"[SAFETY] Dangerous command pattern detected: '{name}'. Command blocked.");
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return InvariantCheckResult.Deny(
+                    "[SAFETY] Command pattern check timed out (possible ReDoS). Command blocked.");
+            }
+        }
+
+        return InvariantCheckResult.Allow;
+    }
+
     public ValueTask<InvariantCheckResult> CheckAsync(
         string toolName,
         IReadOnlyDictionary<string, object?> parameters,
@@ -46,17 +72,7 @@ public sealed class BashCommandInvariant : ISafetyInvariant
         if (command is null)
             return new(InvariantCheckResult.Allow);
 
-        // 逐个检查黑名单模式
-        foreach (var (name, regex) in DangerousPatterns)
-        {
-            if (regex.IsMatch(command))
-            {
-                return new(InvariantCheckResult.Deny(
-                    $"[SAFETY] Dangerous command pattern detected: '{name}'. Command blocked."));
-            }
-        }
-
-        return new(InvariantCheckResult.Allow);
+        return new(CheckCommand(command));
     }
 
     private static string? ExtractCommand(IReadOnlyDictionary<string, object?> parameters)

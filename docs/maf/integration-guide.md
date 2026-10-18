@@ -1,7 +1,7 @@
 # MAF C# 接入指引
 
 > Microsoft Agent Framework（`Microsoft.Agents.AI*`）的**机制说明 + 正确接入姿势 + OneCode 现状对照**。
-> 所有结论以 `agent-framework/` 本地源码为准，不引用官方博客或二手文档。
+> 机制与行为以 pinned NuGet 包（`src/Directory.Packages.props`）为准；本地 `agent-framework/` checkout 仅作阅读辅助，可能不存在或与 pinned 版本不同基线（见 §1.1）。不引用官方博客或二手文档。
 >
 > **边界**：本文不重复决策。「谁拥有 Todo / Compaction / Skills」「禁止自造清单」「提供商请求整形」等**裁决**
 > 在 [MAF 集成边界与禁止清单](../adr/0007-maf-integration-boundaries.md)；压缩阈值的产品取值在
@@ -35,7 +35,7 @@
 | 来源 | 标识 | 用途 |
 |------|------|------|
 | NuGet 包 | `Microsoft.Agents.AI` / `.Workflows` / `.Harness` = **1.24.0**；`.Mcp` = `1.24.0-alpha.261006.1`；`.Hyperlight` / `.Tools.Shell` = `1.24.0-preview.261006.1`（见 `src/Directory.Packages.props`） | **运行时真正加载的二进制** |
-| 本地 checkout | `agent-framework/`，`git describe --tags` = `dotnet-1.22.0-6-g669c8b95e`（即已发布的 `dotnet-1.22.0` 再前进 6 个提交） | 阅读源码、查语义 |
+| 本地 checkout（可选） | `agent-framework/`；存在时 `git describe --tags` 为 `dotnet-1.22.0-6-g669c8b95e`；未 checkout 时跳过源码取证，以 pinned 包行为为准 | 阅读源码、查语义 |
 
 本地 checkout 与 pinned 包**不再同基线**：pinned 已升到 1.24.0，checkout 停在 `dotnet-1.22.0`。下文【已核对】/【版本敏感】
 两档证据均在 1.22.0 基线取证，对 1.24.0 不自动成立。升级 1.24.0 时已按 §13.2 复查并通过的条目（审批协议真实包测试、
@@ -642,7 +642,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 |------|-------------|-------------|------|
 | Agent 构造 | `HarnessAgent` + Options | [`AgentPipelineBuilder.cs`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 单一装配汇合处，profile 驱动 | 符合 |
 | 方法命名 | — | `BuildHarnessAgent` 产出 `HarnessAgent`，命名与产物一致 | 符合 |
-| Agent 装配汇合 | 单一装配点最省心 | [`AgentPipelineBuilder.BuildHarnessAgent`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 覆盖 Main / Forked 两条路径；AutoDream 后台服务直接 `new HarnessAgent(...)` + [`OneCodeToolMiddleware.Apply`](../../src/OneCode.Infrastructure/Agent/OneCodeToolMiddleware.cs) | **偏差（有意）**：AutoDream 无交互会话、无审批 broker、无编辑事务，走完整装配只会挂上无意义的门；它复用的是**共享安全门**（安全不变量 + 结果预算）而非装配函数，故两条路径的安全门不会漂移 |
+| Agent 装配汇合 | 单一装配点最省心 | [`AgentPipelineBuilder.BuildHarnessAgent`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs) 覆盖 Main / Forked 两条路径；AutoDream 后台服务经 `BuildConsolidationAgentOptions` 构造 `HarnessAgentOptions`（当前调用传 `tools: []`）单轮无工具调用 | **符合**：AutoDream 无工具循环、无交互会话、无审批 broker、无编辑事务，所有 prompt 与工具调用结果由宿主确定性预取 |
 | 中间件顺序 | 第一个 `Use` 最外层 | 源码顺序即装配顺序，注释已写明 | 符合 |
 | 函数调用中间件 | 必须挂在有 FICC 的 agent 上 | 全部挂在 `HarnessAgent` 上 | 符合 |
 | Harness opt-out | `DisableXxx` + 追加自己的 provider | [`OneCodeHarnessDefaults.cs`](../../src/OneCode.Infrastructure/Agent/OneCodeHarnessDefaults.cs) 设 3 个（AgentMode / AgentSkills / WebSearch），Todo / FileMemory 按 profile | 符合 |
@@ -650,10 +650,10 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 | 待办清单 | `TodoProvider` 五工具 + 每轮注入清单消息 | 原样采用。批准计划的 Build run 由 [`PlanTodoSeeder`](../../src/OneCode.App/Services/Agent/PlanTodoSeeder.cs) 通过 `todos_add` 把计划步骤播种为待办（标题 `{stepId}: {title}`），模型用 `todos_complete` 汇报进度，TUI 计划卡进度读待办投影（`MainAgentRunner` 在 run 开始、每个 `todos_add/complete/remove` 工具结果到达时、run 结束三个时点重读权威快照并发布；「进行中」是最后一个已勾选步骤之后的第一个未勾选步骤，由 [`PlanStepProjector`](../../src/OneCode.App/Services/PlanMode/PlanStepProjector.cs) 计算；计划侧边栏可见且持有步骤时，底部待办横条隐去计划预置项、只显示模型自加待办，计划 Completed 且侧边栏可见时横条整体隐藏；受控 Build 正常完成且验证通过时由 `PlanTodoSeeder.CompleteRemainingAsync` 补账勾选剩余未勾选项）；计划执行 run 另装 [`TodoStallNudgeChatClient`](../../src/OneCode.Infrastructure/Ai/TodoStallNudgeChatClient.cs)——自上次待办变更起累计 8 次工具调用仍无勾选时，向当次请求追加一次催办（每满一档提醒一次，勾选后重新装填）；`TaskTool`（get/list/stop/output）= 宿主执行记录。受控 Build 单轮直接执行，待办完成度不是 run 成败的闸门——成败只由可验证产物与 BuildRun 终态决定（当计划声明了 `ExpectedFiles` 但全部预期交付物未落盘且零文件改动时，收口阻断假阳性完成） | 符合 |
 | Plan run 收口与封条 | MAF 无「交付物已提交，结束本 run」的原语 | 产品层三件套：① `SubmitPlan` 成功即落 run 级封条（[`RunSeal`](../../src/OneCode.App/Services/Agent/AgentRunContext.cs)，引擎在 Plan run 起点放入 `OneCodeAgentRunContext.PlanSubmissionSeal`；之所以是引用对象而非 bool，是因为工具内对 `AsyncLocal` 的写入不会回流到外层中间件），`PermissionAndLimitMiddleware` 经 `AgentPipelineOptions.IsRunSealed` 见封即拒绝一切后续工具调用（含重复的 `SubmitPlan`），模型只剩纯文本收尾；② 同一计划内容重放时状态机按内容哈希（[`PlanContentHash`](../../src/OneCode.App/Services/PlanMode/PlanContentHash.cs)）幂等返回既有 revision；③ run 以任意终态离场（正常、输出被 hook 拦截、异常、取消）都经 `BuildRunGate.CloseOutPlanRunAsync` 单一入口，由 [`PlanRunCloser`](../../src/OneCode.App/Services/PlanMode/PlanRunCloser.cs) 推进到待审批或置为已取消；旧进程遗留的 `FinalizingPlanRun` 由 `PlanExecutionRecoveryService` 启动对账经同一个 `PlanRunCloser` 补做收口 | 符合 |
 | 计划/执行循环 | `TodoCompletionLoopEvaluator` + `LoopAgent`（`Modes=["execute"]`，`MaxIterations` 有界）跑到待办清零 | 交互 BUILD 保持单轮（用户旁观流式输出；且 pending tool approval 无人解析时 LoopAgent 会直接停止，见 [`AgentPipelineAssembly.cs`](../../src/OneCode.App/Services/Agent/AgentPipelineAssembly.cs) 注释）；GOAL 子目标用 `LoopAgent` + `DelegateLoopEvaluator` 语义 judge。`TodoCompletionLoopEvaluator` **未接入**（`OneCodeHarnessDefaultsTests` 守卫 `LoopEvaluators` 为 null） | **偏差（有意）**：headless / YOLO 需要「持续运行到待办清零」时应在此接入，交互路径不接 |
-| 审批协议 | binding + bypass 默认开 | 均未关闭；`harnessOwnsToolApproval` 阻止第二套 `UseToolApproval` | 符合 |
-| 审批标记 | `ApprovalRequiredAIFunction` | [`ToolApprovalMarker.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarker.cs) 按 `ToolMetadataRegistry` 在装配期包装产品工具目录，[`ToolApprovalMarkingContextProvider.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarkingContextProvider.cs) 在请求期（provider 链末位）包装 provider 注入的工具；配额组工具（Plan 调研配额）另由 `BuildHarnessAgent` 幂等补标——超限 Ask 依赖标记，`WebSearch` 等只读工具按注册元数据不带标记；名单与元数据统一由 [`HarnessProviderTools.cs`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs) 提供 | 符合 |
+| 审批协议 | binding + bypass 默认开 | 均未关闭；审批只由 `EnableToolApproval` 一个开关控制（无交互 broker 时不构造 `ToolApprovalAgentOptions`，并置 `DisableToolAutoApproval`），不存在第二套审批中间件 | 符合 |
+| 审批标记 | `ApprovalRequiredAIFunction` | [`ToolApprovalMarker.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarker.cs) 按 `ToolMetadataRegistry` 在装配期包装产品工具目录（`BuildHarnessAgent` 只做一次 `Apply`），[`ToolApprovalMarkingContextProvider.cs`](../../src/OneCode.Infrastructure/Agent/ToolApprovalMarkingContextProvider.cs) 在请求期（provider 链末位）包装 provider 注入的工具；Plan 外部检索配额（`MaxExternalWebToolCalls`）超限时直接返回 `ToolResult.Error`，不依赖审批标记；名单与元数据统一由 [`HarnessProviderTools.cs`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs) 提供 | 符合 |
 | 自动批准规则 | 只按工具名匹配，需防撞名 | [`AutoApprovalRulesFactory.cs`](../../src/OneCode.Infrastructure/Agent/AutoApprovalRulesFactory.cs) 从权限模型派生 + 技能只读规则 + provider 注入工具按名放行（[`HarnessProviderTools.AutoApprovalRule`](../../src/OneCode.Infrastructure/Agent/HarnessProviderTools.cs)） | 符合 |
-| 迭代上限 | `MaximumIterationsPerRequest` 管 FICC 单请求轮数 | 与 `PipelineOptions.MaxToolCalls` **同一个数值**，但一个管轮数、一个管工具计数 | **符合（有意同源）**：工具调用数 ≥ 迭代轮数，以 `MaxToolCalls` 作迭代上限是保守上界，不会提前截断；避开新增调优参数。代价是两者无法分别调优 |
+| 迭代上限 | `MaximumIterationsPerRequest` 管 FICC 单请求轮数 | 设置 `PipelineOptions.MaxTurns` 时为 `MaxTurns + 1`（预留一轮收尾）；未设置时回落 `MaxToolCalls` | **符合**：子代理按轮数上限精确控制，主路径维持「轮=调用同值」的旧行为；两个参数可分别调优 |
 | 压缩 owner | 单一 owner | 策略经 `HarnessAgentOptions.CompactionStrategy` 交给 Harness，产品不再挂 provider | 符合 |
 | 压缩生效 | 每次服务调用前压一次 | 每次服务调用前压一次（1.24 起哨兵判定解除，§6.4 已在真实包取证）；`MafSessionInvalidator` 在结构性改动后剔除旧历史哨兵，恢复会话与新建会话行为对齐 | 符合 |
 | 摘要守卫 | — | [`GuardedSummarizationCompactionStrategy.cs`](../../src/OneCode.Infrastructure/Agent/GuardedSummarizationCompactionStrategy.cs) 按字符串匹配 MAF 的 `[Summary unavailable]` / `[Summary]` 字面量 | **缺口（框架无公开判据）**：`SummarizationCompactionStrategy.cs:210,215` 为方法内联字面量，无公开常量/标志可替代——守卫是必要适配；MAF 改字面量即静默失效 → 保留在 §13 升级复查清单 |
@@ -730,7 +730,7 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 
 ## 参考
 
-- MAF 源码：`agent-framework/dotnet/src/`（只读 checkout，版本见 §1.1）
+- MAF 源码：`agent-framework/dotnet/src/`（可选只读 checkout，版本见 §1.1；未 checkout 时以 pinned 包行为为准）
 - 集成决策与禁令：[MAF 集成边界与禁止清单](../adr/0007-maf-integration-boundaries.md)
 - 后台响应（Background Responses）评估：[暂不集成，方案存档](../adr/0009-background-responses-assessment.md)
 - 结构化输出采用策略：[结构化请求 + 文本降级](../adr/0008-structured-output-text-fallback.md)

@@ -1,5 +1,7 @@
 using OneCode.Core.Mcp;
 using OneCode.Core.Config;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using OneCode.Core.Prompt;
 
@@ -407,7 +409,7 @@ public sealed class DesignInitCommand(
     private bool IsApiKeyAvailable() =>
         !string.IsNullOrEmpty(configManager.Current.Effective.ApiKey);
 
-    private static bool IsValidUrl(string url)
+    internal static bool IsValidUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return false;
         if (url.Length > 2000) return false;
@@ -424,7 +426,37 @@ public sealed class DesignInitCommand(
             host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // 主机名拦不住的等价写法：IP 字面量（127.0.0.1 / 192.168.* / ::1）与
+        // 整数形式（http://2130706433 在部分解析栈等价于 127.0.0.1）。
+        if (IPAddress.TryParse(host, out var ip) && IsPrivateOrLoopback(ip))
+            return false;
+        if (uint.TryParse(host, out _))
+            return false;
+
         return true;
+    }
+
+    /// <summary>
+    /// 私有、回环、链路本地与「本网络」地址判定。<c>--design-init</c> 的 URL 只接受公网页面，
+    /// 内网地址既无法被远程访问语义解释，也容易把本地服务暴露给抓取链路。
+    /// </summary>
+    private static bool IsPrivateOrLoopback(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip))
+            return true;
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+            return ip.IsIPv6LinkLocal || ip.IsIPv6UniqueLocal;
+
+        var b = ip.GetAddressBytes();
+        return b[0] switch
+        {
+            0 or 10 or 127 => true,
+            169 => b[1] == 254,
+            172 => b[1] >= 16 && b[1] <= 31,
+            192 => b[1] == 168,
+            _ => false,
+        };
     }
 
     /// <summary>

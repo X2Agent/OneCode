@@ -49,7 +49,8 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
         ILoggerFactory? loggerFactory = null,
         int? ollamaNumCtx = null,
         int streamMaxRetries = 6,
-        int streamIdleTimeoutSeconds = 180)
+        int streamIdleTimeoutSeconds = 180,
+        double? ollamaTemperature = null)
     {
         var baseClient = CreateBaseClient(providerId, apiKey, baseUrl, model, loggerFactory, ollamaNumCtx);
 
@@ -64,8 +65,8 @@ public sealed class ChatClientFactory(IHttpClientFactory httpClientFactory) : IC
             retryLogger,
             maxRetries: streamMaxRetries,
             streamIdleTimeout: TimeSpan.FromSeconds(streamIdleTimeoutSeconds));
-        var providerAware = new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx);
-        return new MaxOutputTokensDecorator(providerAware);
+        var providerAware = new ProviderAwareDecorator(retryClient, providerId, ollamaNumCtx, ollamaTemperature);
+        return new MaxOutputTokensDecorator(providerAware, ollamaNumCtx);
     }
 
     private static IChatClient CreateAnthropicClient(string apiKey, string? baseUrl, string? model)

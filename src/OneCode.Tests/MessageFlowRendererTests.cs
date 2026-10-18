@@ -20,7 +20,7 @@ public sealed class MessageFlowRendererTests
         rendered.Should().ContainSingle();
         var header = rendered[0].FullText;
 
-        header.Should().HaveLength(width - 3);
+        header.Should().HaveLength(width);
         header.Should().Contain("hello");
         header.Should().EndWith(expectedTime);
         header.Should().NotContain(Environment.UserName);

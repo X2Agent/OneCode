@@ -25,7 +25,7 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 ```
 src/
 ├── OneCode.Cli/            # CLI 入口 · 快速路径分发（6 文件）
-├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Tui/Services/DI 注册（~400 文件）
+├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Tui/Services/DI 注册（~465 文件）
 ├── OneCode.Core/           # 纯接口与领域模型（仅依赖 *.Abstractions）
 ├── OneCode.Infrastructure/ # 外部系统适配：MCP / MAF 管道 / 配置 / Git / Memory
 ├── OneCode.Automation/     # 后台调度：Cron / ModelCatalog 刷新 / YOLO 规则加载

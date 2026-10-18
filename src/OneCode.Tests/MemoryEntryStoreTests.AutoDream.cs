@@ -1,4 +1,4 @@
-// MemoryEntryStoreTests partial：AutoDream 整合写入与 manual 条目守卫（原文件按职责区块的纯文本搬移）
+// MemoryEntryStoreTests partial：AutoDream 整合写入与 manual 条目守卫
 using OneCode.Core.Memory;
 namespace OneCode.Tests;
 

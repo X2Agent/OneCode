@@ -98,6 +98,18 @@ public sealed partial class ReplShell
             case KeybindingDefaults.ActionSidebarPageDown:
                 ActiveSidebar?.PageDown();
                 return true;
+            case KeybindingDefaults.ActionSidebarScrollUp:
+                ActiveSidebar?.ScrollUp();
+                return true;
+            case KeybindingDefaults.ActionSidebarScrollDown:
+                ActiveSidebar?.ScrollDown();
+                return true;
+            case KeybindingDefaults.ActionChatToggleLastDetails:
+                _transcript.ToggleLastDetails();
+                return true;
+            case KeybindingDefaults.ActionChatFind:
+                _chatInput.BeginSearchMode();
+                return true;
         }
 
         // Ctrl+D — exit the application (when prompt is not focused).

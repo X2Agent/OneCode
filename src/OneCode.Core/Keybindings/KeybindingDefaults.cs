@@ -15,13 +15,16 @@ public static class KeybindingDefaults
     /// <summary>内联选择器（权限提示 / Plan 审批）接管键盘时并入。</summary>
     public const string ContextSelector = "Selector";
 
+    /// <summary>会话内搜索条激活时并入（接管 Enter / Shift+Enter / Esc）。</summary>
+    public const string ContextSearch = "Search";
+
     /// <summary>
     /// 所有有效的上下文名列表。
     /// </summary>
     public static readonly string[] AllContexts =
     [
         ContextGlobal, ContextChat, ContextAutocomplete,
-        ContextDiff, ContextSelector,
+        ContextDiff, ContextSelector, ContextSearch,
     ];
 
     /// <summary>
@@ -34,6 +37,7 @@ public static class KeybindingDefaults
         [ContextAutocomplete] = "When autocomplete menu is visible",
         [ContextDiff] = "While the diff review view has focus",
         [ContextSelector] = "While an inline selector owns the keyboard",
+        [ContextSearch] = "When the inline transcript search bar is active",
     };
 
     // 动作常量
@@ -66,10 +70,19 @@ public static class KeybindingDefaults
     // 占位建议循环（占位符可见时 Ctrl+←/→ 切换建议；分发在 ChatInputView）。
     public const string ActionChatSuggestionPrevious = "chat:suggestionPrevious";
     public const string ActionChatSuggestionNext = "chat:suggestionNext";
+    // 折叠详情块切换（Ctrl+E：从尾部逆序展开/折叠最近一条工具/思考/错误块）。
+    public const string ActionChatToggleLastDetails = "chat:toggleLastDetails";
+    // 会话内搜索（Ctrl+F 打开搜索条；Search 上下文内 Enter/Shift+Enter/Esc 导航与关闭）。
+    public const string ActionChatFind = "chat:find";
+    public const string ActionChatFindNext = "chat:findNext";
+    public const string ActionChatFindPrevious = "chat:findPrevious";
+    public const string ActionChatFindDismiss = "chat:findDismiss";
 
     // 侧栏（Plan 计划卡）键盘滚动——与主对话区滚动互不干扰的分区操作。
     public const string ActionSidebarPageUp = "sidebar:pageUp";
     public const string ActionSidebarPageDown = "sidebar:pageDown";
+    public const string ActionSidebarScrollUp = "sidebar:scrollUp";
+    public const string ActionSidebarScrollDown = "sidebar:scrollDown";
 
     // Autocomplete 菜单动作
     public const string ActionAutocompletePrevious = "autocomplete:previous";
@@ -107,7 +120,10 @@ public static class KeybindingDefaults
         ActionChatScrollUp, ActionChatScrollDown,
         ActionChatPageUp, ActionChatPageDown,
         ActionChatSuggestionPrevious, ActionChatSuggestionNext,
+        ActionChatToggleLastDetails,
+        ActionChatFind, ActionChatFindNext, ActionChatFindPrevious, ActionChatFindDismiss,
         ActionSidebarPageUp, ActionSidebarPageDown,
+        ActionSidebarScrollUp, ActionSidebarScrollDown,
         ActionAutocompletePrevious, ActionAutocompleteNext,
         ActionAutocompleteAccept, ActionAutocompleteDismiss,
         ActionDiffScrollUp, ActionDiffScrollDown,
@@ -148,8 +164,15 @@ public static class KeybindingDefaults
         [ActionChatPageDown] = "对话区向下翻页",
         [ActionChatSuggestionPrevious] = "上一条占位建议（占位符可见时）",
         [ActionChatSuggestionNext] = "下一条占位建议（占位符可见时）",
+        [ActionChatToggleLastDetails] = "展开或折叠最近一条详情块（工具/思考/错误）",
+        [ActionChatFind] = "打开会话内搜索条",
+        [ActionChatFindNext] = "跳转到下一个搜索匹配项",
+        [ActionChatFindPrevious] = "跳转到上一个搜索匹配项",
+        [ActionChatFindDismiss] = "关闭会话内搜索并清除高亮",
         [ActionSidebarPageUp] = "计划侧栏向上翻页（侧栏未显示时无操作）",
         [ActionSidebarPageDown] = "计划侧栏向下翻页",
+        [ActionSidebarScrollUp] = "计划侧栏向上微调滚动（行级）",
+        [ActionSidebarScrollDown] = "计划侧栏向下微调滚动（行级）",
         // Autocomplete
         [ActionAutocompletePrevious] = "上一条补全建议",
         [ActionAutocompleteNext] = "下一条补全建议",
@@ -220,13 +243,26 @@ public static class KeybindingDefaults
             ["pageup"] = ActionChatPageUp,
             ["pagedown"] = ActionChatPageDown,
 
-            // 侧栏翻页（Shift+PageUp/PageDown）：主对话区与右侧计划侧栏分区滚动。
+            // 侧栏翻页与微调滚动（Shift+PageUp/PageDown 翻页，Alt+Up/Down 行级）：主对话区与右侧计划侧栏分区滚动。
             ["shift+pgup"] = ActionSidebarPageUp,
             ["shift+pgdn"] = ActionSidebarPageDown,
+            ["alt+up"] = ActionSidebarScrollUp,
+            ["alt+down"] = ActionSidebarScrollDown,
+
+            // 折叠块展开/折叠（Ctrl+E）与行内搜索（Ctrl+F）。
+            ["ctrl+e"] = ActionChatToggleLastDetails,
+            ["ctrl+f"] = ActionChatFind,
 
             // 占位建议循环（占位符可见时生效；占位符不可见时不 Handled，交给编辑器移动光标）。
             ["ctrl+left"] = ActionChatSuggestionPrevious,
             ["ctrl+right"] = ActionChatSuggestionNext,
+        }),
+        new(ContextSearch, new Dictionary<string, string?>
+        {
+            ["enter"] = ActionChatFindNext,
+            ["shift+enter"] = ActionChatFindPrevious,
+            ["alt+enter"] = ActionChatFindPrevious,
+            ["escape"] = ActionChatFindDismiss,
         }),
         new(ContextAutocomplete, new Dictionary<string, string?>
         {

@@ -40,4 +40,6 @@ internal sealed record QueryStreamRequest(
     ToolCapabilitySet? ToolCapabilities = null,
     // 阶段播种边界（approved-plan 受控 run）：provider 只播种边界之后的转录。
     // null = 全量转录播种（交互路径）。
-    HistorySeedBoundary? HistorySeedBoundary = null);
+    HistorySeedBoundary? HistorySeedBoundary = null,
+    // 无人值守后台运行（如 Cron 触发）：禁用流内交互式工具审批弹窗（未授权工具直接 fail-closed 拒绝）。
+    bool SuppressToolApproval = false);

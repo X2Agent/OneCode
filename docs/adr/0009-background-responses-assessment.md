@@ -61,10 +61,10 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
 
 | 包 | `AllowBackgroundResponses` | `ContinuationToken` | 备注 |
 |---|---|---|---|
-| `Microsoft.Agents.AI` 1.22.0 | ✅ | ✅ | API 面在 pinned 版本就绪 |
-| `Microsoft.Extensions.AI.OpenAI` 10.10.0 | ✅ | ✅ | MEAI 侧映射就绪 |
-| `Microsoft.Extensions.AI.Abstractions` 10.10.0 | — | ✅ | 实验 ID MEAI001 |
-| `Microsoft.Agents.AI.Harness` 1.22.0（同上） | — | — | 含 `RequirePerServiceCallChatHistoryPersistence`（1.21.0 亦含该成员；Harness 侧确认，触发上述降级路径） |
+| `Microsoft.Agents.AI` 1.24.0 | ✅ | ✅ | API 面在 pinned 版本就绪 |
+| `Microsoft.Extensions.AI.OpenAI` 10.10.1 | ✅ | ✅ | MEAI 侧映射就绪 |
+| `Microsoft.Extensions.AI.Abstractions` 10.10.1 | — | ✅ | 实验 ID MEAI001 |
+| `Microsoft.Agents.AI.Harness` 1.24.0（同上） | — | — | 含 `RequirePerServiceCallChatHistoryPersistence`（1.21.0 亦含该成员；Harness 侧确认，触发上述降级路径） |
 
 即：**升级 MAF/MEAI 主版本时须重新核对**上述契约（尤其 Experimental 面的形状变化）。
 
@@ -100,8 +100,8 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
 ### 价值场景（若将来启用）
 
 - 无头长任务：GOAL 子目标（`GoalSubGoalExecutor` → `LoopAgent`）、Cron（`CronJobExecutor`
-  以 `WorkingMode.Goal` 跑 `StreamQueryAsync` 后丢弃事件）、AutoDream（非流式 `RunAsync`，
-  崩溃即丢失本次巩固）——启动后轮询、CLI 重启后可恢复。
+  以 `WorkingMode.Build` + `unattended` 跑 `StreamQueryAsync`，并消费 `ErrorEvent` 判定失败）、
+  AutoDream（非流式 `RunAsync`，崩溃即丢失本次巩固）——启动后轮询、CLI 重启后可恢复。
 - TUI 流式断线恢复：网络闪断后从断点续流而非整轮重来（当前中断只有 "(cancelled)"，无续跑 UX）。
 - 超长单响应绕过高层网关超时（OneCode 已设 `NetworkTimeout = Infinite`，该收益部分被抵消）。
 

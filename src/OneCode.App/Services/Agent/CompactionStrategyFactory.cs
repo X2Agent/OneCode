@@ -3,7 +3,6 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services.Compact;
 using OneCode.Core.Models;
 using OneCode.Infrastructure.Agent;
-using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.App.Services.Agent;
 
@@ -27,9 +26,9 @@ public sealed class CompactionStrategyFactory(
     private readonly CompactPromptBuilder _compactPromptBuilder = compactPromptBuilder;
 
     /// <summary>
-    /// 构建主 Agent 压缩策略，并返回模型 ProviderId（供 PipelineSecurityContext 使用）。
+    /// 构建主 Agent 压缩策略，并返回模型 ProviderId 与解析后的上下文窗口。
     /// </summary>
-    public async Task<(CompactionStrategy CompactionStrategy, string? ProviderId)> BuildAsync(
+    public async Task<(CompactionStrategy CompactionStrategy, string? ProviderId, int ContextWindow)> BuildAsync(
         string? modelId,
         CancellationToken ct)
     {
@@ -38,7 +37,7 @@ public sealed class CompactionStrategyFactory(
             : _modelManager.Resolve(modelId);
 
         var maxContextWindow = ResolveContextWindow(modelInfo, modelId);
-        var maxOutputTokens = ResolveOutputReservation(
+        var maxOutputTokens = TokenBudget.ResolveOutputReservation(
             modelInfo,
             maxContextWindow,
             modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 8192);
@@ -47,7 +46,7 @@ public sealed class CompactionStrategyFactory(
         var compactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(
             _chatClient, maxContextWindow, maxOutputTokens, summarizationPrompt);
 
-        return (compactionStrategy, modelInfo?.ProviderId);
+        return (compactionStrategy, modelInfo?.ProviderId, maxContextWindow);
     }
 
     /// <summary>
@@ -65,7 +64,7 @@ public sealed class CompactionStrategyFactory(
             : _modelManager.Resolve(modelId);
 
         var maxContextWindow = ResolveContextWindow(modelInfo, modelId);
-        var maxOutputTokens = ResolveOutputReservation(
+        var maxOutputTokens = TokenBudget.ResolveOutputReservation(
             modelInfo,
             maxContextWindow,
             maxOutputTokensOverride ?? (modelInfo?.MaxOutputTokens > 0 ? modelInfo.MaxOutputTokens : 4096));
@@ -83,16 +82,4 @@ public sealed class CompactionStrategyFactory(
     /// </summary>
     private static int ResolveContextWindow(ModelInfo? modelInfo, string? modelId)
         => modelInfo is { ContextWindow: > 0 } mi ? mi.ContextWindow : ModelContextDefaults.Resolve(modelId);
-
-    /// <summary>
-    /// 解析输出预留。<b>仅本地 Ollama</b> 收敛到窗口的 1/4——本地小窗口（4K~8K）装不下固定预留；
-    /// 其余 provider 保持既有取值，本次改动不触碰云端模型的预算。
-    /// </summary>
-    private static int ResolveOutputReservation(ModelInfo? modelInfo, int contextWindow, int desired)
-        => IsLocalOllama(modelInfo)
-            ? ModelContextDefaults.ResolveOutputReservation(contextWindow, desired)
-            : desired;
-
-    private static bool IsLocalOllama(ModelInfo? modelInfo) => string.Equals(
-        modelInfo?.ProviderId, CoreConstants.ModelProviders.Ollama, StringComparison.OrdinalIgnoreCase);
 }

@@ -64,10 +64,12 @@ public static class ChatClientServiceCollectionExtensions
                 providerId, CoreConstants.ModelProviders.Ollama, StringComparison.OrdinalIgnoreCase);
 
             var ollamaNumCtx = isOllama ? settings.OllamaContextWindow : (int?)null;
+            var ollamaTemperature = isOllama ? settings.OllamaTemperature : (double?)null;
             return chatClientFactory.CreateWithDecorators(
                 providerId, effectiveApiKey, baseUrl, model, loggerFactory, ollamaNumCtx,
                 streamMaxRetries: settings.StreamMaxRetries,
-                streamIdleTimeoutSeconds: settings.StreamIdleTimeoutSeconds);
+                streamIdleTimeoutSeconds: settings.StreamIdleTimeoutSeconds,
+                ollamaTemperature: ollamaTemperature);
         });
 
         return services;

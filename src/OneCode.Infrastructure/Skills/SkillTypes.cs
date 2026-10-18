@@ -7,8 +7,7 @@ public sealed record SkillDocument(
     string Body,
     string? ArgumentHint = null,
     IReadOnlyList<string>? ArgumentNames = null,
-    bool UserInvocable = true,
-    bool DisableModelInvocation = false)
+    bool UserInvocable = true)
 {
     public IReadOnlyList<string> ArgumentNames { get; init; } = ArgumentNames ?? [];
 }
@@ -20,5 +19,4 @@ internal sealed class SkillFrontmatterRaw
     public string? ArgumentHint { get; set; }
     public string[]? ArgumentNames { get; set; }
     public bool? UserInvocable { get; set; }
-    public bool? DisableModelInvocation { get; set; }
 }

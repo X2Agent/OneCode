@@ -20,13 +20,17 @@ namespace OneCode.Infrastructure.Ai;
 /// 只会得到「看起来生效、实际静默失效」的假象。思考/推理意图统一走 MEAI 标准的
 /// <see cref="ChatOptions.Reasoning"/>，由各适配器自行翻译。
 /// </remarks>
-public sealed class ProviderAwareDecorator(IChatClient inner, string providerId, int? ollamaNumCtx = null) : IChatClient
+public sealed class ProviderAwareDecorator(
+    IChatClient inner,
+    string providerId,
+    int? ollamaNumCtx = null,
+    double? ollamaTemperature = null) : DelegatingChatClient(inner)
 {
-    private readonly IChatClient _inner = inner;
     private readonly string _providerId = providerId;
     private readonly int? _ollamaNumCtx = ollamaNumCtx;
+    private readonly double? _ollamaTemperature = ollamaTemperature;
 
-    public async Task<ChatResponse> GetResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -34,23 +38,18 @@ public sealed class ProviderAwareDecorator(IChatClient inner, string providerId,
         // 始终复制：Anthropic 策略会替换列表元素（clone-on-write），绝不能写回调用方的列表
         var messageList = messages.ToList();
         ApplyProviderStrategy(messageList, options);
-        return await _inner.GetResponseAsync(messageList, options, cancellationToken);
+        return await base.GetResponseAsync(messageList, options, cancellationToken);
     }
 
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         var messageList = messages.ToList();
         ApplyProviderStrategy(messageList, options);
-        return _inner.GetStreamingResponseAsync(messageList, options, cancellationToken);
+        return base.GetStreamingResponseAsync(messageList, options, cancellationToken);
     }
-
-    public object? GetService(Type serviceType, object? serviceKey = null)
-        => _inner.GetService(serviceType, serviceKey);
-
-    void IDisposable.Dispose() => (_inner as IDisposable)?.Dispose();
 
     private void ApplyProviderStrategy(IList<ChatMessage> messages, ChatOptions? options)
     {
@@ -61,7 +60,7 @@ public sealed class ProviderAwareDecorator(IChatClient inner, string providerId,
                 break;
 
             case CoreConstants.ModelProviders.Ollama:
-                InjectOllamaStrategy(options, _ollamaNumCtx);
+                InjectOllamaStrategy(options, _ollamaNumCtx, _ollamaTemperature);
                 break;
 
             // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning，
@@ -198,7 +197,7 @@ public sealed class ProviderAwareDecorator(IChatClient inner, string providerId,
         _ => false,
     };
 
-    private static void InjectOllamaStrategy(ChatOptions? options, int? numCtx)
+    private static void InjectOllamaStrategy(ChatOptions? options, int? numCtx, double? temperature)
     {
         if (options is null)
             return;
@@ -207,6 +206,14 @@ public sealed class ProviderAwareDecorator(IChatClient inner, string providerId,
         // applied here, after generic agent options have been assembled.
         if (numCtx is > 0)
             options.AddOllamaOption(OllamaOption.NumCtx, numCtx.Value);
+
+        if (temperature is > 0 and <= 2.0)
+        {
+            options.AddOllamaOption(OllamaOption.Temperature, (float)temperature.Value);
+            options.AddOllamaOption(OllamaOption.TopP, 0.9f);
+            options.AddOllamaOption(OllamaOption.TopK, 40);
+            options.AddOllamaOption(OllamaOption.RepeatPenalty, 1.1f);
+        }
 
         // OllamaSharp 不读 MEAI 的 ChatOptions.Reasoning，这里把标准档位翻译成原生 think。
         if (options.Reasoning?.Effort is { } effort && effort != ReasoningEffort.None)
