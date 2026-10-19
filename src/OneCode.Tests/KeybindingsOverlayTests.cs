@@ -86,5 +86,7 @@ public sealed class KeybindingsOverlayTests
         var rows = KeybindingsOverlay.FormatRows([], []);
 
         rows.Should().NotContain(r => r.Contains("配置警告"));
+        rows.Should().NotContain(r => r.Contains("Ctrl+Left/Right"),
+            "Ctrl+Left/Right 已通过 keybindings.json 支持重映射，不应再列为硬编码");
     }
 }

@@ -132,7 +132,7 @@
 | 快捷键 | 动作 | 说明 |
 |---|---|---|
 | `Ctrl+D` | `app:exit` | 退出应用 * |
-| `Ctrl+O` | `app:sidebarToggle` | 切换计划侧边栏或底部待办/目标面板展开状态 |
+| `Ctrl+O` | `app:sidebarToggle` | 切换底部待办/目标进度面板展开状态 |
 | `Ctrl+Shift+→` | `app:sidebarWider` | 加宽右侧侧边栏（Plan 面板，步进 4 列） |
 | `Ctrl+Shift+←` | `app:sidebarNarrower` | 收窄右侧侧边栏（与分隔线拖拽共用 clamp 规则） |
 

@@ -84,6 +84,6 @@ public static class HookPointMetadataRegistry
         HookPointMetadata.WithoutMatcher(
             HookInterceptionPoints.ToWireName(HookInterceptionPoint.Output),
             "最终输出",
-            "在最终响应交付调用方前触发。deny 拦截本次响应；有该节点 hook 时框架缓冲响应后再裁决，无 hook 时不影响流式体验。"),
+            "在流式生成完毕、最终响应落盘与收尾前触发（流式增量实时透传、不缓冲）。deny 拦截本次响应（不写会话历史）并终结本轮。"),
     ];
 }

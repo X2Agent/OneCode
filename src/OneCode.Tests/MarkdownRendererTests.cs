@@ -34,16 +34,16 @@ public sealed class MarkdownRendererTests
     }
 
     [Fact]
-    public void Render_FencedCodeBlock_RendersCompactCopyIconAndCopyTag()
+    public void Render_FencedCodeBlock_HeaderAlignsWithBottomBorderWithoutCopyTag()
     {
         var md = "```csharp\nvar x = 1;\n```";
         var lines = MarkdownRenderer.Render(md);
 
-        lines.Should().NotContain(l => l.Text.Contains("copy"),
-            "代码块头部使用单字符 ⧉ 图标而非挤占宽度的 [ copy ] 按钮");
-        lines[0].Text.Should().Contain(TuiGlyphs.CopyIcon);
-        lines[0].Tag.Should().BeOfType<CodeBlockCopyTag>()
-            .Which.CodeContent.Should().Be("var x = 1;");
+        lines.Should().NotContain(l => l.Text.Contains("copy"));
+        lines[0].Tag.Should().BeNull("围栏代码块头部仅渲染语言标签与边框，不附加鼠标复制 Tag");
+        TextWidthHelper.GetDisplayWidth(lines[0].Text).Should().Be(
+            TextWidthHelper.GetDisplayWidth(lines[^1].Text),
+            "代码块首尾边框显示宽度必须严格对齐");
     }
 
     // 窄面板（<60 列）中表格改用记录式渲染：每行一条记录、列名前缀、值换行不截断

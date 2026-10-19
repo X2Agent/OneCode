@@ -34,12 +34,19 @@ public static class HookMiddleware
 
         return async (_, ctx, next, ct) =>
         {
+            var sessionId = options.ConversationId?.ToString();
+            var cwd = options.WorkingDirectory;
+            var toolUseId = ctx.CallContent?.CallId;
+
             if (options.HookExecutionService is not null && ctx.Function is not null)
             {
                 var prePayload = new HookPayload
                 {
                     Point = HookInterceptionPoint.PreToolCall,
+                    SessionId = sessionId,
+                    Cwd = cwd,
                     ToolName = ctx.Function.Name,
+                    ToolUseId = toolUseId,
                     ToolInput = ctx.Arguments is not null
                         ? JsonSerializer.SerializeToElement(ctx.Arguments)
                         : JsonSerializer.SerializeToElement(new { }),
@@ -78,15 +85,17 @@ public static class HookMiddleware
             if (options.HookExecutionService is not null && ctx.Function is not null)
             {
                 // 从工具结果提取 ToolResponse / ToolError，供外部脚本做审计/失败通知。
-                // ToolResult 携带 IsError 语义；其他类型（string/Exception/null）原样作为 response。
-                string? toolError = null;
-                if (result is ToolResult tr && tr.IsError)
-                    toolError = tr.Content;
+                // 内层 ToolResultUnwrapMiddleware 已将 ToolResult 序列化为字符串（JSON 信封或 [ERROR] 文本），
+                // 故同时兼容未解包的 ToolResult 与解包后的字符串错误标识。
+                var toolError = ExtractToolError(result);
 
                 var postPayload = new HookPayload
                 {
                     Point = HookInterceptionPoint.PostToolCall,
+                    SessionId = sessionId,
+                    Cwd = cwd,
                     ToolName = ctx.Function.Name,
+                    ToolUseId = toolUseId,
                     ToolInput = ctx.Arguments is not null
                         ? JsonSerializer.SerializeToElement(ctx.Arguments)
                         : JsonSerializer.SerializeToElement(new { }),
@@ -118,5 +127,25 @@ public static class HookMiddleware
 
             return result;
         };
+    }
+
+    /// <summary>
+    /// 从工具返回值中提取错误详情：兼容未解包的 <see cref="ToolResult"/>、异常对象、
+    /// 以及经 <c>ToolResultUnwrapMiddleware</c> 序列化后的 JSON 信封或纯文本错误前缀。
+    /// </summary>
+    private static string? ExtractToolError(object? result)
+    {
+        switch (result)
+        {
+            case ToolResult tr:
+                return tr.IsError ? tr.Content : null;
+            case Exception ex:
+                return ex.Message;
+            case string text:
+                _ = DisplayJsonSerializer.TryUnwrapEnvelope(text, out var isError, out var unwrapped);
+                return isError ? unwrapped : null;
+            default:
+                return null;
+        }
     }
 }

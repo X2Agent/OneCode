@@ -143,7 +143,7 @@ public static class KeybindingDefaults
     {
         // App 级别
         [ActionAppExit] = "退出应用",
-        [ActionAppSidebarToggle] = "切换计划侧边栏或底部待办/目标面板展开状态",
+        [ActionAppSidebarToggle] = "切换底部待办/目标进度面板展开状态",
         [ActionAppSidebarWider] = "加宽右侧侧边栏（Plan 面板）",
         [ActionAppSidebarNarrower] = "收窄右侧侧边栏（Plan 面板）",
 

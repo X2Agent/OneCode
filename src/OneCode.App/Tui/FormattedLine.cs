@@ -96,8 +96,5 @@ public sealed record ThinkingDetailLineTag;
 /// <summary>错误行标记——可折叠的错误详情。Content 为完整错误文本。</summary>
 public sealed record ErrorLineTag(string Content, bool IsExpanded);
 
-/// <summary>围栏代码块标题行标记——点击标题栏可一键复制完整代码内容到剪贴板。</summary>
-public sealed record CodeBlockCopyTag(string CodeContent);
-
 /// <summary>一行中的颜色段——文本 + 前景色 + 可选背景色。</summary>
 public sealed record LineSegment(string Text, Color Color, Color? Bg = null);

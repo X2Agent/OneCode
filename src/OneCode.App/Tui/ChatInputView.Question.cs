@@ -18,6 +18,9 @@ public sealed partial class ChatInputView
     /// </summary>
     public void SetQuestionMode(Action<string> callback, bool longText = false)
     {
+        if (_isSearchMode)
+            EndSearchMode();
+
         _isQuestionMode = true;
         _isLongTextMode = longText;
         _input.QuestionNavigationEnabled = true;

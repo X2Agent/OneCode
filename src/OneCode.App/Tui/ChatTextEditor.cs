@@ -96,6 +96,8 @@ internal sealed class ChatTextEditor : View
         _editor.KeyBindings.Remove(Key.CursorDown.WithShift);
         _editor.KeyBindings.Remove(Key.PageUp.WithShift);
         _editor.KeyBindings.Remove(Key.PageDown.WithShift);
+        _editor.KeyBindings.Remove(Key.CursorUp.WithAlt);
+        _editor.KeyBindings.Remove(Key.CursorDown.WithAlt);
 
         _editor.KeyDown += (_, e) =>
         {
@@ -138,13 +140,16 @@ internal sealed class ChatTextEditor : View
                 !e.IsShift &&
                 ShouldHandleAsShiftEnter(e))
             {
-                // ConPTY fallback: without kitty keyboard protocol, Shift+Enter is
-                // encoded by the terminal as ESC+\r, which Terminal.Gui decodes as
-                // Ctrl+Alt+M (ESC = Alt, \r = Ctrl+M = 0x0D). This encoding is
-                // unambiguous, so we treat it as deterministic Shift+Enter.
-                // For bare Key.Enter (some terminals strip the ESC prefix), fall
-                // back to GetAsyncKeyState to distinguish from plain Enter.
-                InsertTextAtCursor("\n");
+                // ConPTY 兼容回退：未开启 kitty 协议时，终端将 Shift+Enter 编码为 ESC+\r
+                // （Terminal.Gui 解码为 Ctrl+Alt+M）。先归一化为 Key.Enter.WithShift 派发给
+                // ChatInputView（使 ContextSearch 的上一匹配、短文本提问向导的回退上一题及
+                // 用户重映射的 chat:newline 均能生效）；仅在未被上层消费时兜底插入换行。
+                var shiftEnter = Key.Enter.WithShift;
+                KeyDownEvent?.Invoke(this, shiftEnter);
+                if (!shiftEnter.Handled)
+                {
+                    InsertTextAtCursor("\n");
+                }
                 e.Handled = true;
             }
             else if (!_suppressEvents)
@@ -539,14 +544,15 @@ internal sealed class ChatTextEditor : View
         return bare == Key.CursorLeft || bare == Key.CursorRight;
     }
 
-    private static bool IsScrollKey(Key e)
+    internal static bool IsScrollKey(Key e)
     {
         var bare = e.NoShift.NoCtrl.NoAlt;
         return bare == Key.PageUp
             || bare == Key.PageDown
             || (e.IsCtrl && (bare == Key.PageUp || bare == Key.PageDown))
             || (e.IsShift && (bare == Key.CursorUp || bare == Key.CursorDown))
-            || (e.IsShift && (bare == Key.PageUp || bare == Key.PageDown));
+            || (e.IsShift && (bare == Key.PageUp || bare == Key.PageDown))
+            || (e.IsAlt && (bare == Key.CursorUp || bare == Key.CursorDown));
     }
 
     /// <summary>

@@ -102,15 +102,6 @@ public sealed partial class ChatInputView : View
     /// <summary>Raised when the user presses Tab in a non-completion context to cycle the working mode.</summary>
     public event Action? CycleModeRequested;
 
-    /// <summary>加宽右侧侧边栏（Ctrl+Shift+→，app:sidebarWider）。由 ReplShell 接线到宽度调整。</summary>
-    public event Action? SidebarWiderRequested;
-
-    /// <summary>收窄右侧侧边栏（Ctrl+Shift+←，app:sidebarNarrower）。由 ReplShell 接线到宽度调整。</summary>
-    public event Action? SidebarNarrowerRequested;
-
-    /// <summary>切换右侧侧边栏可见性（Ctrl+O，app:sidebarToggle）。由 ReplShell 接线。</summary>
-    public event Action? SidebarToggleRequested;
-
     /// <summary>
     /// Raised when an image paste is rejected because the current model doesn't
     /// support multimodal input. The caller should show a visible error message.
@@ -118,59 +109,21 @@ public sealed partial class ChatInputView : View
     public event Action? ImagePasteRejected;
 
     /// <summary>
-    /// 活跃交互会话（提问向导 / 内联选择器），由 ReplShell 注入。
-    /// 交互接管期间的按键交由会话统一处理（见 <see cref="IInteractionSession"/>）。
+    /// 活跃交互会话与跨视图动作宿主（由 <see cref="ReplShell"/> 注入）。
+    /// 交互接管期间的按键及所有跨区域动作统一交由宿主处理（见 <see cref="IInteractionSession"/>）。
     /// </summary>
     internal IInteractionSession? InteractionSession { get; set; }
 
-    // Global shortcut forwarding
-    // These events let global shortcuts fire even while the prompt has focus,
-    // because Editor otherwise consumes all keystrokes and ReplShell.OnKeyDown
-    // never sees them.
-
     /// <summary>
-    /// 取消当前正在运行的 agent/query，但不退出应用（Ctrl+X Ctrl+K）。
+    /// 取消当前正在运行的 agent/query，但不退出应用（Ctrl+K Ctrl+A）。
     /// 调用方（OneCodeToplevel）将其桥接到 <c>_queryCts.Cancel()</c>。
     /// </summary>
     public event Action? InterruptRequested;
 
-    /// <summary>对话区向上滚动（Shift+Up / Ctrl+PgUp）。</summary>
-    public event Action? ScrollUpRequested;
-
-    /// <summary>对话区向下滚动（Shift+Down / Ctrl+PgDn）。</summary>
-    public event Action? ScrollDownRequested;
-
-    /// <summary>对话区页级向上滚动（PageUp）。</summary>
-    public event Action? PageUpRequested;
-
-    /// <summary>对话区页级向下滚动（PageDown）。</summary>
-    public event Action? PageDownRequested;
-
-    /// <summary>侧栏（Plan 计划卡）页级向上滚动（Shift+PageUp）。</summary>
-    public event Action? SidebarPageUpRequested;
-
-    /// <summary>侧栏（Plan 计划卡）页级向下滚动（Shift+PageDown）。</summary>
-    public event Action? SidebarPageDownRequested;
-
-    /// <summary>侧栏（Plan 计划卡）行级向上微调滚动（Alt+Up）。</summary>
-    public event Action? SidebarScrollUpRequested;
-
-    /// <summary>侧栏（Plan 计划卡）行级向下微调滚动（Alt+Down）。</summary>
-    public event Action? SidebarScrollDownRequested;
-
-    /// <summary>切换对话流最近一条可折叠详情块的展开状态（Ctrl+E，chat:toggleLastDetails）。</summary>
-    public event Action? ToggleLastDetailsRequested;
-
     /// <summary>会话内搜索词实时变化（Ctrl+F 搜索模式下输入变化时触发）。</summary>
     public event Action<string>? SearchQueryChanged;
 
-    /// <summary>会话内搜索跳转到下一个匹配项（Search 上下文 Enter）。</summary>
-    public event Action? SearchNextRequested;
-
-    /// <summary>会话内搜索跳转到上一个匹配项（Search 上下文 Shift+Enter）。</summary>
-    public event Action? SearchPreviousRequested;
-
-    /// <summary>会话内搜索关闭（Search 上下文 Esc）。</summary>
+    /// <summary>会话内搜索关闭（退出搜索模式时触发以清除高亮）。</summary>
     public event Action? SearchDismissed;
 
     public event Action<bool, int>? CompletionStateChanged;
@@ -235,6 +188,9 @@ public sealed partial class ChatInputView : View
 
     public void SetInteractionSuspended(bool suspended)
     {
+        if (suspended && _isSearchMode)
+            EndSearchMode();
+
         _interactionSuspended = suspended;
         _input.ReadOnly = _interactionSuspended;
         _input.SetNeedsDraw();
@@ -338,6 +294,9 @@ public sealed partial class ChatInputView : View
     /// <summary>进入 Ctrl+F 会话内搜索模式：压入 Search 上下文，暂存当前草稿。</summary>
     public void BeginSearchMode()
     {
+        if (_interactionSuspended || _isQuestionMode || InteractionSession?.IsOverlayVisible == true)
+            return;
+
         if (_isSearchMode)
         {
             FocusInput();

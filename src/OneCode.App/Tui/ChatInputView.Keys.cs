@@ -54,26 +54,29 @@ public sealed partial class ChatInputView
             return;
         }
 
+        // Layer 1: 模态弹层结界（Modal Key Barrier）
+        // 若弹层可见但按键仍落入输入框（如无头测试或焦点滞留），一律转交模态结界并吞掉，严禁穿透。
+        if (InteractionSession?.IsOverlayVisible == true)
+        {
+            InteractionSession.DispatchOverlayKey(e);
+            _suppressKeyBubble = true;
+            e.Handled = true;
+            return;
+        }
+
         // —— 交互会话接管（提问向导 / 内联选择器）——
         // 选择题/选择器挂起态：Editor 只读，全部键转发给会话，未消耗的键也
         // 吞掉，防止回落到聊天分支（如 Enter 误提交）。
         // 文本题：Editor 仍需接收可打印字符，只转发导航/取消/确认组合键。
-        // 例外：转录滚动键在挂起态放行——审批计划卡时恰恰需要翻阅长对话/长计划，
-        // 滚动与 selector 的 up/down/enter/escape 不冲突，也不把焦点还给输入框。
+        // 例外：只读检视动作白名单（IsReadOnlyInspectionAction）在挂起态全部放行——
+        // 审批工具或计划卡时用户需要翻阅对话/侧栏、调宽侧栏、展开工具入参详情或展开待办详情。
         var interactionSuspended = _interactionSuspended && !_isQuestionMode;
         if (interactionSuspended || IsQuestionInteractionKey(e))
         {
-            if (interactionSuspended && IsChatScrollAction(earlyAction))
+            if (interactionSuspended && IsReadOnlyInspectionAction(earlyAction))
             {
-                DispatchChatScroll(earlyAction);
-                e.Handled = true;
-                return;
-            }
-
-            // 侧栏翻页在挂起态同样放行（审批卡场景翻阅右侧计划）。
-            if (interactionSuspended && IsSidebarScrollAction(earlyAction))
-            {
-                DispatchSidebarScroll(earlyAction);
+                InteractionSession?.TryExecuteShellAction(earlyAction);
+                _suppressKeyBubble = true;
                 e.Handled = true;
                 return;
             }
@@ -86,37 +89,12 @@ public sealed partial class ChatInputView
             }
         }
 
-        // Reuse the already-resolved action for the rest of the switch
         var action = earlyAction;
 
-        // ── Search 上下文动作（Ctrl+F 会话内搜索模式激活时优先拦截） ──
-        if (action == KeybindingDefaults.ActionChatFindDismiss)
+        // ── 跨视图与全局动作统一委托给 ReplShell 单一权威入口 ──
+        if (InteractionSession?.TryExecuteShellAction(action) == true)
         {
-            EndSearchMode();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatFindNext)
-        {
-            SearchNextRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatFindPrevious)
-        {
-            SearchPreviousRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatFind)
-        {
-            BeginSearchMode();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionChatToggleLastDetails)
-        {
-            ToggleLastDetailsRequested?.Invoke();
+            _suppressKeyBubble = true;
             e.Handled = true;
             return;
         }
@@ -238,21 +216,6 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan 面板），
-        // 与分隔线鼠标拖拽等价的键盘路径。宽度调整与补全/模式切换互不冲突，无额外守卫。
-        if (action == KeybindingDefaults.ActionAppSidebarWider)
-        {
-            SidebarWiderRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-        if (action == KeybindingDefaults.ActionAppSidebarNarrower)
-        {
-            SidebarNarrowerRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
         // 占位建议循环（chat:suggestionPrevious/Next，默认键 Ctrl+←/→，经 Resolver 可重映射）。
         // 占位符不可见时不 Handled：按键落到编辑器做光标移动。
         if (action == KeybindingDefaults.ActionChatSuggestionNext && _placeholderLabel.Visible)
@@ -320,38 +283,6 @@ public sealed partial class ChatInputView
             return;
         }
 
-        // Ctrl+D — exit the application.
-        if (action == KeybindingDefaults.ActionAppExit)
-        {
-            QuitRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
-        // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
-        // PageUp / PageDown — scroll the conversation transcript (page-level)
-        if (IsChatScrollAction(action))
-        {
-            DispatchChatScroll(action);
-            e.Handled = true;
-            return;
-        }
-
-        // Shift+PageUp/PageDown — scroll the plan sidebar (page-level)
-        if (IsSidebarScrollAction(action))
-        {
-            DispatchSidebarScroll(action);
-            e.Handled = true;
-            return;
-        }
-
-        if (action == KeybindingDefaults.ActionAppSidebarToggle)
-        {
-            SidebarToggleRequested?.Invoke();
-            e.Handled = true;
-            return;
-        }
-
         // Smart paste: Ctrl+V resolves to chat:paste via KeybindingResolver.
         // Routes to SmartPasteHandler (supports images, file paths, large-text collapsing).
         if (action == KeybindingDefaults.ActionChatPaste)
@@ -362,57 +293,23 @@ public sealed partial class ChatInputView
         }
     }
 
-    /// <summary>转录滚动动作判定：挂起态放行与常规分发共用。</summary>
-    private static bool IsChatScrollAction(string? action)
+    /// <summary>
+    /// 审批/选择器挂起态下允许放行的只读检视动作白名单：
+    /// 决策前允许翻阅对话区、翻阅或调宽右侧计划栏、切换底部待办面板详情以及展开工具/思考/报错详情块。
+    /// </summary>
+    internal static bool IsReadOnlyInspectionAction(string? action)
         => action is KeybindingDefaults.ActionChatScrollUp
             or KeybindingDefaults.ActionChatScrollDown
             or KeybindingDefaults.ActionChatPageUp
-            or KeybindingDefaults.ActionChatPageDown;
-
-    private void DispatchChatScroll(string? action)
-    {
-        switch (action)
-        {
-            case KeybindingDefaults.ActionChatScrollUp:
-                ScrollUpRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionChatScrollDown:
-                ScrollDownRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionChatPageUp:
-                PageUpRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionChatPageDown:
-                PageDownRequested?.Invoke();
-                break;
-        }
-    }
-
-    /// <summary>侧栏（Plan 计划卡）翻页与行级微调滚动动作判定。</summary>
-    private static bool IsSidebarScrollAction(string? action)
-        => action is KeybindingDefaults.ActionSidebarPageUp
+            or KeybindingDefaults.ActionChatPageDown
+            or KeybindingDefaults.ActionSidebarPageUp
             or KeybindingDefaults.ActionSidebarPageDown
             or KeybindingDefaults.ActionSidebarScrollUp
-            or KeybindingDefaults.ActionSidebarScrollDown;
-
-    private void DispatchSidebarScroll(string? action)
-    {
-        switch (action)
-        {
-            case KeybindingDefaults.ActionSidebarPageUp:
-                SidebarPageUpRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionSidebarPageDown:
-                SidebarPageDownRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionSidebarScrollUp:
-                SidebarScrollUpRequested?.Invoke();
-                break;
-            case KeybindingDefaults.ActionSidebarScrollDown:
-                SidebarScrollDownRequested?.Invoke();
-                break;
-        }
-    }
+            or KeybindingDefaults.ActionSidebarScrollDown
+            or KeybindingDefaults.ActionAppSidebarToggle
+            or KeybindingDefaults.ActionAppSidebarWider
+            or KeybindingDefaults.ActionAppSidebarNarrower
+            or KeybindingDefaults.ActionChatToggleLastDetails;
 
     private void HandleEnter()
     {

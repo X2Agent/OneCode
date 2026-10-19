@@ -128,6 +128,29 @@ public sealed class HookSettingsLoaderTests : IDisposable
         result.Errors[0].Should().Contain("GoalStageInvoke").And.Contain("不再属于");
     }
 
+    [Theory]
+    [InlineData("agent_startup")]
+    [InlineData("agent_shutdown")]
+    public void Load_ClosedLifecyclePoint_ReportsInternalBoundaryWarningAndSkips(string closedPointName)
+    {
+        WriteHooksJson($$"""
+            {
+              "{{closedPointName}}": [
+                { "hooks": [ { "type": "command", "command": "echo hi" } ] }
+              ],
+              "input": [
+                { "hooks": [ { "type": "command", "command": "echo ok" } ] }
+              ]
+            }
+            """);
+
+        var result = CreateSut().Load(_configDir);
+
+        result.Hooks!.Keys.Should().ContainSingle().Which.Should().Be(HookInterceptionPoint.Input);
+        result.Errors.Should().ContainSingle();
+        result.Errors[0].Should().Contain(closedPointName).And.Contain("内部生命周期边界");
+    }
+
     [Fact]
     public void Load_BrokenJson_FailsWithLineNumber()
     {

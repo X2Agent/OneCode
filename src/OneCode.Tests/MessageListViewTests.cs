@@ -87,6 +87,59 @@ public sealed class MessageListViewTests
         view.RenderedLines.Should().NotContain(l => l.Contains("deep reasoning line 1", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void ToggleLastDetails_MultipleBlocks_CyclesThroughAllInReverseOrder()
+    {
+        var view = new MessageListView();
+        var firstThinking = new ThinkingLineTag("first thought detail", IsExpanded: false);
+        var secondThinking = new ThinkingLineTag("second thought detail", IsExpanded: false);
+        view.AppendLines([
+            FormattedLine.FromSegmentsWithTag([new LineSegment("▸ Thought 1:", Terminal.Gui.Drawing.Color.Gray)], firstThinking),
+            Line("middle text"),
+            FormattedLine.FromSegmentsWithTag([new LineSegment("▸ Thought 2:", Terminal.Gui.Drawing.Color.Gray)], secondThinking),
+        ]);
+
+        // 第 1 次 Ctrl+E：展开最新块（Thought 2）
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().Contain(l => l.Contains("second thought detail", StringComparison.Ordinal));
+        view.RenderedLines.Should().NotContain(l => l.Contains("first thought detail", StringComparison.Ordinal));
+
+        // 第 2 次 Ctrl+E：逆序循环展开前一块（Thought 1）
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().Contain(l => l.Contains("first thought detail", StringComparison.Ordinal));
+        view.RenderedLines.Should().Contain(l => l.Contains("second thought detail", StringComparison.Ordinal));
+
+        // 第 3 次 Ctrl+E：循环回到最新块（Thought 2）并折叠
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().NotContain(l => l.Contains("second thought detail", StringComparison.Ordinal));
+        view.RenderedLines.Should().Contain(l => l.Contains("first thought detail", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ToggleLastDetails_WhenScrolledUp_TogglesBlockInCurrentViewportInsteadOfTail()
+    {
+        var view = new MessageListView();
+        var historyThinking = new ThinkingLineTag("historical thought detail", IsExpanded: false);
+        var tailThinking = new ThinkingLineTag("tail thought detail", IsExpanded: false);
+
+        var lines = new List<FormattedLine>
+        {
+            FormattedLine.FromSegmentsWithTag([new LineSegment("▸ History Thought:", Terminal.Gui.Drawing.Color.Gray)], historyThinking),
+        };
+        lines.AddRange(Enumerable.Range(1, 25).Select(i => Line($"filler {i}")));
+        lines.Add(FormattedLine.FromSegmentsWithTag([new LineSegment("▸ Tail Thought:", Terminal.Gui.Drawing.Color.Gray)], tailThinking));
+        view.AppendLines(lines);
+
+        // 用户按 Home 滚动到历史顶部（脱离底部跟随）
+        view.DispatchKeyDown(Terminal.Gui.Input.Key.Home);
+        view.IsAutoScroll.Should().BeFalse();
+
+        // 按 Ctrl+E 应展开当前视口内的历史折叠块，而非不可见的末尾块
+        view.ToggleLastDetails().Should().BeTrue();
+        view.RenderedLines.Should().Contain(l => l.Contains("historical thought detail", StringComparison.Ordinal));
+        view.RenderedLines.Should().NotContain(l => l.Contains("tail thought detail", StringComparison.Ordinal));
+    }
+
     private static FormattedLine Line(string text) =>
         FormattedLine.Plain(text, Terminal.Gui.Drawing.Color.White);
 }

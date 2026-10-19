@@ -241,7 +241,11 @@ public static class AgentPipelineBuilder
         // pre/post_model_call 在模型调用边界做纯审计（不支持 deny），流式交付零缓冲，
         // 无匹配 hook 时仅透传（HasActiveHooks 守卫，不构造 payload）。
         var chatClient = options.PipelineOptions.HookExecutionService is not null
-            ? new ModelCallHookDecorator(options.ChatClient, options.PipelineOptions.HookExecutionService)
+            ? new ModelCallHookDecorator(
+                options.ChatClient,
+                options.PipelineOptions.HookExecutionService,
+                options.PipelineOptions.WorkingDirectory,
+                options.PipelineOptions.ConversationId?.ToString())
             : options.ChatClient;
 
         // 轮次预算收尾提醒（子代理管道）：达到 MaxTurns 的 80% 时注入一次收尾指令，

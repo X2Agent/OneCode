@@ -1,5 +1,7 @@
 using NSubstitute;
 using OneCode.App.Tui;
+using OneCode.Core.Commands;
+using OneCode.Core.Coordinator;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Tools;
 using Terminal.Gui.App;
@@ -193,22 +195,26 @@ public sealed class KeyRoutingTests
         // 审批计划卡（挂起态）恰恰需要翻阅长对话/长计划：PageDown / Ctrl+PgDn
         // 等转录滚动键必须放行到滚动分发，不得被挂起分支吞掉。
         var shell = CreateShell();
+        shell.Transcript.MessageView.AppendLines(
+            Enumerable.Range(1, 30)
+                .Select(i => FormattedLine.Plain($"line {i}", Terminal.Gui.Drawing.Color.White))
+                .ToList());
+        shell.Transcript.MessageView.DispatchKeyDown(Terminal.Gui.Input.Key.Home);
+        shell.Transcript.MessageView.ScrollOffset.Should().Be(0);
+
         var selector = new InlineSelector("权限", [
             new InlineSelectorOption("allow", "允许"),
             new InlineSelectorOption("deny", "拒绝"),
         ]);
         shell.ShowInlineSelector(selector);
 
-        var pageDown = 0;
-        var scrollDown = 0;
-        shell.ChatInput.PageDownRequested += () => pageDown++;
-        shell.ChatInput.ScrollDownRequested += () => scrollDown++;
-
         shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown);
-        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown.WithCtrl);
+        var offsetAfterPageDown = shell.Transcript.MessageView.ScrollOffset;
+        offsetAfterPageDown.Should().BeGreaterThan(0, "挂起态 PageDown 放行并驱动对话区下翻");
 
-        pageDown.Should().Be(1, "挂起态 PageDown 放行");
-        scrollDown.Should().Be(1, "挂起态 Ctrl+PageDown 放行（3 行小步滚动）");
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown.WithCtrl);
+        shell.Transcript.MessageView.ScrollOffset.Should().BeGreaterThan(
+            offsetAfterPageDown, "挂起态 Ctrl+PageDown 放行（3 行小步滚动）");
     }
 
     [Fact]
@@ -216,15 +222,23 @@ public sealed class KeyRoutingTests
     {
         // 分区滚动：Shift+PageDown 翻右侧计划侧栏，不触发主对话区翻页。
         var shell = CreateShell();
-        var sidebarPageDown = 0;
-        var transcriptPageDown = 0;
-        shell.ChatInput.SidebarPageDownRequested += () => sidebarPageDown++;
-        shell.ChatInput.PageDownRequested += () => transcriptPageDown++;
+        shell.Transcript.MessageView.AppendLines(
+            Enumerable.Range(1, 30)
+                .Select(i => FormattedLine.Plain($"line {i}", Terminal.Gui.Drawing.Color.White))
+                .ToList());
+        shell.Transcript.MessageView.DispatchKeyDown(Terminal.Gui.Input.Key.Home);
+
+        shell.ShowPlanCard(
+            "重构",
+            Enumerable.Range(1, 20).Select(i => new PlanStep($"步骤 {i}")).ToList(),
+            PlanCardPhase.Finalizing);
+        shell.PlanSidebar.ScrollUp(100);
+        shell.PlanSidebar.ScrollOffset.Should().Be(0);
 
         shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageDown.WithShift);
 
-        sidebarPageDown.Should().Be(1, "Shift+PageDown 路由到侧栏翻页");
-        transcriptPageDown.Should().Be(0, "不得误触主对话区翻页");
+        shell.PlanSidebar.ScrollOffset.Should().BeGreaterThan(0, "Shift+PageDown 路由到侧栏翻页");
+        shell.Transcript.MessageView.ScrollOffset.Should().Be(0, "不得误触主对话区翻页");
     }
 
     [Fact]
@@ -232,17 +246,20 @@ public sealed class KeyRoutingTests
     {
         // 审批计划卡（挂起态）时 Shift+PageUp 仍可向上翻阅右侧计划。
         var shell = CreateShell();
+        shell.ShowPlanCard(
+            "重构",
+            Enumerable.Range(1, 20).Select(i => new PlanStep($"步骤 {i}")).ToList(),
+            PlanCardPhase.Finalizing);
+        shell.PlanSidebar.ScrollDown(10);
         var selector = new InlineSelector("权限", [
             new InlineSelectorOption("allow", "允许"),
             new InlineSelectorOption("deny", "拒绝"),
         ]);
         shell.ShowInlineSelector(selector);
-        var sidebarPageUp = 0;
-        shell.ChatInput.SidebarPageUpRequested += () => sidebarPageUp++;
 
         shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.PageUp.WithShift);
 
-        sidebarPageUp.Should().Be(1, "挂起态侧栏翻页放行");
+        shell.PlanSidebar.IsAutoScroll.Should().BeFalse("挂起态侧栏上翻页放行并脱离底部跟随");
         selector.SelectedIndex.Should().Be(0, "翻页不得移动选择器高亮");
     }
 
@@ -277,6 +294,7 @@ public sealed class KeyRoutingTests
         wizard.CurrentIndex.Should().Be(0);
         wizard.Questions[1].Answer.Should().Be("答案二");
         shell.ChatInput.IsQuestionMode.Should().BeTrue();
+        shell.ChatInput.CurrentText.Should().Be("答案一", "回退到短文本上一题时应把已填答案恢复到输入框");
     }
 
     [Fact]
@@ -410,30 +428,172 @@ public sealed class KeyRoutingTests
     }
 
     [Fact]
-    public void SidebarToggle_CtrlO_TogglesVisibility()
+    public void SidebarToggle_CtrlO_TogglesTodoStripAndNeverHidesPlanSidebar()
     {
         var shell = CreateShell();
         shell.ShowPlanCard("重构", [new PlanStep("测试")], PlanCardPhase.Finalizing);
+        shell.ShowTodoPanel([
+            new TodoListItem(1, "独立待办事项", null, IsComplete: false),
+        ]);
         shell.IsPlanSidebarVisible.Should().BeTrue();
+        shell.TodoStrip.IsExpanded.Should().BeFalse();
 
-        shell.ToggleSidebarVisibility();
-        shell.IsPlanSidebarVisible.Should().BeFalse("Ctrl+O 应收起已展开的侧边栏");
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.O.WithCtrl);
+        shell.IsPlanSidebarVisible.Should().BeTrue("PlanSidebar 遵循纯数据驱动显隐，按 Ctrl+O 绝不隐藏侧边栏");
+        shell.TodoStrip.IsExpanded.Should().BeTrue("Ctrl+O 专用于展开底部 TodoStrip 详情");
 
-        shell.ToggleSidebarVisibility();
-        shell.IsPlanSidebarVisible.Should().BeTrue("再次 Ctrl+O 应恢复展示侧边栏");
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.O.WithCtrl);
+        shell.IsPlanSidebarVisible.Should().BeTrue();
+        shell.TodoStrip.IsExpanded.Should().BeFalse("再次按 Ctrl+O 应收起底部 TodoStrip 详情");
     }
 
-    // 无计划内容时 Ctrl+O 不应展开空面板（空侧栏只增视觉噪声；
-    // 计划一旦出现会自动展开）。
     [Fact]
-    public void SidebarToggle_CtrlO_DoesNotExpandEmptySidebar()
+    public void SidebarToggle_CtrlO_DoesNotExpandEmptySidebarOrTodoStrip()
     {
         var shell = CreateShell();
         shell.IsPlanSidebarVisible.Should().BeFalse();
+        shell.TodoStrip.IsExpanded.Should().BeFalse();
 
         shell.ToggleSidebarVisibility();
 
         shell.IsPlanSidebarVisible.Should().BeFalse("无内容时 Ctrl+O 不应展开空侧栏");
+        shell.TodoStrip.IsExpanded.Should().BeFalse("无待办内容时 Ctrl+O 不应展开空 TodoStrip");
+    }
+
+    [Fact]
+    public void ModalBarrier_WhenOverlayVisible_BlocksAllBackgroundActionsAndExitsSearch()
+    {
+        var shell = CreateShell();
+        shell.Transcript.MessageView.AppendLines([
+            FormattedLine.FromSegmentsWithTag(
+                [new LineSegment("▸ Thought:", Terminal.Gui.Drawing.Color.Gray)],
+                new ThinkingLineTag("hidden thought", IsExpanded: false)),
+        ]);
+        shell.ShowTodoPanel([
+            new TodoListItem(1, "待办", null, IsComplete: false),
+        ]);
+        shell.ChatInput.SetText("draft");
+        shell.ChatInput.BeginSearchMode();
+        shell.ChatInput.IsSearchMode.Should().BeTrue();
+
+        var overlay = new Terminal.Gui.ViewBase.View { Width = 10, Height = 10, CanFocus = true };
+        shell.Overlays.Push(overlay);
+
+        shell.ChatInput.IsSearchMode.Should().BeFalse("打开模态弹层时必须自动退出会话内搜索并恢复草稿");
+        shell.ChatInput.CurrentText.Should().Be("draft");
+
+        // 模态结界：无论经输入框还是经 ReplShell 派发，均不得穿透触发底层搜索、TodoStrip 或折叠详情
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.F.WithCtrl);
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.O.WithCtrl);
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.E.WithCtrl);
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.F.WithCtrl).Should().BeTrue();
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.O.WithCtrl).Should().BeTrue();
+        shell.DispatchKeyDown(Terminal.Gui.Input.Key.E.WithCtrl).Should().BeTrue();
+
+        shell.ChatInput.IsSearchMode.Should().BeFalse("弹层打开期间严禁进入搜索模式");
+        shell.TodoStrip.IsExpanded.Should().BeFalse("弹层打开期间严禁穿透切换 TodoStrip");
+        shell.Transcript.MessageView.RenderedLines.Should().NotContain(
+            l => l.Contains("hidden thought", StringComparison.Ordinal),
+            "弹层打开期间严禁穿透展开底层折叠块");
+    }
+
+    [Fact]
+    public void SuspendedSelector_AllowsReadOnlyInspectionWhitelist()
+    {
+        var shell = CreateShell();
+        shell.Transcript.MessageView.AppendLines([
+            FormattedLine.FromSegmentsWithTag(
+                [new LineSegment("▸ Tool:", Terminal.Gui.Drawing.Color.Gray)],
+                new ThinkingLineTag("tool arguments detail", IsExpanded: false)),
+        ]);
+        shell.ShowTodoPanel([
+            new TodoListItem(1, "独立待办", null, IsComplete: false),
+        ]);
+
+        var selector = new InlineSelector("审批工具", [
+            new InlineSelectorOption("allow", "允许"),
+            new InlineSelectorOption("deny", "拒绝"),
+        ]);
+        shell.ShowInlineSelector(selector);
+
+        // 挂起态下按 Ctrl+E 展开工具详情、按 Ctrl+O 展开待办详情：均在白名单内放行
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.E.WithCtrl);
+        shell.ChatInput.DispatchInputKey(Terminal.Gui.Input.Key.O.WithCtrl);
+
+        shell.Transcript.MessageView.RenderedLines.Should().Contain(
+            l => l.Contains("tool arguments detail", StringComparison.Ordinal),
+            "审批挂起态下 Ctrl+E 必须放行以检视工具入参详情");
+        shell.TodoStrip.IsExpanded.Should().BeTrue("审批挂起态下 Ctrl+O 必须放行以检视待办详情");
+        selector.SelectedIndex.Should().Be(0, "只读检视动作不得干扰选择器选中项");
+        selector.ResultTask.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SearchMode_IsMutuallyExclusiveWithInteractionStates()
+    {
+        var shell = CreateShell();
+        shell.ChatInput.SetText("my draft");
+        shell.ChatInput.BeginSearchMode();
+        shell.ChatInput.IsSearchMode.Should().BeTrue();
+
+        var selector = new InlineSelector("审批", [new InlineSelectorOption("1", "允许")]);
+        shell.ShowInlineSelector(selector);
+
+        shell.ChatInput.IsSearchMode.Should().BeFalse("进入选择器挂起态时必须自动退出搜索模式");
+        shell.ChatInput.CurrentText.Should().Be("my draft", "退出搜索模式时必须恢复原草稿");
+
+        // 挂起态下尝试再次进入搜索模式应被拒绝
+        shell.ChatInput.BeginSearchMode();
+        shell.ChatInput.IsSearchMode.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ChatTextEditor_IsScrollKey_InterceptsAltUpDownForSidebarScroll()
+    {
+        ChatTextEditor.IsScrollKey(Terminal.Gui.Input.Key.CursorUp.WithAlt).Should().BeTrue();
+        ChatTextEditor.IsScrollKey(Terminal.Gui.Input.Key.CursorDown.WithAlt).Should().BeTrue();
+        ChatTextEditor.IsScrollKey(Terminal.Gui.Input.Key.CursorUp).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Overlays_ReviewResumeAndTrust_SupportSelectorAndTabFocusRing()
+    {
+        // 1. ReviewOverlay 支持 selector:next / selector:previous / selector:confirm
+        ReviewFileEntry? selectedFile = null;
+        var review = new ReviewOverlay([
+            new ReviewFileEntry("a.cs", 10, 2, "M"),
+            new ReviewFileEntry("b.cs", 5, 1, "M"),
+        ]);
+        review.FileSelected += f => selectedFile = f;
+        review.ListView.SelectedItem.Should().Be(0);
+        review.NewKeyDownEvent(Terminal.Gui.Input.Key.CursorDown).Should().BeTrue();
+        review.ListView.SelectedItem.Should().Be(1);
+        review.NewKeyDownEvent(Terminal.Gui.Input.Key.Enter).Should().BeTrue();
+        selectedFile?.Path.Should().Be("b.cs");
+
+        // 2. ResumeChooserOverlay 支持显式 Tab / Shift+Tab 焦点环
+        var resume = new ResumeChooserOverlay([
+            new SessionEntry("s1", "会话一", "gpt-5", "build", 3, DateTimeOffset.UtcNow),
+        ]);
+        var host = new OverlayHost(() => { });
+        host.Push(resume);
+        resume.ListView.HasFocus.Should().BeTrue();
+        resume.NewKeyDownEvent(Terminal.Gui.Input.Key.Tab).Should().BeTrue();
+        resume.NewButton.HasFocus.Should().BeTrue();
+        resume.NewKeyDownEvent(Terminal.Gui.Input.Key.Tab).Should().BeTrue();
+        resume.ResumeButton.HasFocus.Should().BeTrue();
+        resume.NewKeyDownEvent(Terminal.Gui.Input.Key.Tab.WithShift).Should().BeTrue();
+        resume.NewButton.HasFocus.Should().BeTrue();
+        host.Pop();
+
+        // 3. TrustOverlay 支持 Tab / 左右方向键在「是 / 否」按钮间切换焦点
+        var trust = new TrustOverlay("E:\\OneCode", isHomeDir: false);
+        host.Push(trust);
+        trust.YesButton.HasFocus.Should().BeTrue();
+        trust.NewKeyDownEvent(Terminal.Gui.Input.Key.Tab).Should().BeTrue();
+        trust.NoButton.HasFocus.Should().BeTrue();
+        trust.NewKeyDownEvent(Terminal.Gui.Input.Key.CursorLeft).Should().BeTrue();
+        trust.YesButton.HasFocus.Should().BeTrue();
     }
 
     private static ReplShell CreateShell()

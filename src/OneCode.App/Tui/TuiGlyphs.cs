@@ -41,9 +41,6 @@ internal static class TuiGlyphs
     /// <summary>省略号（…），表示文本截断或"更多"。采用 U+2026 标准文本省略号以获得最佳字体支持。</summary>
     public const string Ellipsis = "…";
 
-    /// <summary>复制图标（⧉），用于代码块标题栏的复制按钮。U+29C9 TWO JOINED SQUARES，兼容性好且宽度为 1 cell。</summary>
-    public const string CopyIcon = "⧉";
-
     /// <summary>流式输出尾部光标（▌），用于实时 token 预览末尾指示生成位置。</summary>
     public const string StreamingCursor = "▌";
 

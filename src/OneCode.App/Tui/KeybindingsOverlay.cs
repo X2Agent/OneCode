@@ -71,8 +71,8 @@ public sealed class KeybindingsOverlay : CenteredOverlay
         }
 
         rows.Add("— 硬编码（不可通过 keybindings.json 重映射）—");
-        rows.Add("  Tab                补全确认 / 模式切换");
-        rows.Add("  Ctrl+Left/Right    占位符建议切换");
+        rows.Add("  Tab                补全确认 / 占位建议采纳 / 模式切换");
+        rows.Add("  Esc                关闭顶层弹层（安全兜底）");
         rows.Add("  /find <keyword>    搜索对话记录");
         rows.Add("  /diff              Git 变更审查 overlay");
         rows.Add(string.Empty);

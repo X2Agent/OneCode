@@ -93,6 +93,51 @@ public sealed class ModelCallHookDecoratorTests
     }
 
     [Fact]
+    public async Task GetResponseAsync_PropagatesWorkingDirectoryAndSessionIdToPreAndPostPayloads()
+    {
+        var inner = new StubChatClient(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));
+        var hooks = Substitute.For<IHookExecutionService>();
+        hooks.HasActiveHooks(Arg.Any<HookInterceptionPoint>(), Arg.Any<string?>()).Returns(true);
+        hooks.FireAsync(Arg.Any<HookPayload>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AggregatedHookResult()));
+
+        var sut = new ModelCallHookDecorator(
+            inner,
+            hooks,
+            workingDirectory: "/workspace/project",
+            sessionId: "session-abc");
+
+        await sut.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "hi")],
+            new ChatOptions { ModelId = "m-1" },
+            TestContext.Current.CancellationToken);
+
+        var fired = FireCalls(hooks);
+        fired.Should().HaveCount(2);
+        fired[0].Cwd.Should().Be("/workspace/project");
+        fired[0].SessionId.Should().Be("session-abc");
+        fired[1].Cwd.Should().Be("/workspace/project");
+        fired[1].SessionId.Should().Be("session-abc");
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_WhenPipelineSessionIdNull_FallsBackToChatOptionsConversationId()
+    {
+        var inner = new StubChatClient(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));
+        var (sut, hooks) = CreateSut(inner);
+
+        await sut.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "hi")],
+            new ChatOptions { ModelId = "m-1", ConversationId = "conv-from-options" },
+            TestContext.Current.CancellationToken);
+
+        var fired = FireCalls(hooks);
+        fired.Should().HaveCount(2);
+        fired[0].SessionId.Should().Be("conv-from-options");
+        fired[1].SessionId.Should().Be("conv-from-options");
+    }
+
+    [Fact]
     public async Task GetResponseAsync_PreModelCall_ProjectsRequestMessages()
     {
         var inner = new StubChatClient(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));

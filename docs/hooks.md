@@ -143,7 +143,7 @@ OneCode 运行时
 
 | 类型 | 职责 |
 |------|------|
-| `HookInterceptionPoint` / `HookInterceptionPoints` | 6 + 2 个拦截点枚举与协议词汇（线格式名、matcher 字段、开放范围、旧事件迁移映射） |
+| `HookInterceptionPoint` / `HookInterceptionPoints` | 6 个拦截点枚举与协议词汇（线格式名、matcher 字段、开放范围、内部生命周期节点诊断与旧事件迁移映射） |
 | `HookType` | 3 种执行器类型枚举（Command / Notification / Http） |
 | `HookPayload` | 钩子数据载荷，传递给执行器的完整上下文 |
 | `HookRegistration` | 钩子注册项（Name / Point / Matcher / Priority / Once / ExecutorType / TimeoutMs / Config） |
@@ -215,7 +215,7 @@ OneCode 运行时
 | `post_model_call` | 一次模型完整响应返回后（工具调用执行前） | `model_id`（glob） | 同上 | ❌（纯审计） |
 | `pre_tool_call` | 工具调用执行前 | `tool_name`（glob） | Bash / Edit / Write / Read / Grep / Glob / Task / `todos_*`（Harness 待办工具） / `mcp__*`（MCP 工具名为 `mcp__{server}__{tool}`）等 | ✅ deny |
 | `post_tool_call` | 工具调用成功或失败返回后 | `tool_name`（glob） | 同上 | ❌ |
-| `output` | 流式生成完毕、最终响应完成收尾前（不缓冲流式 token delta，deny 时发射 `ErrorEvent` 并以 `RunTerminalReason.Blocked` 终结本轮） | 无 matcher | — | ✅ deny |
+| `output` | 流式生成完毕、最终响应落盘与收尾前（不缓冲流式 token delta，deny 时跳过最终响应落盘、发射 `ErrorEvent` 并以 `RunTerminalReason.Blocked` 终结本轮） | 无 matcher | — | ✅ deny |
 
 > **model 节点是纯审计语义**：`pre_model_call` / `post_model_call` 的裁决结果（含 exit code 2）被丢弃，
 > 不阻断、不改写模型调用——需要阻断的策略应挂在 `input` / `pre_tool_call` / `output`。

@@ -48,13 +48,15 @@ public sealed class HookSettingsLoader(ILogger<HookSettingsLoader> logger)
             {
                 if (HookInterceptionPoints.TryParseWireName(eventProp.Name, out var point))
                 {
-                    if (!HookInterceptionPoints.IsOpen(point))
-                    {
-                        var closed = $"拦截点 '{eventProp.Name}' 为内部生命周期边界，不对用户配置开放，已跳过";
-                        errors.Add(closed);
-                        _logger.LogWarning("hooks.json: {Message}", closed);
-                        continue;
-                    }
+                    var groups = ParseEventHooks(eventProp.Value);
+                    if (groups is { Count: > 0 })
+                        result[point] = groups;
+                }
+                else if (HookInterceptionPoints.IsClosedLifecycleWireName(eventProp.Name))
+                {
+                    var closed = $"拦截点 '{eventProp.Name}' 为内部生命周期边界，不对用户配置开放，已跳过";
+                    errors.Add(closed);
+                    _logger.LogWarning("hooks.json: {Message}", closed);
                 }
                 else
                 {
@@ -64,12 +66,7 @@ public sealed class HookSettingsLoader(ILogger<HookSettingsLoader> logger)
                         : $"事件 '{eventProp.Name}' 不再属于 Hook 拦截范围（有效节点: {OpenPointList}），已跳过";
                     errors.Add(message);
                     _logger.LogWarning("hooks.json: {Message}", message);
-                    continue;
                 }
-
-                var groups = ParseEventHooks(eventProp.Value);
-                if (groups is { Count: > 0 })
-                    result[point] = groups;
             }
 
             return new HookFileLoadResult(

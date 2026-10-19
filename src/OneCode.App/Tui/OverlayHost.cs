@@ -3,8 +3,8 @@ namespace OneCode.App.Tui;
 /// <summary>
 /// Centralised overlay (popup) manager for the TUI.
 ///
-/// Owns the lifecycle of modal panels (/diff Review, Ctrl+Shift+D LSP,
-/// Settings, Resume chooser, Diff detail, etc.).
+/// Owns the lifecycle of modal panels (/diff Review, Settings,
+/// Resume chooser, Diff detail, etc.).
 /// The host exposes:
 /// <list type="bullet">
 ///   <item><see cref="Push"/> / <see cref="Pop"/> — stack-based modal layering</item>
@@ -20,12 +20,16 @@ namespace OneCode.App.Tui;
 public sealed class OverlayHost : View
 {
     private readonly Action _focusBackground;
+    private readonly Func<Key, bool>? _isPassthroughKey;
     private readonly Stack<View> _stack = new();
     private int _lastHostWidth = -1;
     private int _lastHostHeight = -1;
 
+    /// <summary>Raised whenever an overlay is pushed onto the modal stack.</summary>
+    public event Action? OverlayPushed;
+
     public OverlayHost(ReplShell shell)
-        : this(CreateBackgroundFocusAction(shell))
+        : this(CreateBackgroundFocusAction(shell), shell.IsGlobalExitKey)
     {
     }
 
@@ -35,10 +39,11 @@ public sealed class OverlayHost : View
         return shell.FocusChatInput;
     }
 
-    internal OverlayHost(Action focusBackground)
+    internal OverlayHost(Action focusBackground, Func<Key, bool>? isPassthroughKey = null)
     {
         ArgumentNullException.ThrowIfNull(focusBackground);
         _focusBackground = focusBackground;
+        _isPassthroughKey = isPassthroughKey;
         CanFocus = true;
         TabStop = TabBehavior.TabGroup;
         Width = Dim.Fill();
@@ -57,10 +62,12 @@ public sealed class OverlayHost : View
     public void Push(View overlay)
     {
         ArgumentNullException.ThrowIfNull(overlay);
+        Visible = true;
         foreach (var v in _stack)
             if (v is CenteredOverlay co) co.IsTopMost = false;
 
         _stack.Push(overlay);
+        OverlayPushed?.Invoke();
         Add(overlay);
         Position(overlay);
         FocusOverlay(overlay);
@@ -214,9 +221,18 @@ public sealed class OverlayHost : View
 
     protected override bool OnKeyDown(Key kb)
     {
-        if (kb == Key.Esc && _stack.Count > 0)
+        if (_stack.Count == 0)
+            return base.OnKeyDown(kb);
+
+        if (kb == Key.Esc)
             return HandleEsc();
 
-        return base.OnKeyDown(kb);
+        if (_isPassthroughKey?.Invoke(kb) == true)
+            return base.OnKeyDown(kb);
+
+        // 模态键盘结界：弹层打开期间，未被顶层弹层消费的按键一律在此截停，
+        // 阻止向底层视图冒泡或触发宿主级焦点跳转。
+        _ = base.OnKeyDown(kb);
+        return true;
     }
 }

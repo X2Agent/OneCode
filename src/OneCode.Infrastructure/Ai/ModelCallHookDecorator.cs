@@ -21,11 +21,17 @@ namespace OneCode.Infrastructure.Ai;
 ///
 /// <para><b>取消语义</b>：<see cref="OperationCanceledException"/> 一律透传，不降级为 hook 结果。</para>
 /// </summary>
-public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionService hookExecutionService)
+public sealed class ModelCallHookDecorator(
+    IChatClient inner,
+    IHookExecutionService hookExecutionService,
+    string? workingDirectory = null,
+    string? sessionId = null)
     : DelegatingChatClient(inner)
 {
     private readonly IHookExecutionService _hooks =
         hookExecutionService ?? throw new ArgumentNullException(nameof(hookExecutionService));
+    private readonly string? _workingDirectory = workingDirectory;
+    private readonly string? _sessionId = sessionId;
 
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
@@ -39,7 +45,7 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
             .ConfigureAwait(false);
 
         if (_hooks.HasActiveHooks(HookInterceptionPoint.PostModelCall, options?.ModelId))
-            await FirePostAsync(response, options?.ModelId, cancellationToken).ConfigureAwait(false);
+            await FirePostAsync(response, options, cancellationToken).ConfigureAwait(false);
 
         return response;
     }
@@ -65,7 +71,7 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
         }
 
         if (updates is { Count: > 0 })
-            await FirePostAsync(updates.ToChatResponse(), options?.ModelId, cancellationToken)
+            await FirePostAsync(updates.ToChatResponse(), options, cancellationToken)
                 .ConfigureAwait(false);
     }
 
@@ -78,6 +84,8 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
         var payload = new HookPayload
         {
             Point = HookInterceptionPoint.PreModelCall,
+            SessionId = _sessionId ?? options?.ConversationId,
+            Cwd = _workingDirectory,
             ModelId = options?.ModelId,
             RequestMessages = ProjectMessages(messages),
         };
@@ -86,12 +94,14 @@ public sealed class ModelCallHookDecorator(IChatClient inner, IHookExecutionServ
     }
 
     /// <summary>post_model_call 审计触发；聚合结果按纯审计语义丢弃（不做阻断）。</summary>
-    private Task FirePostAsync(ChatResponse response, string? requestedModelId, CancellationToken ct)
+    private Task FirePostAsync(ChatResponse response, ChatOptions? options, CancellationToken ct)
     {
-        var modelId = requestedModelId ?? response.ModelId;
+        var modelId = options?.ModelId ?? response.ModelId;
         var payload = new HookPayload
         {
             Point = HookInterceptionPoint.PostModelCall,
+            SessionId = _sessionId ?? options?.ConversationId ?? response.ConversationId,
+            Cwd = _workingDirectory,
             ModelId = modelId,
             ModelResponse = response.Text,
             FinishReason = response.FinishReason?.ToString(),

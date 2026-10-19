@@ -386,11 +386,10 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             aggregatedText.Append(session.FinalText);
             aggregatedTurns += session.TurnCount;
             aggregatedUsage = QueryStreamHelpers.SumUsage(aggregatedUsage, session.FinalUsage);
-            await _transcriptPersistence.PersistAsync(
-                request, session, session.FinalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
             outcome = QueryStreamHelpers.ResolveTerminalOutcome(session, options, runResult, session.FinalText);
-            // output 拦截点：最终响应交付调用方前的策略门。终因只用于产品收尾，不作 hook matcher。
-            // deny 拦截本次响应并终结本轮——纠偏、预算终结与异常收尾都不是该节点的职责。
+            // output 拦截点：最终响应落盘并完成交付前的策略门。终因只用于产品收尾，不作 hook matcher。
+            // deny 拦截本次响应并终结本轮（跳过最终助手消息落盘，防止被拒响应污染会话历史）——
+            // 纠偏、预算终结与异常收尾都不是该节点的职责。
             var outputResult = await _hookDispatcher.FireHookAsync(
                 HookInterceptionPoint.Output,
                 request.SessionId,
@@ -406,6 +405,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                     null, session.FinalUsage, session.TurnCount, RunTerminalReason.Blocked, request.ConversationId);
                 yield break;
             }
+            await _transcriptPersistence.PersistAsync(
+                request, session, session.FinalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
             await foreach (var e in FinalizeAsync(
                 request,
                 session,

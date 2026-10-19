@@ -147,7 +147,9 @@ OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的�
 
 ## Interaction
 
-交互必须保持单焦点模型。全局快捷键在输入区获得焦点时由输入区转发，在其他焦点状态由根 Shell 兜底；同一个动作只能有一个权威执行路径。
+交互必须保持单焦点模型。全局与跨视图快捷键在输入区获得焦点时由输入区委托 `ReplShell.TryExecuteShellAction`，在其他焦点状态由根 Shell 兜底；同一个动作只能有一个权威执行路径。
+
+键盘路由遵循五层互斥优先级（`app:exit` 退出 → `OverlayHost` 模态键盘结界截停未消费按键并禁止穿透 → `Autocomplete` 补全浮窗 → `InteractionSession` 内联选择器/提问向导，其中挂起态放行只读检视动作白名单 → `Search` 行内搜索与编辑器本地动作）。
 
 快捷键的默认绑定、上下文和显示名称以 `KeybindingDefaults` 为准；文档只描述稳定语义，不复制完整绑定表。
 

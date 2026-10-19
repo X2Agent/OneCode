@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using OneCode.Core.Keybindings;
 
 namespace OneCode.App.Tui;
 
@@ -13,14 +14,26 @@ public sealed class ReviewOverlay : CenteredOverlay
 {
     private readonly List<ReviewFileEntry> _files;
     private readonly ListView _listView;
+    private readonly KeybindingResolver _keyResolver;
+    private readonly KeybindingContextManager _keyContextManager;
 
     public event Action<ReviewFileEntry>? FileSelected;
 
+    internal ListView ListView => _listView;
+
     protected override View? InitialFocusView => _listView;
 
-    public ReviewOverlay(IReadOnlyList<ReviewFileEntry>? files = null)
+    public ReviewOverlay(
+        IReadOnlyList<ReviewFileEntry>? files = null,
+        KeybindingResolver? keyResolver = null,
+        KeybindingContextManager? keyContextManager = null)
         : base($"  代码审查  ({TuiGlyphs.ArrowUp}{TuiGlyphs.ArrowDown} 选择 · Enter 查看 · Esc 关闭)  ", preferredWidth: 80, preferredHeight: 18)
     {
+        _keyResolver = keyResolver ?? new KeybindingResolver();
+        if (keyResolver is null)
+            _keyResolver.SetBindings([.. KeybindingDefaults.GetDefaultParsedBindings()]);
+        _keyContextManager = keyContextManager ?? new KeybindingContextManager();
+
         // Width scales via OverlayHost (up to 70% of terminal); height fits the file list.
         // Soft ceiling of 60 rows — host clamps further to 75% of viewport on resize.
         PreferredWidth = 80;
@@ -55,14 +68,61 @@ public sealed class ReviewOverlay : CenteredOverlay
 
         _listView.KeyDown += (_, key) =>
         {
-            if (key == Key.Enter && _files.Count > 0)
-            {
-                InvokeFileSelected();
+            if (HandleSelectorKey(key))
                 key.Handled = true;
-            }
         };
 
         Add(header, _listView);
+    }
+
+    protected override bool OnKeyDown(Key kb)
+    {
+        if (HandleSelectorKey(kb))
+            return true;
+
+        return base.OnKeyDown(kb);
+    }
+
+    private bool HandleSelectorKey(Key kb)
+    {
+        var contexts = new HashSet<string>(_keyContextManager.ActiveContexts, StringComparer.Ordinal)
+        {
+            KeybindingDefaults.ContextSelector,
+        };
+
+        switch (TuiKeyAdapter.ResolveAction(kb, _keyResolver, contexts))
+        {
+            case KeybindingDefaults.ActionSelectorPrevious:
+                if (_files.Count > 0)
+                {
+                    var current = _listView.SelectedItem ?? 0;
+                    if (current > 0)
+                        _listView.SelectedItem = current - 1;
+                }
+                return true;
+
+            case KeybindingDefaults.ActionSelectorNext:
+                if (_files.Count > 0)
+                {
+                    var current = _listView.SelectedItem ?? 0;
+                    if (current < _files.Count - 1)
+                        _listView.SelectedItem = current + 1;
+                }
+                return true;
+
+            case KeybindingDefaults.ActionSelectorConfirm:
+                if (_files.Count > 0)
+                    InvokeFileSelected();
+                return true;
+
+            case KeybindingDefaults.ActionSelectorDismiss:
+                if (SuperView is OverlayHost host)
+                    return host.HandleEsc();
+                return false;
+
+            default:
+                return false;
+        }
     }
 
 

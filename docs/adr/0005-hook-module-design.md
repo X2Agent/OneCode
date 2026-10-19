@@ -24,7 +24,7 @@ OneCode 需要一个生命周期钩子（Hook）子系统，让用户在 Agent �
 
 ### 1. 拦截点收敛为 6 个开放点
 
-**决策**：`HookInterceptionPoint` 只保留 6 个与 AGENT-HOOKS-0.1 对齐的开放拦截点，另有两个内部点不对用户 DSL 开放。
+**决策**：`HookInterceptionPoint` 只保留 6 个与 AGENT-HOOKS-0.1 对齐的开放拦截点；协议中的 `agent_startup` / `agent_shutdown` 由 `HookInterceptionPoints.IsClosedLifecycleWireName` 识别并产出配置诊断，不进可执行枚举。
 
 ```csharp
 public enum HookInterceptionPoint
@@ -35,16 +35,13 @@ public enum HookInterceptionPoint
     PreToolCall,    // 工具执行前（可阻断；matcher: tool_name）
     PostToolCall,   // 工具执行后（matcher: tool_name）
     Output,         // 最终响应交付调用方前（无 matcher）
-
-    AgentStartup,   // 内部：agent run 开始，不开放
-    AgentShutdown,  // 内部：agent run 结束，不开放
 }
 ```
 
 **理由**：
 - 6 个开放点覆盖 agent 的四类策略边界（输入 / 模型调用 / 工具调用 / 输出），与 AGENT-HOOKS-0.1 协议一致且**不再扩展**
 - 会话生命周期、Stop 纠偏、压缩、Goal 编排、权限通知与异常告警不由 Hook 承载：这些属宿主职责，暴露给外部脚本只会造成职责重叠
-- `AgentStartup` / `AgentShutdown` 表达 agent run 边界，与产品会话边界不等价，故仅内部使用
+- `agent_startup` / `agent_shutdown` 表达单次 agent run 边界，与产品会话边界不等价，故不对外开放
 - `PreToolCall` 保留阻断语义（fail-closed）：安全策略需要在工具执行前拒绝
 
 **拦截点元数据**：`HookPointMetadataRegistry` 为每个拦截点声明 matcher 字段名与可选值，用于 UI 展示和文档生成：

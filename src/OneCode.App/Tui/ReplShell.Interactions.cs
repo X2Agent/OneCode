@@ -281,7 +281,7 @@ public sealed partial class ReplShell : IInteractionSession
             });
         }, longText);
 
-        if (longText && !string.IsNullOrEmpty(question.Answer))
+        if (!string.IsNullOrEmpty(question.Answer))
             _chatInput.SetText(question.Answer);
     }
 }

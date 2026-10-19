@@ -8,10 +8,10 @@ namespace OneCode.App.Tui;
 /// <code>
 /// │                                        │               │
 /// │  Chat — sole main view (scrollable)    │  PlanSidebar  │  Dim.Fill()
-/// │  (sidebar auto-shrinks the chat width  │  (auto, ≤45col│  when a plan
-/// │   when a plan exists; Ctrl+O toggles)  │   Ctrl+O)     │   exists)
+/// │  (sidebar auto-shrinks the chat width  │  (auto-shown  │  when a plan
+/// │   when a plan exists)                  │   data-driven)│   exists)
 /// │                                        │               │
-/// ├─ TodoStrip ─────────────────────────────────────────────┤  0–6 rows
+/// ├─ TodoStrip ─────────────────────────────────────────────┤  0–6 rows (Ctrl+O)
 /// │  ◆ 待办 (2/5) ✓ #1 …  ○ #3 …                (隐藏时 0)  │  (todos_* snapshot)
 /// ├─ AgentStatusBar ───────────────────────────────────────┤  1 row
 /// │  ⠋ 思考中 · Opus · 🔒 Sandbox                  BUILD   │
@@ -78,6 +78,9 @@ public sealed partial class ReplShell : View
     private int ContentWidth => TuiSpacing.GetContentColumnWidth(
         Math.Max(0, (_transcript.Viewport.Width > 0 ? _transcript.Viewport.Width : Viewport.Width) - 1));
 
+    internal PlanSidebarView PlanSidebar => _planSidebar;
+    internal TodoStripView TodoStrip => _todoStrip;
+
     public ChatInputView ChatInput => _chatInput;
     public ChatTranscriptView Transcript => _transcript;
     public WorkingModeController ModeController => _modeController;
@@ -98,7 +101,7 @@ public sealed partial class ReplShell : View
         _clipboard = environment.Clipboard;
         _gitHelper = environment.GitHelper;
 
-        _transcript = new ChatTranscriptView(_app, _clipboard, inputSources.GetShowThinking);
+        _transcript = new ChatTranscriptView(_app, inputSources.GetShowThinking);
         _chatInput = new ChatInputView(
             _app,
             _modeController,
@@ -117,33 +120,10 @@ public sealed partial class ReplShell : View
         _chatInput.Height = ChatInputView.FixedHeight;
         _chatInput.Y = Pos.AnchorEnd(ChatInputView.FixedHeight + _chatInput.BottomOffset);
 
-        // Forward global shortcuts from ChatInputView.
-        // Editor consumes all keys when prompt is focused, so ReplShell.OnKeyDown
-        // never fires. ChatInputView intercepts these and forwards them here.
-
-        // 交互会话（InlineSelector/QuestionWizard 接管键盘期间）由本类统一处理：
-        // ChatInputView 把挂起态/提问态的按键转发给会话（见 IInteractionSession），
-        // 替代旧的松散转发事件。
+        // 交互会话与跨区域全局动作由本类作为唯一权威宿主处理（见 IInteractionSession 与 ReplShell.Keyboard.cs）。
         _chatInput.InteractionSession = this;
 
-        // Shift+Up/Down or Ctrl+PgUp/PgDn — scroll conversation transcript (line-level)
-        _chatInput.ScrollUpRequested += () => _transcript.MessageView.ScrollUp();
-        _chatInput.ScrollDownRequested += () => _transcript.MessageView.ScrollDown();
-
-        // PageUp/PageDown — scroll the conversation transcript (page-level)
-        _chatInput.PageUpRequested += () => _transcript.MessageView.PageUp();
-        _chatInput.PageDownRequested += () => _transcript.MessageView.PageDown();
-
-        // Shift+PageUp/PageDown and Alt+Up/Down — scroll the active plan sidebar
-        _chatInput.SidebarPageUpRequested += () => ActiveSidebar?.PageUp();
-        _chatInput.SidebarPageDownRequested += () => ActiveSidebar?.PageDown();
-        _chatInput.SidebarScrollUpRequested += () => ActiveSidebar?.ScrollUp();
-        _chatInput.SidebarScrollDownRequested += () => ActiveSidebar?.ScrollDown();
-
-        // Ctrl+E — toggle the most recent collapsible details block in the transcript
-        _chatInput.ToggleLastDetailsRequested += () => _transcript.ToggleLastDetails();
-
-        // Ctrl+F — inline transcript search bar
+        // Ctrl+F — 会话内搜索词变化与关闭高亮清理
         _chatInput.SearchQueryChanged += query =>
         {
             if (string.IsNullOrWhiteSpace(query))
@@ -155,25 +135,10 @@ public sealed partial class ReplShell : View
             var (total, idx) = _transcript.SearchAndScroll(query);
             _chatInput.SetSearchMatchStatus(total, idx);
         };
-        _chatInput.SearchNextRequested += () =>
-        {
-            var (total, idx) = _transcript.FindNext();
-            _chatInput.SetSearchMatchStatus(total, idx);
-        };
-        _chatInput.SearchPreviousRequested += () =>
-        {
-            var (total, idx) = _transcript.FindPrevious();
-            _chatInput.SetSearchMatchStatus(total, idx);
-        };
         _chatInput.SearchDismissed += () => _transcript.ClearSearchHighlight();
 
         // Dynamic 2-6 row input height reflows the bottom stack and content zone
         _chatInput.DynamicHeightChanged += _ => ApplyBottomStackLayout();
-
-        // Ctrl+Shift+Left/Right — 键盘调整右侧侧边栏宽度（Plan 面板）。
-        _chatInput.SidebarWiderRequested += () => AdjustSidebarWidth(SidebarViewBase.KeyboardResizeStep);
-        _chatInput.SidebarNarrowerRequested += () => AdjustSidebarWidth(-SidebarViewBase.KeyboardResizeStep);
-        _chatInput.SidebarToggleRequested += () => ToggleSidebarVisibility();
 
         // SessionContextBar sits at the bottom; ChatInputView and AgentStatusBar anchor above it.
         _sessionContextBar = new SessionContextBar()
@@ -236,6 +201,13 @@ public sealed partial class ReplShell : View
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             Visible = false,
+        };
+        _overlayHost.OverlayPushed += () =>
+        {
+            if (_chatInput.IsSearchMode)
+                _chatInput.EndSearchMode();
+            if (_completionVisible)
+                _chatInput.HideCompletion();
         };
 
         // completion overlay
@@ -318,33 +290,15 @@ public sealed partial class ReplShell : View
     }
 
     /// <summary>
-    /// 切换当前侧边栏可见性或待办/Goal 进度面板展开态（Ctrl+O，app:sidebarToggle）。
-    /// 当存在活跃 Plan 面板时优先切换右侧边栏；否则若输入框上方 TodoStrip 有内容（Goal 子目标或待办），
-    /// 则切换其折叠/展开详情态。
+    /// 切换底部待办/Goal 进度面板展开态（Ctrl+O，app:sidebarToggle）。
+    /// 右侧 <see cref="PlanSidebarView"/> 遵循纯数据驱动显隐（有计划自动展示、清计划自动隐藏），不支持手动切换。
     /// </summary>
     internal void ToggleSidebarVisibility()
     {
-        if (_planSidebar.Visible)
-        {
-            _planSidebar.Visible = false;
-        }
-        else if (_activePlan is not null)
-        {
-            _planSidebar.Visible = true;
-        }
-        else if (_todoStrip.HasContent)
+        if (_todoStrip.HasContent)
         {
             _todoStrip.ToggleExpanded();
-            return;
         }
-        else
-        {
-            return;
-        }
-
-        ApplySidebarLayout();
-        RenderActivePlanCard();
-        _transcript.RequestContentRerender();
     }
 
     /// <summary>

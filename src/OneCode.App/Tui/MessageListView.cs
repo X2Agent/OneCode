@@ -10,7 +10,6 @@ namespace OneCode.App.Tui;
 public sealed partial class MessageListView : View
 {
     private readonly List<LineEntry> _lines = new();
-    private readonly OneCode.Core.IO.IClipboardService? _clipboard;
     private readonly ScrollState _scroll;
     private readonly ScrollBarController _scrollBar;
     private readonly IApplication? _app;
@@ -65,9 +64,8 @@ public sealed partial class MessageListView : View
     /// </summary>
     public bool IsStreaming => _streamingPreviewStart >= 0;
 
-    public MessageListView(OneCode.Core.IO.IClipboardService? clipboard = null, IApplication? app = null)
+    public MessageListView(IApplication? app = null)
     {
-        _clipboard = clipboard;
         _app = app;
         _scroll = new ScrollState(
             () => Viewport.Height,
@@ -91,6 +89,8 @@ public sealed partial class MessageListView : View
         _lines.Clear();
         _tailRegionStart = -1;
         _streamingPreviewStart = -1;
+        _lastKeyboardToggledTag = null;
+        _lastKeyboardToggledLineIdx = -1;
         _toolDetailLayoutWidth = 0;
         _scroll.Reset();
         SetNeedsDraw();
@@ -511,18 +511,12 @@ public sealed partial class MessageListView : View
             return true;
         }
 
-        // Tool / thinking / error line click-to-expand/collapse, or code block header click-to-copy
+        // 工具 / 思考 / 错误行点击展开或折叠
         if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) && mouse.Position is { } clickPos)
         {
             var clickedLineIdx = clickPos.Y + _scroll.ScrollOffset;
             if (clickedLineIdx >= 0 && clickedLineIdx < _lines.Count)
             {
-                if (_lines[clickedLineIdx].Tag is CodeBlockCopyTag copyTag)
-                {
-                    if (_clipboard is not null)
-                        _ = _clipboard.TryCopyTextAsync(copyTag.CodeContent);
-                    return true;
-                }
                 if (_lines[clickedLineIdx].Tag is ToolLineTag tag)
                 {
                     ToggleToolExpansion(clickedLineIdx, tag);

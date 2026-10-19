@@ -5,31 +5,25 @@ using Markdig.Syntax.Inlines;
 namespace OneCode.App.Tui;
 
 /// <summary>
-/// Complex markdown block renderers for <see cref="MarkdownRenderer"/>:
-/// fenced/indented code (with copy header and diff coloring), tables,
-/// and (nested) lists with checkbox support. These stay as partials of the
-/// main dispatcher because rendering is mutually recursive (nested blocks
-/// call back into RenderBlock) and shares the inline-extraction helpers.
+/// <see cref="MarkdownRenderer"/> 的复杂块渲染器：围栏/缩进代码块（含 diff 着色）、
+/// 表格以及（支持复选框的）嵌套列表。
 /// </summary>
 internal static partial class MarkdownRenderer
 {
     /// <summary>
-    /// Renders a fenced code block with a beautified header bar:
+    /// 渲染带顶部语言栏的围栏代码块：
     ///
     ///   ┌─ csharp ─────────────────────┐
     ///   │ var x = 1;                    │
     ///   │ var y = 2;                    │
     ///   └───────────────────────────────┘
-    ///
-    /// The language label uses accent color and the code body uses a subtle
-    /// background tint to visually separate it from surrounding text.
     /// </summary>
     private static void RenderFencedCode(FencedCodeBlock code, List<ConvLine> lines, int viewWidth)
     {
         var lang = code.Info ?? "";
         var codeLines = ExtractCodeLines(code);
 
-        // Calculate inner width (space for code text between borders)
+        // 计算代码正文的最小内宽（两侧边框内的可用列数）
         var maxCodeWidth = 0;
         foreach (var ln in codeLines)
         {
@@ -37,46 +31,43 @@ internal static partial class MarkdownRenderer
             if (w > maxCodeWidth) maxCodeWidth = w;
         }
 
-        // Total block width (including 2-char indent) = innerWidth + 6:
+        // 代码块总宽度（含 2 列前导缩进）= innerWidth + 6：
         //   indent(2) + │(1) + space(1) + code(innerWidth) + space(1) + │(1)
         var maxInner = Math.Max(10, viewWidth - 6);
 
-        // Header minimum inner width fits the language label, copy icon, plus minimal dashes.
+        // 标题行最小内宽需容纳语言标签及基础横线
         var langDisplayWidth = TextWidthHelper.GetDisplayWidth(lang);
-        var headerMinInner = string.IsNullOrEmpty(lang) ? 5 : langDisplayWidth + 6;
+        var headerMinInner = string.IsNullOrEmpty(lang) ? 2 : langDisplayWidth + 3;
 
         var innerWidth = Math.Max(maxCodeWidth, headerMinInner);
         if (innerWidth > maxInner) innerWidth = maxInner;
 
-        // Target total display width (including indent) — body and header must match this
+        // 目标总显示宽度（含前导缩进）——代码行与首尾边框严格对齐此宽度
         var totalWidth = innerWidth + 6;
 
-        // Build header parts (with right-aligned ⧉ copy icon)
-        var headerLeft = $"  {TuiGlyphs.BorderTopLeft}{TuiGlyphs.BorderHorizontal} ";
+        var headerLeft = string.IsNullOrEmpty(lang)
+            ? $"  {TuiGlyphs.BorderTopLeft}{TuiGlyphs.BorderHorizontal}"
+            : $"  {TuiGlyphs.BorderTopLeft}{TuiGlyphs.BorderHorizontal} ";
         var headerLang = string.IsNullOrEmpty(lang) ? "" : lang;
-        var headerLangSep = string.IsNullOrEmpty(lang) ? "" : $" {TuiGlyphs.BorderHorizontal} ";
-        var headerCopy = $" {TuiGlyphs.CopyIcon} ";
+        var headerLangSep = string.IsNullOrEmpty(lang) ? "" : " ";
         var headerRight = $"{TuiGlyphs.BorderHorizontal}{TuiGlyphs.BorderTopRight}";
 
-        // Compute display width of all fixed parts (everything except the filler dashes)
         var fixedDisplayWidth = TextWidthHelper.GetDisplayWidth(headerLeft)
                               + TextWidthHelper.GetDisplayWidth(headerLang)
                               + TextWidthHelper.GetDisplayWidth(headerLangSep)
-                              + TextWidthHelper.GetDisplayWidth(headerCopy)
                               + TextWidthHelper.GetDisplayWidth(headerRight);
         var dashCount = Math.Max(0, totalWidth - fixedDisplayWidth);
         var dashes = new string(TuiGlyphs.BorderHorizontal[0], dashCount);
 
-        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerCopy}{headerRight}";
-        List<LineSegment> headerSegments = [
-            new(headerLeft, TuiPalette.Border),
-            new(headerLang, TuiPalette.Accent),
-            new(headerLangSep + dashes, TuiPalette.Border),
-            new(headerCopy, TuiPalette.FgMuted),
-            new(headerRight, TuiPalette.Border),
-        ];
-        var copyTag = new CodeBlockCopyTag(string.Join("\n", codeLines));
-        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments, tag: copyTag));
+        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerRight}";
+        List<LineSegment> headerSegments = string.IsNullOrEmpty(lang)
+            ? [new(headerText, TuiPalette.Border)]
+            : [
+                new(headerLeft, TuiPalette.Border),
+                new(headerLang, TuiPalette.Accent),
+                new($"{headerLangSep}{dashes}{headerRight}", TuiPalette.Border),
+            ];
+        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
 
         // Code body lines — 超宽行按 innerWidth 硬换行成多行盒内片段，
         // 否则右侧边框被推出视口、代码尾部不可见。

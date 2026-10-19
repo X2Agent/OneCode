@@ -70,7 +70,9 @@ public sealed class KeybindingsCommand(KeybindingLoader keybindingLoader) : Comm
                 "Common keybindings:\n" +
                 "  Ctrl+C   Copy selected text\n" +
                 "  Ctrl+D   Exit\n" +
-                "  Ctrl+Shift+D  LSP diagnostics\n" +
+                "  Ctrl+O   Toggle Todo/Goal progress panel\n" +
+                "  Ctrl+E   Expand/collapse details\n" +
+                "  Ctrl+F   Find in conversation\n" +
                 "  Ctrl+X Ctrl+K  Interrupt running query\n" +
                 "  Up/Down  Navigate history\n" +
                 "  Tab      Autocomplete or cycle mode\n" +
@@ -185,8 +187,8 @@ public sealed class KeybindingsCommand(KeybindingLoader keybindingLoader) : Comm
 
         sb.AppendLine();
         sb.AppendLine("Hardcoded (not remappable via keybindings.json):");
-        sb.AppendLine("  Tab              Accept completion / cycle mode");
-        sb.AppendLine("  Ctrl+Left/Right  Cycle placeholder suggestions");
+        sb.AppendLine("  Tab              Accept completion / accept suggestion / cycle mode");
+        sb.AppendLine("  Esc              Close topmost overlay (safety fallback)");
         sb.AppendLine("  /find <keyword>  Search transcript (slash command)");
         sb.AppendLine("  /diff            Review git changes overlay (slash command)");
 

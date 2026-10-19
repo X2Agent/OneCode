@@ -52,14 +52,14 @@ public sealed partial class ChatTranscriptView : View
     /// <summary>Raised when the agent runtime phase changes.</summary>
     public event Action<string>? ActivityChanged;
 
-    public ChatTranscriptView(IApplication app, OneCode.Core.IO.IClipboardService? clipboard = null, Func<bool>? getShowThinking = null, ILogger<ChatTranscriptView>? logger = null)
+    public ChatTranscriptView(IApplication app, Func<bool>? getShowThinking = null, ILogger<ChatTranscriptView>? logger = null)
     {
         _app = app;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ChatTranscriptView>.Instance;
         _renderer = new MessageFlowRenderer();
         _renderer.GetShowThinking = getShowThinking;
 
-        _messageView = new MessageListView(clipboard, app);
+        _messageView = new MessageListView(app);
 
         Width = Dim.Fill();
         Height = Dim.Fill();

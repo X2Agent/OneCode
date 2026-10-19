@@ -20,4 +20,16 @@ internal interface IInteractionSession
     /// 与原生 Shift+Enter 行为一致）。
     /// </summary>
     void HandleQuestionNewline();
+
+    /// <summary>当前是否有模态弹层打开。</summary>
+    bool IsOverlayVisible { get; }
+
+    /// <summary>模态弹层打开时，将按键转交模态结界处理（Esc 关闭或转交顶层弹层，其余截停）。</summary>
+    bool DispatchOverlayKey(Key key);
+
+    /// <summary>
+    /// 执行跨视图或 Shell 级全局动作（对话/侧栏滚动、侧栏调宽、待办面板展开、折叠详情切换、会话内搜索）。
+    /// 返回 true 表示动作已匹配并执行。
+    /// </summary>
+    bool TryExecuteShellAction(string? action);
 }

@@ -301,31 +301,112 @@ public sealed partial class MessageListView
         SetNeedsDraw();
     }
 
+    private object? _lastKeyboardToggledTag;
+    private int _lastKeyboardToggledLineIdx = -1;
+
+    /// <summary>最近一次通过键盘（Ctrl+E）切换展开态的摘要行索引（测试断言与诊断用）。</summary>
+    internal int LastKeyboardToggledLineIndex => _lastKeyboardToggledLineIdx;
+
     /// <summary>
-    /// 从对话流尾部逆序查找最近一条带可折叠详情标记（<see cref="ToolLineTag"/> /
-    /// <see cref="ThinkingLineTag"/> / <see cref="ErrorLineTag"/>）的摘要行并切换展开态（Ctrl+E）。
+    /// 视口感知的多块循环展开/折叠（Ctrl+E）：
+    /// - 处于底部自动跟随时：在末尾视口（或全量会话）中逆序循环切换可折叠块；
+    /// - 向上翻页浏览历史（!AutoScroll）时：优先在当前可见视口 [ScrollOffset, ScrollOffset + visibleLines)
+    ///   内逆序循环切换；若当前视口无折叠块则向上回退查找 [0, ScrollOffset)，并调用 ScrollToLine 保证目标可见。
     /// </summary>
     public bool ToggleLastDetails()
     {
-        for (var i = _lines.Count - 1; i >= 0; i--)
+        if (_lines.Count == 0)
+            return false;
+
+        List<int> candidates;
+        var visibleLines = Viewport.Height > 0 ? Viewport.Height : 10;
+
+        if (!_scroll.AutoScroll)
+        {
+            var viewStart = Math.Clamp(_scroll.ScrollOffset, 0, _lines.Count);
+            var viewEnd = Math.Min(_lines.Count, viewStart + visibleLines);
+            candidates = CollectCollapsibleSummaryLines(viewStart, viewEnd);
+            if (candidates.Count == 0 && viewStart > 0)
+                candidates = CollectCollapsibleSummaryLines(0, viewStart);
+            if (candidates.Count == 0)
+                candidates = CollectCollapsibleSummaryLines(0, _lines.Count);
+        }
+        else
+        {
+            if (Viewport.Height > 0)
+            {
+                var tailStart = Math.Max(0, _lines.Count - Viewport.Height);
+                candidates = CollectCollapsibleSummaryLines(tailStart, _lines.Count);
+                if (candidates.Count == 0)
+                    candidates = CollectCollapsibleSummaryLines(0, _lines.Count);
+            }
+            else
+            {
+                candidates = CollectCollapsibleSummaryLines(0, _lines.Count);
+            }
+        }
+
+        if (candidates.Count == 0)
+            return false;
+
+        var targetIdx = candidates[0];
+        if (_lastKeyboardToggledTag is not null)
+        {
+            var prevPos = candidates.FindIndex(idx => ReferenceEquals(_lines[idx].Tag, _lastKeyboardToggledTag));
+            if (prevPos >= 0)
+                targetIdx = candidates[(prevPos + 1) % candidates.Count];
+        }
+
+        switch (_lines[targetIdx].Tag)
+        {
+            case ToolLineTag toolTag:
+                ToggleToolExpansion(targetIdx, toolTag);
+                break;
+            case ThinkingLineTag thinkingTag:
+                ToggleThinkingExpansion(targetIdx, thinkingTag);
+                break;
+            case ErrorLineTag errorTag:
+                ToggleErrorExpansion(targetIdx, errorTag);
+                break;
+            default:
+                return false;
+        }
+
+        _lastKeyboardToggledLineIdx = targetIdx;
+        _lastKeyboardToggledTag = _lines[targetIdx].Tag;
+
+        if (!_scroll.AutoScroll && (targetIdx < _scroll.ScrollOffset || targetIdx >= _scroll.ScrollOffset + visibleLines))
+        {
+            _scroll.ScrollToLine(targetIdx);
+            SetNeedsDraw();
+        }
+
+        return true;
+    }
+
+    private List<int> CollectCollapsibleSummaryLines(int startInclusive, int endExclusive)
+    {
+        List<int> indices = [];
+        var start = Math.Max(0, startInclusive);
+        var end = Math.Min(_lines.Count, endExclusive);
+        for (var i = end - 1; i >= start; i--)
         {
             switch (_lines[i].Tag)
             {
-                case ToolLineTag toolTag:
-                    ToggleToolExpansion(i, toolTag);
-                    return true;
-                case ThinkingLineTag thinkingTag:
-                    ToggleThinkingExpansion(i, thinkingTag);
-                    return true;
+                case ToolLineTag:
+                case ThinkingLineTag:
+                    indices.Add(i);
+                    break;
                 case ErrorLineTag errorTag:
                     // Error 展开详情行与首行摘要共享相同的 ErrorLineTag.Content；
-                    // 跳过详情行，定位到该错误块的首行摘要后再切换。
+                    // 跳过详情行，定位到该错误块的首行摘要。
                     while (i > 0 && _lines[i - 1].Tag is ErrorLineTag prevErr && prevErr.Content == errorTag.Content)
                         i--;
-                    ToggleErrorExpansion(i, (ErrorLineTag)_lines[i].Tag!);
-                    return true;
+                    if (i >= start)
+                        indices.Add(i);
+                    break;
             }
         }
-        return false;
+        return indices;
     }
 }

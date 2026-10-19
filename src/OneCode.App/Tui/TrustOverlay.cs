@@ -6,6 +6,10 @@ public sealed class TrustOverlay : ResultOverlay<bool>
     private readonly string _cwd;
     private readonly bool _isHomeDir;
     private Button? _yesButton;
+    private Button? _noButton;
+
+    internal Button YesButton => _yesButton!;
+    internal Button NoButton => _noButton!;
 
     protected override View? InitialFocusView => _yesButton;
 
@@ -60,13 +64,45 @@ public sealed class TrustOverlay : ResultOverlay<bool>
         };
         accessNote.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
-        var noButton = CreateButton($"{TuiGlyphs.Failed} _否，退出", Pos.AnchorEnd(14));
-        noButton.Accepting += (_, _) => RequestClose(OverlayCloseReason.Cancelled);
+        _noButton = CreateButton($"{TuiGlyphs.Failed} _否，退出", Pos.AnchorEnd(14));
+        _noButton.Accepting += (_, _) => RequestClose(OverlayCloseReason.Cancelled);
 
         _yesButton = CreateButton($"{TuiGlyphs.Complete} _是，我信任此文件夹", Pos.AnchorEnd(34));
         _yesButton.Accepting += (_, _) => Complete(true);
 
-        Add(dirLabel, warningText, accessNote, _yesButton, noButton);
+        Add(dirLabel, warningText, accessNote, _yesButton, _noButton);
+    }
+
+    protected override bool OnKeyDown(Key kb)
+    {
+        if (HandleNavigationKey(kb))
+            return true;
+
+        return base.OnKeyDown(kb);
+    }
+
+    private bool HandleNavigationKey(Key kb)
+    {
+        if (kb == Key.Tab || kb == Key.CursorRight)
+            return CycleTabStop(forward: true);
+        if (kb == Key.Tab.WithShift || kb == Key.CursorLeft)
+            return CycleTabStop(forward: false);
+
+        return false;
+    }
+
+    private bool CycleTabStop(bool forward)
+    {
+        if (_yesButton is null || _noButton is null)
+            return false;
+
+        View[] stops = [_yesButton, _noButton];
+        var index = Array.IndexOf(stops, MostFocused);
+        var next = forward
+            ? (index + 1) % stops.Length
+            : (index <= 0 ? stops.Length - 1 : index - 1);
+        stops[next].SetFocus();
+        return true;
     }
 
     private static Button CreateButton(string text, Pos x)

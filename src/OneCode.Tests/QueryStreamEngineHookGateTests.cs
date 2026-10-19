@@ -11,6 +11,7 @@ using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Config;
+using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Tools;
 using OneCode.Tests.TestSupport;
@@ -23,34 +24,36 @@ namespace OneCode.Tests;
 ///
 /// 契约：
 /// - input deny：不进入运行循环、不落会话历史；
-/// - output deny：拦截最终响应并终结本轮，**不重入**（纠偏续跑已随 Stop 事件退出 Hook 协议）。
+/// - output deny：拦截最终响应并终结本轮（不写入最终助手消息到会话历史），**不重入**（纠偏续跑已随 Stop 事件退出 Hook 协议）。
 /// </summary>
 public sealed class QueryStreamEngineHookGateTests
 {
     [Fact]
-    public async Task StreamInteractiveAsync_HooksAllowCompletion_RunsOnce()
+    public async Task StreamInteractiveAsync_HooksAllowCompletion_RunsOnceAndPersistsAssistantMessage()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (engine, runner, _) = CreateEngine(textForRound: n => $"round-{n}");
+        var (engine, runner, _, sessionManager, conversationId) = CreateEngine(textForRound: n => $"round-{n}");
 
         var events = await CollectAsync(engine, ct);
 
         await runner.Received(1).RunStreamingAsync(
             Arg.Any<MainAgentRunOptions>(), Arg.Any<ChannelWriter<object>>(), Arg.Any<CancellationToken>());
+        await sessionManager.Received(1).AppendAssistantMessageAsync(
+            conversationId, "round-1", Arg.Any<TokenUsage>(), Arg.Any<CancellationToken>());
         events.OfType<ErrorEvent>().Should().BeEmpty();
         events.OfType<DoneEvent>().Should().ContainSingle()
             .Which.FullText.Should().Be("round-1");
     }
 
     /// <summary>
-    /// output deny 必须终结本轮且**不重入**：纠偏续跑不属于该拦截点职责。
-    /// 若误改为重入循环，本用例会因运行次数超限而失败。
+    /// output deny 必须终结本轮、**不重入**，且不得将被拒绝的最终响应落盘到会话历史。
+    /// 若误改为重入循环或先落盘再触发 output hook，本用例会失败。
     /// </summary>
     [Fact]
-    public async Task StreamInteractiveAsync_OutputHookBlocks_TerminatesWithoutRetry()
+    public async Task StreamInteractiveAsync_OutputHookBlocks_TerminatesWithoutRetryOrPersistingDeniedResponse()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (engine, runner, _) = CreateEngine(
+        var (engine, runner, _, sessionManager, _) = CreateEngine(
             textForRound: n => $"round-{n}",
             hookResult: point => point == HookInterceptionPoint.Output
                 ? Blocking("secret in output")
@@ -60,6 +63,8 @@ public sealed class QueryStreamEngineHookGateTests
 
         await runner.Received(1).RunStreamingAsync(
             Arg.Any<MainAgentRunOptions>(), Arg.Any<ChannelWriter<object>>(), Arg.Any<CancellationToken>());
+        await sessionManager.DidNotReceive().AppendAssistantMessageAsync(
+            Arg.Any<SessionId>(), Arg.Any<string>(), Arg.Any<TokenUsage>(), Arg.Any<CancellationToken>());
 
         events.OfType<ErrorEvent>().Should().Contain(e => e.Message.Contains("Response blocked by hook"));
         events.OfType<DoneEvent>().Should().ContainSingle();
@@ -69,7 +74,7 @@ public sealed class QueryStreamEngineHookGateTests
     public async Task StreamInteractiveAsync_InputHookBlocks_SkipsRunEntirely()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (engine, runner, _) = CreateEngine(
+        var (engine, runner, _, sessionManager, _) = CreateEngine(
             textForRound: n => $"round-{n}",
             hookResult: point => point == HookInterceptionPoint.Input
                 ? Blocking("prompt rejected")
@@ -79,6 +84,8 @@ public sealed class QueryStreamEngineHookGateTests
 
         await runner.DidNotReceive().RunStreamingAsync(
             Arg.Any<MainAgentRunOptions>(), Arg.Any<ChannelWriter<object>>(), Arg.Any<CancellationToken>());
+        await sessionManager.DidNotReceive().AppendUserMessageAsync(
+            Arg.Any<SessionId>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         events.OfType<ErrorEvent>().Should().ContainSingle()
             .Which.Message.Should().Contain("Prompt blocked by hook");
         events.OfType<DoneEvent>().Should().ContainSingle();
@@ -101,7 +108,7 @@ public sealed class QueryStreamEngineHookGateTests
         return events;
     }
 
-    private static (QueryStreamEngine Engine, IMainAgentRunner Runner, IHookExecutionService Hooks) CreateEngine(
+    private static (QueryStreamEngine Engine, IMainAgentRunner Runner, IHookExecutionService Hooks, ISessionManager SessionManager, SessionId ConversationId) CreateEngine(
         Func<int, string>? textForRound = null,
         Func<HookInterceptionPoint, AggregatedHookResult>? hookResult = null)
     {
@@ -114,8 +121,10 @@ public sealed class QueryStreamEngineHookGateTests
         var configManager = TestConfigManager.Create();
         configManager.Current.Returns(ConfigSnapshot.FromEffective(new AppSettings { MaxTurns = 100 }));
 
+        var conversation = new Conversation { Id = SessionId.NewId(), WorkingDirectory = Path.GetTempPath() };
         var sessionManager = Substitute.For<ISessionManager>();
         sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        sessionManager.ForegroundConversation.Returns(conversation);
 
         var round = 0;
         var runner = Substitute.For<IMainAgentRunner>();
@@ -155,6 +164,6 @@ public sealed class QueryStreamEngineHookGateTests
                 new TokenBreakdownEstimator(TestTokenEstimators.Default),
                 Substitute.For<INotifierService>()));
 
-        return (engine, runner, hooks);
+        return (engine, runner, hooks, sessionManager, conversation.Id);
     }
 }

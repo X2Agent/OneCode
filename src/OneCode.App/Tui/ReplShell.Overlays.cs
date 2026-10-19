@@ -41,7 +41,7 @@ public sealed partial class ReplShell
             : await _gitHelper.GetPendingDiffStatAsync(ct: default).ConfigureAwait(true);
         _app.Invoke(() =>
         {
-            var review = new ReviewOverlay(files);
+            var review = new ReviewOverlay(files, _keyResolver, _keyContextManager);
             review.FileSelected += file =>
             {
                 _ = LoadDiffAndShowAsync(file.Path);
