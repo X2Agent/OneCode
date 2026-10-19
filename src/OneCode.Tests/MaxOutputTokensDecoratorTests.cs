@@ -143,4 +143,54 @@ public sealed class MaxOutputTokensDecoratorTests
         seenCaps.Should().Equal([2_048, 8_191],
             "small contextWindow must clamp escalation cap to contextWindow - 1 instead of 65536");
     }
+
+    [Fact]
+    public async Task GetResponseAsync_SmallContextWindowWithUnsetMaxOutputTokens_StartsAtQuarterWindowAndEscalatesToWindowMinusOne()
+    {
+        var inner = Substitute.For<IChatClient>();
+        var callCount = 0;
+        var seenCaps = new List<int?>();
+        inner.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                seenCaps.Add(ci.Arg<ChatOptions?>()?.MaxOutputTokens);
+                return ++callCount == 1
+                    ? new ChatResponse(new ChatMessage(ChatRole.Assistant, "")) { FinishReason = ChatFinishReason.Length }
+                    : new ChatResponse(new ChatMessage(ChatRole.Assistant, "recovered")) { FinishReason = ChatFinishReason.Stop };
+            });
+        var sut = new MaxOutputTokensDecorator(inner, contextWindow: 8_192);
+
+        var response = await sut.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "default options on 8k window")],
+            new ChatOptions(),
+            TestContext.Current.CancellationToken);
+
+        response.Text.Should().Be("recovered");
+        seenCaps.Should().Equal([2_048, 8_191],
+            "unset MaxOutputTokens on 8K window must start at 2048 (window/4) and escalate to 8191 on Length");
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_SmallContextWindowWithOversizedExplicitMaxOutputTokens_ClampsToWindowMinusOne()
+    {
+        var inner = Substitute.For<IChatClient>();
+        int? seenCap = null;
+        inner.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(), Arg.Any<ChatOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                seenCap = ci.Arg<ChatOptions?>()?.MaxOutputTokens;
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant, "clamped")) { FinishReason = ChatFinishReason.Stop };
+            });
+        var sut = new MaxOutputTokensDecorator(inner, contextWindow: 8_192);
+        var callerOptions = new ChatOptions { MaxOutputTokens = MaxOutputTokensDecorator.EscalatedMaxTokens };
+
+        var response = await sut.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "zero-output retry with 65536")],
+            callerOptions,
+            TestContext.Current.CancellationToken);
+
+        response.Text.Should().Be("clamped");
+        seenCap.Should().Be(8_191, "explicit MaxOutputTokens exceeding contextWindow must be clamped to contextWindow - 1");
+        callerOptions.MaxOutputTokens.Should().Be(MaxOutputTokensDecorator.EscalatedMaxTokens, "caller options must not be mutated");
+    }
 }

@@ -65,9 +65,21 @@ public sealed class ToolArgumentBindingMiddleware(ILogger? logger = null)
         };
     }
 
+    private static readonly IReadOnlyDictionary<string, string> CommonParameterAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["path"] = "filePath",
+            ["file"] = "filePath",
+            ["cmd"] = "command",
+        };
+
     /// <summary>
-    /// 归一化 schema 声明为数组的参数。返回 <c>true</c> 表示存在无法归一化的参数
-    /// （<paramref name="failure"/> 已携带错误结果，不应继续调用工具）。
+    /// 归一化工具参数：
+    /// 1) 键名归一化：将未命中 schema 的 <c>snake_case</c> / 连字符键名（如 <c>file_path</c>、<c>old_string</c>）
+    ///    或高频别名（<c>path</c>→<c>filePath</c>、<c>cmd</c>→<c>command</c>）映射到 schema 标准属性名；
+    /// 2) 标量字符串解包：将声明为 <c>boolean</c>/<c>integer</c>/<c>number</c> 但传入 JSON 字符串的值转为对应标量；
+    /// 3) 数组形状归一化：处理 schema 声明为 <c>array</c> 的畸形参数。
+    /// 返回 <c>true</c> 表示存在无法归一化的参数（<paramref name="failure"/> 已携带错误结果，不应继续调用工具）。
     /// </summary>
     internal static bool TryNormalizeArrayArguments(AIFunction function, AIFunctionArguments arguments, out ToolResult failure)
     {
@@ -83,15 +95,31 @@ public sealed class ToolArgumentBindingMiddleware(ILogger? logger = null)
         // schema 属性名与参数名一致；模型可能产出大小写不同的键，因此按大小写不敏感匹配，
         // 回写时使用参数字典中的原始键，避免在 ordinal 字典里制造重复键。
         var schemaByProperty = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        var canonicalByCollapsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var property in properties.EnumerateObject())
+        {
             schemaByProperty[property.Name] = property.Value;
+            canonicalByCollapsed.TryAdd(CollapseKey(property.Name), property.Name);
+        }
 
-        foreach (var argument in arguments)
+        NormalizeUnmatchedArgumentKeys(arguments, schemaByProperty, canonicalByCollapsed);
+
+        foreach (var argument in arguments.ToList())
         {
             if (!schemaByProperty.TryGetValue(argument.Key, out var propertySchema) ||
-                !IsArrayType(propertySchema) ||
                 argument.Value is not JsonElement element)
             {
+                continue;
+            }
+
+            if (!IsArrayType(propertySchema))
+            {
+                if (element.ValueKind == JsonValueKind.String &&
+                    TryCoerceStringToScalar(propertySchema, element, out var coercedScalar))
+                {
+                    arguments[argument.Key] = coercedScalar;
+                }
+
                 continue;
             }
 
@@ -144,8 +172,100 @@ public sealed class ToolArgumentBindingMiddleware(ILogger? logger = null)
         return false;
     }
 
+    private static void NormalizeUnmatchedArgumentKeys(
+        AIFunctionArguments arguments,
+        Dictionary<string, JsonElement> schemaByProperty,
+        Dictionary<string, string> canonicalByCollapsed)
+    {
+        List<(string OldKey, string CanonicalKey, object? Value)>? remaps = null;
+
+        foreach (var argument in arguments)
+        {
+            if (schemaByProperty.ContainsKey(argument.Key))
+                continue;
+
+            string? targetKey = null;
+            if (canonicalByCollapsed.TryGetValue(CollapseKey(argument.Key), out var byCollapsed))
+            {
+                targetKey = byCollapsed;
+            }
+            else if (CommonParameterAliases.TryGetValue(argument.Key, out var byAlias) &&
+                     schemaByProperty.ContainsKey(byAlias))
+            {
+                targetKey = byAlias;
+            }
+
+            if (targetKey is not null && !arguments.ContainsKey(targetKey))
+            {
+                remaps ??= [];
+                remaps.Add((argument.Key, targetKey, argument.Value));
+            }
+        }
+
+        if (remaps is null)
+            return;
+
+        foreach (var (oldKey, canonicalKey, value) in remaps)
+        {
+            arguments.Remove(oldKey);
+            if (!arguments.ContainsKey(canonicalKey))
+                arguments[canonicalKey] = value;
+        }
+    }
+
+    private static string CollapseKey(string key)
+    {
+        if (!key.Contains('_') && !key.Contains('-'))
+            return key;
+
+        return string.Create(key.Length, key, static (span, src) =>
+        {
+            var written = 0;
+            foreach (var ch in src)
+            {
+                if (ch is not ('_' or '-'))
+                    span[written++] = ch;
+            }
+        }).TrimEnd('\0');
+    }
+
+    private static bool TryCoerceStringToScalar(
+        JsonElement propertySchema,
+        JsonElement stringElement,
+        out JsonElement coerced)
+    {
+        coerced = default;
+        var raw = stringElement.GetString()?.Trim();
+        if (string.IsNullOrEmpty(raw))
+            return false;
+
+        if (HasSchemaType(propertySchema, "boolean") && bool.TryParse(raw, out var boolValue))
+        {
+            coerced = JsonSerializer.SerializeToElement(boolValue);
+            return true;
+        }
+
+        if (HasSchemaType(propertySchema, "integer") &&
+            long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+        {
+            coerced = JsonSerializer.SerializeToElement(longValue);
+            return true;
+        }
+
+        if (HasSchemaType(propertySchema, "number") &&
+            double.TryParse(raw, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var doubleValue))
+        {
+            coerced = JsonSerializer.SerializeToElement(doubleValue);
+            return true;
+        }
+
+        return false;
+    }
+
     /// <summary>schema 属性的 <c>type</c> 含 <c>array</c>（type 可能是字符串或字符串数组，如 ["array","null"]）。</summary>
-    private static bool IsArrayType(JsonElement propertySchema)
+    private static bool IsArrayType(JsonElement propertySchema) => HasSchemaType(propertySchema, "array");
+
+    private static bool HasSchemaType(JsonElement propertySchema, string expectedType)
     {
         if (propertySchema.ValueKind != JsonValueKind.Object ||
             !propertySchema.TryGetProperty("type", out var type))
@@ -155,9 +275,10 @@ public sealed class ToolArgumentBindingMiddleware(ILogger? logger = null)
 
         return type.ValueKind switch
         {
-            JsonValueKind.String => string.Equals(type.GetString(), "array", StringComparison.Ordinal),
+            JsonValueKind.String => string.Equals(type.GetString(), expectedType, StringComparison.Ordinal),
             JsonValueKind.Array => type.EnumerateArray()
-                .Any(t => t.ValueKind == JsonValueKind.String && t.GetString() == "array"),
+                .Any(t => t.ValueKind == JsonValueKind.String &&
+                          string.Equals(t.GetString(), expectedType, StringComparison.Ordinal)),
             _ => false,
         };
     }

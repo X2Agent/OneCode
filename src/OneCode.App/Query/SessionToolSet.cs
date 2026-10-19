@@ -109,11 +109,11 @@ public sealed class SessionToolSet(IToolCatalog catalog, ToolMetadataRegistry me
     public bool Activate(string toolName, ToolCapabilitySet capabilities)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
-        if (!capabilities.AllowDynamicActivation || !capabilities.AllowedToolNames.Contains(toolName))
+        if (!capabilities.AllowDynamicActivation)
             return false;
 
         var meta = _metadata.Get(toolName);
-        if (meta is null || !meta.IsVisible || !meta.IsEnabled)
+        if (meta is null || !meta.IsVisible || !meta.IsEnabled || !capabilities.AllowedToolNames.Contains(meta.Name))
             return false;
 
         lock (_lock)
@@ -122,9 +122,9 @@ public sealed class SessionToolSet(IToolCatalog catalog, ToolMetadataRegistry me
             if (meta.LoadPolicy == ToolLoadPolicy.Always)
                 return false;
 
-            if (_activatedSet.Add(toolName))
+            if (_activatedSet.Add(meta.Name))
             {
-                _activatedOrder.Add(toolName);
+                _activatedOrder.Add(meta.Name);
                 return true;
             }
             return false;

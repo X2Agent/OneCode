@@ -186,6 +186,42 @@ public sealed class ToolArgumentBindingMiddlewareTests
         invoked.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task CreateDelegate_SnakeCaseAndStringifiedScalarArguments_AreNormalizedAndBoundToCamelCaseParameters()
+    {
+        var function = AIFunctionFactory.Create(SampleTools.EditSlice, name: "Edit");
+        var context = CreateContext(
+            function,
+            """{"file_path":"src/App.cs","old_string":"foo","new_string":"bar","replace_all":"true","line_offset":"12"}""");
+
+        var result = await RunAsync(context);
+
+        ResultText(result).Should().Be("src/App.cs:foo->bar:replaceAll=True:offset=12",
+            "snake_case 键名与字符串形式的 bool/int 标量应被归一化并成功绑定到 C# camelCase 参数");
+    }
+
+    [Fact]
+    public async Task CreateDelegate_CommonAliasKeys_MapToCanonicalSchemaPropertyWithoutOverwritingExplicitCanonicalKey()
+    {
+        var editFn = AIFunctionFactory.Create(SampleTools.EditSlice, name: "Edit");
+        var bashFn = AIFunctionFactory.Create(SampleTools.RunCommand, name: "Bash");
+
+        var viaAlias = await RunAsync(CreateContext(
+            editFn,
+            """{"path":"a.cs","oldString":"x","newString":"y"}"""));
+        var explicitWins = await RunAsync(CreateContext(
+            editFn,
+            """{"filePath":"canonical.cs","path":"ignored.cs","oldString":"x","newString":"y"}"""));
+        var cmdAlias = await RunAsync(CreateContext(
+            bashFn,
+            """{"cmd":"dotnet test"}"""));
+
+        ResultText(viaAlias).Should().Be("a.cs:x->y:replaceAll=False:offset=0");
+        ResultText(explicitWins).Should().Be("canonical.cs:x->y:replaceAll=False:offset=0",
+            "显式传入标准参数名时不得被同名别名覆盖");
+        ResultText(cmdAlias).Should().Be("ran:dotnet test");
+    }
+
     private async Task<object?> RunAsync(
         FunctionInvocationContext context,
         Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? nextOverride = null)
@@ -232,6 +268,16 @@ public sealed class ToolArgumentBindingMiddlewareTests
         public static string FirstNode(JsonElement[] nodes) => nodes[0].GetRawText();
 
         public static string TakeItems(SampleItem[] items) => string.Join("|", items.Select(item => item.Name));
+
+        public static string EditSlice(
+            string filePath,
+            string oldString,
+            string newString,
+            bool replaceAll = false,
+            int lineOffset = 0)
+            => $"{filePath}:{oldString}->{newString}:replaceAll={replaceAll}:offset={lineOffset}";
+
+        public static string RunCommand(string command) => $"ran:{command}";
     }
 
     internal sealed record SampleItem(string Name);

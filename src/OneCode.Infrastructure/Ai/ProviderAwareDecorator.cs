@@ -37,7 +37,7 @@ public sealed class ProviderAwareDecorator(
     {
         // 始终复制：Anthropic 策略会替换列表元素（clone-on-write），绝不能写回调用方的列表
         var messageList = messages.ToList();
-        ApplyProviderStrategy(messageList, options);
+        options = ApplyProviderStrategy(messageList, options);
         return await base.GetResponseAsync(messageList, options, cancellationToken);
     }
 
@@ -47,11 +47,11 @@ public sealed class ProviderAwareDecorator(
         CancellationToken cancellationToken = default)
     {
         var messageList = messages.ToList();
-        ApplyProviderStrategy(messageList, options);
+        options = ApplyProviderStrategy(messageList, options);
         return base.GetStreamingResponseAsync(messageList, options, cancellationToken);
     }
 
-    private void ApplyProviderStrategy(IList<ChatMessage> messages, ChatOptions? options)
+    private ChatOptions? ApplyProviderStrategy(IList<ChatMessage> messages, ChatOptions? options)
     {
         switch (_providerId)
         {
@@ -60,12 +60,16 @@ public sealed class ProviderAwareDecorator(
                 break;
 
             case CoreConstants.ModelProviders.Ollama:
+                if (options is null && (_ollamaNumCtx is > 0 || _ollamaTemperature is >= 0.0 and <= 2.0))
+                    options = new ChatOptions();
                 InjectOllamaStrategy(options, _ollamaNumCtx, _ollamaTemperature);
                 break;
 
             // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning，
             // 无需任何 provider 私有注入。
         }
+
+        return options;
     }
 
     // Anthropic 策略
@@ -207,7 +211,10 @@ public sealed class ProviderAwareDecorator(
         if (numCtx is > 0)
             options.AddOllamaOption(OllamaOption.NumCtx, numCtx.Value);
 
-        if (temperature is > 0 and <= 2.0)
+        // Ollama chat 默认 temperature ≈ 0.8，对 tool-call JSON 熵过高；代码/工具调用默认压到 0.15，
+        // 且允许显式设为 0（greedy 解码）。TopP / TopK / RepeatPenalty 按 Ollama 服务端默认值显式 pin，
+        // 让请求体自解释并防止服务端默认值漂移。
+        if (temperature is >= 0.0 and <= 2.0)
         {
             options.AddOllamaOption(OllamaOption.Temperature, (float)temperature.Value);
             options.AddOllamaOption(OllamaOption.TopP, 0.9f);

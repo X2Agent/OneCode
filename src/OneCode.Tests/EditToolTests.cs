@@ -188,6 +188,38 @@ public sealed class EditToolTests : IDisposable
         (await File.ReadAllTextAsync(file)).Should().Be("only one NEW here");
     }
 
+    // trailing whitespace fallback (unique match only)
+
+    [Fact]
+    public async Task Edit_TrailingWhitespaceDifference_UniqueMatch_ReplacesSuccessfully()
+    {
+        var file = Write("trailing.cs", "class Foo\n{\n    int x = 1;   \n    int y = 2;\n}\n");
+        var result = await RunEditAsync(
+            file,
+            "    int x = 1;\n    int y = 2;",
+            "    int x = 10;\n    int y = 20;");
+
+        result.Content.Should().NotStartWith("Error");
+        (await File.ReadAllTextAsync(file)).Should().Be("class Foo\n{\n    int x = 10;\n    int y = 20;\n}\n");
+    }
+
+    [Fact]
+    public async Task Edit_TrailingWhitespaceDifference_AmbiguousMultipleMatches_ReturnsErrorWithoutModifyingFile()
+    {
+        const string original =
+            "class A\n{\n    int v = 1;   \n    return v;\n}\nclass B\n{\n    int v = 1;\t\n    return v;\n}\n";
+        var file = Write("ambiguous-trailing.cs", original);
+
+        var result = await RunEditAsync(
+            file,
+            "    int v = 1;\n    return v;",
+            "    int v = 2;\n    return v;");
+
+        result.Content.Should().Contain("Could not find");
+        (await File.ReadAllTextAsync(file)).Should().Be(original,
+            "行尾空白回退遇到多处候选时必须拒绝修改，严守唯一锚点契约");
+    }
+
     private string Write(string name, string content)
     {
         var path = Path.Combine(_tmpDir, name);

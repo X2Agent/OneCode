@@ -26,9 +26,9 @@ public sealed class CompactionStrategyFactory(
     private readonly CompactPromptBuilder _compactPromptBuilder = compactPromptBuilder;
 
     /// <summary>
-    /// 构建主 Agent 压缩策略，并返回模型 ProviderId 与解析后的上下文窗口。
+    /// 构建主 Agent 压缩策略，并返回模型 ProviderId。
     /// </summary>
-    public async Task<(CompactionStrategy CompactionStrategy, string? ProviderId, int ContextWindow)> BuildAsync(
+    public async Task<(CompactionStrategy CompactionStrategy, string? ProviderId)> BuildAsync(
         string? modelId,
         CancellationToken ct)
     {
@@ -46,7 +46,7 @@ public sealed class CompactionStrategyFactory(
         var compactionStrategy = CompactionPipelineBuilder.BuildForMainAgent(
             _chatClient, maxContextWindow, maxOutputTokens, summarizationPrompt);
 
-        return (compactionStrategy, modelInfo?.ProviderId, maxContextWindow);
+        return (compactionStrategy, modelInfo?.ProviderId);
     }
 
     /// <summary>

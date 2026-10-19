@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.Core.Models;
 
 namespace OneCode.Infrastructure.Ai;
 
@@ -40,14 +41,25 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner, int? contextWind
             ? Math.Min(EscalatedMaxTokens, Math.Max(1, contextWindow.Value - 1))
             : EscalatedMaxTokens;
 
+    /// <summary>
+    /// 首轮默认输出上限：已知有限上下文窗口（如本地 Ollama <c>num_ctx</c>）时按窗口 1/4（上限 8192）保守起步，
+    /// 避免首轮就把 <c>num_predict</c> 顶到 <c>contextWindow - 1</c> 挤压输入 KV cache 并使升级分支失效；
+    /// 未知窗口（云端默认）保持 <see cref="EscalatedMaxTokens"/>。
+    /// </summary>
+    private int ResolveInitialDefaultCap() =>
+        contextWindow is > 0
+            ? Math.Min(ResolveEscalationCap(), ModelContextDefaults.ResolveOutputReservation(contextWindow.Value, 8_192))
+            : EscalatedMaxTokens;
+
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         var cap = ResolveEscalationCap();
+        var initialCap = ResolveInitialDefaultCap();
         var messageList = messages.ToList();
-        var workingOptions = WithDefaultMaxOutputTokens(options, cap);
+        var workingOptions = WithDefaultMaxOutputTokens(options, initialCap, cap);
         var escalated = workingOptions.MaxOutputTokens >= cap;
         var recoveryCount = 0;
 
@@ -88,19 +100,25 @@ public sealed class MaxOutputTokensDecorator(IChatClient inner, int? contextWind
         // 零输出 Length 重试由 MainAgentRunner 在流结束后处理）。
         return base.GetStreamingResponseAsync(
             messages,
-            WithDefaultMaxOutputTokens(options, ResolveEscalationCap()),
+            WithDefaultMaxOutputTokens(options, ResolveInitialDefaultCap(), ResolveEscalationCap()),
             cancellationToken);
     }
 
     /// <summary>
-    /// 克隆调用方 <see cref="ChatOptions"/> 并在未指定上限且未开启显式 Reasoning 时填入默认输出上限，
-    /// 绝不原地修改调用方传入的实例。
+    /// 克隆调用方 <see cref="ChatOptions"/>：在未指定上限且未开启显式 Reasoning 时填入 <paramref name="defaultCap"/>；
+    /// 若调用方显式指定的 <see cref="ChatOptions.MaxOutputTokens"/> 超过 <paramref name="maxCap"/>（如零输出重试硬编码 65536
+    /// 落到小窗口模型），则钳制到 <paramref name="maxCap"/>。绝不原地修改调用方传入的实例。
     /// </summary>
-    internal static ChatOptions WithDefaultMaxOutputTokens(ChatOptions? options, int defaultCap = EscalatedMaxTokens)
+    internal static ChatOptions WithDefaultMaxOutputTokens(
+        ChatOptions? options,
+        int defaultCap = EscalatedMaxTokens,
+        int? maxCap = null)
     {
         var clone = options?.Clone() ?? new ChatOptions();
         if (clone.MaxOutputTokens is null && clone.Reasoning?.Effort is null)
             clone.MaxOutputTokens = defaultCap;
+        else if (maxCap is { } clamp && clone.MaxOutputTokens > clamp)
+            clone.MaxOutputTokens = clamp;
         return clone;
     }
 }

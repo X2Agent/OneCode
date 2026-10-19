@@ -92,6 +92,18 @@ public sealed class SessionToolSetTests
         sut.Activate("NonExistentTool").Should().BeFalse();
     }
 
+    [Fact]
+    public void Activate_ByAlias_ResolvesCanonicalToolNameAndIncludesToolInGetTools()
+    {
+        var (catalog, metadata) = CreateTestCatalog();
+        var sut = new SessionToolSet(catalog, metadata);
+
+        sut.Activate("web_search").Should().BeTrue("registered alias should resolve to canonical WebSearch");
+
+        sut.ActivatedNames.Should().Contain("WebSearch");
+        sut.GetTools("").Select(t => t.Name).Should().Contain("WebSearch");
+    }
+
     // Session Isolation
 
     [Fact]
@@ -261,7 +273,8 @@ public sealed class SessionToolSetTests
             Risk = ToolRisk.ReadOnly,
             SearchHint = "search the web",
             LoadPolicy = ToolLoadPolicy.Contextual,
-            Keywords = ["web search", "search web"]
+            Keywords = ["web search", "search web"],
+            Aliases = ["web_search"]
         });
         metadata.Register(new ToolMetadata
         {

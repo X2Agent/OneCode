@@ -56,11 +56,12 @@ public sealed class ProviderWireContractTests
     private static (ProviderAwareDecorator Sut, CapturingHttpHandler Capture) CreateOpenAiSut()
         => CreateHttpSut(OpenAiResponse, CoreConstants.ModelProviders.OpenAI, "gpt-5");
 
-    private static (ProviderAwareDecorator Sut, CapturingHttpHandler Capture) CreateOllamaSut(int? numCtx = null)
-        => CreateHttpSut(OllamaResponse, CoreConstants.ModelProviders.Ollama, "llama3.2", numCtx);
+    private static (ProviderAwareDecorator Sut, CapturingHttpHandler Capture) CreateOllamaSut(
+        int? numCtx = null, double? temperature = null)
+        => CreateHttpSut(OllamaResponse, CoreConstants.ModelProviders.Ollama, "llama3.2", numCtx, temperature);
 
     private static (ProviderAwareDecorator Sut, CapturingHttpHandler Capture) CreateHttpSut(
-        string response, string providerId, string model, int? numCtx = null)
+        string response, string providerId, string model, int? numCtx = null, double? temperature = null)
     {
         var capture = new CapturingHttpHandler(response);
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
@@ -69,7 +70,7 @@ public sealed class ProviderWireContractTests
 
         var baseClient = new ChatClientFactory(httpClientFactory)
             .CreateBaseClient(providerId, "test-key", "https://provider.invalid", model);
-        return (new ProviderAwareDecorator(baseClient, providerId, numCtx), capture);
+        return (new ProviderAwareDecorator(baseClient, providerId, numCtx, temperature), capture);
     }
 
     private static JsonElement Body(CapturingHttpHandler capture)
@@ -212,6 +213,7 @@ public sealed class ProviderWireContractTests
         body.TryGetProperty("thinking", out _).Should().BeFalse();
         body.TryGetProperty("thinking_budget", out _).Should().BeFalse();
         body.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
+        body.TryGetProperty("options", out _).Should().BeFalse("非 Ollama provider 不得泄漏 Ollama 原生 options 块");
     }
 
     [Fact]
@@ -228,6 +230,56 @@ public sealed class ProviderWireContractTests
         // Ollama 原生 API 的 think 是请求体顶层字段，num_ctx 属于 options 子对象
         body.GetProperty("think").GetString().Should().Be("medium");
         body.GetProperty("options").GetProperty("num_ctx").GetInt32().Should().Be(8192);
+    }
+
+    [Fact]
+    public async Task Ollama_SamplingBaseline_IsSerializedAsNativeOptions()
+    {
+        var (sut, capture) = CreateOllamaSut(numCtx: 8192, temperature: 0.15);
+
+        await sut.GetResponseAsync([new ChatMessage(ChatRole.User, "code")],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var opts = Body(capture).GetProperty("options");
+        opts.GetProperty("num_ctx").GetInt32().Should().Be(8192);
+        opts.GetProperty("temperature").GetDouble().Should().BeApproximately(0.15, 0.001);
+        opts.GetProperty("top_p").GetDouble().Should().BeApproximately(0.9, 0.001);
+        opts.GetProperty("top_k").GetInt32().Should().Be(40);
+        opts.GetProperty("repeat_penalty").GetDouble().Should().BeApproximately(1.1, 0.001);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.05)]
+    public async Task Ollama_TemperatureOverride_IncludingZeroGreedy_IsSerializedAsNativeOption(double configuredTemperature)
+    {
+        var (sut, capture) = CreateOllamaSut(temperature: configuredTemperature);
+
+        await sut.GetResponseAsync([new ChatMessage(ChatRole.User, "code")],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var opts = Body(capture).GetProperty("options");
+        opts.GetProperty("temperature").GetDouble().Should().BeApproximately(configuredTemperature, 0.001);
+        opts.GetProperty("top_p").GetDouble().Should().BeApproximately(0.9, 0.001);
+        opts.GetProperty("top_k").GetInt32().Should().Be(40);
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(2.5)]
+    public async Task Ollama_OutOfRangeTemperature_DoesNotEmitSamplingOptions(double invalidTemperature)
+    {
+        var (sut, capture) = CreateOllamaSut(temperature: invalidTemperature);
+
+        await sut.GetResponseAsync([new ChatMessage(ChatRole.User, "code")],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        if (Body(capture).TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Object)
+        {
+            opts.TryGetProperty("temperature", out _).Should().BeFalse("越界 temperature 不得注入非法采样参数");
+            opts.TryGetProperty("top_p", out _).Should().BeFalse();
+            opts.TryGetProperty("top_k", out _).Should().BeFalse();
+        }
     }
 
     [Fact]

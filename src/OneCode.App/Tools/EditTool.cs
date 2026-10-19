@@ -87,6 +87,12 @@ public sealed class EditTool(
                     insertText = newString;
                     count = CountOccurrences(content, searchFor);
                 }
+                else if (!replaceAll &&
+                         TryResolveUniqueTrailingWhitespaceAnchor(content, searchFor, out var fallbackAnchor))
+                {
+                    searchFor = fallbackAnchor;
+                    count = 1;
+                }
             }
 
             switch (count)
@@ -183,6 +189,75 @@ public sealed class EditTool(
             idx += pattern.Length;
         }
         return count;
+    }
+
+    /// <summary>
+    /// 当精确匹配 0 命中且非 <c>replaceAll</c> 时，尝试忽略每行末尾空白（<c>TrimEnd(' ', '\t')</c>）定位唯一锚点。
+    /// 仅当全文件恰好唯一命中 1 处（<c>count == 1</c>）时返回原文件对应切片，不改写 <c>newString</c>；0 处或多处命中均返回 <c>false</c>。
+    /// </summary>
+    private static bool TryResolveUniqueTrailingWhitespaceAnchor(
+        string content,
+        string searchFor,
+        out string matchedAnchor)
+    {
+        matchedAnchor = string.Empty;
+        if (string.IsNullOrWhiteSpace(searchFor))
+            return false;
+
+        var fileLines = ParseLines(content);
+        var searchLines = ParseLines(searchFor);
+        var windowLen = searchLines.Count;
+        if (windowLen == 0 || windowLen > fileLines.Count)
+            return false;
+
+        var matchIndex = -1;
+        for (var i = 0; i <= fileLines.Count - windowLen; i++)
+        {
+            if (!MatchesIgnoringTrailingWhitespace(fileLines, i, searchLines))
+                continue;
+
+            if (matchIndex >= 0)
+                return false; // 多处命中，严守唯一锚点契约拒绝消歧
+            matchIndex = i;
+        }
+
+        if (matchIndex < 0)
+            return false;
+
+        var anchor = content[fileLines[matchIndex].Start..fileLines[matchIndex + windowLen - 1].RawEnd];
+        if (CountOccurrences(content, anchor) != 1)
+            return false;
+
+        matchedAnchor = anchor;
+        return true;
+    }
+
+    private static List<(int Start, int RawEnd, string Text)> ParseLines(string content)
+    {
+        List<(int Start, int RawEnd, string Text)> lines = [];
+        for (var pos = 0; pos <= content.Length;)
+        {
+            var nextLf = content.IndexOf('\n', pos);
+            var lineEnd = nextLf >= 0 ? nextLf : content.Length;
+            var rawEnd = lineEnd > pos && content[lineEnd - 1] == '\r' ? lineEnd - 1 : lineEnd;
+            lines.Add((pos, rawEnd, content[pos..rawEnd]));
+            if (nextLf < 0) break;
+            pos = nextLf + 1;
+        }
+        return lines;
+    }
+
+    private static bool MatchesIgnoringTrailingWhitespace(
+        List<(int Start, int RawEnd, string Text)> fileLines,
+        int startIndex,
+        List<(int Start, int RawEnd, string Text)> searchLines)
+    {
+        for (var j = 0; j < searchLines.Count; j++)
+        {
+            if (!fileLines[startIndex + j].Text.AsSpan().TrimEnd(" \t").SequenceEqual(searchLines[j].Text.AsSpan().TrimEnd(" \t")))
+                return false;
+        }
+        return true;
     }
 
     private string BuildMissingFileMessage(string fullPath, string workingDirectory)

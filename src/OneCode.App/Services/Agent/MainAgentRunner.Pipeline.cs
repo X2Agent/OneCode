@@ -26,7 +26,7 @@ public partial class MainAgentRunner
         long? budgetBaselineTokens = null,
         CancellationToken ct = default)
     {
-        var (compactionStrategy, providerId, contextWindow) = await _compactionBuilder
+        var (compactionStrategy, providerId) = await _compactionBuilder
             .BuildAsync(options.ModelId, ct).ConfigureAwait(false);
 
         var contextProviders = await _contextPipeline

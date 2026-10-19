@@ -27,7 +27,7 @@
 - Worker 阈值更激进：子 Agent 上下文更短、生命周期更短；只读研究子 Agent（`Explore` / `Plan`）额外叠加 `40K / 80K / 120K` 绝对 token 上限，在大窗模型下提前折叠大文件读取与搜索输出。
 - 模型上下文窗口与最大输出 token 由 `CompactionStrategyFactory` 从 `IModelManager` 解析（主 Agent 输出上限缺省 8,192，Worker 缺省 4,096，可被 `maxOutputTokensOverride` 覆盖）。
   窗口按守卫式读取：`0` 视作「未解析出窗口」，回落到 catalog / 128,000 默认值，不会作为有效窗口传给严格校验。
-- 输出预留仅对**本地 Ollama** 收敛为 `min(缺省值, 窗口 / 4)`：本地小窗口（4K~8K）装不下固定 8,192，而预留 ≥ 窗口会被装配校验直接拒绝。窗口 ≥ 32,768 时结果与固定预留一致；其余 provider 保持原值，云端预算不受影响。
+- 输出预留仅对**本地 Ollama** 收敛为 `min(缺省值, 窗口 / 4)`：本地小窗口（4K~8K）装不下固定 8,192，而预留 ≥ 窗口会被装配校验直接拒绝。窗口 ≥ 32,768 时结果与固定预留一致；其余 provider 保持原值，云端预算不受影响。客户端管道的 `MaxOutputTokensDecorator` 在已知有限窗口（本地 Ollama `num_ctx`）下同样按 `min(8,192, 窗口 / 4)` 注入首轮默认输出上限，并将 `Length` 恢复升级上限及显式超窗值钳制到 `contextWindow - 1`。
 
 ### 策略升级顺序（`PipelineCompactionStrategy`，逐级触发）
 
