@@ -8,6 +8,7 @@ using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Persistence;
 using OneCode.Infrastructure.Media;
+using OneCode.Infrastructure.Setup;
 
 namespace OneCode.App.Services;
 
@@ -42,7 +43,7 @@ public sealed class AppStartupService(
                 TaskContinuationOptions.OnlyOnFaulted);
 
         // DurableFile 崩溃残留清扫与自更新 .old 旧可执行文件清理
-        Setup.UpgradeService.TryCleanupStaleOldExecutable(Environment.ProcessPath, logger);
+        UpgradeService.TryCleanupStaleOldExecutable(Environment.ProcessPath, logger);
         var durableRoot = PathsHelper.GetUserConfigDir();
         _ = Task.Run(
             () =>

@@ -1,4 +1,4 @@
-using OneCode.App.Services.Hooks;
+using OneCode.Infrastructure.Hooks;
 
 namespace OneCode.Tests;
 

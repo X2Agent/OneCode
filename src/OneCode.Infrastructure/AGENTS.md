@@ -17,6 +17,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Build/` | Build run 落盘（`JsonBuildRunStore`）+ 工作区指纹（`WorkspaceFingerprintProvider`） |
 | `Config/` | 配置解析与持久化（`ConfigManager`）、配置目录解析（`ConfigDirPaths`）、共享常量（`Constants` 系列） |
 | `Goals/` | Goal 工作区准备（`GitGoalWorkspaceService`、`GoalWorkspacePathResolver` 隔离 worktree 路径解析）+ Goal run 落盘（`JsonGoalRunStore`） |
+| `Hooks/` | Hook 敏感字段展开（`HookSecretExpander`：dpapi: DPAPI 解密 + ${ENV_VAR} 展开；执行器与注册表在 App） |
 | `Git/` | Git 操作（blame 解析 + worktree 布局） |
 | `Keybindings/` | 用户快捷键配置加载（`KeybindingLoader`） |
 | `Mcp/` | 传输级 MCP 客户端与配置适配：`McpClient` 封装官方 ModelContextProtocol SDK（stdio / SSE / HTTP 传输），自定义 WebSocket / InProcess transport，`.mcp.json` 解析（`McpConfigParser`）与多作用域加载（`McpMultiScopeConfigLoader`），官方 registry 客户端（`OfficialMcpRegistryClient`）。连接池管理器 `McpConnectionManager` 在 App 层（`OneCode.App/Services/Mcp/`），其接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`） |
@@ -30,6 +31,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Remote/` | 远程 Agent 通信（`SshRemoteService` / `SshToolHelper`，SSH.NET） |
 | `Search/` | Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |
 | `Skills/` | Skill frontmatter 解析（`SkillFrontmatterParser`，YamlDotNet）+ Skill 模型（`SkillTypes`） |
+| `Setup/` | 自更新域：GitHub Release 版本检查（`ReleaseNotesService`）+ 下载/校验/解压/原地替换流水线（`UpgradeService`） |
 | `Tasks/` | 子代理任务落盘（`JsonTaskStore`） |
 | `Text/` | 纯文本处理：统一 diff（`UnifiedDiff`）、HTML→Markdown（`HtmlToMarkdownConverter`，AngleSharp）、文件编码/行尾检测（`FileEncodingHelper`）、LSP URI 转换（`LspUriHelper`） |
 | `Tools/` | 工具域适配（`GenericVerificationProvider` / `ProjectCommandDetector`） |
@@ -63,6 +65,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Microsoft.Extensions.Caching.Memory` | 内存缓存 |
 | `Microsoft.Extensions.FileSystemGlobbing` | 文件 Glob 匹配 |
 | `System.ClientModel` | AI 客户端模型基类 |
+| `System.Security.Cryptography.ProtectedData` | Windows DPAPI（`HookSecretExpander` 解密 `dpapi:` 前缀敏感字段） |
 | `Anthropic` | Anthropic API SDK（`ChatClientFactory` 内部使用，App 层不直接引用） |
 | `Microsoft.Extensions.AI.OpenAI` | OpenAI 兼容客户端 SDK（`ChatClientFactory` 内部使用） |
 | `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Harness` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架 1.24.0（实验性 API 的诊断 ID `MAAI001` 由 `src/Directory.Build.props` 的全局 `NoWarn` 统一抑制；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension；Harness 提供 `HarnessAgent` 装配） |

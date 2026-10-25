@@ -1,5 +1,5 @@
 using OneCode.Core.Product;
-using OneCode.App.Services.Setup;
+using OneCode.Infrastructure.Setup;
 
 namespace OneCode.App.Commands;
 

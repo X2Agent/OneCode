@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.RegularExpressions;
 
-namespace OneCode.App.Services.Hooks;
+namespace OneCode.Infrastructure.Hooks;
 
 /// <summary>
 /// Hook 配置敏感字段展开器（C1）——webhookUrl / secret / url 等字段支持两种保密形式：
@@ -28,6 +26,8 @@ public static partial class HookSecretExpander
 
         if (value.StartsWith(DpapiPrefix, StringComparison.Ordinal))
         {
+            if (!OperatingSystem.IsWindows())
+                throw new PlatformNotSupportedException("dpapi: 前缀仅支持 Windows（ProtectedData/DPAPI）");
             var protectedBytes = Convert.FromBase64String(value[DpapiPrefix.Length..]);
             var plain = ProtectedData.Unprotect(protectedBytes, optionalEntropy: null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(plain);

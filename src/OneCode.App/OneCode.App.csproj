@@ -20,7 +20,6 @@
     <PackageReference Include="Microsoft.Extensions.AI" />
 
     <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
     <PackageReference Include="CliWrap" />

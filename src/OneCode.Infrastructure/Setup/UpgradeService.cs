@@ -7,7 +7,7 @@ using OneCode.Core.IO;
 
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Setup;
+namespace OneCode.Infrastructure.Setup;
 
 /// <summary>
 /// 执行 OneCode 自更新:下载 GitHub Release 资产 → 校验 SHA256 → 解压 → 原地替换当前安装。
@@ -215,7 +215,7 @@ public sealed class UpgradeService(
     public void CleanupStaleOldExecutable(string? exePath = null)
         => TryCleanupStaleOldExecutable(exePath ?? Environment.ProcessPath, _logger);
 
-    /// <summary>静态清理入口，供 <see cref="AppStartupService"/> 启动预热与升级流程共用。</summary>
+    /// <summary>静态清理入口，供启动预热（App 的 AppStartupService）与升级流程共用。</summary>
     public static void TryCleanupStaleOldExecutable(string? exePath, ILogger? logger = null)
     {
         var target = exePath is { Length: > 0 } p ? p + ".old" : null;

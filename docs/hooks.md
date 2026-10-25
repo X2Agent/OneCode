@@ -179,9 +179,10 @@ OneCode 运行时
 | `FeishuNotificationProvider` | 飞书机器人通知 Provider（编译型） |
 | `WeChatWorkNotificationProvider` | 企业微信群机器人通知 Provider（编译型） |
 | `HookTemplateRenderer` | `{{Field}}` 模板插值渲染器（支持 8 个字段，未知字段保持原样） |
-| `HookSecretExpander` | 敏感字段展开器（`dpapi:` → DPAPI 解密；否则 `${ENV_VAR}` 环境变量） |
 | `HostStopSessionCloseService` | 宿主停止时兜底关闭前台会话的 `IHostedService`（随 `AddHookServices` 注册） |
 | `HookSerializerContext` | JSON Source Generator（高频序列化性能） |
+
+敏感字段展开器 `HookSecretExpander`（`dpapi:` → DPAPI 解密；否则 `${ENV_VAR}` 环境变量展开）位于 `OneCode.Infrastructure/Hooks/`（OS 级加密适配）。
 
 ### 3.3 集成点（`OneCode.Infrastructure/Middleware/`）
 

@@ -1,7 +1,7 @@
 using OneCode.Core.Product;
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Setup;
+namespace OneCode.Infrastructure.Setup;
 
 /// <summary>
 /// Checks for product updates by querying the latest GitHub release and comparing
