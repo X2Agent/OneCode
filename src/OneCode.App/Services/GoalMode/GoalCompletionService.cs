@@ -2,6 +2,7 @@ using OneCode.App.Services.Lsp;
 using OneCode.Core.Goals;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
+using OneCode.Infrastructure.Goals;
 
 namespace OneCode.App.Services.GoalMode;
 

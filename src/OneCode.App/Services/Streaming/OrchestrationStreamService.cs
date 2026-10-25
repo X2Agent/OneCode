@@ -4,6 +4,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Query;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Goals;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
 using System.Runtime.CompilerServices;

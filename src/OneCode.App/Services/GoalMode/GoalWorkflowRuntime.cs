@@ -4,6 +4,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Query;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Goals;
 using static OneCode.App.Services.GoalMode.GoalWorkflowStateMapper;
 
 namespace OneCode.App.Services.GoalMode;

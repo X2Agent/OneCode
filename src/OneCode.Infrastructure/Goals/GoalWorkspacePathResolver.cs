@@ -1,7 +1,7 @@
-using System.Diagnostics;
+using OneCode.Core.Goals;
 using OneCode.Core.IO;
 
-namespace OneCode.Core.Goals;
+namespace OneCode.Infrastructure.Goals;
 
 /// <summary>
 /// Resolves effective working directories and step file paths inside an isolated Goal worktree,
