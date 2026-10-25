@@ -1,6 +1,6 @@
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// LSP (Language Server Protocol) client implementation.

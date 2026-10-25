@@ -1,5 +1,5 @@
+using OneCode.Infrastructure.Lsp;
 using OneCode.App.Services;
-using OneCode.App.Services.Lsp;
 
 using OneCode.Core.Keybindings;
 

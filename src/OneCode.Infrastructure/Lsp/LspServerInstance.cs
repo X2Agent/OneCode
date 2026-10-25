@@ -1,7 +1,7 @@
 
 using OneCode.Core.Lsp;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// Wraps an LspClient with server-specific logic and state tracking.

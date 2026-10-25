@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.Infrastructure.Lsp;
 using OneCode.Core.Goals;
 
 namespace OneCode.App.Services.Agent;
@@ -141,7 +142,7 @@ public sealed record GoalToolExecutionEvidence(
 /// </summary>
 public sealed record GoalSubGoalGateDependencies(
     IVerificationProvider? VerificationProvider,
-    OneCode.App.Services.Lsp.LspDiagnosticRegistry? DiagnosticRegistry);
+    LspDiagnosticRegistry? DiagnosticRegistry);
 
 /// <summary>确定性验证步骤的可审计证据。</summary>
 public sealed record GoalValidationEvidence(

@@ -19,6 +19,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Goals/` | Goal 工作区准备（`GitGoalWorkspaceService`、`GoalWorkspacePathResolver` 隔离 worktree 路径解析）+ Goal run 落盘（`JsonGoalRunStore`） |
 | `Hooks/` | Hook 敏感字段展开（`HookSecretExpander`：dpapi: DPAPI 解密 + ${ENV_VAR} 展开；执行器与注册表在 App） |
 | `Git/` | Git 操作（blame 解析 + worktree 布局） |
+| `Lsp/` | LSP 服务器进程域：`LspClient`（stdio JSON-RPC，`LspProtocol` 帧编解码）、`LspServerManager`（生命周期/健康检查/崩溃自愈）、`LspServerInstance`、`LspDiagnosticRegistry`（诊断收集存储，含 `LspDiagnostic`/`LspRange`）、`LanguagePackInstaller` / `LanguagePackRegistry` / `BuiltInLanguagePacks` / `LspProjectMatcher`（语言包定义与安装）。契约 `ILspServerManager` 等在 Core.Lsp；App 保留 HostedService 与 EnhancedLspService 编排 |
 | `Keybindings/` | 用户快捷键配置加载（`KeybindingLoader`） |
 | `Mcp/` | 传输级 MCP 客户端与配置适配：`McpClient` 封装官方 ModelContextProtocol SDK（stdio / SSE / HTTP 传输），自定义 WebSocket / InProcess transport，`.mcp.json` 解析（`McpConfigParser`）与多作用域加载（`McpMultiScopeConfigLoader`），官方 registry 客户端（`OfficialMcpRegistryClient`）。连接池管理器 `McpConnectionManager` 在 App 层（`OneCode.App/Services/Mcp/`），其接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`） |
 | `Media/` | 图像处理管道（`ImagePipeline`，截图缩放/格式转换） |

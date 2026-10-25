@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using OneCode.Infrastructure.Lsp;
 using OneCode.App.Tools;
 using OneCode.Core.Lsp;
 

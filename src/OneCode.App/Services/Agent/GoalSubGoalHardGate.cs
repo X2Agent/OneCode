@@ -1,4 +1,5 @@
 using OneCode.App.Services.Lsp;
+using OneCode.Infrastructure.Lsp;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OneCode.Infrastructure.Lsp;
 using OneCode.App.Services.Lsp;
 
 namespace OneCode.Tests;

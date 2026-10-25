@@ -1,6 +1,6 @@
 using System.Diagnostics;
+using OneCode.Infrastructure.Lsp;
 using Microsoft.Extensions.Logging.Abstractions;
-using OneCode.App.Services.Lsp;
 using OneCode.Core.Lsp;
 
 namespace OneCode.Tests;

@@ -2,7 +2,7 @@
 using OneCode.Infrastructure.Text;
 using OneCode.Core.Lsp;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// Collects and manages LSP diagnostics from multiple servers.

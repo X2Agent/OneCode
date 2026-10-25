@@ -1,7 +1,7 @@
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// Manages multiple LSP server instances — lifecycle, health checks, and diagnostic collection.

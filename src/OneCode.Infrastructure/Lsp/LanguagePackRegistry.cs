@@ -1,7 +1,6 @@
 using OneCode.Core.Lsp;
-using OneCode.Infrastructure;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// Discovers and manages language packs.

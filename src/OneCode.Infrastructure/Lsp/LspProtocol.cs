@@ -1,10 +1,10 @@
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// LSP 协议的 JSON-RPC 帧编解码与工具函数（Content-Length 帧格式）。
 /// 无状态，独立于 <see cref="LspClient"/> 便于复用与单测。
 /// </summary>
-internal static class LspProtocol
+public static class LspProtocol
 {
     // Cloned JsonElements outlive their parent JsonDocument, so these are safe to
     // reuse as default parameter values without disposing.

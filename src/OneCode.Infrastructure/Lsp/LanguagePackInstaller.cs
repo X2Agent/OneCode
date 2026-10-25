@@ -1,7 +1,8 @@
 using OneCode.Core.Lsp;
+using OneCode.Core.Tools;
 using OneCode.Infrastructure.Config;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>Result of an install or uninstall operation.</summary>
 public sealed record InstallResult(bool Success, string Message, string? PackId);

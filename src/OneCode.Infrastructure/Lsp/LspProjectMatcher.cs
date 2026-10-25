@@ -1,12 +1,12 @@
 using OneCode.Core.Lsp;
 
-namespace OneCode.App.Services.Lsp;
+namespace OneCode.Infrastructure.Lsp;
 
 /// <summary>
 /// Detects whether a working directory looks like a project for a given language pack
 /// by matching top-level <see cref="LanguagePack.ProjectFiles"/> globs.
 /// </summary>
-internal static class LspProjectMatcher
+public static class LspProjectMatcher
 {
     /// <summary>
     /// Returns true when any configured project-marker glob matches a file at the

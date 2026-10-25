@@ -1,7 +1,7 @@
 using System.Text.Json;
+using OneCode.Infrastructure.Lsp;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Search;
 using OneCode.App.Tools;
 using OneCode.Core.IO;

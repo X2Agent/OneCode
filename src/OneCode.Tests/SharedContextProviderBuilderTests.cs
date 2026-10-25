@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using OneCode.Infrastructure.Lsp;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;

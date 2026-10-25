@@ -1,7 +1,7 @@
 using OneCode.App.Query;
+using OneCode.Infrastructure.Lsp;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Lsp;
 using OneCode.Core.Prompt;
 
 namespace OneCode.App.Commands;

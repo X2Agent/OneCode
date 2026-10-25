@@ -1,8 +1,8 @@
 using System.Text.Json;
+using OneCode.Infrastructure.Lsp;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Context;
-using OneCode.App.Services.Lsp;
 using OneCode.Infrastructure.Text;
 using System.Reflection;
 

@@ -79,6 +79,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `HtmlToMarkdownConverter` | `Tools/HtmlToMarkdownConverter.cs` | `OneCode.Infrastructure.Text.HtmlToMarkdownConverter` |
 | `ReleaseNotesService` + `UpgradeService` | `Services/Setup/` | `OneCode.Infrastructure.Setup`（GitHub Release 检查 + 自更新流水线） |
 | `HookSecretExpander` | `Services/Hooks/HookSecretExpander.cs` | `OneCode.Infrastructure.Hooks.HookSecretExpander`（DPAPI/环境变量展开；`ProtectedData` 包随迁） |
+| LSP 进程域 9 件 | `Services/Lsp/`（Client/ServerInstance/ServerManager/Protocol/DiagnosticRegistry/LanguagePackInstaller/LanguagePackRegistry/BuiltInLanguagePacks/LspProjectMatcher） | `OneCode.Infrastructure.Lsp`；App 保留 `LspHostedService` / `EnhancedLspService` / `LspNotifier` / DI 装配 |
 | MAF 中间件集 + Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码

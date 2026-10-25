@@ -1,5 +1,5 @@
 using System.Text;
-using OneCode.App.Services.Lsp;
+using OneCode.Infrastructure.Lsp;
 using OneCode.Core.Lsp;
 
 namespace OneCode.App.Commands;

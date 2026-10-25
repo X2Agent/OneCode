@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using OneCode.Infrastructure.Lsp;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Goals;
@@ -26,7 +27,7 @@ public static class GoalServiceCollectionExtensions
         services.AddSingleton<IGoalPlanningService>(sp => sp.GetRequiredService<GoalDecomposer>());
         services.AddSingleton(sp => new GoalSubGoalGateDependencies(
             sp.GetService<IVerificationProvider>(),
-            sp.GetService<Services.Lsp.LspDiagnosticRegistry>()));
+            sp.GetService<LspDiagnosticRegistry>()));
         services.AddSingleton<GoalSubTaskDagRunner>();
         services.AddSingleton(sp => new GoalSubGoalExecutor(
             sp.GetRequiredService<IMainAgentRunner>(),
@@ -42,7 +43,7 @@ public static class GoalServiceCollectionExtensions
             sp.GetRequiredService<IGoalRunStore>(),
             sp.GetRequiredService<IGoalWorkspaceService>(),
             sp.GetService<IVerificationProvider>(),
-            sp.GetService<Services.Lsp.LspDiagnosticRegistry>(),
+            sp.GetService<LspDiagnosticRegistry>(),
             logger: sp.GetRequiredService<ILogger<GoalCompletionService>>()));
         services.AddSingleton<IGoalWorkflowRuntimeFactory, GoalWorkflowRuntimeFactory>();
 

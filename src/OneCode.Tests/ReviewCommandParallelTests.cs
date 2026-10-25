@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OneCode.Infrastructure.Lsp;
 using NSubstitute;
 using OneCode.App.Commands;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Lsp;
 using OneCode.Core.Commands;
 using OneCode.Core.Domain;
 using OneCode.Core.Prompt;
