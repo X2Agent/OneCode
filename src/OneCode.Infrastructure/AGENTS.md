@@ -12,11 +12,11 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | 子目录 | 职责 |
 |--------|------|
 | `Agent/` | **MAF 管道装配层**：Agent 构建与中间件栈（`AgentPipelineBuilder`）、Harness 产品化默认值（`OneCodeHarnessDefaults` / `PipelineProfile`）、上下文压缩策略（`CompactionPipelineBuilder` / `GuardedSummarizationCompactionStrategy`）、工具审批标记与自动批准规则（`ToolApprovalMarker` 装配期标记 + `ToolApprovalMarkingContextProvider` 请求期标记 provider + `HarnessProviderTools` provider 工具名单/元数据/按名放行规则 + `AutoApprovalRulesFactory`）、Run 级中间件（`RunMiddleware/`：BudgetGuard / UsageTracking）、会话状态扩展（`SessionStateExtensions`）、Hyperlight 代码执行服务（`HyperlightCodeActService`）、SSH shell（`SshShellExecutor`） |
-| `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
+| `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、缺密钥哨兵（`MissingApiKeyChatClient`）、Token 估算、OpenAI 响应消毒 |
 | `Api/` | 跨轮 API 用量账本（`TokenLedger`） |
 | `Build/` | Build run 落盘（`JsonBuildRunStore`）+ 工作区指纹（`WorkspaceFingerprintProvider`） |
 | `Config/` | 配置解析与持久化（`ConfigManager`）、配置目录解析（`ConfigDirPaths`）、共享常量（`Constants` 系列） |
-| `Goals/` | Goal 工作区准备（`GitGoalWorkspaceService`）+ Goal run 落盘（`JsonGoalRunStore`） |
+| `Goals/` | Goal 工作区准备（`GitGoalWorkspaceService`、`GoalWorkspacePathResolver` 隔离 worktree 路径解析）+ Goal run 落盘（`JsonGoalRunStore`） |
 | `Git/` | Git 操作（blame 解析 + worktree 布局） |
 | `Keybindings/` | 用户快捷键配置加载（`KeybindingLoader`） |
 | `Mcp/` | 传输级 MCP 客户端与配置适配：`McpClient` 封装官方 ModelContextProtocol SDK（stdio / SSE / HTTP 传输），自定义 WebSocket / InProcess transport，`.mcp.json` 解析（`McpConfigParser`）与多作用域加载（`McpMultiScopeConfigLoader`），官方 registry 客户端（`OfficialMcpRegistryClient`）。连接池管理器 `McpConnectionManager` 在 App 层（`OneCode.App/Services/Mcp/`），其接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`） |
@@ -31,7 +31,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Search/` | Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |
 | `Skills/` | Skill frontmatter 解析（`SkillFrontmatterParser`，YamlDotNet）+ Skill 模型（`SkillTypes`） |
 | `Tasks/` | 子代理任务落盘（`JsonTaskStore`） |
-| `Text/` | 纯文本处理：统一 diff（`UnifiedDiff`）、文件编码/行尾检测（`FileEncodingHelper`）、LSP URI 转换（`LspUriHelper`） |
+| `Text/` | 纯文本处理：统一 diff（`UnifiedDiff`）、HTML→Markdown（`HtmlToMarkdownConverter`，AngleSharp）、文件编码/行尾检测（`FileEncodingHelper`）、LSP URI 转换（`LspUriHelper`） |
 | `Tools/` | 工具域适配（`GenericVerificationProvider` / `ProjectCommandDetector`） |
 | `Workflows/` | Workflow run 注册表落盘（`JsonWorkflowRunRegistry`） |
 

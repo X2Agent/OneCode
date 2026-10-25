@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Caching.Memory;
 using OneCode.Infrastructure.Config;
+using OneCode.Infrastructure.Text;
 
 namespace OneCode.App.Tools;
 

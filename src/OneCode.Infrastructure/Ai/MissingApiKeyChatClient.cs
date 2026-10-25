@@ -1,11 +1,11 @@
 using Microsoft.Extensions.AI;
-namespace OneCode.App.Query;
+namespace OneCode.Infrastructure.Ai;
 
 /// <summary>
 /// Sentinel IChatClient — registered when no API key is configured.
 /// Throws on first use to prompt the user to configure credentials.
 /// </summary>
-internal sealed class MissingApiKeyChatClient(ILogger<MissingApiKeyChatClient> _logger) : IChatClient
+public sealed class MissingApiKeyChatClient(ILogger<MissingApiKeyChatClient> _logger) : IChatClient
 {
     public void Dispose() { }
 

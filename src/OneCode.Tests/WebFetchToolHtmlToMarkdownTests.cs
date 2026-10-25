@@ -1,4 +1,5 @@
 using OneCode.App.Tools;
+using OneCode.Infrastructure.Text;
 
 namespace OneCode.Tests;
 

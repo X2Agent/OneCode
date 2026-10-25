@@ -1,21 +1,19 @@
-using System.Text;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
-namespace OneCode.App.Tools;
+namespace OneCode.Infrastructure.Text;
 
 /// <summary>
 /// HTML→Markdown 转换器（WebFetchTool 专用）——基于 AngleSharp DOM 遍历的纯静态实现。
-/// 测试经 InternalsVisibleTo 覆盖 <see cref="Convert"/>。
 /// </summary>
-internal static class HtmlToMarkdownConverter
+public static class HtmlToMarkdownConverter
 {
     private static readonly HtmlParser Parser = new();
 
     // Markdown fenced-code opener/closer length (` ``` `).
     private const int MarkdownFenceLength = 3;
 
-    internal static string Convert(string html)
+    public static string Convert(string html)
     {
         if (string.IsNullOrWhiteSpace(html))
             return string.Empty;

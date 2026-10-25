@@ -24,8 +24,6 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
     <PackageReference Include="CliWrap" />
-    <!-- AngleSharp: WebFetchTool HTML→Markdown DOM 解析（替代正则，消除 ReDoS 风险） -->
-    <PackageReference Include="AngleSharp" />
   </ItemGroup>
 
   <ItemGroup>

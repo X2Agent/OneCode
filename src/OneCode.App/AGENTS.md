@@ -35,7 +35,6 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | `Terminal.Gui` | **禁止**——TUI 渲染栈只允许出现在 `OneCode.Tui` 项目 | OneCode.Tui |
 | `Microsoft.Extensions.AI` | AI 调用抽象（`IChatClient` / `ChatMessage` 等核心接口） | App |
 | `Microsoft.Extensions.Hosting` | DI + 生命周期 | App |
-| `AngleSharp` | HTML DOM 解析（WebFetchTool 的 HTML→Markdown 转换） | App |
 | `System.Security.Cryptography.ProtectedData` | Windows DPAPI 密钥解密（HookSecretExpander） | App |
 | `Markdig` | **禁止**——Markdown 渲染在 `OneCode.Tui` | OneCode.Tui |
 | `CliWrap` | 进程调用（Bash/PowerShell 工具执行） | App |
@@ -77,6 +76,8 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `CompactionPipelineBuilder` | `Services/Agent/CompactionPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.CompactionPipelineBuilder` |
 | `AgentPipelineBuilder` | `Services/Agent/AgentPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.AgentPipelineBuilder` |
 | `UnifiedDiff` | `Tools/UnifiedDiff.cs` | `OneCode.Infrastructure.Text.UnifiedDiff` |
+| `MissingApiKeyChatClient` | `Query/MissingApiKeyChatClient.cs` | `OneCode.Infrastructure.Ai.MissingApiKeyChatClient` |
+| `HtmlToMarkdownConverter` | `Tools/HtmlToMarkdownConverter.cs` | `OneCode.Infrastructure.Text.HtmlToMarkdownConverter` |
 | MAF 中间件集 + Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码
