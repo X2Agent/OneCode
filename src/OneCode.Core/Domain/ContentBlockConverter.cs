@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 
-namespace OneCode.App.Session;
+namespace OneCode.Core.Domain;
 
-internal sealed class ContentBlockConverter : JsonConverter<ContentBlock>
+public sealed class ContentBlockConverter : JsonConverter<ContentBlock>
 {
     private static readonly JsonSerializerOptions InnerOptions = new()
     {

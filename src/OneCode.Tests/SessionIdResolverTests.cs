@@ -1,5 +1,5 @@
+using OneCode.Core.Session;
 using OneCode.App.Session;
-using OneCode.Core.Domain;
 
 namespace OneCode.Tests;
 
@@ -13,7 +13,7 @@ public sealed class SessionIdResolverTests
     private const string UnrelatedId = "1a2b3c4d5e6f7a889900112233445566";
 
     private static ConversationSummary Summary(string fullId) =>
-        new(new SessionId(fullId), null, "gpt-5", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        new(new SessionId(fullId), null, "gpt-5", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new TokenUsage(0, 0));
 
     [Fact]
     public void Resolve_FullId_ParsesDirectly()

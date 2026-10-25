@@ -1,3 +1,4 @@
+using OneCode.Core.Session;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Commands;
@@ -6,7 +7,6 @@ using OneCode.App.Services;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.GoalMode;
 using OneCode.Core.Goals;

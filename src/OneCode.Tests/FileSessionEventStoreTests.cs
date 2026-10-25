@@ -1,4 +1,4 @@
-using OneCode.Core.Domain;
+using OneCode.Infrastructure.Persistence;
 using OneCode.Core.Session;
 
 namespace OneCode.Tests;
@@ -12,7 +12,7 @@ public sealed class FileSessionEventStoreTests : IDisposable
     [Fact]
     public async Task AppendAndRead_RoundTripsTypedEvents()
     {
-        var store = new OneCode.App.Session.FileSessionEventStore(_root);
+        var store = new FileSessionEventStore(_root);
         var sessionId = SessionId.NewId();
         var now = DateTimeOffset.UtcNow;
 
@@ -33,7 +33,7 @@ public sealed class FileSessionEventStoreTests : IDisposable
     [Fact]
     public async Task Append_ConcurrentBatches_ProducesContinuousSequences()
     {
-        var store = new OneCode.App.Session.FileSessionEventStore(_root);
+        var store = new FileSessionEventStore(_root);
         var sessionId = SessionId.NewId();
         var now = DateTimeOffset.UtcNow;
 

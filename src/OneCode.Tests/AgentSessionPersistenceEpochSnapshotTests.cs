@@ -5,7 +5,6 @@ using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
 using OneCode.App.Session;
-using OneCode.Core.Domain;
 using System.Text.Json;
 
 namespace OneCode.Tests;

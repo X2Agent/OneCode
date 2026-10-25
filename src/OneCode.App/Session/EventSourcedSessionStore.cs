@@ -106,40 +106,6 @@ public sealed class EventSourcedSessionStore(ISessionEventStore eventStore) : IS
     }
 
     /// <inheritdoc />
-    public async Task<SessionResume?> LoadForResumeAsync(
-        SessionId sessionId,
-        CancellationToken ct = default)
-    {
-        var conversation = await LoadAsync(sessionId, ct).ConfigureAwait(false);
-        if (conversation is null || conversation.Messages.Count == 0)
-            return null;
-
-        var resolvedToolUseIds = conversation.Messages
-            .OfType<ToolResultMessage>()
-            .Select(message => message.ToolUseId)
-            .ToHashSet(StringComparer.Ordinal);
-        var messages = conversation.Messages
-            .Where(message => message is not AssistantMessage assistant
-                || assistant.Content.OfType<ToolUseBlock>().All(tool => resolvedToolUseIds.Contains(tool.Id)))
-            .ToList();
-        var lastMessage = messages.FindLast(message =>
-            message.Role is not MessageRole.System and not MessageRole.Tool);
-        var title = messages.OfType<UserMessage>().FirstOrDefault()?.Content.TrimStart();
-
-        return new SessionResume(
-            sessionId,
-            messages,
-            lastMessage?.Role switch
-            {
-                MessageRole.User => InterruptionState.InterruptedPrompt,
-                _ => InterruptionState.None,
-            },
-            conversation.LastActivityAt,
-            string.IsNullOrEmpty(title) ? "(untitled)" : title,
-            messages.Count);
-    }
-
-    /// <inheritdoc />
     public Task DeleteAsync(SessionId sessionId, CancellationToken ct = default) =>
         eventStore.DeleteAsync(sessionId, ct);
 

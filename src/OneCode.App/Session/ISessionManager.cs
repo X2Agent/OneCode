@@ -1,3 +1,4 @@
+using OneCode.Core.Session;
 using Microsoft.Extensions.AI;
 
 namespace OneCode.App.Session;

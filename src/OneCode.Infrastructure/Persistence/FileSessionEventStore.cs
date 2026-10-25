@@ -1,9 +1,9 @@
-using System.Text.Json.Serialization;
+using OneCode.Core.Domain;
 using OneCode.Core.Session;
 using InfraConstants = OneCode.Infrastructure.Config.Constants;
 using CoreConstants = OneCode.Core.Constants;
 
-namespace OneCode.App.Session;
+namespace OneCode.Infrastructure.Persistence;
 
 /// <summary>按 session 文件追加事件的 JSONL 存储。</summary>
 public sealed class FileSessionEventStore : ISessionEventStore

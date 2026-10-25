@@ -1,3 +1,4 @@
+using OneCode.Core.Session;
 using OneCode.App.Commands;
 using OneCode.App.Query;
 using OneCode.App.Services;
@@ -135,7 +136,7 @@ public sealed class ChatSessionClientTests
         _sessionManager.ListAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new ConversationSummary(
                 new SessionId("aaaaaaaa-0000-0000-0000-000000000001"), "demo", "model-x", 3,
-                DateTimeOffset.Now, DateTimeOffset.Now) });
+                DateTimeOffset.Now, DateTimeOffset.Now, new TokenUsage(0, 0)) });
 
         await client.InitializeAsync();
 
@@ -154,7 +155,7 @@ public sealed class ChatSessionClientTests
         _sessionManager.ForegroundConversation.Returns(new Conversation { Id = id });
         _sessionManager.ListAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new ConversationSummary(
-                id, "switched", "model-x", 2, DateTimeOffset.Now, DateTimeOffset.Now) });
+                id, "switched", "model-x", 2, DateTimeOffset.Now, DateTimeOffset.Now, new TokenUsage(0, 0)) });
         _sessionManager.ReplayAsync(id.ToString(), Arg.Any<CancellationToken>())
             .Returns(new Message[]
             {

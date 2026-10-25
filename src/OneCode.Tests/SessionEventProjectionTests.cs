@@ -1,4 +1,4 @@
-using OneCode.Core.Domain;
+using OneCode.Infrastructure.Persistence;
 using OneCode.Core.Session;
 
 namespace OneCode.Tests;
@@ -40,7 +40,7 @@ public sealed class SessionEventProjectionTests
         try
         {
             var store = new OneCode.App.Session.EventSourcedSessionStore(
-                new OneCode.App.Session.FileSessionEventStore(root));
+                new FileSessionEventStore(root));
             var conversation = new Conversation
             {
                 Id = SessionId.NewId(),

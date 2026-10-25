@@ -85,6 +85,9 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `DebugFileLoggerProvider` | `Logging/` | `OneCode.Infrastructure`（调试文件日志提供器；App/Logging 留组合根日志引导 DI） |
 | `FileIgnore` + `WorkspaceIgnoreProvider` | `Tools/` | `OneCode.Infrastructure.Tools`（内置忽略表 + `.onecodeignore` 引擎；依赖 FileSystemGlobbing 故不进 Core） |
 | `TextSearchService` + `ITextSearchService` | `Services/Search/` | `OneCode.Infrastructure.Search`（ripgrep/Regex 搜索内核） |
+| `ContentBlockConverter` | `Session/` | `OneCode.Core.Domain`（Core 模型自配套 JSON converter） |
+| `ISessionStore` + `ConversationSummary` | `Session/ISessionStore.cs` | `OneCode.Core.Session`（会话存储契约；顺带删除死代码 `SessionResume`/`LoadForResumeAsync`，`TotalUsage` 改必填非空） |
+| `FileSessionEventStore` | `Session/` | `OneCode.Infrastructure.Persistence`（JSONL 事件存储，与 DurableFile/Json*Store 同域） |
 | MAF 中间件集 + Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码

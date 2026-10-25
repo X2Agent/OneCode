@@ -1,4 +1,4 @@
-using OneCode.Core.Domain;
+using OneCode.Core.Session;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NSubstitute;

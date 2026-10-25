@@ -27,7 +27,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Middleware/` | MAF 中间件集（工具参数绑定 / 审批与限流 / Hook / Edit 事务 / 状态机 / 预算等）+ `Invariants/` 守卫（Bash / FileSystem / Resource） |
 | `Model/` | 模型目录缓存服务（`ModelCatalogCacheService`）+ models.dev 客户端（`ModelsDevClient`） |
 | `Permissions/` | YOLO 规则落盘（`Yolo/YoloRuleFileStore`；规则引擎本体在 `OneCode.Core/Permissions/`） |
-| `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底），供 Build / Goals / Workflows 的 run store 复用 |
+| `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底）、会话事件 JSONL 存储（`FileSessionEventStore`），供 Build / Goals / Workflows / Session 的 run store 复用 |
 | `Prompt/` | 文件 Prompt 存储（`FilePromptStore`） |
 | `Remote/` | 远程 Agent 通信（`SshRemoteService` / `SshToolHelper`，SSH.NET） |
 | `Search/` | 文本搜索内核（`TextSearchService`：ripgrep 优先 + C# Regex 回退，契约 `ITextSearchService`）与 Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |

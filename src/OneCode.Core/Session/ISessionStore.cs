@@ -1,4 +1,6 @@
-namespace OneCode.App.Session;
+using OneCode.Core.Domain;
+
+namespace OneCode.Core.Session;
 
 public interface ISessionStore
 {
@@ -7,8 +9,6 @@ public interface ISessionStore
     Task SaveAsync(Conversation conversation, CancellationToken ct = default);
 
     Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default);
-
-    Task<SessionResume?> LoadForResumeAsync(SessionId sessionId, CancellationToken ct = default);
 
     Task DeleteAsync(SessionId sessionId, CancellationToken ct = default);
 }
@@ -24,5 +24,5 @@ public sealed record ConversationSummary(
     int MessageCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivityAt,
-    string? Mode = null,
-    TokenUsage TotalUsage = default);
+    TokenUsage TotalUsage,
+    string? Mode = null);

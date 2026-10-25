@@ -1,7 +1,6 @@
 using OneCode.App.Commands;
 using OneCode.App.Session;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using OneCode.Core.Session;
 using NSubstitute;
 
@@ -23,7 +22,7 @@ public sealed class SessionCommandTests
         new(_manager, _eventStore, new NewCommand(_manager));
 
     private static ConversationSummary Summary(string fullId, string title, string mode = "plan") =>
-        new(new SessionId(fullId), title, "gpt-5", 7, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, mode);
+        new(new SessionId(fullId), title, "gpt-5", 7, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new TokenUsage(0, 0), mode);
 
     private void SetupSessions(params ConversationSummary[] summaries)
     {

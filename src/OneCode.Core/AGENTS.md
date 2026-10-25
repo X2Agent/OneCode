@@ -16,7 +16,7 @@
 | `Config/` | 配置模型（`ConfigModels` 及字段描述符） |
 | `Coordinator/` | 编排事件族（`OrchestrationEvent`） |
 | `Cron/` | `ICronParser` 契约 + `CronExpressionHelper` 纯格式化（Cronos 实现在 Automation） |
-| `Domain/` | 会话领域模型：`Conversation` / `Message` / `ContentBlock` / `MessageCloner` |
+| `Domain/` | 会话领域模型：`Conversation` / `Message` / `ContentBlock` / `MessageCloner` + 模型自配套 JSON converter（`ContentBlockConverter`） |
 | `Errors/` | 错误记录类型 |
 | `Exec/` | Shell 执行契约（`IShellExecutor` + DTO） |
 | `Goals/` | Goal 运行领域模型：`GoalRun` 状态机、`GoalBudget` |
@@ -33,7 +33,7 @@
 | `Prompt/` | `PromptTemplate` 插值 + `PromptManager` 责任链（存储经 `IPromptStore` 外移） |
 | `Results/` | `Result<T>` 操作结果单子 |
 | `Search/` | Web 搜索契约（`IWebSearchProvider`） |
-| `Session/` | 会话事件类型与投影（`ConversationEventMapper`、`SessionEventProjection`） |
+| `Session/` | 会话事件类型与投影（`ConversationEventMapper`、`SessionEventProjection`）+ 会话存储契约（`ISessionStore` / `ConversationSummary` / `ISessionEventStore`） |
 | `Skills/` | 内置技能文本（`BundledSkills`） |
 | `Tasks/` | 子代理任务：`TaskService` 内存任务表（持久化经 `ITaskStore` 外移） |
 | `Text/` | 纯文本算法（`StringDistance`、`TextTokenizer`） |

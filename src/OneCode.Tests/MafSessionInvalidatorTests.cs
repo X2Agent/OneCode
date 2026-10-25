@@ -1,5 +1,4 @@
 using OneCode.App.Services.Compact;
-using OneCode.Core.Domain;
 
 namespace OneCode.Tests;
 
