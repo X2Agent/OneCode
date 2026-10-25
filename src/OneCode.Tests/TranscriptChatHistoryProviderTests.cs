@@ -3,7 +3,6 @@ using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Session;
-using OneCode.Core.Domain;
 using OneCode.Tests.TestSupport;
 
 namespace OneCode.Tests;

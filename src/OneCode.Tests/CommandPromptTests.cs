@@ -3,7 +3,6 @@ using OneCode.Infrastructure.Lsp;
 using OneCode.App.Commands;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Lsp;
 using OneCode.Core.Commands;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;

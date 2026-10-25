@@ -1,7 +1,6 @@
 using OneCode.App.Commands;
 using OneCode.App.Session;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using NSubstitute;
 
 namespace OneCode.Tests;

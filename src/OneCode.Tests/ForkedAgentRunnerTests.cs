@@ -5,7 +5,6 @@ using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
@@ -79,7 +78,8 @@ public sealed class ForkedAgentRunnerTests
                 new SessionIdHolder(),
                 configManager),
             promptComposer: new PromptComposer(promptManager));
-    }    [Fact]
+    }
+    [Fact]
     public void BuildOptions_PropagatesConversationIdToPipelineOptions()
     {
         // fork 管道的 usage 归属：ConversationId 经 SubAgentPipelineFactory → AgentPipelineOptions

@@ -2,8 +2,6 @@
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
-using OneCode.Core.Workflows;
-using OneCode.Core.Domain;
 using OneCode.Core.Tasks;
 using TaskStatus = OneCode.Core.Tasks.TaskStatus;
 namespace OneCode.Tests;

@@ -4,8 +4,6 @@ using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
-using OneCode.Core.Workflows;
-using OneCode.Core.Domain;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.Tests;

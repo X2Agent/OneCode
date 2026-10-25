@@ -6,8 +6,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
-using OneCode.Core.Workflows;
-using OneCode.Core.Domain;
 using OneCode.Core.Tools;
 using OneCode.Core.Tasks;
 using OneCode.Infrastructure.Build;
@@ -207,7 +205,7 @@ public sealed partial class QueryStreamEngineTests
             Arg.Any<CancellationToken>());
     }
 
-        [Fact]
+    [Fact]
     public async Task StreamWorkflowRunAsync_MissingPrescribedPlan_FailsWithoutStartingAgent()
     {
         // 受控执行恒由上层批准的预置计划驱动（WorkflowRunRequest.PrescribedBuildPlan

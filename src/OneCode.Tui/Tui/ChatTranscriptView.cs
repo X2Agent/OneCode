@@ -378,7 +378,7 @@ public sealed partial class ChatTranscriptView : View
         {
             _committedJournal.Add(MemoizeByWidth(width =>
             {
-                List<FormattedLine> lines = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
+                List<FormattedLine> lines = [FormattedLine.Plain("", TuiPalette.BgPrimary)];
                 lines.AddRange(memoized(width));
                 return lines;
             }));

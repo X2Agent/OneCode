@@ -164,13 +164,13 @@ public sealed class McpCommandResolveTests
         string? title = null,
         string? description = null,
         List<OfficialRegistryPackage>? packages = null) => new()
-    {
-        Name = name,
-        Title = title,
-        Description = description,
-        Version = "1.0.0",
-        Packages = packages,
-    };
+        {
+            Name = name,
+            Title = title,
+            Description = description,
+            Version = "1.0.0",
+            Packages = packages,
+        };
 
     private static OfficialRegistryServerEntry Entry(OfficialRegistryServer server) => new()
     {

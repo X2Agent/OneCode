@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Compact;
-using OneCode.Core.Domain;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Ai;

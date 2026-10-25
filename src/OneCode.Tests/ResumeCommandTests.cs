@@ -2,7 +2,6 @@ using NSubstitute;
 using OneCode.App.Commands;
 using OneCode.App.Session;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 
 namespace OneCode.Tests;

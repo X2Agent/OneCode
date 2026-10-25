@@ -1,8 +1,6 @@
 // BuildRunCoordinatorTests partial：计划审批与驳回守卫（state 门、空策略门、工作区漂移重基线门）。
 using NSubstitute;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
-using OneCode.Core.Workflows;
 
 namespace OneCode.Tests;
 

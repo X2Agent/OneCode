@@ -65,8 +65,8 @@ public sealed class ProviderAwareDecorator(
                 InjectOllamaStrategy(options, _ollamaNumCtx, _ollamaTemperature);
                 break;
 
-            // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning，
-            // 无需任何 provider 私有注入。
+                // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning，
+                // 无需任何 provider 私有注入。
         }
 
         return options;

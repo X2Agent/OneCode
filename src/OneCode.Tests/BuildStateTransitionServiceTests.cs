@@ -3,7 +3,6 @@
 // result.TerminalReason，缺边会让预算熔断路径抛 InvalidOperationException。
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
 
 namespace OneCode.Tests;
 

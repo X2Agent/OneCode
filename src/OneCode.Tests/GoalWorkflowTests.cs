@@ -2,9 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
-using OneCode.Core.Workflows;
 using OneCode.Infrastructure.Goals;
 using OneCode.Infrastructure.Workflows;
 

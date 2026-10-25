@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI.Tools.Shell;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Tools;
-using OneCode.Core.Domain;
 
 namespace OneCode.Tests;
 

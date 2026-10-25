@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.Core.Domain;
 using OneCode.Core.Errors;
 using OneCode.Core.Tools;
 

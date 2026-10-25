@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Observability;
-using OneCode.Core.Domain;
 using OneCode.Infrastructure.Api;
 using OneCode.Tests.TestSupport;
 

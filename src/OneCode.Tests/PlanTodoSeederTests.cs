@@ -4,7 +4,6 @@ using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
-using OneCode.Core.Domain;
 using OneCode.Core.Build;
 
 namespace OneCode.Tests;

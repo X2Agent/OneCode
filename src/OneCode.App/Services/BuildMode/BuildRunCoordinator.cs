@@ -97,11 +97,11 @@ public sealed partial class BuildRunCoordinator(
                         durableStateObserver).ConfigureAwait(false);
 
                 case BuildResumeAction.ConfirmCommit:
-                {
-                    var committed = await ConfirmCommitAsync(existing.Id, ct).ConfigureAwait(false);
-                    durableStateObserver?.Invoke(committed);
-                    return committed;
-                }
+                    {
+                        var committed = await ConfirmCommitAsync(existing.Id, ct).ConfigureAwait(false);
+                        durableStateObserver?.Invoke(committed);
+                        return committed;
+                    }
 
                 case BuildResumeAction.ParkAtGate:
                 default:

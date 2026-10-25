@@ -1,7 +1,6 @@
 using NSubstitute;
 using OneCode.Core.Build;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Git;
 using OneCode.Infrastructure.Goals;

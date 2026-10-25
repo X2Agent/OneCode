@@ -176,7 +176,8 @@ public sealed partial class OneCodeToplevel
         }
     }
 
-    private async Task RunQueryAsync(string userText, IReadOnlyList<string>? imagePaths, CancellationToken ct)    {
+    private async Task RunQueryAsync(string userText, IReadOnlyList<string>? imagePaths, CancellationToken ct)
+    {
         try
         {
             await _ctx.CreateSession(ct).ConfigureAwait(false);

@@ -1,7 +1,6 @@
 using OneCode.App.Services;
 using OneCode.App.Services.Compact;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Models;
 using OneCode.Tests.TestSupport;
 

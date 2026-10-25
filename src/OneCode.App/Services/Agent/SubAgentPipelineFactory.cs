@@ -65,7 +65,8 @@ public sealed class SubAgentPipelineFactory(
         return AgentPipelineOptionsFactory.Create(request.Profile, securityContext, roleOverrides)
             // 轮次预算收尾提醒对 fork 全路径开启（MaxTurns 缺省时没有可参照的轮数预算，
             // 不开）；主会话管道不经本工厂装配，逐调用计数不会跨用户消息失真。
-            with { EnableTurnBudgetNudge = request.MaxTurns is not null };
+            with
+        { EnableTurnBudgetNudge = request.MaxTurns is not null };
     }
 
     private PipelineSecurityContext BuildSecurityContext(SubAgentPipelineRequest request)

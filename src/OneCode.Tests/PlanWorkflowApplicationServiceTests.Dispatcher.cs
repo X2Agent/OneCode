@@ -5,7 +5,6 @@ using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 namespace OneCode.Tests;
 
@@ -480,4 +479,5 @@ public sealed partial class PlanWorkflowApplicationServiceTests
         sessionManager.GetConversation(workflow.SessionId).Returns(CreateConversation(workflow.SessionId));
         dispatcher = CreateDispatcher(workflowService);
         return CreateInteractiveSession(sessionManager, runner);
-    }}
+    }
+}

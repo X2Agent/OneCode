@@ -3,7 +3,6 @@ using OneCode.Infrastructure.Lsp;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Lsp;
 using OneCode.App.Services.Skills;
 using OneCode.App.Session;
 using OneCode.App.Tools;
@@ -70,11 +69,11 @@ public sealed class SharedContextProviderBuilderTests
     private static AgentContextProviderOptions Options(
         WorkingMode? workingMode,
         bool suppressToolApproval = false) => new()
-    {
-        WorkingDirectory = Path.GetTempPath(),
-        WorkingMode = workingMode,
-        SuppressToolApproval = suppressToolApproval,
-    };
+        {
+            WorkingDirectory = Path.GetTempPath(),
+            WorkingMode = workingMode,
+            SuppressToolApproval = suppressToolApproval,
+        };
 
     private static (SharedContextProviderBuilder Sut, IHyperlightCodeActService CodeActService, AIContextProvider CodeActProvider)
         CreateSut()

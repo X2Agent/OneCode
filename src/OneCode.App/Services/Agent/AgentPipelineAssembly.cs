@@ -47,7 +47,8 @@ public sealed class AgentPipelineAssembly(
         var roleOverrides = BuildMainRoleOverrides(options);
         // 待办停滞提醒只给计划执行 run：此时待办即步骤进度，停滞会直接表现为界面卡在某一步。
         var pipelineOptions = AgentPipelineOptionsFactory.Create(PipelineProfile.Full, securityContext, roleOverrides)
-            with { EnableTodoStallNudge = options.SeedTodoTasks is { Count: > 0 } };
+            with
+        { EnableTodoStallNudge = options.SeedTodoTasks is { Count: > 0 } };
 
         // Plan 提交即收口：SubmitPlan 落封后，该 run 的工具调用一律被拒，模型只能纯文本收尾。
         // 探针读的是引擎在 run 起点放入 ambient 的封条引用（StartRun 捕获的执行上下文里可见）。

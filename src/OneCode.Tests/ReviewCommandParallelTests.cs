@@ -5,7 +5,6 @@ using OneCode.App.Commands;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Commands;
-using OneCode.Core.Domain;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;

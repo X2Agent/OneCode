@@ -4,7 +4,6 @@ using NSubstitute;
 using OneCode.App.Query;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.PlanMode;
-using OneCode.Core.Domain;
 using OneCode.Core.Permissions;
 using OneCode.Core.PlanMode;
 

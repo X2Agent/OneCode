@@ -11,7 +11,6 @@ using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Tools;
 using OneCode.Tests.TestSupport;

@@ -12,7 +12,6 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.PlanMode;
 using OneCode.Core.Tools;

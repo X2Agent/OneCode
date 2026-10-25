@@ -6,7 +6,6 @@ using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.App.Tools;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 using OneCode.Infrastructure.Middleware;
 

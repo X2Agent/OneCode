@@ -4,7 +4,6 @@ using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Session;
 using OneCode.Infrastructure.Agent;
-using OneCode.Core.Domain;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.Tests;

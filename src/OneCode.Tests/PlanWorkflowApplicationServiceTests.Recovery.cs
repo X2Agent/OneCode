@@ -6,7 +6,6 @@ using OneCode.App.Services.Compact;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 namespace OneCode.Tests;
 

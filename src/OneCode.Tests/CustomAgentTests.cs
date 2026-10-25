@@ -3,7 +3,6 @@ using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tools;
-using OneCode.Core.Domain;
 using OneCode.Core.Tasks;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;

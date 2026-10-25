@@ -1,5 +1,4 @@
 using Microsoft.Agents.AI;
-using OneCode.Infrastructure.Lsp;
 using Microsoft.Agents.AI.Tools.Shell;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.Memory;

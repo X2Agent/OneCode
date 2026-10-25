@@ -2,7 +2,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;

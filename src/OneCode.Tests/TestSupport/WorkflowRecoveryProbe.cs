@@ -112,52 +112,52 @@ internal static class WorkflowRecoveryProbe
         switch (mode)
         {
             case "lease-hold":
-            {
-                using var lease = registry.Acquire(runId);
-                await WriteLeaseResultAsync(resultFile, true, lease.FencingToken, "Active").ConfigureAwait(false);
-                var releasePath = resultFile + ".release";
-                while (!File.Exists(releasePath))
-                    await Task.Delay(20).ConfigureAwait(false);
-                return 0;
-            }
+                {
+                    using var lease = registry.Acquire(runId);
+                    await WriteLeaseResultAsync(resultFile, true, lease.FencingToken, "Active").ConfigureAwait(false);
+                    var releasePath = resultFile + ".release";
+                    while (!File.Exists(releasePath))
+                        await Task.Delay(20).ConfigureAwait(false);
+                    return 0;
+                }
             case "lease-try":
-            {
-                using var lease = registry.TryAcquire(runId);
-                var acquired = lease is not null;
-                await WriteLeaseResultAsync(
-                    resultFile,
-                    acquired,
-                    lease?.FencingToken ?? 0,
-                    acquired ? "Active" : "Contended").ConfigureAwait(false);
-                return acquired ? 0 : 2;
-            }
+                {
+                    using var lease = registry.TryAcquire(runId);
+                    var acquired = lease is not null;
+                    await WriteLeaseResultAsync(
+                        resultFile,
+                        acquired,
+                        lease?.FencingToken ?? 0,
+                        acquired ? "Active" : "Contended").ConfigureAwait(false);
+                    return acquired ? 0 : 2;
+                }
             case "lease-acquire":
-            {
-                using var lease = registry.Acquire(runId);
-                await WriteLeaseResultAsync(resultFile, true, lease.FencingToken, "Active").ConfigureAwait(false);
-                return 0;
-            }
+                {
+                    using var lease = registry.Acquire(runId);
+                    await WriteLeaseResultAsync(resultFile, true, lease.FencingToken, "Active").ConfigureAwait(false);
+                    return 0;
+                }
             case "lease-write":
-            {
-                var tokenHint = ReadTokenHint(resultFile);
-                registry.WriteEvidence(runId, tokenHint, "evidence");
-                await WriteLeaseResultAsync(resultFile, true, tokenHint, "EvidenceWritten").ConfigureAwait(false);
-                return 0;
-            }
+                {
+                    var tokenHint = ReadTokenHint(resultFile);
+                    registry.WriteEvidence(runId, tokenHint, "evidence");
+                    await WriteLeaseResultAsync(resultFile, true, tokenHint, "EvidenceWritten").ConfigureAwait(false);
+                    return 0;
+                }
             case "lease-complete":
-            {
-                var tokenHint = ReadTokenHint(resultFile);
-                registry.Complete(runId, tokenHint);
-                await WriteLeaseResultAsync(resultFile, true, tokenHint, "Completed").ConfigureAwait(false);
-                return 0;
-            }
+                {
+                    var tokenHint = ReadTokenHint(resultFile);
+                    registry.Complete(runId, tokenHint);
+                    await WriteLeaseResultAsync(resultFile, true, tokenHint, "Completed").ConfigureAwait(false);
+                    return 0;
+                }
             case "lease-cleanup":
-            {
-                var tokenHint = ReadTokenHint(resultFile);
-                registry.Cleanup(runId, tokenHint);
-                await WriteLeaseResultAsync(resultFile, true, tokenHint, "Completed").ConfigureAwait(false);
-                return 0;
-            }
+                {
+                    var tokenHint = ReadTokenHint(resultFile);
+                    registry.Cleanup(runId, tokenHint);
+                    await WriteLeaseResultAsync(resultFile, true, tokenHint, "Completed").ConfigureAwait(false);
+                    return 0;
+                }
             default:
                 throw new ArgumentOutOfRangeException(nameof(mode));
         }

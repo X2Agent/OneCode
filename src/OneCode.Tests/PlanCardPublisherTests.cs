@@ -1,7 +1,6 @@
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Streaming;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.Tests;

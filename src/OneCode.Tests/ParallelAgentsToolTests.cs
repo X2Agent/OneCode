@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Tools;
-using OneCode.Core.Domain;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;

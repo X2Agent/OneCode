@@ -108,7 +108,7 @@ public static partial class ChatBlockRenderers
     {
         var c = TuiPalette.FromAgentName(agentName);
 
-        List<FormattedLine> lines = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
+        List<FormattedLine> lines = [FormattedLine.Plain("", TuiPalette.BgPrimary)];
 
         // Compact agent identifier line: ▸ AgentName (首字母大写，统一角色名显示)
         var displayName = string.IsNullOrEmpty(agentName)
@@ -150,7 +150,7 @@ public static partial class ChatBlockRenderers
     public static IReadOnlyList<FormattedLine> RenderLspDiagnosticsBlock(
         string fileName, IReadOnlyList<LspDiagnostic> diagnostics, int viewWidth = 0)
     {
-        List<FormattedLine> list = [ FormattedLine.Plain("", TuiPalette.BgPrimary) ];
+        List<FormattedLine> list = [FormattedLine.Plain("", TuiPalette.BgPrimary)];
 
         var errors = diagnostics.Count(d => d.Severity == LspDiagnosticSeverity.Error);
         var warnings = diagnostics.Count(d => d.Severity == LspDiagnosticSeverity.Warning);

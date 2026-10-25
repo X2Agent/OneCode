@@ -13,14 +13,14 @@ public sealed class HookRegistryTests
         string name,
         HookInterceptionPoint point = HookInterceptionPoint.PreToolCall,
         string matcher = "Bash") => new()
-    {
-        Name = name,
-        Point = point,
-        Matcher = matcher,
-        ExecutorType = HookType.Command,
-        TimeoutMs = 5000,
-        Config = new HookConfig(),
-    };
+        {
+            Name = name,
+            Point = point,
+            Matcher = matcher,
+            ExecutorType = HookType.Command,
+            TimeoutMs = 5000,
+            Config = new HookConfig(),
+        };
 
     [Fact]
     public void ReplaceAll_RemovesOldRegistrationsAndRebuildsMatcherIndex()

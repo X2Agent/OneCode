@@ -67,15 +67,15 @@ internal sealed class AutoDreamConsolidationPromptBuilder(
                     allTurns.Add($"User: {TruncateSingleLine(user.Content, MaxTurnPreviewChars)}");
                     break;
                 case AssistantMessage assistant:
-                {
-                    var text = string.Join(" ", assistant.Content
-                        .OfType<TextBlock>()
-                        .Select(b => b.Text)
-                        .Where(t => !string.IsNullOrWhiteSpace(t)));
-                    if (!string.IsNullOrWhiteSpace(text))
-                        allTurns.Add($"Assistant: {TruncateSingleLine(text, MaxTurnPreviewChars)}");
-                    break;
-                }
+                    {
+                        var text = string.Join(" ", assistant.Content
+                            .OfType<TextBlock>()
+                            .Select(b => b.Text)
+                            .Where(t => !string.IsNullOrWhiteSpace(t)));
+                        if (!string.IsNullOrWhiteSpace(text))
+                            allTurns.Add($"Assistant: {TruncateSingleLine(text, MaxTurnPreviewChars)}");
+                        break;
+                    }
             }
         }
 

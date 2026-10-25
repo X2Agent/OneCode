@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using OneCode.App.Services.PlanMode;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.Tests;

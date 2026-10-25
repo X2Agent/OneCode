@@ -1,6 +1,5 @@
 using System.Text;
 using OneCode.Infrastructure.Lsp;
-using OneCode.App.Services.Lsp;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Git;

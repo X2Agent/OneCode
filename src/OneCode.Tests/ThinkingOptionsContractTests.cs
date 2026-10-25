@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
-using OneCode.Core.Domain;
 
 namespace OneCode.Tests;
 

@@ -6,7 +6,6 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.Context;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.GoalMode;
-using OneCode.App.Services.Lsp;
 
 using OneCode.App.Services.Skills;
 using OneCode.App.Session;

@@ -75,7 +75,7 @@ public sealed class MessageFlowRenderer
                             goto SegmentEnd;
                     }
                 }
-                SegmentEnd:
+            SegmentEnd:
                 units.Add(segment);
             }
             else

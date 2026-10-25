@@ -5,7 +5,6 @@ using NSubstitute;
 using OneCode.App.Services.AutoDream;
 using OneCode.App.Session;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Memory;
 using OneCode.Core.Tools;
 using OneCode.Core.Models;

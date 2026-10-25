@@ -1,4 +1,3 @@
-using OneCode.App.Services.Lsp;
 using OneCode.Infrastructure.Lsp;
 using OneCode.App.Session;
 using OneCode.App.Tools;

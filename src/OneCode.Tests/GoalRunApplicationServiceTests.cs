@@ -1,7 +1,6 @@
 using NSubstitute;
 using OneCode.App.Services.GoalMode;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Goals;
 using System.Text.Json;
