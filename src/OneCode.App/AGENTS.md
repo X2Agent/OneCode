@@ -13,12 +13,11 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
 | `Daemon/` | 无头守护进程：`DaemonHost` 宿主 + `DaemonLifecycle`（互斥体/状态文件/停止哨兵）+ `DaemonStopWatcher` |
-| `Logging/` | 调试文件日志提供器（`DebugFileLoggerProvider`）与日志 DI 扩展 |
+| `Logging/` | 组合根日志引导 DI（`ConfigureApplicationLogging`；文件日志提供器 `DebugFileLoggerProvider` 在 Infrastructure） |
 | `Modes/` | 工作模式定义（`WorkingMode`：BUILD / PLAN / GOAL） |
 | `Tools/` | AI 工具实现：Agent 调用的 27 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
 | `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Hooks、Lsp、Mcp 等 |
 | `Query/` | 运行事件契约：`QueryEvent` 层级（唯一 UI 契约）、`StreamingSession`、`QueryStreamEngine`（**零 Terminal.Gui、零前端引用**） |
-| `Skills/` | 子进程脚本运行器（`SubprocessScriptRunner`）；Skills 执行引擎在 `Services/Skills/`，frontmatter 解析在 `OneCode.Infrastructure/Skills/` |
 | `Session/` | 会话上下文和生命周期管理 |
 | `prompts/` | Prompt 模板文件（`system/*.prompt`） |
 

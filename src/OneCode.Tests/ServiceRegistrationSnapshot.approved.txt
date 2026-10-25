@@ -46,7 +46,7 @@
   46 Singleton Microsoft.Extensions.AI.IChatClient -> (factory)
   47 Singleton Microsoft.Extensions.Options.IConfigureOptions`1[OneCode.App.Services.SessionOptions] -> (instance)
   48 Singleton OneCode.Core.Session.ISessionEventStore -> (factory)
-  49 Singleton OneCode.App.Session.ISessionStore -> (factory)
+  49 Singleton OneCode.Core.Session.ISessionStore -> (factory)
   50 Singleton OneCode.Core.Domain.SessionIdHolder -> OneCode.Core.Domain.SessionIdHolder
   51 Singleton OneCode.Core.Domain.ISessionIdProvider -> (factory)
   52 Singleton OneCode.Core.Tools.IWorkingDirectoryAccessor -> OneCode.App.Services.SessionWorkingDirectoryAccessor
@@ -65,8 +65,8 @@
   65 Singleton OneCode.App.Services.PlanMode.IPlanModeService -> (factory)
   66 Singleton OneCode.App.Services.PlanMode.PlanCardPublisher -> OneCode.App.Services.PlanMode.PlanCardPublisher
   67 Singleton OneCode.App.Services.Context.PlanExecutionContextProvider -> (factory)
-  68 Singleton OneCode.App.Tools.IWorkspaceIgnoreProvider -> OneCode.App.Tools.WorkspaceIgnoreProvider
-  69 Singleton OneCode.App.Services.Search.ITextSearchService -> OneCode.App.Services.Search.TextSearchService
+  68 Singleton OneCode.Infrastructure.Tools.IWorkspaceIgnoreProvider -> OneCode.Infrastructure.Tools.WorkspaceIgnoreProvider
+  69 Singleton OneCode.Infrastructure.Search.ITextSearchService -> OneCode.Infrastructure.Search.TextSearchService
   70 Singleton OneCode.Infrastructure.Mcp.McpElicitationHandler -> (factory)
   71 Singleton OneCode.Infrastructure.Mcp.OfficialMcpRegistryClient -> OneCode.Infrastructure.Mcp.OfficialMcpRegistryClient
   72 Singleton OneCode.Infrastructure.Mcp.McpMultiScopeConfigLoader -> OneCode.Infrastructure.Mcp.McpMultiScopeConfigLoader
@@ -152,8 +152,8 @@
  152 Singleton OneCode.App.Services.InputQueue -> OneCode.App.Services.InputQueue
  153 Singleton OneCode.Infrastructure.GitInfo -> OneCode.Infrastructure.GitInfo
  154 Singleton OneCode.App.Services.Context.ContextBuilder -> OneCode.App.Services.Context.ContextBuilder
- 155 Singleton OneCode.App.Services.Setup.ReleaseNotesService -> OneCode.App.Services.Setup.ReleaseNotesService
- 156 Singleton OneCode.App.Services.Setup.UpgradeService -> OneCode.App.Services.Setup.UpgradeService
+ 155 Singleton OneCode.Infrastructure.Setup.ReleaseNotesService -> OneCode.Infrastructure.Setup.ReleaseNotesService
+ 156 Singleton OneCode.Infrastructure.Setup.UpgradeService -> OneCode.Infrastructure.Setup.UpgradeService
  157 Singleton OneCode.Infrastructure.Config.ConfigManager -> (factory)
  158 Singleton OneCode.Core.Config.IConfigManager -> (factory)
  159 Singleton OneCode.Infrastructure.Agent.IHyperlightRuntimeProbe -> OneCode.Infrastructure.Agent.HyperlightRuntimeProbe
@@ -273,14 +273,14 @@
  273 Singleton OneCode.Core.Prompt.PromptManager -> (factory)
  274 Singleton OneCode.Core.Prompt.IPromptManager -> (factory)
  275 Singleton OneCode.App.Services.PromptComposer -> OneCode.App.Services.PromptComposer
- 276 Singleton OneCode.App.Services.Lsp.LspDiagnosticRegistry -> OneCode.App.Services.Lsp.LspDiagnosticRegistry
+ 276 Singleton OneCode.Infrastructure.Lsp.LspDiagnosticRegistry -> OneCode.Infrastructure.Lsp.LspDiagnosticRegistry
  277 Singleton OneCode.App.Services.Lsp.EnhancedLspService -> OneCode.App.Services.Lsp.EnhancedLspService
  278 Singleton OneCode.App.Services.Lsp.IEnhancedLspService -> (factory)
  279 Singleton OneCode.App.Tools.ILspNotifier -> OneCode.App.Services.Lsp.LspNotifier
- 280 Singleton OneCode.App.Services.Lsp.LspServerManager -> OneCode.App.Services.Lsp.LspServerManager
+ 280 Singleton OneCode.Infrastructure.Lsp.LspServerManager -> OneCode.Infrastructure.Lsp.LspServerManager
  281 Singleton OneCode.Core.Lsp.ILspServerManager -> (factory)
- 282 Singleton OneCode.App.Services.Lsp.LanguagePackRegistry -> OneCode.App.Services.Lsp.LanguagePackRegistry
- 283 Singleton OneCode.App.Services.Lsp.LanguagePackInstaller -> OneCode.App.Services.Lsp.LanguagePackInstaller
+ 282 Singleton OneCode.Infrastructure.Lsp.LanguagePackRegistry -> OneCode.Infrastructure.Lsp.LanguagePackRegistry
+ 283 Singleton OneCode.Infrastructure.Lsp.LanguagePackInstaller -> OneCode.Infrastructure.Lsp.LanguagePackInstaller
  284 Singleton Microsoft.Extensions.Hosting.IHostedService -> OneCode.App.Services.Lsp.LspHostedService
  285 Singleton OneCode.App.Services.IStartupHintCollector -> OneCode.App.Services.StartupHintCollector
  286 Transient Microsoft.Extensions.Options.IConfigureOptions`1[Microsoft.Extensions.Options.StartupValidatorOptions] -> (factory)
@@ -313,8 +313,8 @@
  313 Singleton OneCode.Infrastructure.CodeIndexHotReloader -> OneCode.Infrastructure.CodeIndexHotReloader
  314 Singleton OneCode.Core.Search.IWebSearchProvider -> OneCode.Infrastructure.Search.TavilySearchProvider
  315 Singleton OneCode.Core.Search.IWebSearchProvider -> OneCode.Infrastructure.Search.DuckDuckGoSearchProvider
- 316 Singleton OneCode.App.Services.Notifier.NotifierService -> OneCode.App.Services.Notifier.NotifierService
- 317 Singleton OneCode.App.Services.Notifier.INotifierService -> (factory)
+ 316 Singleton OneCode.Infrastructure.NotifierService -> OneCode.Infrastructure.NotifierService
+ 317 Singleton OneCode.Infrastructure.INotifierService -> (factory)
  318 Singleton OneCode.Infrastructure.Media.ImagePipeline -> OneCode.Infrastructure.Media.ImagePipeline
  319 Singleton OneCode.Core.Commands.IGitHelper -> OneCode.App.Commands.GitHelper
  320 Singleton OneCode.Core.Commands.ICommand -> OneCode.App.Commands.AddDirCommand

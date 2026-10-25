@@ -122,7 +122,7 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 - Codex App：`developers.openai.com/codex/app`
 - 代码证据：`src/OneCode.App/Query/QueryEventTypes.cs`（唯一 UI 契约）、
   `src/OneCode.Core/Permissions/IApprovalBroker.cs`（审批端口）、
-  `src/OneCode.App/Query/IConversationRunner.cs`、`src/OneCode.App/Session/FileSessionEventStore.cs`
+  `src/OneCode.App/Query/IConversationRunner.cs`、`src/OneCode.Infrastructure/Persistence/FileSessionEventStore.cs`
   （全局存储挂 `PathsHelper.UserHome`）、`src/OneCode.Automation/Cron/CronSchedulerService.cs`（主进程宿主缺口）、
   `src/OneCode.App/Services/Agent/ApprovalBroker.cs`、`src/OneCode.App/Commands/KeybindingsCommand.cs`
   （`Process.Start` 先例）
