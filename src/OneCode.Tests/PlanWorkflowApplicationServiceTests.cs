@@ -9,7 +9,6 @@ using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.Core.Build;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
 using OneCode.Tests.TestSupport;
@@ -507,7 +506,7 @@ public sealed partial class PlanWorkflowApplicationServiceTests : IDisposable
         => new(
             workflowService,
             new PlanCardPublisher(new OrchestrationEventBus()),
-            new TuiInteractionBridge(),
+            new OneCode.App.Services.RunEventBridge(),
             modelManager ?? CreateModelManager("test-model"),
             // 真实访问器：其 Current 恒非 null（默认 AppState 的 MainLoopModel 为 null → 回退配置模型）。
             // 不用 Substitute.For<IAppStateAccessor>() 作默认值——NSubstitute 无法为密封 record

@@ -12,12 +12,14 @@ namespace OneCode.App.Services.Cron;
 /// </summary>
 public static class CronServiceCollectionExtensions
 {
-    public static IServiceCollection AddCronSchedulingServices(this IServiceCollection services)
+    /// <param name="services">DI 容器。</param>
+    /// <param name="workingDir">进程工作目录；durable 作业按此归属过滤，只在归属项目的进程中触发。</param>
+    public static IServiceCollection AddCronSchedulingServices(this IServiceCollection services, string workingDir)
     {
         services.AddSingleton<ICronParser, CronosCronParser>();
         services.AddSingleton<CronJobExecutor>();
         services.AddSingleton<ICronJobExecutor>(sp => sp.GetRequiredService<CronJobExecutor>());
-        services.AddCronScheduler();
+        services.AddCronScheduler(projectDir: workingDir);
 
         return services;
     }

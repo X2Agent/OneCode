@@ -1,29 +1,28 @@
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Discriminated result from <see cref="SlashCommandPipeline.TryResolvePromptCommandAsync"/>
-/// indicating how the TUI dispatch layer should handle the command.
+/// <see cref="SlashCommandPipeline.TryResolvePromptCommandAsync"/> 的判别结果，
+/// 指示宿主分发层如何处理该命令。
 /// </summary>
 public abstract record CommandDispatchResult
 {
-    /// <summary>Command produced a prompt to be streamed through the LLM pipeline.</summary>
+    /// <summary>命令产出一段 prompt，经 LLM 查询流水线流式呈现。</summary>
     public sealed record Prompt(string Content, string[]? AllowedTools) : CommandDispatchResult;
 
-    /// <summary>Command requests resuming a durable workflow — route directly to the workflow resume stream.</summary>
+    /// <summary>命令请求恢复持久化工作流——直接路由到工作流恢复流。</summary>
     public sealed record ResumeWorkflow(string SessionId, WorkflowResumeKind Kind) : CommandDispatchResult;
 
-    /// <summary>Command requests running a bounded deterministic loop — route to the loop stream.</summary>
+    /// <summary>命令请求运行有界确定性循环——直接路由到循环流。</summary>
     public sealed record Loop(string Task, string? CheckCommand, int MaxIterations) : CommandDispatchResult;
 }
 
 /// <summary>
-/// Handles slash-command resolution and execution. Owns the
-/// <see cref="CommandExecutionState"/> that caches non-prompt results,
-/// plus the exit-requested flag consulted by the TUI lifecycle.
+/// 斜杠命令解析与执行。持有缓存非 prompt 结果的 <see cref="CommandExecutionState"/>，
+/// 以及供宿主生命周期查询的退出标记。
 /// </summary>
 /// <remarks>
-/// The <see cref="CommandState"/> property is shared
-/// with <see cref="TuiHostConfigurator"/> (for session-UI refresh wiring).
+/// <see cref="CommandState"/> 与 <c>TuiHostConfigurator</c> 共享（用于会话 UI 刷新接线）。
+/// 实例持有会话内可变状态：TUI 单用户场景用单例，多电路宿主（WebUI）每电路新建实例。
 /// </remarks>
 public sealed class SlashCommandPipeline(
     ICommandRegistry commandRegistry)
@@ -31,16 +30,16 @@ public sealed class SlashCommandPipeline(
     private readonly CommandExecutionState _cmdState = new();
     private volatile bool _exitRequested;
 
-    /// <summary>True after an ExitResult command (e.g. /exit) was executed.</summary>
+    /// <summary>ExitResult 命令（如 /exit）执行后为 true。</summary>
     public bool IsExitRequested => _exitRequested;
 
-    /// <summary>Shared mutable state for the slash-command pipeline.</summary>
+    /// <summary>斜杠命令管线共享的可变状态。</summary>
     public CommandExecutionState CommandState => _cmdState;
 
     /// <summary>
-    /// Executes a slash command and checks if it produced a PromptResult or ResumeWorkflowResult.
-    /// Returns a <see cref="CommandDispatchResult"/> indicating how the dispatch layer should proceed.
-    /// If neither, caches the result for <see cref="ExecuteCommandAsync"/> to consume.
+    /// 执行斜杠命令并判断是否产出 PromptResult / ResumeWorkflowResult / LoopResult。
+    /// 返回 <see cref="CommandDispatchResult"/> 指示宿主分发层如何继续；
+    /// 都不是时缓存结果，供 <see cref="ExecuteCommandAsync"/> 取用。
     /// </summary>
     public async Task<CommandDispatchResult?> TryResolvePromptCommandAsync(
         InteractiveSession session, string text, CancellationToken ct)
@@ -64,9 +63,8 @@ public sealed class SlashCommandPipeline(
     }
 
     /// <summary>
-    /// Executes a slash command. If <see cref="TryResolvePromptCommandAsync"/>
-    /// already executed and cached the result (non-PromptResult), returns it
-    /// without re-execution. Otherwise executes the command and maps the result.
+    /// 执行斜杠命令。若 <see cref="TryResolvePromptCommandAsync"/> 已执行并缓存了结果
+    /// （非 PromptResult），直接返回缓存而不重复执行；否则执行命令并映射结果。
     /// </summary>
     public async Task<string?> ExecuteCommandAsync(
         InteractiveSession session, string text, CancellationToken ct)
@@ -96,9 +94,8 @@ public sealed class SlashCommandPipeline(
         if (result is CommandResult.ExitResult)
             _exitRequested = true;
 
-        // Session-affecting commands: session (list/switch/new/close), new, close.
-        // Refresh the TUI so transcript/counters reflect the foreground conversation
-        // (or clear it entirely when /close left no foreground session).
+        // 影响会话的命令：session（list/switch/new/close）、new、close。
+        // 刷新宿主 UI，使转录/计数反映前台会话（/close 后无前台会话时整体清空）。
         if (result is not CommandResult.ErrorResult && cmd.Name is "session" or "new" or "close")
             await _cmdState.RefreshSessionUiAsync(ct).ConfigureAwait(false);
 

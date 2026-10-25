@@ -222,11 +222,12 @@ public sealed record AgentPipelineOptions
     public long BudgetBaselineTokens { get; init; }
 
     /// <summary>
-    /// 预算 100% 消耗时的用户询问回调（交互模式）。参数：(超出基线的已消耗量, 预算上限, 取消令牌)，
-    /// 返回 AllowOnce=追加预算继续 / AllowAlways=收尾总结 / Deny=直接停止。
+    /// 预算 100% 消耗时的用户询问回调（交互模式），经 <see cref="OneCode.Core.Goals.IBudgetDecisionService"/>
+    /// 端口取得决策。参数：(超出基线的已消耗量, 预算上限, 取消令牌)，
+    /// 返回 ContinueWithExtraBudget=追加预算继续 / WrapUpAndStop=收尾总结 / 其余=直接停止。
     /// null（无人值守路径）时 BudgetGuard 硬停短路。
     /// </summary>
-    public Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded { get; init; }
+    public Func<long, long, CancellationToken, Task<OneCode.Core.Goals.GoalBudgetDecision>>? OnBudgetExceeded { get; init; }
 
     /// <summary>预算 70%/90% 预警回调（参数：级别、超出基线的已消耗量、预算上限）。</summary>
     public Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning { get; init; }
@@ -413,42 +414,39 @@ public static class AgentPipelineBuilder
             builder = builder.Use(runFunc, runStreamingFunc);
         }
 
-        // Tool middleware install order (source order == MAF AsBuilder.Use order).
-        // Optional stages are skipped when disabled; relative order of enabled stages stays fixed:
-        // SafetyInvariant → Hook → ToolCallEvent → PermissionAndLimit → StateMachine →
-        // EditTransaction → EditGuard(contract pre + verification) → ResultBudget → ResultUnwrap → ArgumentBinding.
-        // Custom behavior belongs in these middleware / MAF extension points — not a Stage registry.
+        // 工具级中间件装配顺序说明：
+        // MAF AIAgentBuilder.Build() 逆序遍历 _agentFactories（从 Count - 1 到 0）。
+        // 对于 functionInvocationCallback，后调用 .Use() 的中间件最先挂载到 FunctionInvokingChatClient，
+        // 在运行时处于最外层（先进入、后退出）；先调用 .Use() 的中间件处于最内层（紧贴 AIFunction.InvokeAsync）。
+        //
+        // 因此下方按「由内向外（Innermost → Outermost）」顺序调用 builder.Use()，
+        // 使运行时真实调用链从外到内严格为：
+        //   1. ToolCallEvent（最外层：对所有调用发射 ToolStart / ToolDone，含被拦截调用）
+        //   2. ToolResultUnwrap [外层兜底]（入口重置 ToolExecutionContext；出口将外层短路返回的 ToolResult 序列化为 string）
+        //   3. ToolArgumentBinding（在任何安全/权限/契约检查前归一化 snake_case、别名与标量/数组参数）
+        //   4. SafetyInvariant（Layer 0 安全不变量：命令/路径/URL 硬拦截）
+        //   5. Hook（pre_tool_call / post_tool_call 拦截与审计）
+        //   6. PermissionAndLimit（Layer 1：封条、白名单、权限检查与调用配额上限）
+        //   7. StateMachine（Layer 2：指向性故障限流与编译验证恢复闸）
+        //   8. EditGuard（Edit 目标存在性前置检查 + 编辑后编译验证写 IsVerificationFailure）
+        //   9. EditTransaction（编辑前文件快照 + 编辑后增量 Diff 通知）
+        //  10. ToolExecutionBudget（单次工具输出字符上限截断）
+        //  11. ToolResultUnwrap [内层核心]（捕获编组/执行异常；将 AIFunction.InvokeAsync 返回的 JsonElement/ToolResult 解包并写 IsError）
+        //  -> AIFunction.InvokeAsync
+        var unwrapDelegate = new ToolResultUnwrapMiddleware(
+            modelId: options.ModelId,
+            providerId: options.ProviderId,
+            logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate();
 
-        // Safety invariants always mount (Layer 0): they guard destructive edits and
-        // sensitive-file access regardless of role or profile.
+        // 11. 最内层：紧贴 AIFunction.InvokeAsync 解包 JsonElement / ToolResult 并捕获执行异常
+        builder = builder.Use(unwrapDelegate);
+
+        // 10. 工具结果字符预算截断（依赖内层 Unwrap 输出的 string）
         builder = builder.Use(
-            SafetyInvariantMiddleware.Create(
-                SafetyInvariantMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
-                loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
+            new ToolExecutionBudgetMiddleware(
+                logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
 
-        if (options.HookExecutionService is not null)
-        {
-            builder = builder.Use(
-                HookMiddleware.Create(options, loggerFactory.CreateLogger("HookMiddleware")));
-        }
-
-        if (options.OrchestrationEventSink is not null)
-        {
-            builder = builder.Use(
-                ToolCallEventMiddleware.Create(
-                    options, loggerFactory.CreateLogger("ToolCallEventMiddleware")));
-        }
-
-        builder = builder.Use(PermissionAndLimitMiddleware.Create(
-            options, metrics, loggerFactory.CreateLogger("PermissionAndLimitMiddleware")));
-
-        if (options.EnableStateMachine)
-        {
-            builder = builder.Use(
-                StateMachineMiddleware.Create(
-                    loggerFactory.CreateLogger("StateMachineMiddleware")));
-        }
-
+        // 9. 编辑事务快照与增量 Diff（仅在前置安全/权限/契约全部通过后触发）
         if (options.EditTransaction is not null)
         {
             builder = builder.Use(
@@ -459,7 +457,7 @@ public static class AgentPipelineBuilder
                     loggerFactory.CreateLogger<EditTransactionMiddleware>()).CreateDelegate());
         }
 
-        // W2-B: one EditGuard middleware (edit-target pre-checks + optional verification post).
+        // 8. 编辑前置检查 + 编辑后编译/静态验证（验证失败时写 IsVerificationFailure 供外层状态机读取）
         var editVerification = options.EnableVerification ? options.VerificationProvider : null;
         if (options.EnableEditPreChecks || editVerification is not null)
         {
@@ -472,24 +470,46 @@ public static class AgentPipelineBuilder
                     loggerFactory.CreateLogger("EditGuardMiddleware")));
         }
 
-        // Tool-result size truncation (character budget) always mounts.
-        builder = builder.Use(
-            new ToolExecutionBudgetMiddleware(
-                logger: loggerFactory.CreateLogger<ToolExecutionBudgetMiddleware>()).CreateDelegate());
+        // 7. 恢复状态机（包裹 EditGuard 与内层执行，读取真实执行错误与 IsVerificationFailure）
+        if (options.EnableStateMachine)
+        {
+            builder = builder.Use(
+                StateMachineMiddleware.Create(
+                    loggerFactory.CreateLogger("StateMachineMiddleware")));
+        }
 
-        builder = builder.Use(
-            new ToolResultUnwrapMiddleware(
-                modelId: options.ModelId,
-                providerId: options.ProviderId,
-                logger: loggerFactory.CreateLogger<ToolResultUnwrapMiddleware>()).CreateDelegate());
+        // 6. 权限与配额限制（位于状态机外层：被权限或配额拦截的调用不进入状态机）
+        builder = builder.Use(PermissionAndLimitMiddleware.Create(
+            options, metrics, loggerFactory.CreateLogger("PermissionAndLimitMiddleware")));
 
-        // ArgumentBinding is the innermost layer: it sits directly against the AIFunction so it can
-        // normalize malformed array arguments before MEAI reflection marshalling throws JsonException
-        // (which happens before the tool body runs), and turn that failure into a self-correctable
-        // ToolResult.Error that the outer ResultUnwrap layer serializes.
+        // 5. Hook 拦截点（pre_tool_call / post_tool_call）
+        if (options.HookExecutionService is not null)
+        {
+            builder = builder.Use(
+                HookMiddleware.Create(options, loggerFactory.CreateLogger("HookMiddleware")));
+        }
+
+        // 4. Layer 0 安全不变量（无论何种角色与权限模式均强制执行）
+        builder = builder.Use(
+            SafetyInvariantMiddleware.Create(
+                SafetyInvariantMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
+                loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
+
+        // 3. 参数名/别名/数组形状归一化（位于安全不变量与权限检查外层，确保检查与执行看到同一份规范参数）
         builder = builder.Use(
             new ToolArgumentBindingMiddleware(
                 loggerFactory.CreateLogger<ToolArgumentBindingMiddleware>()).CreateDelegate());
+
+        // 2. 外层兜底解包（将 SafetyInvariant / Hook / PermissionAndLimit / EditGuard 短路返回的 ToolResult 序列化为 string 并同步 IsError）
+        builder = builder.Use(unwrapDelegate);
+
+        // 1. 最外层：工具调用生命周期事件（确保被前置拦截的调用同样成对发射 ToolStart / ToolDone）
+        if (options.OrchestrationEventSink is not null)
+        {
+            builder = builder.Use(
+                ToolCallEventMiddleware.Create(
+                    options, loggerFactory.CreateLogger("ToolCallEventMiddleware")));
+        }
 
         return new AgentPipelineHandle(builder.Build(serviceProvider), metrics);
     }

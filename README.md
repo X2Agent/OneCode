@@ -1,11 +1,11 @@
 # OneCode .NET
 
-A production-grade CLI AI coding assistant built on .NET 10, featuring a Terminal.Gui v2 full-screen TUI, the Microsoft Agent Framework (MAF) orchestration pipeline, and a Hyperlight sandbox.
+A production-grade AI coding assistant built on .NET 10, featuring a Terminal.Gui v2 full-screen TUI, a Blazor Server browser client that shares the same in-process event contract, the Microsoft Agent Framework (MAF) orchestration pipeline, and a Hyperlight sandbox.
 
 ## Highlights
 
 - **Three working modes** — BUILD / PLAN / GOAL, switchable with `Tab`
-- **44 slash commands · 27 built-in tools** — file ops, LSP, web, agents, cron, Git worktree, MCP
+- **45 slash commands · 27 built-in tools** — file ops, LSP, web, agents, cron, Git worktree, MCP
 - **Safety-first execution** — 7 permission modes, command classifiers, hooks, editable transactions
 - **Cross-platform** — self-contained single-file binaries for Windows / Linux / macOS (x64 + ARM64)
 
@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/X2Agent/OneCode/main/scripts/instal
 
 ```bash
 onecode                        # launch the interactive TUI (BUILD mode)
-onecode "fix the CSS bug"      # start with an initial prompt
+onecode --cwd /path/to/project # launch in a specific directory
 onecode --version
 ```
 

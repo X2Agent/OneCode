@@ -91,7 +91,7 @@ public sealed class LspHostedService(
         try
         {
             // Use the session's working directory (set via --workspace or /cwd) rather than the
-            // process CWD. Without this, launching OneCode.Cli from its bin/Debug directory causes
+            // process CWD. Without this, launching OneCode.Tui from its bin/Debug directory causes
             // LSP servers to index the build output folder instead of the user's project root.
             var sessionWorkingDir = workingDirectoryAccessor.WorkingDirectory;
 

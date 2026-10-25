@@ -1,0 +1,111 @@
+@using OneCode.Core.Goals
+@using OneCode.Core.Permissions
+
+<div class="interaction" tabindex="0" @onkeydown="OnKeyDown">
+    <div class="interaction-head">
+        <span class="badge @Pending.Kind.ToString().ToLowerInvariant()">@KindLabel</span>
+        <span class="title">@Pending.Title</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Pending.Description))
+    {
+        <pre class="interaction-detail">@Pending.Description</pre>
+    }
+
+    @switch (Pending.Kind)
+    {
+        case WebInteractionKind.Approval:
+            <div class="actions">
+                <button class="primary" @onclick="ApproveOnce">允许一次</button>
+                <button @onclick="ApproveAlways">总是允许</button>
+                <button class="danger" @onclick="Deny">拒绝</button>
+            </div>
+            <label class="check">
+                <input type="checkbox" @bind="_allowAllForSession" /> 本次会话始终允许
+            </label>
+            break;
+
+        case WebInteractionKind.Question:
+            @if (Pending.Options is { Count: > 0 })
+            {
+                <div class="actions">
+                    @foreach (var option in Pending.Options)
+                    {
+                        <button @onclick="() => RespondAsync(new InteractionAnswer(Text: option))">@option</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="actions">
+                    <input class="answer" @bind="_answer" placeholder="输入回答…" />
+                    <button class="primary" @onclick="SubmitAnswer">提交</button>
+                </div>
+            }
+            break;
+
+        case WebInteractionKind.Budget:
+            <div class="actions">
+                <button class="primary" @onclick="() => RespondAsync(new InteractionAnswer(Budget: GoalBudgetDecision.ContinueWithExtraBudget))">追加预算继续</button>
+                @if (Pending.BudgetScope == BudgetPromptScope.GoalRun)
+                {
+                    <button @onclick="() => RespondAsync(new InteractionAnswer(Budget: GoalBudgetDecision.SkipCurrentStep))">跳过当前子目标</button>
+                    <button @onclick="() => RespondAsync(new InteractionAnswer(Budget: GoalBudgetDecision.Pause))">暂停保存进度</button>
+                }
+                else
+                {
+                    <button @onclick="() => RespondAsync(new InteractionAnswer(Budget: GoalBudgetDecision.WrapUpAndStop))">收尾总结后结束</button>
+                }
+                <button class="danger" @onclick="() => RespondAsync(new InteractionAnswer(Budget: GoalBudgetDecision.Abort))">
+                    @(Pending.BudgetScope == BudgetPromptScope.GoalRun ? "终止任务" : "直接停止")
+                </button>
+            </div>
+            break;
+    }
+
+    <div class="hint">Esc 关闭（等同拒绝/取消）</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public WebPendingInteraction Pending { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<InteractionAnswer> OnRespond { get; set; }
+
+    private bool _allowAllForSession;
+    private string _answer = string.Empty;
+
+    private string KindLabel => Pending.Kind switch
+    {
+        WebInteractionKind.Approval => "审批",
+        WebInteractionKind.Question => "提问",
+        _ => "预算",
+    };
+
+    private Task ApproveOnce()
+        => RespondAsync(new InteractionAnswer(
+            Approval: _allowAllForSession ? ApprovalDecision.AllowAllConversation : ApprovalDecision.AllowOnce));
+
+    private Task ApproveAlways() => RespondAsync(new InteractionAnswer(Approval: ApprovalDecision.AllowAlways));
+
+    private Task Deny() => RespondAsync(new InteractionAnswer(Approval: ApprovalDecision.Deny));
+
+    private Task SubmitAnswer() => RespondAsync(new InteractionAnswer(Text: _answer));
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key != "Escape")
+            return;
+
+        var answer = Pending.Kind switch
+        {
+            WebInteractionKind.Approval => new InteractionAnswer(Approval: ApprovalDecision.Deny),
+            WebInteractionKind.Budget => new InteractionAnswer(Budget: GoalBudgetDecision.Abort),
+            _ => new InteractionAnswer(Text: null),
+        };
+        await RespondAsync(answer);
+    }
+
+    private Task RespondAsync(InteractionAnswer answer) => OnRespond.InvokeAsync(answer);
+}

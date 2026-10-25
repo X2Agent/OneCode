@@ -18,7 +18,7 @@ public sealed class TuiDesignDocumentTests
             pair => ((YamlScalarNode)pair.Value).Value!);
 
         parsed.Should().BeEquivalentTo(
-            OneCode.App.Tui.TuiPalette.DesignTokens,
+            OneCode.Tui.TuiPalette.DesignTokens,
             options => options.WithStrictOrdering());
     }
 
@@ -27,7 +27,7 @@ public sealed class TuiDesignDocumentTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "src", "OneCode.App", "Tui", "DESIGN.md");
+            var candidate = Path.Combine(directory.FullName, "src", "OneCode.Tui", "Tui", "DESIGN.md");
             if (File.Exists(candidate))
                 return candidate;
 

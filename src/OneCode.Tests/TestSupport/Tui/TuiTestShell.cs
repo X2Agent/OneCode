@@ -1,11 +1,11 @@
 using NSubstitute;
 
-using OneCode.App.Tui;
 
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
+using OneCode.Tui;
 
 namespace OneCode.Tests.TestSupport.Tui;
 
@@ -30,18 +30,18 @@ internal sealed class TuiTestShell : IDisposable
     private readonly TuiUiThread _ui;
     private readonly IApplication _app;
     private readonly CancellationToken _ct;
-    private readonly Latch _sessionGate;
-    private readonly Latch _commandGate;
-    private readonly Latch _streamExhaustedGate;
+    private readonly TuiLatch _sessionGate;
+    private readonly TuiLatch _commandGate;
+    private readonly TuiLatch _streamExhaustedGate;
 
     private TuiTestShell(
         TuiUiThread ui,
         IApplication app,
         OneCodeToplevel toplevel,
         TuiTestContextBuilder builder,
-        Latch sessionGate,
-        Latch commandGate,
-        Latch streamExhaustedGate)
+        TuiLatch sessionGate,
+        TuiLatch commandGate,
+        TuiLatch streamExhaustedGate)
     {
         _ui = ui;
         _app = app;
@@ -77,9 +77,9 @@ internal sealed class TuiTestShell : IDisposable
 
     public static TuiTestShell Create(Action<TuiTestContextBuilder>? configure = null)
     {
-        var sessionGate = new Latch();
-        var commandGate = new Latch();
-        var streamExhaustedGate = new Latch();
+        var sessionGate = new TuiLatch();
+        var commandGate = new TuiLatch();
+        var streamExhaustedGate = new TuiLatch();
 
         var builder = new TuiTestContextBuilder();
         builder
@@ -278,19 +278,5 @@ internal sealed class TuiTestShell : IDisposable
         // 防抖 / 延迟重绘在替身下没有时钟，直接视为已执行（KeyRoutingTests 同款做法）。
         app.AddTimeout(Arg.Any<TimeSpan>(), Arg.Any<Func<bool>>()).Returns(new object());
         return app;
-    }
-
-    /// <summary>一次性完成信号：<see cref="Arm"/> 之后 <see cref="Release"/> 才生效。</summary>
-    private sealed class Latch
-    {
-        private volatile TaskCompletionSource? _tcs;
-
-        public void Arm() =>
-            _tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public void Release() => _tcs?.TrySetResult();
-
-        public Task WaitAsync(TimeSpan timeout, CancellationToken ct) =>
-            _tcs is { } tcs ? tcs.Task.WaitAsync(timeout, ct) : Task.CompletedTask;
     }
 }

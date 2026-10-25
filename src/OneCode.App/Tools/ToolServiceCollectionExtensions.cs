@@ -2,7 +2,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Query;
-using OneCode.App.Services;
 using OneCode.App.Services.Streaming;
 using OneCode.Automation;
 using OneCode.Core.Exec;
@@ -84,8 +83,6 @@ public static class ToolServiceCollectionExtensions
         services.AddToolInstance("ParallelAgents", (ParallelAgentsTool tool) => AIFunctionFactory.Create(tool.RunParallelAsync, name: "ParallelAgents"), ToolRisk.Safe, searchHint: "run sub-agents with DAG dependencies",
             loadPolicy: ToolLoadPolicy.Contextual, keywords: ["agent", "parallel"], category: ToolCategory.PlanAllowed);
 
-        services.AddSingleton<TuiInteractionBridge>();
-        services.AddSingleton<IUserQuestionService, UserQuestionService>();
 
         services.AddSingleton<AskUserQuestionTool>();
         services.AddToolInstance("AskUserQuestion", (AskUserQuestionTool tool) => AIFunctionFactory.Create(tool.AskAsync, name: "AskUserQuestion"), ToolRisk.ReadOnly, searchHint: "ask the user one or more blocking questions in a single dialog or wizard",

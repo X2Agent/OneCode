@@ -20,7 +20,7 @@ public sealed class UpgradeServiceTests
 
         try
         {
-            var exeName = OperatingSystem.IsWindows() ? "OneCode.Cli.exe" : "OneCode.Cli";
+            var exeName = OperatingSystem.IsWindows() ? "OneCode.Tui.exe" : "OneCode.Tui";
             var currentExePath = Path.Combine(installDir, "onecode.exe");
             await File.WriteAllTextAsync(currentExePath, "old-binary");
             await File.WriteAllTextAsync(Path.Combine(sourceDir, exeName), "new-binary");

@@ -1,8 +1,8 @@
 using System.Reflection;
 using NSubstitute;
-using OneCode.App.Tui;
 using OneCode.Core.Mcp;
 using Terminal.Gui.App;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

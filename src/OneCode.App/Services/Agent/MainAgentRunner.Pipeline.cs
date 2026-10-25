@@ -43,7 +43,7 @@ public partial class MainAgentRunner
         var handle = AgentPipelineBuilder.BuildHarnessAgent(new ChatClientAgentBuildOptions
         {
             ChatClient = _chatClient,
-            Name = "main-agent",
+            Name = MainAgentName,
             ChatOptions = BuildChatOptions(options),
             LoggerFactory = _loggerFactory,
             ServiceProvider = _serviceProvider,

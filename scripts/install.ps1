@@ -115,16 +115,16 @@ function Install-Binary {
         Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
 
         # 发布包包含 prompts 等运行时资源，必须整体安装。
-        $sourceExecutable = Join-Path $extractDir "OneCode.Cli.exe"
+        $sourceExecutable = Join-Path $extractDir "OneCode.Tui.exe"
         if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
-            throw "在归档根目录中找不到 OneCode.Cli.exe"
+            throw "在归档根目录中找不到 OneCode.Tui.exe"
         }
 
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
         Get-ChildItem -LiteralPath $extractDir -Force | Copy-Item -Destination $InstallDir -Recurse -Force
 
         $targetPath = Join-Path $InstallDir $BinaryName
-        Move-Item -LiteralPath (Join-Path $InstallDir "OneCode.Cli.exe") -Destination $targetPath -Force
+        Move-Item -LiteralPath (Join-Path $InstallDir "OneCode.Tui.exe") -Destination $targetPath -Force
 
         Write-Ok "已安装到 $targetPath（含运行时资源）"
         return $targetPath

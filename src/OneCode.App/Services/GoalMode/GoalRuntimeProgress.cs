@@ -1,15 +1,15 @@
 using System.Threading.Channels;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Goals;
 
 namespace OneCode.App.Services.GoalMode;
 
 /// <summary>
-/// GOAL 运行期的 TUI 进度发射器：步骤开始/回执、预算快照文案、黄/橙预算预警。
+/// GOAL 运行期的进度发射器：步骤开始/回执、预算快照文案、黄/橙预算预警。
 /// TryWrite 非阻塞；发射点均在持久化之后（由调用方保证），不影响执行/事务语义。
-/// 拥有预警级别去重状态（Fix-6：级别变化才推送）。
+/// 拥有预警级别去重状态：级别变化才推送。
 /// </summary>
-internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBudget budget)
+internal sealed class GoalRuntimeProgress(ChannelWriter<QueryEvent> events, GoalBudget budget)
 {
     private GoalBudget _budget = budget;
     private GoalBudgetWarningLevel? _lastWarningLevel;
@@ -21,14 +21,14 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
     }
 
     public void Progress(string message)
-        => events.TryWrite(new TuiModeProgress(WorkingMode.Goal, message));
+        => events.TryWrite(new ModeProgressEvent(WorkingMode.Goal, message));
 
     public void PlanCreated(GoalStepSnapshot[] plan)
     {
         if (plan.Length == 0)
             return;
-        events.TryWrite(new TuiGoalPlan(plan.Select(step => step.Description).ToArray()));
-        events.TryWrite(new TuiGoalPlanUpdated(plan, [], 0, new GoalBudgetUsage(0, 0, null), _budget));
+        events.TryWrite(new GoalPlanEvent(plan.Select(step => step.Description).ToArray()));
+        events.TryWrite(new GoalPlanUpdatedEvent(plan, [], 0, new GoalBudgetUsage(0, 0, null), _budget));
         Progress(plan.Length == 1
             ? "已分解为单个子目标，开始执行"
             : $"已分解为 {plan.Length} 个子目标，开始执行");
@@ -42,11 +42,11 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
         IReadOnlyList<GoalStepSnapshot>? plan = null,
         IReadOnlyList<GoalStepExecutionEvidence>? executions = null)
     {
-        events.TryWrite(new TuiTurnStarted(index + 1));
+        events.TryWrite(new TurnStartedEvent(index + 1));
         if (plan is { Count: > 0 })
         {
             var activePlan = plan.Select((s, i) => i == index ? s with { State = GoalStepState.InProgress } : s).ToArray();
-            events.TryWrite(new TuiGoalPlanUpdated(activePlan, executions ?? [], index, usage, _budget));
+            events.TryWrite(new GoalPlanUpdatedEvent(activePlan, executions ?? [], index, usage, _budget));
         }
         Progress($"子目标 {index + 1}/{total}: {TruncateEllipsis(step.Description, 40)}{FormatBudget(usage)}");
     }
@@ -68,7 +68,7 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
         };
         if (plan is { Count: > 0 })
         {
-            events.TryWrite(new TuiGoalPlanUpdated(plan, executions ?? [], Math.Min(index + 1, plan.Count - 1), usage, _budget));
+            events.TryWrite(new GoalPlanUpdatedEvent(plan, executions ?? [], Math.Min(index + 1, plan.Count - 1), usage, _budget));
         }
         Progress($"{icon} 子目标 {index + 1}/{total} {label} · {evidence.Attempts} 轮 · {evidence.ChangedFiles.Count} 个文件变更");
     }
@@ -81,7 +81,7 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
     {
         if (plan.Count > 0)
         {
-            events.TryWrite(new TuiGoalPlanUpdated(
+            events.TryWrite(new GoalPlanUpdatedEvent(
                 plan,
                 executions,
                 Math.Clamp(currentIndex, 0, plan.Count - 1),
@@ -116,7 +116,7 @@ internal sealed class GoalRuntimeProgress(ChannelWriter<TuiEvent> events, GoalBu
         _lastWarningLevel = level;
         if (level is null)
             return;
-        events.TryWrite(new TuiGoalBudgetWarning(
+        events.TryWrite(new GoalBudgetWarningEvent(
             level.Value,
             usage.TotalAttempts,
             usage.TotalTokens,

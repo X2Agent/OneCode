@@ -1,8 +1,8 @@
 using NSubstitute;
 using OneCode.App.Services;
+using OneCode.Tui;
 using OneCode.Core.Commands;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Models;
 using OneCode.Core.Tools;
 using OneCode.Tests.TestSupport;

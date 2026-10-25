@@ -5,7 +5,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Query;
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
 using OneCode.Core.Exec;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
@@ -25,7 +24,7 @@ namespace OneCode.App.Services.Loop;
 public interface IIterativeLoopService
 {
     /// <summary>执行一次有界循环，逐轮投影进度与验证结果。</summary>
-    IAsyncEnumerable<TuiEvent> RunAsync(
+    IAsyncEnumerable<QueryEvent> RunAsync(
         string systemPrompt,
         LoopRunRequest request,
         string? modelId,
@@ -54,7 +53,7 @@ public sealed class IterativeLoopService(
     /// <summary>inner agent 单轮内的工具调用上限（与主会话 <c>maxTurns</c> 默认值一致）。</summary>
     private const int MaxTurnsPerIteration = 100;
 
-    public async IAsyncEnumerable<TuiEvent> RunAsync(
+    public async IAsyncEnumerable<QueryEvent> RunAsync(
         string systemPrompt,
         LoopRunRequest request,
         string? modelId,
@@ -93,7 +92,7 @@ public sealed class IterativeLoopService(
             },
             ct).ConfigureAwait(false);
 
-        var progress = Channel.CreateUnbounded<TuiEvent>();
+        var progress = Channel.CreateUnbounded<QueryEvent>();
         var evaluator = new DelegateLoopEvaluator(async (loopContext, evalCt) =>
         {
             loopContext.AdditionalProperties.TryAdd(RunStateKey, state);
@@ -104,7 +103,7 @@ public sealed class IterativeLoopService(
                 request, workingDirectory, transaction, changeVersion, evalCt).ConfigureAwait(false);
             state.LastFeedback = feedback;
 
-            progress.Writer.TryWrite(new TuiModeProgress(
+            progress.Writer.TryWrite(new ModeProgressEvent(
                 WorkingMode.Goal,
                 passed
                     ? $"🔁 循环 第 {state.Iterations}/{request.MaxIterations} 轮 · 检查通过"
@@ -143,7 +142,7 @@ public sealed class IterativeLoopService(
                 await foreach (var _ in loopAgent.RunStreamingAsync(
                     messages, cancellationToken: ct).ConfigureAwait(false))
                 {
-                    // 循环中间输出不进主对话转录：进度与验证结果以 TuiModeProgress 单独投影，
+                    // 循环中间输出不进主对话转录：进度与验证结果以 ModeProgressEvent 单独投影，
                     // 否则每轮完整 agent 输出会把转录刷满。
                 }
             }
@@ -175,7 +174,7 @@ public sealed class IterativeLoopService(
             transaction.Rollback();
 
         var outcome = Summarize(request, state);
-        yield return new TuiModeProgress(
+        yield return new ModeProgressEvent(
             WorkingMode.Goal,
             outcome.Completed
                 ? $"✅ 循环通过：第 {outcome.Attempts}/{request.MaxIterations} 轮确定性检查通过"
@@ -183,9 +182,9 @@ public sealed class IterativeLoopService(
             outcome.Completed ? ModeProgressState.Completed : ModeProgressState.Failed);
 
         if (!string.IsNullOrWhiteSpace(state.ErrorMessage))
-            yield return new TuiError($"循环执行失败：{state.ErrorMessage}");
+            yield return new ErrorEvent($"循环执行失败：{state.ErrorMessage}");
 
-        yield return new TuiModeProgress(WorkingMode.Goal, outcome.Summary);
+        yield return new ModeProgressEvent(WorkingMode.Goal, outcome.Summary);
     }
 
     /// <summary>

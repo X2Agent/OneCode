@@ -5,9 +5,7 @@ using OneCode.App.Services;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
-using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Domain;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.Tests;

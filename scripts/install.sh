@@ -141,13 +141,13 @@ install_binary() {
     tar -xzf "${temp_dir}/onecode.tar.gz" -C "$extract_dir"
 
     # 发布包包含 prompts 等运行时资源，必须整体安装。
-    if [ ! -f "${extract_dir}/OneCode.Cli" ]; then
-        err "在归档根目录中找不到 OneCode.Cli"; exit 1
+    if [ ! -f "${extract_dir}/OneCode.Tui" ]; then
+        err "在归档根目录中找不到 OneCode.Tui"; exit 1
     fi
 
     mkdir -p "$INSTALL_DIR"
     cp -R "${extract_dir}/." "$INSTALL_DIR/"
-    mv -f "${INSTALL_DIR}/OneCode.Cli" "${INSTALL_DIR}/${BINARY_NAME}"
+    mv -f "${INSTALL_DIR}/OneCode.Tui" "${INSTALL_DIR}/${BINARY_NAME}"
     chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
     ok "已安装到 ${INSTALL_DIR}/${BINARY_NAME}（含运行时资源）"

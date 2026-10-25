@@ -183,7 +183,7 @@ public sealed class DocFactConsistencyTests
     [Fact]
     public void Docs_AllReferencedSourceFilesExist()
     {
-        // 负向断言：`.cs` 后不得再接单词字符，否则会把 `OneCode.Cli.csproj` 的前缀当成路径。
+        // 负向断言：`.cs` 后不得再接单词字符，否则会把 `OneCode.Tui.csproj` 的前缀当成路径。
         // 不能排除 `)`/`]` 等后续字符——多数引用写在 Markdown 链接 `[标签](路径)` 里。
         var pathPattern = new Regex(@"[\w./\\-]*\.cs(?![\w])", RegexOptions.Compiled);
         var violations = new List<string>();

@@ -6,16 +6,16 @@ namespace OneCode.Core.Coordinator;
 
 /// <summary>
 /// 编排模式（Goal 等多步工作流）执行过程中推送给 TUI 层的事件。
-/// 这是一个 Core 层的抽象类型，避免 Core 依赖 App 层的 TuiEvent。
-/// App 层负责将 OrchestrationEvent 转换为具体的 TuiEvent。
+/// 这是一个 Core 层的抽象类型，避免 Core 依赖 App 层的 QueryEvent。
+/// App 层负责将 OrchestrationEvent 转换为具体的 QueryEvent。
 ///
-/// 展平为独立 sealed record 列表需改动 20+ 调用点（TuiEventMapper、
+/// 展平为独立 sealed record 列表需改动 20+ 调用点（查询事件投影、
 /// OrchestrationStreamService 等），风险/收益比不足，保留嵌套 record 层次。
 /// </summary>
 public abstract record OrchestrationEvent
 {
     /// <summary>单个 Agent 的消息输出。子代理 DAG / Goal 工作流产生。</summary>
-    public sealed record AgentMessage(string AgentName, string? AgentColor, string Content) : OrchestrationEvent;
+    public sealed record AgentMessage(string AgentName, string Content) : OrchestrationEvent;
 
     /// <summary>工具调用开始。通用事件。</summary>
     public sealed record ToolStart(string AgentName, string ToolId, string Name, string? ToolInput = null) : OrchestrationEvent;

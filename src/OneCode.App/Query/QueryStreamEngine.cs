@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
+using OneCode.App.Services.Notifier;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
@@ -35,6 +36,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
     private readonly ToolAssembler _toolAssembler;
     private readonly BuildPreambleRunner _buildPreambleRunner;
     private readonly HookDispatcher _hookDispatcher;
+    private readonly INotifierService _notifier;
     private readonly OneCode.Infrastructure.Agent.IHyperlightRuntimeProbe? _hyperlightRuntimeProbe;
     private readonly OneCode.App.Services.AutoDream.IAutoDreamService? _autoDreamService;
 
@@ -90,6 +92,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             toolCatalog, _configManager, session.SessionToolSetManager, _toolCapabilityResolver, _logger);
         _buildPreambleRunner = new BuildPreambleRunner(_buildRunGate, _toolAssembler);
         _hookDispatcher = new HookDispatcher(hookExecutionService, _configManager, observability.NotifierService);
+        _notifier = observability.NotifierService;
         _hyperlightRuntimeProbe = session.HyperlightRuntimeProbe;
         _autoDreamService = observability.AutoDreamService;
     }
@@ -138,7 +141,6 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         string? harnessInstructions = null,
         bool unattended = false)
     {
-        yield return new ToolPoolReadyEvent(0, 0, 0);
         var includeNextPrompt = !unattended && _configManager.Current.Effective.NextPromptSuggesterEnabled == true;
         if (includeNextPrompt)
             systemPrompt += NextPromptTrailerInstruction;
@@ -288,6 +290,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         QueryStreamRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        var runStartedAt = DateTimeOffset.UtcNow;
+
         foreach (var notice in ConsumeHyperlightUnavailableNotice(request.WorkingMode))
         {
             yield return notice;
@@ -421,6 +425,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             }
             // FinalizeAsync 首行已完成收口；置位防外层兜底重复调用。
             planRunClosed = true;
+            NotifyLongRunCompleted(request, runStartedAt);
         }
         finally
         {
@@ -498,6 +503,34 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
 
     private static string PromptTooLongHint(Exception runException) =>
         QueryStreamHelpers.PromptTooLongHint(runException);
+
+    /// <summary>长任务完成通知阈值：常规问答远低于此；超过即视为「用户已切走」的长任务。</summary>
+    private static readonly TimeSpan LongRunNotifyThreshold = TimeSpan.FromMinutes(2);
+
+    private void NotifyLongRunCompleted(QueryStreamRequest request, DateTimeOffset runStartedAt)
+    {
+        var elapsed = DateTimeOffset.UtcNow - runStartedAt;
+        if (!ShouldNotifyLongRunCompletion(request.SuppressToolApproval, elapsed)) return;
+        if (_configManager.Current.Effective.NotificationsEnabled == false) return;
+
+        var preview = request.UserPrompt.Length > 60 ? request.UserPrompt[..60] + "..." : request.UserPrompt;
+        var minutes = Math.Round(elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture);
+        _ = _notifier.SendNotificationAsync(
+                "OneCode 任务完成",
+                $"耗时 {minutes} 分钟：{preview}",
+                CancellationToken.None)
+            .ContinueWith(
+                t => _logger.LogWarning(t.Exception, "Long-run completion notify failed"),
+                TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    /// <summary>
+    /// 长任务完成通知门槛：仅交互运行且时长达到阈值——无人值守路径（cron 等）由
+    /// CronJobExecutor 自行通知，此处放行会造成双发；终端在后台的用户看不到流式结束，
+    /// 靠 OS toast 抢回注意力。
+    /// </summary>
+    internal static bool ShouldNotifyLongRunCompletion(bool unattended, TimeSpan elapsed) =>
+        !unattended && elapsed >= LongRunNotifyThreshold;
 
     /// <summary>
     /// 终结段：Plan run 收尾 → 完成通知 → token 记账 → durable BuildRun 回读 →

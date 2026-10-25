@@ -1,0 +1,11 @@
+global using OneCode.App.Commands;
+global using OneCode.App.Query;
+global using OneCode.App.Services.Mcp;
+global using OneCode.App.Services.PlanMode;
+global using Terminal.Gui.App;
+global using Terminal.Gui.Drawing;
+global using Terminal.Gui.Input;
+global using Terminal.Gui.ViewBase;
+global using Terminal.Gui.Views;
+global using Attribute = Terminal.Gui.Drawing.Attribute;
+global using Color = Terminal.Gui.Drawing.Color;

@@ -136,7 +136,7 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | 键 | 类型 | 默认值 | 作用 |
 |---|---|---|---|
 | `nextPromptSuggesterEnabled` | `bool` | `true` | 是否生成下一步输入建议 |
-| `notificationsEnabled` | `bool` | `false` | 是否启用本地任务完成通知 |
+| `notificationsEnabled` | `bool` | `false` | 是否启用本地 OS 桌面通知（Windows toast / macOS osascript / Linux notify-send）。触发点：cron 完成/失败、hook 通知、审批挂起超 30 秒宽限、交互运行超过 2 分钟的任务完成（无人值守路径由 cron 通知，不双发） |
 
 日志级别由构建模式决定：Debug 构建记录 `Debug` 及以上，Release 构建记录 `Warning` 及以上（含 Error），
 两者都同时写控制台与文件 `~/.onecode/debug/<sessionId>.log`。没有运行时覆盖开关，也不属于持久化配置。
@@ -288,13 +288,7 @@ AutoDream **默认开启**，在 `BUILD` 模式任务正常完成时通过零 To
 
 > 环境变量由 `ConfigManager` 映射到配置键并标记来源为 `Environment`。环境变量作用域只读，任何保存操作都不会将其值持久化到 `settings.json`。
 >
-> `ONECODE_REMOTE`、`ONECODE_IS_WORKER` 属于进程运行标志，不是持久化配置项。
->
-> 其他不走 `ConfigManager` 的环境变量：
->
-> | 环境变量 | 作用 |
-> |---|---|
-> | `ONECODE_DURABLE_CRON` | 持久化 Cron 总开关；为 `true` 时 `--durable` 任务才会落盘（`CronPaths.IsDurableCronEnabled`，见 [后台服务](background-services.md) §4.4） |
+> `ONECODE_REMOTE` 属于进程运行标志，不是持久化配置项。
 
 ---
 

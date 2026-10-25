@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Goals;
-using OneCode.Core.Permissions;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Api;
@@ -400,7 +399,7 @@ public sealed class BudgetGuardRunMiddlewareTests
                 handlerCalls++;
                 used.Should().Be(2_000_000);
                 limit.Should().Be(1_000_000);
-                return Task.FromResult(ApprovalDecision.Deny);
+                return Task.FromResult(GoalBudgetDecision.Abort);
             });
 
         var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
@@ -417,7 +416,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var stubAgent = new StubAgent(CreateResponse("result"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(
             tracker, maxBudgetTokens: 1_000_000, null,
-            onBudgetExceeded: (_, _, _) => Task.FromResult(ApprovalDecision.AllowOnce));
+            onBudgetExceeded: (_, _, _) => Task.FromResult(GoalBudgetDecision.ContinueWithExtraBudget));
 
         var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
 
@@ -432,7 +431,7 @@ public sealed class BudgetGuardRunMiddlewareTests
         var capturingAgent = new MessageCapturingAgent(CreateResponse("wrap-up summary"));
         var (runFunc, _) = BudgetGuardRunMiddleware.Create(
             tracker, maxBudgetTokens: 1_000_000, null,
-            onBudgetExceeded: (_, _, _) => Task.FromResult(ApprovalDecision.AllowAlways));
+            onBudgetExceeded: (_, _, _) => Task.FromResult(GoalBudgetDecision.WrapUpAndStop));
 
         var response = await runFunc([], null, null, capturingAgent, TestContext.Current.CancellationToken);
         response.Text.Should().Be("wrap-up summary");

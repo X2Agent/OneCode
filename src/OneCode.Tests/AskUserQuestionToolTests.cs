@@ -1,56 +1,23 @@
 using NSubstitute;
-using OneCode.App.Services;
+using OneCode.App.Services.Interaction;
 using OneCode.App.Tools;
-using OneCode.App.Tui;
 using OneCode.Core.Tools;
 
 namespace OneCode.Tests;
 
-// AskUserQuestionTool — headless / interactive 行为契约测试
+// AskUserQuestionTool 行为契约测试。
 //
-// 防回归：确保 headless 回退路径返回 Error（而非伪装成用户答案的 Success），
-// 并且 UserQuestionService 在 TuiInteractionBridge 未设置时让工具进入 Error 分支。
+// 防回归：服务返回空（用户取消 / 无头宿主无接收者）时返回 Error 而非伪装成
+// 用户答案的 Success；单题与向导的参数校验与服务分派各就各位。
 
 public sealed class AskUserQuestionToolTests
 {
-    // AskUserQuestionTool: headless 回退
-
-    [Fact]
-    public async Task AskAsync_NoService_ReturnsError_NotSuccess()
-    {
-        var tool = new AskUserQuestionTool(userQuestionService: null!);
-
-        var result = await tool.AskAsync(questions: [new AskQuestionInput("Use EF Core or Dapper?", Options: ["EF Core", "Dapper"])]);
-
-        result.IsError.Should().BeTrue();
-        result.Content.Should().Contain("no interactive terminal");
-        result.Content.Should().Contain("Use EF Core or Dapper?");
-        // 关键防回归：不能出现伪装成用户答案的固定字符串
-        result.Content.Should().NotContain("Answer: (no interactive terminal available)");
-        result.SuggestedNextAction.Should().Be("Choose reasonable defaults or skip the step that required user input.",
-            "headless 错误的后续动作必须是安全默认/跳过，而不是把错误当答案");
-    }
-
-    [Fact]
-    public async Task AskAsync_NoService_DoesNotReturnCannedAnswerString()
-    {
-        // 防止历史回归：旧的 NullAskUserQuestionSink 会返回
-        // "Answer: (no interactive terminal available)" 这类伪装成用户答案的 Success。
-        var tool = new AskUserQuestionTool(userQuestionService: null!);
-
-        var result = await tool.AskAsync(questions: [new AskQuestionInput("Proceed?")]);
-
-        result.IsError.Should().BeTrue();
-        // 错误内容里不应出现 "Answer:" 前缀（那是真实回答才有的格式）
-        result.Content.Should().NotContain("Answer:");
-    }
-
     // AskUserQuestionTool: 参数校验
 
     [Fact]
     public async Task AskAsync_NoQuestions_ReturnsError()
     {
-        var tool = new AskUserQuestionTool(userQuestionService: null!);
+        var tool = new AskUserQuestionTool(Substitute.For<IUserQuestionService>());
 
         var result = await tool.AskAsync();
 
@@ -73,7 +40,7 @@ public sealed class AskUserQuestionToolTests
         await svc.DidNotReceiveWithAnyArgs().AskMultipleAsync(default!, default!, default);
     }
 
-    // AskUserQuestionTool: 服务返回 null（用户取消 / TUI 不可用）
+    // AskUserQuestionTool: 服务返回 null（用户取消 / 无头宿主无接收者）
 
     [Fact]
     public async Task AskAsync_ServiceReturnsNull_ReturnsError()
@@ -87,6 +54,9 @@ public sealed class AskUserQuestionToolTests
 
         result.IsError.Should().BeTrue();
         result.Content.Should().Contain("did not provide an answer");
+        // 防回归：错误内容里不得出现 "Answer:" 前缀（那是真实回答才有的格式），
+        // 也不得复现旧实现的伪装答案字符串。
+        result.Content.Should().NotContain("Answer:");
         result.SuggestedNextAction.Should().Be("Choose a reasonable default or skip the step that required user input.",
             "取消/无 UI 场景的后续动作必须是安全默认/跳过");
     }
@@ -186,64 +156,13 @@ public sealed class AskUserQuestionToolTests
         result.Content.Should().NotContain("Answers:");
     }
 
-    // UserQuestionService: TuiInteractionBridge 未设置 EmitEvent 时返回 null
+    // 端到端：真实提问端口 + 无头通道（无接收者）→ 工具返回 Error
 
     [Fact]
-    public async Task UserQuestionService_NoEmitEvent_ReturnsNull()
+    public async Task AskAsync_HeadlessPortNoReceiver_ReturnsError()
     {
-        var bridge = new TuiInteractionBridge();
-        var svc = new UserQuestionService(bridge);
-
-        var answer = await svc.AskAsync("q", ["a", "b"]);
-
-        answer.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task UserQuestionService_WithEmitEvent_EmitsRequestAndReturnsResponse()
-    {
-        TuiUserQuestionRequest? emitted = null;
-        var bridge = new TuiInteractionBridge();
-        bridge.SetEmitter(evt =>
-        {
-            emitted = (TuiUserQuestionRequest)evt;
-            // 模拟 TUI 层回传用户答案
-            emitted.ResponseSource.TrySetResult("Dapper");
-        });
-        var svc = new UserQuestionService(bridge);
-
-        var answer = await svc.AskAsync("Which?", ["EF Core", "Dapper"]);
-
-        answer.Should().Be("Dapper");
-        emitted.Should().NotBeNull();
-        emitted!.Question.Should().Be("Which?");
-        emitted.Options.Should().BeEquivalentTo(["EF Core", "Dapper"]);
-    }
-
-    [Fact]
-    public async Task UserQuestionService_Cancellation_PropagatesAndReturnsNull()
-    {
-        var bridge = new TuiInteractionBridge();
-        bridge.SetEmitter(_ =>
-        {
-            // 不设置结果，等待取消
-        });
-        var svc = new UserQuestionService(bridge);
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        var answer = await svc.AskAsync("q", ct: cts.Token);
-
-        answer.Should().BeNull();
-    }
-
-    // 端到端：Tool + UserQuestionService + 无 EmitEvent
-
-    [Fact]
-    public async Task EndToEnd_RealServiceWithoutEmitEvent_ToolReturnsError()
-    {
-        // 真实 UserQuestionService + bridge 未设置 EmitEvent → 工具应返回 Error
-        var bridge = new TuiInteractionBridge();
-        var svc = new UserQuestionService(bridge);
+        // 真实交互端口 + 无头 dispatcher（TrySend 恒 false）→ 工具应返回 Error
+        var svc = new InteractionUserQuestionService(new HeadlessInteractionDispatcher());
         var tool = new AskUserQuestionTool(svc);
 
         var result = await tool.AskAsync(questions: [new AskQuestionInput("any question?")]);

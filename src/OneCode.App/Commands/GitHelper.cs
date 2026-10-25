@@ -202,7 +202,7 @@ public sealed class GitHelper(IProcessRunner processRunner, ILogger<GitHelper>? 
 
         // Critical: --numstat paths are repo-root relative, but `git diff -- <path>`
         // pathspecs are cwd-relative when the process is inside a subdirectory
-        // (e.g. `dotnet run` from src/OneCode.Cli). Always execute from repo root,
+        // (e.g. `dotnet run` from src/OneCode.Tui). Always execute from repo root,
         // and prefix with :(top) so pathspecs stay root-anchored even if cwd drifts.
         var root = await ResolveGitRootAsync(workingDirectory, ct).ConfigureAwait(false);
         var topPath = ToTopLevelPathspec(path);

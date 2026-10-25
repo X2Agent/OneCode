@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using OneCode.App.Services.Compact;
 using OneCode.App.Session;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
@@ -88,6 +89,7 @@ public sealed class AgentSessionPersistence(
                 {
                     var restored = await agent.DeserializeSessionAsync(json, null, ct)
                         .ConfigureAwait(false);
+                    restored.StateBag.ResetStateMachineForNewTurn();
                     _logger.LogDebug("AgentSessionPersistence session restored from conversation metadata");
                     return restored;
                 }

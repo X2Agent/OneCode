@@ -4,10 +4,10 @@ using OneCode.App.Services.PlanMode;
 using OneCode.Core.Permissions;
 
 /// <summary>
-/// Bridges the TUI <see cref="WorkingModeController"/> to
-/// <see cref="IPermissionModeProvider"/> runtime overrides and
-/// <see cref="IPlanModeService"/> enter/exit.
-/// Created once per interactive session; dispose when the session ends.
+/// 把 TUI 的 <see cref="WorkingModeController"/> 桥接到
+/// <see cref="IPermissionModeProvider"/> 的运行时权限覆盖与
+/// <see cref="IPlanModeService"/> 的进入/退出。
+/// 每个交互式会话创建一份；会话结束时释放。
 /// </summary>
 public sealed class WorkingModeBridge : IDisposable
 {
@@ -38,13 +38,13 @@ public sealed class WorkingModeBridge : IDisposable
     {
         try
         {
-            // Preserve CLI-advanced permissions (e.g. BypassPermissions) through mode switches.
-            // Plan mode is allowed to override because it has its own permission semantics.
+            // 命令行参数设置的高级权限档（如 BypassPermissions）在模式切换中保持不变；
+            // Plan 模式允许覆盖，因为它有独立的权限语义。
             var currentMode = _permissionModeProvider.CurrentMode;
-            if (IsCliAdvancedPermissionMode(currentMode) && e.CurrentMode != WorkingMode.Plan)
+            if (IsCommandLineAdvancedPermissionMode(currentMode) && e.CurrentMode != WorkingMode.Plan)
             {
                 _logger?.LogDebug(
-                    "WorkingModeBridge: skipping ApplyMode — CLI override active ({Mode})", currentMode);
+                    "WorkingModeBridge: skipping ApplyMode — command-line override active ({Mode})", currentMode);
                 return;
             }
 
@@ -58,9 +58,8 @@ public sealed class WorkingModeBridge : IDisposable
     }
 
     /// <summary>
-    /// Translates a UI <see cref="WorkingMode"/> into the corresponding
-    /// backend state. Public so callers (e.g. tests, or an explicit
-    /// re-sync after DI rebuild) can drive it deterministically.
+    /// 把 UI 的 <see cref="WorkingMode"/> 翻译为对应的后端状态。设为 public 以便
+    /// 调用方（如测试或 DI 重建后的显式再同步）确定性地驱动。
     /// </summary>
     public void ApplyMode(WorkingMode mode)
     {
@@ -105,17 +104,16 @@ public sealed class WorkingModeBridge : IDisposable
     }
 
     /// <summary>
-    /// Pushes the controller's <em>current</em> mode into the backend. Call
-    /// this once after construction to synchronise state.
+    /// 把控制器的当前模式推送进后端。构造完成后调用一次以同步状态。
     /// </summary>
     public void SyncInitialState()
     {
         var currentMode = _permissionModeProvider.CurrentMode;
 
-        if (IsCliAdvancedPermissionMode(currentMode))
+        if (IsCommandLineAdvancedPermissionMode(currentMode))
         {
             _logger?.LogDebug(
-                "WorkingModeBridge: skipping initial sync — CLI override active ({Mode})", currentMode);
+                "WorkingModeBridge: skipping initial sync — command-line override active ({Mode})", currentMode);
             return;
         }
 
@@ -123,9 +121,9 @@ public sealed class WorkingModeBridge : IDisposable
     }
 
     /// <summary>
-    /// 判断指定的 <see cref="PermissionMode"/> 是否为 CLI 设置的高级权限模式。
+    /// 判断指定的 <see cref="PermissionMode"/> 是否为命令行参数设置的高级权限模式。
     /// </summary>
-    internal static bool IsCliAdvancedPermissionMode(PermissionMode? mode) =>
+    internal static bool IsCommandLineAdvancedPermissionMode(PermissionMode? mode) =>
         mode is PermissionMode.BypassPermissions
             or PermissionMode.Auto
             or PermissionMode.DontAsk;

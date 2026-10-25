@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OneCode daemon launchd 模板（macOS，用户级 LaunchAgent）。一个 daemon 绑定一个项目。 -->
+<!--
+  安装（项目 /path/to/project）：
+    1. 复制本文件到 ~/Library/LaunchAgents/com.onecode.daemon.<项目名>.plist
+    2. 把下方 /PATH/TO/PROJECT 替换为项目绝对路径；Label 追加项目名后缀保持唯一
+    3. 把 /usr/local/bin/onecode 替换为实际可执行路径（which onecode）
+    4. launchctl load ~/Library/LaunchAgents/com.onecode.daemon.<项目名>.plist
+  卸载：
+    launchctl unload ~/Library/LaunchAgents/com.onecode.daemon.<项目名>.plist
+    rm ~/Library/LaunchAgents/com.onecode.daemon.<项目名>.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.onecode.daemon.PROJECT</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/onecode</string>
+    <string>--cwd</string>
+    <string>/PATH/TO/PROJECT</string>
+    <string>daemon</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/onecode-daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/onecode-daemon.err</string>
+</dict>
+</plist>

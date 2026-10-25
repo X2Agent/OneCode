@@ -1,0 +1,21 @@
+using OneCode.Core.Config;
+using OneCode.App.Session;
+using OneCode.Core.Models;
+using IAppStateAccessor = OneCode.Core.Domain.IAppStateAccessor;
+
+namespace OneCode.Tui;
+
+/// <summary>Session stack for interactive bootstrap.</summary>
+public sealed record InteractiveSessionStack(
+    IConversationRunner ConversationRunner,
+    ISessionManager SessionManager,
+    IAppStateAccessor AppState,
+    IPermissionModeProvider PermissionMode);
+
+/// <summary>Command/model discovery for interactive bootstrap.</summary>
+public sealed record InteractiveDiscoveryDependencies(
+    ICommandRegistry CommandRegistry,
+    IEnumerable<IDynamicCommandSource> DynamicCommandSources,
+    IToolCatalog ToolCatalog,
+    IModelManager ModelManager,
+    IConfigManager ConfigManager);

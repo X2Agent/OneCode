@@ -137,11 +137,11 @@ public sealed record MainAgentRunOptions
     public Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning { get; init; }
 
     /// <summary>
-    /// 预算 100% 消耗时的用户询问回调（交互模式）。返回 AllowOnce=追加预算继续 /
-    /// AllowAlways=收尾总结 / Deny=直接停止。无人值守路径（SuppressToolApproval）保持
-    /// null → BudgetGuard 硬停短路。
+    /// 预算 100% 消耗时的用户询问回调（交互模式），经 <see cref="IBudgetDecisionService"/> 端口取得决策：
+    /// ContinueWithExtraBudget=追加预算继续 / WrapUpAndStop=收尾总结 / 其余=直接停止。
+    /// 无人值守路径（SuppressToolApproval）保持 null → BudgetGuard 硬停短路。
     /// </summary>
-    public Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded { get; init; }
+    public Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? OnBudgetExceeded { get; init; }
 
     /// <summary>
     /// 转换为无人值守运行选项（禁用交互式审批弹窗与预算询问挂起），供 Goal 子目标等非交互执行路径复用。

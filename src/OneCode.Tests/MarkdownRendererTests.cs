@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -29,8 +29,8 @@ public sealed class MarkdownRendererTests
 
         lines.Should().Contain(l => l.Text.Contains("csharp"));
         lines.Should().Contain(l => l.Text.Contains("var x = 1;"));
-        lines.Should().Contain(l => l.Text.Contains("┌─"));
-        lines.Should().Contain(l => l.Text.Contains("└─"));
+        lines.Should().Contain(l => l.Text.Contains("╭─"));
+        lines.Should().Contain(l => l.Text.Contains("╰─"));
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class MarkdownRendererTests
         var lines = MarkdownRenderer.Render(md);
 
         lines.Should().Contain(l => l.Text.Contains("hello"));
-        lines.Should().Contain(l => l.Text.Contains("┌─"));
+        lines.Should().Contain(l => l.Text.Contains("╭─"));
     }
 
     [Fact]

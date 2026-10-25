@@ -1,7 +1,6 @@
 using System.Text;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Persistence;
-using CoreConstants = OneCode.Core.Constants;
 
 namespace OneCode.Automation.Cron;
 
@@ -22,17 +21,6 @@ public static class CronPaths
     /// </summary>
     public static string GetJobFilePath(string id)
         => Path.Combine(GetCronDirectory(), $"{id}.json");
-
-    /// <summary>
-    /// Whether durable cron persistence is enabled at all. Disabled by default to preserve
-    /// the previous "in-memory unless explicitly opted in" behaviour. Enable by setting
-    /// <c>ONECODE_DURABLE_CRON=true</c>.
-    /// </summary>
-    public static bool IsDurableCronEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable(CoreConstants.EnvVars.DurableCron),
-            "true",
-            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Validate that a job ID contains only safe characters (alphanumeric and hyphen).

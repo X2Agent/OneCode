@@ -5,7 +5,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
 
@@ -376,7 +376,7 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         IReadOnlyList<GoalToolExecutionEvidence>? toolExecutions = null,
         IReadOnlyList<string>? modifiedFiles = null)
     {
-        var channel = Channel.CreateUnbounded<TuiEvent>();
+        var channel = Channel.CreateUnbounded<QueryEvent>();
         var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
         if (modifiedFiles is not null && inner is ScriptedStreamingAgent scripted)
         {

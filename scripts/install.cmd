@@ -89,8 +89,8 @@ if errorlevel 1 (
 )
 
 :: 发布包包含 prompts 等运行时资源，必须整体安装。
-if not exist "%EXTRACT_DIR%\OneCode.Cli.exe" (
-    echo ✗ 在归档根目录中找不到 OneCode.Cli.exe!
+if not exist "%EXTRACT_DIR%\OneCode.Tui.exe" (
+    echo ✗ 在归档根目录中找不到 OneCode.Tui.exe!
     set "INSTALL_FAILED=1"
     goto cleanup
 )
@@ -102,7 +102,7 @@ if errorlevel 1 (
     set "INSTALL_FAILED=1"
     goto cleanup
 )
-move /y "%INSTALL_DIR%\OneCode.Cli.exe" "%INSTALL_DIR%\%BINARY_NAME%" >nul
+move /y "%INSTALL_DIR%\OneCode.Tui.exe" "%INSTALL_DIR%\%BINARY_NAME%" >nul
 if errorlevel 1 (
     echo ✗ 重命名主程序失败!
     set "INSTALL_FAILED=1"

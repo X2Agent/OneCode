@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Tests.TestSupport.Tui;
 
 namespace OneCode.Tests;
@@ -29,7 +29,7 @@ public sealed class TuiHeadlessResizeTests
     public async Task Resize_WhileSessionHasContent_ContentStillRendered()
     {
         const string Reply = "拉伸前的中文回复";
-        using var host = TuiHeadlessHost.Start(b => b.Stream(new TuiTextDelta(Reply), new TuiDone(2, 2)));
+        using var host = TuiHeadlessHost.Start(b => b.Stream(new TextDeltaEvent(Reply), new DoneEvent(null, new TokenUsage(2, 2), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("ask something");
         await host.ResizeAsync(140, 40);

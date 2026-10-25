@@ -1,10 +1,11 @@
+using OneCode.App.Services.PlanMode;
 using NSubstitute;
-using OneCode.App.Tui;
 using OneCode.Core.Commands;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Tools;
 using Terminal.Gui.App;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

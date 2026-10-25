@@ -1,5 +1,5 @@
 using NSubstitute;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Tests.TestSupport.Tui;
 
 namespace OneCode.Tests;
@@ -18,7 +18,7 @@ public sealed class OneCodeToplevelResumeTests
         var resumeStarted = false;
         using var shell = TuiTestShell.Create(b =>
         {
-            b.Resume(new TuiNotice("恢复中"), new TuiDone(1, 1));
+            b.Resume(new NoticeEvent("恢复中"), new DoneEvent(null, new TokenUsage(1, 1), 0, RunTerminalReason.Completed));
             b.OnResumeStarted(() => resumeStarted = true);
         });
 

@@ -13,8 +13,8 @@
 ### 能力已被覆盖
 
 评估当时项目具备等价的代码式工作流能力（YAML 团队配置 / GroupChat / Magentic 编排 / team.yaml 自定义模板，
-由 `TeamWorkflowRunner` + `AgentTemplateConfig` 提供）。该 Team 编排整体移除后，并行派工由
-`Agent` / `ParallelAgents` 工具承接，无需引入 MAF Declarative：
+由 `TeamWorkflowRunner` + `AgentTemplateConfig` 提供；这些类已随 Team 编排的移除一并删除，下表仅记录评估时点）。
+Team 移除后，并行派工由 `Agent` / `ParallelAgents` 工具承接，无需引入 MAF Declarative：
 
 | 能力 | 评估时的实现 | MAF Declarative 对应 |
 |------|----------|---------------------|

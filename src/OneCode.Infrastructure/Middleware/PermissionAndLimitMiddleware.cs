@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using OneCode.Core.Domain;
 using OneCode.Core.Permissions;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;
@@ -42,7 +43,10 @@ public static class PermissionAndLimitMiddleware
             // 封条先于一切：run 已封口（如计划已提交）时拒绝所有后续工具调用，
             // 连权限询问也不再发起——模型只剩纯文本收尾这一条路。
             if (options.IsRunSealed?.Invoke() == true)
+            {
+                MarkGuidance(GuidanceKind.NextSteps);
                 return ToolResult.Error(options.RunSealedMessage);
+            }
 
             // 白名单拒绝只失败当前调用。批次中的每个 call 都必须生成对应 result；
             // 是否停止下一轮模型请求由编排层在完整批次排空后决定。
@@ -59,16 +63,21 @@ public static class PermissionAndLimitMiddleware
             async ValueTask<object> ExecuteWithLimitAsync(FunctionInvocationContext innerCtx, CancellationToken innerCt)
             {
                 if (metrics.IncrementToolCallCount() > options.MaxToolCalls)
+                {
+                    MarkGuidance(GuidanceKind.NextSteps);
                     return ToolResult.Error(options.ToolLimitMessage);
+                }
 
                 if (options.MaxExternalWebToolCalls is { } maxWebCalls
                     && innerCtx.Function is not null
                     && IsExternalWebTool(innerCtx.Function.Name)
                     && metrics.IncrementExternalWebToolCallCount() > maxWebCalls)
                 {
+                    MarkGuidance(GuidanceKind.NextSteps);
                     return ToolResult.Error(
                         $"External web tool budget ({maxWebCalls} calls) reached for '{innerCtx.Function.Name}'. " +
-                        "Stop calling WebSearch/WebFetch and proceed using the information already gathered with local workspace tools (Write, Edit, Read, Bash).");
+                        "Stop calling WebSearch/WebFetch and proceed using the information already gathered with local workspace tools " +
+                        "(such as Read, Grep, Glob, SubmitPlan, or Write, Edit, Read, Bash when permitted by the active mode).");
                 }
 
                 return await next(innerCtx, innerCt).ConfigureAwait(false) ?? "";
@@ -163,6 +172,13 @@ public static class PermissionAndLimitMiddleware
         return ToolResult.Error(
             $"Tool '{ctx.Function.Name}' denied: unrecognized permission decision '{perm.Decision}'.",
             "This is likely a framework bug — the PermissionDecision enum has an unhandled value.");
+    }
+
+    private static void MarkGuidance(GuidanceKind guidance)
+    {
+        var stateBag = AIAgent.CurrentRunContext?.Session?.StateBag;
+        if (stateBag is not null)
+            stateBag.GetOrInitializeToolExecutionContext().Guidance = guidance;
     }
 
     private static bool IsExternalWebTool(string toolName) =>

@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Tests.TestSupport.Tui;
 
 using Terminal.Gui.Input;
@@ -32,8 +32,8 @@ public sealed class TuiHeadlessRenderTests
     {
         const string Reply = "流式中文回复标记";
         using var host = TuiHeadlessHost.Start(b => b.Stream(
-            new TuiTextDelta(Reply),
-            new TuiDone(3, 5)));
+            new TextDeltaEvent(Reply),
+            new DoneEvent(null, new TokenUsage(3, 5), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("read the config");
 
@@ -50,7 +50,7 @@ public sealed class TuiHeadlessRenderTests
     [Fact]
     public async Task SubmitQuery_AfterReply_InputRowIsFocusableAgain()
     {
-        using var host = TuiHeadlessHost.Start(b => b.Stream(new TuiTextDelta("回复一"), new TuiDone(1, 1)));
+        using var host = TuiHeadlessHost.Start(b => b.Stream(new TextDeltaEvent("回复一"), new DoneEvent(null, new TokenUsage(1, 1), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("first question");
         // 一轮结束后输入框必须解除忙碌：Ctrl+D 能被吃掉才说明焦点与忙碌状态都收尾了。

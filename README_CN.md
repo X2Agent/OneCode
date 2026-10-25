@@ -1,6 +1,6 @@
-# OneCode .NET — 生产级 CLI AI 编程助手
+# OneCode .NET — 生产级 TUI AI 编程助手
 
-> **导读**：OneCode .NET 是一个生产级 CLI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.24.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
+> **导读**：OneCode .NET 是一个生产级 TUI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.24.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
 
 > **免责声明**: 本仓库内容仅用于技术研究和科研爱好者交流学习参考，**严禁任何个人、机构及组织将其用于商业用途、盈利性活动、非法用途及其他未经授权的场景。** 若内容涉及侵犯您的合法权益、知识产权或存在其他侵权问题，请及时联系我们，我们将第一时间核实并予以删除处理。
 
@@ -50,17 +50,22 @@
 
 ```
 src/
-├── OneCode.Cli/                 # CLI 入口 · 快速路径分发（6 文件 + 1 AGENTS.md）
+├── OneCode.Tui/                 # 进程入口 + Terminal.Gui v2 全屏界面
 │   ├── Program.cs              #   主入口
-│   ├── CliModeDetector.cs      #   快速路径检测
-│   └── FastPathDispatcher.cs   #   特殊模式快速分发
+│   ├── LaunchModeDetector.cs   #   快速路径检测
+│   ├── FastPathDispatcher.cs   #   特殊模式快速分发
+│   └── Tui/                    #   视图 · 浮层 · 渲染器 · TUI 装配（TuiHost / ReplShell / OneCodeToplevel）
 │
-├── OneCode.App/                 # 工具实现 · 命令 · TUI · 服务组合（466 文件）
+├── OneCode.WebUI/               # Blazor Server 浏览器客户端（进程内消费 QueryEvent）
+│   ├── Program.cs              #   启动入口：AddOneCodeCore + 交互端口替换 + loopback 绑定
+│   ├── Components/             #   Chat 页面 · 消息流 · 工具卡片 · 中断卡片 · 活动抽屉
+│   └── Services/               #   ChatSessionClient · 交互端口实现 · Markdown 渲染
+│
+├── OneCode.App/                 # 工具实现 · 命令 · 服务组合（不含 UI 形状）
 │   ├── Tools/                  #   27 个工具（通过 AddToolInstance<T> 注册）
-│   ├── Commands/               #   44 斜杠命令
-│   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等 22 子模块，各带 XxxServiceCollectionExtensions）
-│   ├── Query/                  #   查询编排（QueryStreamEngine / StreamingSession）
-│   ├── Tui/                    #   Terminal.Gui v2 全屏界面
+│   ├── Commands/               #   45 斜杠命令
+│   ├── Services/               #   业务服务（Agent、Memory、Plan、Skills 等子模块，各带 XxxServiceCollectionExtensions）
+│   ├── Query/                  #   查询编排 + 唯一 UI 事件契约（QueryEvent / StreamingSession / QueryStreamEngine）
 │   └── Session/                #   会话上下文与事件溯源存储
 │
 ├── OneCode.Core/                # 纯接口与领域模型（168 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
@@ -89,14 +94,14 @@ src/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  OneCode.Cli  (6 文件)                                          │
-│  CLI 入口 · 快速路径分发 · CliModeDetector · FastPathDispatcher │
+│  OneCode.Tui  /  OneCode.WebUI  （对等前端，均进程内）            │
+│  Terminal.Gui 视图/浮层 · Blazor 组件 · 进程入口/快路径分发     │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
-│  OneCode.App  (466 文件)                                        │
-│  工具实现 · 命令 · TUI · 服务组合 · MAF 集成中枢                 │
-│  27 Tools · 44 Commands · Query 编排 · 领域自有 DI 注册类       │
+│  OneCode.App  (365 文件)                                        │
+│  工具实现 · 命令 · 服务组合 · UI 契约 · MAF 集成中枢            │
+│  27 Tools · 45 Commands · Query 编排 · 领域自有 DI 注册类       │
 └───────────┬─────────────────────────────────┬───────────────────┘
             │                                 │
 ┌───────────▼──────────┐          ┌───────────▼───────────────────┐
@@ -115,7 +120,7 @@ src/
             OneCode.Tests (370 文件) → 测试以上所有层
 ```
 
-**依赖方向**：Cli → App → Infrastructure → Core（单向；App 另引用 Automation）。`Automation` 仅依赖 Core + Infrastructure，通过 DI 反向注入 App 实现的接口（如 `ICronJobExecutor`）。Core 层保持纯抽象，不引入外部实现依赖。
+**依赖方向**：Tui → App → Infrastructure → Core（单向；App 另引用 Automation）。`Automation` 仅依赖 Core + Infrastructure，通过 DI 反向注入 App 实现的接口（如 `ICronJobExecutor`）。Core 层保持纯抽象，不引入外部实现依赖。
 
 ---
 
@@ -177,11 +182,8 @@ cd OneCode
 # 进入交互式 TUI（默认 BUILD 模式）
 onecode
 
-# 携带初始 prompt 进入 TUI（默认 BUILD 模式直接执行）
-onecode "修复登录页的 CSS 问题"
-
 # 指定工作目录启动
-onecode --cwd /path/to/project "分析项目结构"
+onecode --cwd /path/to/project
 
 # 查看版本
 onecode --version
@@ -469,11 +471,11 @@ HarnessAgent
 
 ## 斜杠命令
 
-44 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
+45 个斜杠命令按 `CommandCategory` 分为 5 类（详见 [docs/commands.md](docs/commands.md)）：
 
-### Builtin 类别命令（22 个）
+### Builtin 类别命令（23 个）
 
-`/add-dir` `/compact` `/config` `/copy` `/cron` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/loop` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/think` `/upgrade` `/version`
+`/add-dir` `/compact` `/config` `/copy` `/cron` `/daemon` `/design-init` `/exit` `/fastmodel` `/files` `/help` `/hooks` `/init` `/keybindings` `/loop` `/lsp` `/model` `/permissions` `/prompts` `/skills` `/think` `/upgrade` `/version`
 
 ### Session 类别命令（11 个）
 
@@ -520,7 +522,7 @@ HarnessAgent
 
 | 文档 | 说明 |
 |------|------|
-| [docs/commands.md](docs/commands.md) | 全部 44 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
+| [docs/commands.md](docs/commands.md) | 全部 45 个斜杠命令的功能说明、用法与参数详解，按 `Builtin` / `Session` / `Diagnostic` / `Skill` / `Git` 5 类组织 |
 | [docs/settings.md](docs/settings.md) | `settings.json` 全部合法配置项、默认值、优先级与环境变量说明 |
 | [docs/skills.md](docs/skills.md) | 8 个内置技能（BundledSkills）的逐个说明、参数占位符规则、自定义技能开发指南 |
 

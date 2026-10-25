@@ -2,13 +2,11 @@ using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Services.Streaming;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Build;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Core.Tools;
-using OneCode.Core.Workflows;
 using OneCode.Infrastructure.Goals;
 using System.Text.Json;
 
@@ -33,16 +31,16 @@ public sealed class OrchestrationStreamServiceTests : IDisposable
         var run = await BeginRunAsync(sessionId);
 
         var sut = CreateSut(resolvedRun: run);
-        var events = new List<TuiEvent>();
+        var events = new List<QueryEvent>();
         var drain = async () =>
         {
             await foreach (var evt in sut.StreamResumeGoalAsync(sessionId, ModelId, SystemPrompt, TestContext.Current.CancellationToken))
                 events.Add(evt);
         };
 
-        // 校验通过即进入执行路径；宿主为纯桩，异常被收入 TuiError，绝不复现 definition changed。
+        // 校验通过即进入执行路径；宿主为纯桩，异常被收入 ErrorEvent，绝不复现 definition changed。
         await drain.Should().NotThrowAsync();
-        events.OfType<TuiError>().Select(e => e.Message)
+        events.OfType<ErrorEvent>().Select(e => e.Message)
             .Should().NotContain(t => t.Contains("definition changed", StringComparison.OrdinalIgnoreCase));
     }
 

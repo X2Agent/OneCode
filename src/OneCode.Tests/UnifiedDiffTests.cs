@@ -134,6 +134,53 @@ public sealed class UnifiedDiffTests
         result.Should().Contain(" line2");
         result.Should().Contain(" line4");
     }
+
+    // ComputeLineChanges：EditTransactionMiddleware 依赖的「仅行集合」API
+
+    [Fact]
+    public void ComputeLineChanges_AddedLines_ReturnsAddedOnly()
+    {
+        var original = "line1\nline2\nline3";
+        var modified = "line1\nline2\nline3\nline4\nline5";
+
+        var (added, removed) = UnifiedDiff.ComputeLineChanges(original, modified);
+
+        added.Should().Contain(new[] { "line4", "line5" });
+        removed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ComputeLineChanges_RemovedLines_ReturnsRemovedOnly()
+    {
+        var original = "line1\nline2\nline3\nline4";
+        var modified = "line1\nline2";
+
+        var (added, removed) = UnifiedDiff.ComputeLineChanges(original, modified);
+
+        added.Should().BeEmpty();
+        removed.Should().Contain(new[] { "line3", "line4" });
+    }
+
+    [Fact]
+    public void ComputeLineChanges_IdenticalContent_ReturnsEmpty()
+    {
+        var original = "line1\nline2";
+
+        var (added, removed) = UnifiedDiff.ComputeLineChanges(original, original);
+
+        added.Should().BeEmpty();
+        removed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ComputeLineChanges_RespectsMaxLines()
+    {
+        var original = "old";
+        var modified = string.Join("\n", Enumerable.Range(0, 50).Select(i => $"new{i}"));
+
+        var (added, removed) = UnifiedDiff.ComputeLineChanges(original, modified, maxLines: 5);
+
+        added.Length.Should().Be(5);
+        removed.Should().ContainSingle().Which.Should().Be("old");
+    }
 }
-
-

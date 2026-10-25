@@ -1,9 +1,11 @@
 using System.Runtime.CompilerServices;
 
 using OneCode.App.Services;
-using OneCode.App.Tui;
+using OneCode.App.Commands;
+using OneCode.App.Query;
 using OneCode.Core.Commands;
 using OneCode.Core.Keybindings;
+using OneCode.Tui;
 
 namespace OneCode.Tests.TestSupport.Tui;
 
@@ -11,18 +13,18 @@ namespace OneCode.Tests.TestSupport.Tui;
 /// 脚本化 <see cref="TuiContext"/> 工厂。
 ///
 /// 交互测试关心「一条输入进来后界面怎么走」，不关心模型返回了什么，
-/// 因此这里用一段可编程的 <see cref="TuiEvent"/> 脚本顶替真实查询流，
+/// 因此这里用一段可编程的 <see cref="QueryEvent"/> 脚本顶替真实查询流，
 /// 用命令名集合顶替真实 <c>CommandRegistry</c> 的 <c>Immediate</c> 判定
 /// （生产实现见 <c>TuiContextFactory</c>）。
 /// </summary>
 internal sealed class TuiTestContextBuilder
 {
-    private readonly List<TuiEvent> _script = [];
+    private readonly List<QueryEvent> _script = [];
     private readonly HashSet<string> _immediateCommands = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SlashCommandEntry> _slashCommands = [];
     private readonly List<string> _sessionPrompts = [];
 
-    private Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<TuiEvent>>? _stream;
+    private Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<QueryEvent>>? _stream;
     private Func<string, CancellationToken, Task<string?>>? _execute;
     private string _model = "test-model";
     private IGitHelper? _gitHelper;
@@ -32,7 +34,7 @@ internal sealed class TuiTestContextBuilder
     private readonly List<Action> _commandExecutedObservers = [];
     private readonly List<Action> _streamExhaustedObservers = [];
     private readonly List<Action> _resumeStartedObservers = [];
-    private List<TuiEvent>? _resumeScript;
+    private List<QueryEvent>? _resumeScript;
 
     /// <summary>
     /// 观测点：<c>CreateSession</c> 被调用。这是查询流水线唯一「已进入」的确定性信号，
@@ -72,14 +74,14 @@ internal sealed class TuiTestContextBuilder
     /// 声明 /resume 的恢复流脚本：启用 <c>TryResolvePromptCommand</c> / <c>StreamResumeWorkflow</c>
     /// 的脚本化实现（仅识别 resume 命令，等价于生产 <c>SlashCommandPipeline</c> 的映射）。
     /// </summary>
-    public TuiTestContextBuilder Resume(params TuiEvent[] events)
+    public TuiTestContextBuilder Resume(params QueryEvent[] events)
     {
         _resumeScript = [.. events];
         return this;
     }
 
     /// <summary>追加查询流事件：按声明顺序产出，脚本耗尽即流结束。</summary>
-    public TuiTestContextBuilder Stream(params TuiEvent[] events)
+    public TuiTestContextBuilder Stream(params QueryEvent[] events)
     {
         _script.AddRange(events);
         return this;
@@ -87,7 +89,7 @@ internal sealed class TuiTestContextBuilder
 
     /// <summary>替换查询流实现 —— 用于脚本表达不了的场景（挂起、抛异常、断言取消）。</summary>
     public TuiTestContextBuilder StreamQuery(
-        Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<TuiEvent>> stream)
+        Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<QueryEvent>> stream)
     {
         _stream = stream;
         return this;
@@ -215,7 +217,7 @@ internal sealed class TuiTestContextBuilder
         return result;
     }
 
-    private Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<TuiEvent>> ResolveStream()
+    private Func<string, IReadOnlyList<string>?, CancellationToken, IAsyncEnumerable<QueryEvent>> ResolveStream()
         => _stream ?? ((_, _, ct) => ScriptedStream(ct));
 
     /// <summary>
@@ -223,8 +225,8 @@ internal sealed class TuiTestContextBuilder
     /// 因此脚本走完即代表全部事件都已落到界面上。
     /// <c>finally</c> 保证取消路径（Esc 打断）同样释放该信号。
     /// </summary>
-    private async IAsyncEnumerable<TuiEvent> Compose(
-        IAsyncEnumerable<TuiEvent> inner,
+    private async IAsyncEnumerable<QueryEvent> Compose(
+        IAsyncEnumerable<QueryEvent> inner,
         [EnumeratorCancellation] CancellationToken ct)
     {
         try
@@ -239,7 +241,7 @@ internal sealed class TuiTestContextBuilder
         }
     }
 
-    private async IAsyncEnumerable<TuiEvent> ScriptedStream(
+    private async IAsyncEnumerable<QueryEvent> ScriptedStream(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         foreach (var evt in _script)
@@ -262,17 +264,17 @@ internal sealed class TuiTestContextBuilder
                         : null);
             };
 
-    private Func<string, string[]?, CancellationToken, IAsyncEnumerable<TuiEvent>>? ResolveCommandPromptStream()
+    private Func<string, string[]?, CancellationToken, IAsyncEnumerable<QueryEvent>>? ResolveCommandPromptStream()
         => _resumeScript is null ? null : (_, _, ct) => EmptyStream(ct);
 
-    private static async IAsyncEnumerable<TuiEvent> EmptyStream(
+    private static async IAsyncEnumerable<QueryEvent> EmptyStream(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         await Task.CompletedTask;
         yield break;
     }
 
-    private async IAsyncEnumerable<TuiEvent> ResumeScripted(
+    private async IAsyncEnumerable<QueryEvent> ResumeScripted(
         string sessionId,
         WorkflowResumeKind kind,
         [EnumeratorCancellation] CancellationToken ct = default)

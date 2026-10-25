@@ -3,8 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
-using OneCode.Core.Domain;
+using OneCode.App.Query;
 using OneCode.Core.Goals;
 using OneCode.Core.Tools;
 
@@ -111,8 +110,8 @@ public sealed class GoalSubTaskDagRunnerTests
         captured.Should().BeEmpty("fail-closed：非法任务数不得执行任何任务");
     }
 
-    private static ChannelWriter<TuiEvent> CreateChannel()
-        => Channel.CreateUnbounded<TuiEvent>().Writer;
+    private static ChannelWriter<QueryEvent> CreateChannel()
+        => Channel.CreateUnbounded<QueryEvent>().Writer;
 
     private static GoalSubTaskDagRunner CreateRunner(IAgentRunner runner)
     {

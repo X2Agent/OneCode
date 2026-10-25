@@ -1,5 +1,4 @@
 using Microsoft.Agents.AI;
-using OneCode.Core.Domain;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Middleware;
 
@@ -68,7 +67,9 @@ public class SessionStateExtensionsTests
     [Theory]
     [InlineData("AskUserQuestion")]
     [InlineData("askuserquestion")]
-    public void StateMachineBlocked_AllowsUserInterventionTool(string toolName)
+    [InlineData("SubmitPlan")]
+    [InlineData("submitplan")]
+    public void StateMachineBlocked_AllowsUserInterventionAndPlanSubmissionTools(string toolName)
     {
         StateMachineMiddleware.ShouldBlockTool(AgentState.Blocked, toolName).Should().BeFalse();
     }
@@ -84,16 +85,73 @@ public class SessionStateExtensionsTests
 
     [Theory]
     [InlineData("AskUserQuestion")]
-    public void StateMachineTransition_BlockedUserAnswer_UnblocksSession(string toolName)
+    [InlineData("SubmitPlan")]
+    public void StateMachineTransition_BlockedEscapeTool_UnblocksSession(string toolName)
     {
         var bag = NewStateBag();
         bag.SetCurrentState(AgentState.Blocked);
         bag.SetConsecutiveFailures(3);
+        bag.SetLastFailedToolName("WebFetch");
+        bag.SetSameToolConsecutiveFailures(3);
 
         StateMachine.Transition(bag, toolName, isSuccess: true);
 
         bag.GetCurrentState().Should().Be(AgentState.Active);
         bag.GetConsecutiveFailures().Should().Be(0);
+        bag.GetLastFailedToolName().Should().BeNull();
+        bag.GetSameToolConsecutiveFailures().Should().Be(0);
+    }
+
+    [Fact]
+    public void StateMachine_SameToolConsecutiveFailures_BlocksOnlyThatTool_AllowsCrossToolRecovery()
+    {
+        var bag = NewStateBag();
+
+        // 同一工具（如 WebFetch）连续失败 3 次
+        StateMachine.Transition(bag, "WebFetch", isSuccess: false);
+        StateMachine.Transition(bag, "WebFetch", isSuccess: false);
+        StateMachine.Transition(bag, "WebFetch", isSuccess: false);
+
+        bag.GetCurrentState().Should().Be(AgentState.Recovering);
+        bag.GetSameToolConsecutiveFailures().Should().Be(3);
+
+        // 再次调用同一故障工具 WebFetch 被定向阻拦
+        StateMachineMiddleware.ShouldBlockTool(bag, "WebFetch", out var blockReason).Should().BeTrue();
+        blockReason.Should().Contain("WebFetch").And.Contain("temporarily blocked");
+
+        // 但切换到其他工具（如 Read / Grep / SubmitPlan）自愈时不被阻拦
+        StateMachineMiddleware.ShouldBlockTool(bag, "Read", out _).Should().BeFalse();
+        StateMachineMiddleware.ShouldBlockTool(bag, "Grep", out _).Should().BeFalse();
+        StateMachineMiddleware.ShouldBlockTool(bag, "SubmitPlan", out _).Should().BeFalse();
+
+        // 切换到其他工具执行成功后，自动回到 Active 并清空单工具锁定
+        StateMachine.Transition(bag, "Read", isSuccess: true);
+        bag.GetCurrentState().Should().Be(AgentState.Active);
+        bag.GetConsecutiveFailures().Should().Be(0);
+        bag.GetSameToolConsecutiveFailures().Should().Be(0);
+        bag.GetLastFailedToolName().Should().BeNull();
+        StateMachineMiddleware.ShouldBlockTool(bag, "WebFetch", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void StateMachine_VerificationFailure_EscalatesToBlocked()
+    {
+        var bag = NewStateBag();
+
+        // 编译/验证失败立即进入 Recovering
+        StateMachine.Transition(bag, "Edit", isSuccess: false, isVerificationFailure: true);
+        bag.GetCurrentState().Should().Be(AgentState.Recovering);
+
+        // 继续验证失败累计达阈值后升级为全局 Blocked
+        StateMachine.Transition(bag, "Edit", isSuccess: false, isVerificationFailure: true);
+        StateMachine.Transition(bag, "Edit", isSuccess: false, isVerificationFailure: true);
+        bag.GetCurrentState().Should().Be(AgentState.Blocked);
+
+        // ResetStateMachineForNewTurn 在新一轮用户交互启动时解锁
+        bag.ResetStateMachineForNewTurn();
+        bag.GetCurrentState().Should().Be(AgentState.Active);
+        bag.GetConsecutiveFailures().Should().Be(0);
+        bag.GetSameToolConsecutiveFailures().Should().Be(0);
     }
 
     [Fact]

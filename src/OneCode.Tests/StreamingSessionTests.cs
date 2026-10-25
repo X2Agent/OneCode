@@ -1,7 +1,6 @@
 using OneCode.App.Query;
 using OneCode.Core.Build;
 using OneCode.Core.Coordinator;
-using OneCode.Core.Domain;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -103,7 +102,6 @@ public sealed class StreamingSessionTests
         var events = DigestAll(sut, first, second);
 
         // Totals are replaced (not summed) within the same turn — mirrors the runner's cumulative usage semantics.
-        events.OfType<UsageUpdateEvent>().Should().HaveCount(2);
         sut.TotalInputTokens.Should().Be(700);
         sut.FinalUsage.InputTokens.Should().Be(700);
         sut.FinalUsage.OutputTokens.Should().Be(300);
@@ -302,21 +300,6 @@ public sealed class StreamingSessionTests
     }
 
     [Fact]
-    public void Digest_ApprovalEvent_PassesThroughUnchanged()
-    {
-        // durableStateObserver → BuildRunStateEvent 直通透传退役——受控 attempt
-        // 改发 OrchestrationEvent.BuildStateProjectionChanged，由 Digest 解信封为流内
-        // BuildRunStateEvent（见 Digest_OrchestrationBuildProjection_IsUnwrappedToStreamContract）。
-        var sut = CreateSut();
-        var approval = new ApprovalRequestEvent("req-1", "Write", "path=src/x.cs");
-
-        var events = DigestAll(sut, approval);
-
-        events.Should().ContainSingle()
-            .Which.Should().Be(approval, "approval requests pass straight through to the TUI");
-    }
-
-    [Fact]
     public void Digest_OrchestrationBuildProjection_IsUnwrappedToStreamContract()
     {
         // 受控 attempt 以 OrchestrationEvent.BuildStateProjectionChanged
@@ -365,7 +348,6 @@ public sealed class StreamingSessionTests
         var completed = sut.CompleteTurnIfStarted();
         completed.Should().NotBeNull();
         completed!.TurnNumber.Should().Be(1);
-        completed.HadToolCalls.Should().BeFalse();
     }
 
     [Fact]
@@ -401,5 +383,47 @@ public sealed class StreamingSessionTests
 
         events.Select(e => ((SubagentProgressEvent)e).Phase)
             .Should().Equal(SubagentProgressPhase.Started, SubagentProgressPhase.Completed);
+    }
+
+    [Fact]
+    public void Digest_PureToolTurnAndReasoningAfterToolResult_EmitsTurnStartedBeforeNextRoundContent()
+    {
+        var sut = CreateSut();
+
+        // Turn 1: reasoning + tool call + tool result (no assistant text in Turn 1)
+        var turn1Events = DigestAll(
+            sut,
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("round 1 thinking") } },
+            new AgentResponseUpdate { Contents = { new FunctionCallContent("c1", "Glob", new Dictionary<string, object?> { ["pattern"] = "*.cs" }) } },
+            new AgentResponseUpdate { Contents = { new FunctionResultContent("c1", "Program.cs") } });
+
+        turn1Events.OfType<TurnStartedEvent>().Should().BeEmpty("Turn 1 had no text and no preceding tool boundary");
+
+        // Turn 2 starts directly with reasoning + another tool call (no text between Turn 1 and Turn 2)
+        var turn2Events = DigestAll(
+            sut,
+            new AgentResponseUpdate { Contents = { new TextReasoningContent("round 2 thinking") } },
+            new AgentResponseUpdate { Contents = { new FunctionCallContent("c2", "Read", new Dictionary<string, object?> { ["filePath"] = "Program.cs" }) } },
+            new AgentResponseUpdate { Contents = { new FunctionResultContent("c2", "class Program {}") } });
+
+        // Must emit TurnStartedEvent(2) before the ThinkingDeltaEvent of Turn 2
+        turn2Events.OfType<TurnStartedEvent>().Should().ContainSingle()
+            .Which.TurnNumber.Should().Be(2);
+        var turn2StartIndex = turn2Events.FindIndex(static e => e is TurnStartedEvent);
+        var turn2ThinkingIndex = turn2Events.FindIndex(static e => e is ThinkingDeltaEvent);
+        turn2StartIndex.Should().BeLessThan(turn2ThinkingIndex,
+            "TurnStartedEvent must precede Turn 2's ThinkingDeltaEvent so TUI commits Turn 1 before appending Turn 2");
+
+        // Turn 3 starts directly with a FunctionCallContent (no reasoning, no text)
+        var turn3Events = DigestAll(
+            sut,
+            new AgentResponseUpdate { Contents = { new FunctionCallContent("c3", "SubmitPlan", new Dictionary<string, object?> { ["title"] = "plan" }) } });
+
+        turn3Events.OfType<TurnStartedEvent>().Should().ContainSingle()
+            .Which.TurnNumber.Should().Be(3);
+        var turn3StartIndex = turn3Events.FindIndex(static e => e is TurnStartedEvent);
+        var turn3ToolStartIndex = turn3Events.FindIndex(static e => e is ToolStartEvent);
+        turn3StartIndex.Should().BeLessThan(turn3ToolStartIndex,
+            "TurnStartedEvent must precede Turn 3's ToolStartEvent on a pure tool turn");
     }
 }

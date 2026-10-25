@@ -1,5 +1,5 @@
-using OneCode.App.Tui;
 using OneCode.Core.Keybindings;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

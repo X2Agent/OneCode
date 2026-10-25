@@ -1,5 +1,5 @@
 using OneCode.App.Session;
-using OneCode.App.Tui;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

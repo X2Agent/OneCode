@@ -1,13 +1,14 @@
 using OneCode.App.Query;
 using OneCode.App.Session;
-using OneCode.App.Tui;
+
+using OneCode.App.Commands;
 
 namespace OneCode.App.Services;
 
 /// <summary>
-/// Runtime artifacts produced by <see cref="InteractiveBootstrapService.InitializeAsync"/>
+/// Runtime artifacts produced by <c>InteractiveBootstrapService.InitializeAsync</c>
 /// and consumed by both the executor's streaming/command methods and
-/// <see cref="TuiHostConfigurator"/>. Carries the shared, immutable session
+/// <c>TuiHostConfigurator</c>. Carries the shared, immutable session
 /// state needed to wire the TUI and dispatch queries.
 /// </summary>
 /// <remarks>

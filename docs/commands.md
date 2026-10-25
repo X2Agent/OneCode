@@ -12,13 +12,13 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 
 | 类别 | 说明 | 数量 |
 |---|---|---|
-| `Builtin` | 内置通用命令（配置、模式、工具等） | 22 |
+| `Builtin` | 内置通用命令（配置、模式、工具等） | 23 |
 | `Session` | 会话管理（会话、记忆、检查点、导出、队列等） | 11 |
 | `Diagnostic` | 诊断命令（环境检查、状态统计） | 3 |
 | `Skill` | 技能安装与 MCP 服务器管理 | 2 |
 | `Git` | Git 工作流命令 | 6 |
 
-当前共 44 个命令，数量由 `DocFactConsistencyTests` 的命令数守卫锚定。
+当前共 45 个命令，数量由 `DocFactConsistencyTests` 的命令数守卫锚定。
 
 ---
 
@@ -134,6 +134,31 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `N` | 位置参数 | `1` | 从末尾开始 1-based 的响应序号，`1` 表示最后一条 |
+
+---
+
+### /daemon
+
+管理项目守护进程：查看运行状态与本项目 durable cron 概况、显式启停。守护进程是无头宿主，
+令 durable cron 作业在 TUI 关闭后仍按计划触发；一个 daemon 绑定一个项目（进程工作目录），
+与 TUI 并存时 durable 作业由跨进程触发锁仲裁不双发。开机常驻注册走
+`scripts/install-daemon.ps1`（Windows 任务计划程序）与 systemd / launchd 模板，不在本命令内。
+
+**用法**：
+
+```
+/daemon [status|start|stop]
+```
+
+**子命令**：
+
+| 子命令 | 说明 |
+|---|---|
+| `status`（无参默认） | daemon 运行状态（PID / 启动时间）+ 本项目 durable cron 作业概况与下次触发；未运行时给出常驻安装指引 |
+| `start` | 分离启动一个 daemon 进程（隐藏窗口），回报 PID 与日志目录；已有实例在运行时提示不重复拉起 |
+| `stop` | 写停止哨兵并等待优雅退出（15 秒上限，超时只报告不强杀——可能在收尾长任务） |
+
+> 相关：`/cron`（作业创建与管理）；守护进程与 cron 的生命周期语义见 [docs/background-services.md](background-services.md)。
 
 ---
 
@@ -545,8 +570,6 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `pause <id>` | 暂停任务 |
 | `resume <id>` | 恢复任务 |
 | `run` / `trigger <id>` | 立即触发任务 |
-
-> `--durable` 需要环境变量 `ONECODE_DURABLE_CRON=true`。
 
 ---
 

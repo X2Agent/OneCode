@@ -5,7 +5,7 @@ using NSubstitute;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Loop;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Exec;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tools;
@@ -29,7 +29,7 @@ public sealed class IterativeLoopServiceTests
         ProgressMessages(events).Should().Contain(m => m.Contains("第 1/3 轮 · 检查未通过"));
         ProgressMessages(events).Should().Contain(m => m.Contains("第 2/3 轮 · 检查通过"));
         ProgressMessages(events).Should().Contain(m => m.Contains("循环通过"));
-        events.OfType<TuiError>().Should().BeEmpty();
+        events.OfType<ErrorEvent>().Should().BeEmpty();
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class IterativeLoopServiceTests
             CreateService(CreateShellExecutor(0), innerAgent: new ThrowingAgent()),
             new LoopRunRequest("会崩", "exit 0", 3));
 
-        events.OfType<TuiError>().Should().ContainSingle();
+        events.OfType<ErrorEvent>().Should().ContainSingle();
         ProgressMessages(events).Should().Contain(m => m.Contains("循环未通过"));
     }
 
@@ -174,12 +174,12 @@ public sealed class IterativeLoopServiceTests
         return pm;
     }
 
-    private static List<string> ProgressMessages(List<TuiEvent> events)
-        => events.OfType<TuiModeProgress>().Select(e => e.Message).ToList();
+    private static List<string> ProgressMessages(List<QueryEvent> events)
+        => events.OfType<ModeProgressEvent>().Select(e => e.Message).ToList();
 
-    private static async Task<List<TuiEvent>> DrainAsync(IIterativeLoopService service, LoopRunRequest request)
+    private static async Task<List<QueryEvent>> DrainAsync(IIterativeLoopService service, LoopRunRequest request)
     {
-        var events = new List<TuiEvent>();
+        var events = new List<QueryEvent>();
         await foreach (var evt in service.RunAsync(
             "system prompt",
             request,

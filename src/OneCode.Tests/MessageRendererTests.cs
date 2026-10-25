@@ -1,4 +1,5 @@
-using OneCode.App.Tui;
+using OneCode.App.Query;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -124,7 +125,7 @@ public sealed class MessageRendererTests
             "Explore · 检索USDD脱锚与SunPerp",
             null,
             IsExpanded: true,
-            LiveProgress: new TuiSubagentProgress(
+            LiveProgress: new SubagentProgressEvent(
                 ForkId: "fork-1",
                 AgentName: "Explore",
                 OneCode.App.Query.SubagentProgressPhase.Running,

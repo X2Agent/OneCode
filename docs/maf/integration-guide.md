@@ -41,6 +41,10 @@
 两档证据均在 1.22.0 基线取证，对 1.24.0 不自动成立。升级 1.24.0 时已按 §13.2 复查并通过的条目（审批协议真实包测试、
 压缩装配真实包测试、摘要守卫字面量核对）以 1.24.0 包为证；引用其余源码结论前需先升级 checkout 并重做取证。
 
+上游版本现状（2026-10-24）：NuGet stable 已发布 **1.25.0**（2026-10-14）与 **1.26.0**（2026-10-23，release notes 含
+[BREAKING] 条目），pinned 仍为 1.24.0。本文引用的 1.24.0 包级事实（Harness options 成员、BackgroundAgents 符号面、
+压缩类型名）均经本地 NuGet 缓存的 1.24.0 DLL 字符串验证；升级 1.25/1.26 时按 §13.2 条目 1-15 逐项重跑。
+
 因此每条源码结论仍需标注证据等级，本文采用两档：
 
 | 等级 | 含义 | 覆盖范围 |
@@ -244,7 +248,7 @@ ApprovalResponseBindingChatClient          ← 最外层
 | 3 | `FunctionInvokingChatClient` | 恒有，`MaximumIterationsPerRequest` 在此生效 |
 | 4 | `MessageInjectingChatClient` | 恒有（Harness 硬编码 `UseMessageInjection()`） |
 | 5 | `PerServiceCallChatHistoryPersistingChatClient` | 恒有（Harness 硬编码，且 Options 里写死 `RequirePerServiceCallChatHistoryPersistence = true`） |
-| 6 | `AIContextProviderChatClient`（装 `CompactionProvider`） | 有压缩策略时 |
+| 6 | `AIContextProviderChatClient`（装 `CompactionProvider`） | `CompactionStrategy` 非空，或 `MaxContextWindowTokens` + `MaxOutputTokens` 均设置（Harness 创建默认 `ContextWindowCompactionStrategy`）；`DisableCompaction = true` 关闭 |
 | 7（最内） | `OpenTelemetryChatClient` | `DisableOpenTelemetry != true` |
 
 **默认 Context Provider（按加入顺序）**：`TodoProvider` → `AgentModeProvider` → `FileMemoryProvider` →
@@ -258,6 +262,14 @@ ApprovalResponseBindingChatClient          ← 最外层
 
 **指令合成**：`HarnessInstructions`（`null` → `HarnessAgent.DefaultInstructions`）在前，`ChatOptions.Instructions` 在后，
 以 `\n\n` 连接。想彻底不要框架指令就传 `string.Empty`（`null` 不等于「不要」）。
+
+**聊天历史与压缩的接入面**（成员存在性经 1.24.0 Harness 包 DLL 字符串验证，行为细节为官方文档口径）：
+`HarnessAgentOptions.ChatHistoryProvider` 默认为 `InMemoryChatHistoryProvider`，自定义 provider **按原样使用**。
+压缩默认关闭；仅设 `MaxContextWindowTokens` + `MaxOutputTokens` 时 Harness 创建默认 `ContextWindowCompactionStrategy`，
+并把该策略经 `AsChatReducer()` 配给默认历史 provider——自定义历史 provider 不参与这一步，但环内压缩（每次模型调用前）
+仍然生效。`DisableCompaction = true` 覆盖 token 设置与 `CompactionStrategy`；`MaxOutputTokens` 在压缩开关与否两种状态下
+都会写入 `ChatOptions.MaxOutputTokens`。OneCode 传入 `TranscriptChatHistoryProvider` 即走「自定义按原样使用」分支
+（[`AgentPipelineBuilder.cs`](../../src/OneCode.Infrastructure/Agent/AgentPipelineBuilder.cs)）。
 
 ### 3.4 该选哪条
 
@@ -386,7 +398,7 @@ if (index.IncludedNonSystemGroupCount <= 1 || !this.Trigger(index)) { /* 跳过 
 | 策略 | 做什么 |
 |------|--------|
 | `ToolResultCompactionStrategy` | 把旧的 tool call 组折叠成简短摘要（`ToolCallFormatter` 可换） |
-| `SummarizationCompactionStrategy` | 调 LLM 生成摘要替换旧消息；默认保留最近 8 组（硬下限） |
+| `SummarizationCompactionStrategy` | 调 LLM 生成摘要替换旧消息；`minimumPreservedGroups` 硬下限保护最近非系统组（官方文档称默认 4，OneCode 显式传 8，默认值不影响行为——取值见 [压缩阈值](../compact-thresholds.md)） |
 | `TruncationCompactionStrategy` | 直接丢弃最旧的非系统组 |
 | `SlidingWindowCompactionStrategy` | 滑动窗口 |
 | `ChatReducerCompactionStrategy` | 适配 `IChatReducer` |
@@ -398,7 +410,11 @@ if (index.IncludedNonSystemGroupCount <= 1 || !this.Trigger(index)) { /* 跳过 
 
 ### 6.3 三种挂载时机
 
-1. **run 内**（`CompactionProvider`）——每次服务调用前压一次，防止工具循环撑爆上下文。
+1. **run 内**（`CompactionProvider`）——每次服务调用前压一次，防止工具循环撑爆上下文。**注册点决定是否进工具环**
+   【版本敏感，官方文档口径，1.24 未单独取证】：只有经 `ChatClientBuilder.UseAIContextProviders(...)` 注册的
+   `CompactionProvider` 在工具调用环内每次模型调用前执行；经 `ChatClientAgentOptions.AIContextProviders` 注册的
+   **不进**工具环（agent 级 provider 在历史落库前运行，产生的合成摘要可能随 `ChatHistoryProvider` 持久化）。
+   `HarnessAgent` 把 provider 装在 chat client 链上，属前者。
 2. **落库前**——在 `ChatHistoryProvider` 写入前压。
 3. **对已有存储做维护**——用静态方法 `CompactionProvider.CompactAsync(strategy, messages, logger, ct)`。
 
@@ -466,7 +482,10 @@ if (index.IncludedNonSystemGroupCount <= 1 || !this.Trigger(index)) { /* 跳过 
 | `ApprovalNotRequiredFunctionBypassingChatClient` | 摘掉「不需要审批却被连坐」的请求，存进 session，下一轮自动以已批准形式回注 |
 | `ApprovalResponseBindingChatClient` | 记录框架实际浮出过的每个审批请求，把回来的响应绑定到对应请求上，保证「批准的就是问过的那一个」 |
 
-两者默认启用，**建议保持**。`ApprovalResponseBindingChatClient` 直接关系到人机审批边界的强度。
+两者默认启用，**建议保持**。`ApprovalResponseBindingChatClient` 直接关系到人机审批边界的强度。两个装饰器在
+`HarnessAgentOptions` 上有各自的独立开关（1.24.0 Harness 包 DLL 已验证存在）：`DisableApprovalResponseBinding` /
+`DisableApprovalNotRequiredFunctionBypassing`；而 `DisableToolAutoApproval` 只摘除 `ToolApprovalAgent`（常驻规则 /
+排队 / 自动批准），不解除 `ApprovalRequiredAIFunction` 自身的审批要求，也不动这两个装饰器（官方文档口径）。
 
 ### 7.3 `ToolApprovalAgent`（Harness 默认装上）
 
@@ -514,6 +533,11 @@ MAF 的 ToolApproval 是**协议层**（谁来问、怎么记住、怎么绑定�
 - `AgentSkillsProvider.ReadOnlyToolsAutoApprovalRule` — 只放行 `load_skill` / `read_skill_resource`
 - `AgentSkillsProvider.AllToolsAutoApprovalRule` — 连 `run_skill_script` 一起放行
 
+Harness 侧（`HarnessAgentOptions.AgentSkillsSource`，1.24.0 Harness 包 DLL 已验证存在，行为为官方文档口径）：
+默认从进程当前目录发现文件技能；设 `AgentSkillsSource` 可替换发现源，但它**不暴露 `AgentSkillsProviderOptions`**——
+需要 `DisableLoadSkillApproval` 这类 provider 级开关时，须 `DisableAgentSkillsProvider = true` + 把配置好的
+`AgentSkillsProvider` 经 `AIContextProviders` 自挂（OneCode 即此形态）。
+
 ### 8.1 简单构造 vs Builder
 
 简单构造函数（传路径或传技能列表）已经自带 **去重 + 缓存**，并且 `ownsSource: true`：
@@ -529,7 +553,7 @@ new AgentSkillsProvider(skillPath, scriptRunner, fileOptions, options, loggerFac
 var provider = new AgentSkillsProviderBuilder()
     .UseFileSkills(paths)
     .UseFileScriptRunner(runner)
-    .UseSkills(inlineSkill)
+    .UseSkill(inlineSkill)
     .UseFilter((skill, ctx) => ...)
     .UseLoggerFactory(loggerFactory)
     .Build();   // = Deduplicating(Filtering(Caching(Aggregating(...))))，ownsSource: true
@@ -592,10 +616,14 @@ IReadOnlyList<AIFunction> tools = await mcpClient.ListAgentToolsWithTasksAsync(o
   OneCode 的决定见 [子代理派工边界](../adr/0011-background-agents-delegation-boundary.md)：不挂载（门禁绕过 / 审批不转发 /
   DAG 无对应物 / 恢复语义倒置四条硬证据），亦不用作 `AgentTool` 的底层实现——provider 公共面只有
   构造 / `StateKeys` / `GetIncompleteTasks` / `ReleaseSessionAsync`，**没有编程式起任务入口**。
-  .NET 侧 `ReleaseSessionAsync` / `GetIncompleteTasks` 均已存在；Microsoft Learn 的 .NET zone
-  「宿主端释放不可用」与源码不符，以本地源码为准。
+  .NET 侧 `ReleaseSessionAsync` / `GetIncompleteTasks` 在 pinned 1.24.0 包 DLL 字符串验证中均存在、`StartTaskAsync`
+  零匹配（取证记录见 [子代理派工边界](../adr/0011-background-agents-delegation-boundary.md) §4）；Microsoft Learn 的
+  .NET zone 仍标注「宿主端释放不可用」，与包证据相左，分歧列入 §13.2 条目 10 升级复核。
 - `LoopAgent` 是**最外层**装饰器，每次迭代都是一次完整 agent run（含审批与遥测）。想做「目标未达成就重跑」的循环，
-  用它 + `DelegateLoopEvaluator`，不要自己写 `while (RunStreaming)`。
+  用它 + `DelegateLoopEvaluator`，不要自己写 `while (RunStreaming)`。循环参数经 `HarnessAgentOptions.LoopAgentOptions`
+  传入（1.24.0 DLL 已验证存在）；`LoopAgentOptions` 另有 `FreshContextPerIteration`（每轮从原始请求 + 聚合反馈日志重建
+  上下文，并重置/恢复会话）与 `NonStreamingReturnsLastResponseOnly`（非流式只返回末轮响应，默认返回聚合转录）两个成员
+  （1.24.0 DLL 已验证存在，语义为官方文档口径），默认 `MaxIterations` 上限为 10 次调用（官方文档口径）。
 - `MaxIterations` 是**调用次数**上限，且达到上限时**先停后判**——最后一轮不会进入评估器。
   因此配 3 得到的是 3 次调用 + 2 次完整「评估 → 重试」。OneCode 的 GOAL 子目标与 `/loop` 都保持与配置 1:1，不做 +1 补偿。
 - `TodoProvider` 的并发安全靠 per-session 锁（`ConditionalWeakTable<AgentSession, SemaphoreSlim>`）；`FileMemoryProvider`
@@ -694,7 +722,8 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 ### 13.2 MAF 升级复查清单
 
 升级 MAF 版本时逐条执行。当前 pinned 为 **1.24.0**（1.22.0 → 1.24.0 升级已按条目 1-4 复查通过；
-条目 5-11 引用的源码结论仍是 1.22.0 基线取证，见 §1.1），以下条目即按它复查：
+条目 5-11 引用的源码结论仍是 1.22.0 基线取证，见 §1.1）。上游 stable 已到 **1.26.0**（1.25.0：2026-10-14；
+1.26.0：2026-10-23，release notes 含 [BREAKING] 条目，见 §1.1），升级 1.25/1.26 时除条目 1-11 外还须执行 12-15：
 
 1. **核对实际版本**：读 `project.assets.json`，不要用旧 artifacts 或本地 NuGet 缓存代替。
 2. **审批协议**【版本敏感】：重跑「暂停 → 恢复 → 审批响应绑定」与「只回显响应、不回放请求」两组用例
@@ -720,11 +749,27 @@ ChatClient 级刻意放在函数调用之下：这样 chat span 会在工具执�
 10. **BackgroundAgents**：核对 `Harness/BackgroundAgents/**` 的工具名（`background_agents_*`）、状态键与
     `ReleaseSessionAsync` 语义是否变化；**并确认上游是否暴露编程式任务入口**（如 `StartTaskAsync`）——
     若暴露，按 [子代理派工边界](../adr/0011-background-agents-delegation-boundary.md) 的后续工作定义重评 F4-F6 能否改用框架能力。
+    注：Microsoft Learn 的 .NET zone 标注「宿主端释放不可用」，与 1.24.0 DLL 证据（`ReleaseSessionAsync` /
+    `GetIncompleteTasks` 存在、`StartTaskAsync` 零匹配，见 §10）相左；升级时以包为准裁决并同步更新两边表述。
 11. **决策模型 API**：核对 `Microsoft.Extensions.AI.Abstractions` 与 `Microsoft.Agents.AI.Abstractions`
     是否出现 `IDecisionClient` / `DecisionQuestion` / `DecisionResponse` 等决策类型（按 pinned 程序集逐符号计数，
     勿用本地 checkout 为已发布包行为作证）。一旦出现即按
     [决策模型接入](../adr/0012-decision-model-integration-jev.md) §决策 6 重评，并删除该 ADR §决策 1 的自持契约、
     改用上游类型。
+12. **压缩类型与参数改名**：官方文档已改用 `MessageIndex` / `MessageGroup` / `MessageGroupKind` 与参数
+    `minimumPreserved`（1.24.0 为 `CompactionMessageIndex` / `CompactionMessageGroup` / `CompactionGroupKind` /
+    `minimumPreservedGroups`，DLL 字符串验证 `MessageGroupKind` 在 1.24.0 零匹配）。若改名属实，同步
+    [`GuardedSummarizationCompactionStrategy.cs`](../../src/OneCode.Infrastructure/Agent/GuardedSummarizationCompactionStrategy.cs)、
+    [`CompactionPipelineBuilder.cs`](../../src/OneCode.Infrastructure/Agent/CompactionPipelineBuilder.cs)、
+    `TranscriptChatHistoryProvider.cs` 注释、测试反射（`CompactionPipelineBuilderTests` /
+    `GuardedSummarizationCompactionStrategyTests` 用 `typeof(CompactionMessageIndex)`）及本文 §6。
+13. **Skills builder 方法名收敛**：1.24.0 DLL 中 `UseFileSkill` 与 `UseFileSkills` 并存（本地代码用复数，
+    `SkillProviderFactory.cs`）；核对上游是否收敛为单数并同步代码与 [技能系统](../skills.md)、
+    [MAF 集成边界](../adr/0007-maf-integration-boundaries.md) 的引用。
+14. **Summarization 默认保留组数**：官方文档称 `MinimumPreserved` 默认 4，本文 1.22 源码基线曾记录 8；以升级包
+    反编译为准。OneCode 显式传 `minimumPreservedGroups: 8`（`CompactionPipelineBuilder.cs`），默认值变化不影响行为。
+15. **LoopAgent 默认值与新语义**：官方文档称默认 `MaxIterations = 10` 次调用；`FreshContextPerIteration` /
+    `NonStreamingReturnsLastResponseOnly`（1.24.0 DLL 已验证存在）的行为是否变化。
 
 ---
 

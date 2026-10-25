@@ -1,122 +1,142 @@
 # OneCode TUI 极致化路线图
 
-> 状态：计划稿（P0 待立项，P1-P4 依次推进）。
-> UI 形态战略（TUI 是唯一交互前端；Web UI / 桌面壳 / AG-UI 端点不做）的决策依据与业界调研见
-> [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)，本计划是其工程落地图纸。
+> 状态：P0 项目边界与契约下沉已落地（TUI 独立为 `OneCode.Tui`；App 零 Terminal.Gui 依赖，且不再产出 UI 形状事件，
+> 见 [TUI 项目边界](../adr/0016-tui-project-boundary.md) 与 [UI 契约单层化](../adr/0017-ui-contract-single-layer.md)）；
+> P1 daemon 已落地（§4）；P2-P4 依次推进。
+> UI 形态：TUI 与 Blazor Server 浏览器客户端同为进程内消费端，对外网络端点不做
+> （决策依据与业界调研见 [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)，本计划是其工程落地图纸）。
 > 关联文档：[后台代理派工边界](../adr/0011-background-agents-delegation-boundary.md)（后台会话/attach/守护进程复用
 > `QueryStreamEngine`/权限/Build 门禁，不构成背景代理派工触发）、[docs/keybindings.md](../keybindings.md)。
+> 范围：本路线只覆盖宿主/交互形态。引擎能力演进（如控制型浏览器自动化工具、GitHub/PR 集成）不在本路线范围，
+> 出现真实需求另行立项。
 
 ## 1. 路线总览
 
 | 阶段 | 内容 | 一句话目标 | 依赖 |
 |---|---|---|---|
-| **P0** | 引擎与 TUI 解耦 | 引擎可脱离 TUI 运行，attach/守护进程的地基 | 无，立即开工 |
-| **P1** | 后台多会话并行 + tab + `onecode sessions/attach` | 一个终端盯多个会话，任意终端介入任意会话 | P0 |
-| **P2** | `onecode daemon` 无头守护进程 + OS 通知 | TUI 关了定时任务照跑、审批消息弹 toast | P0 |
-| **P3** | 产物卡 + 本机软件调起 + 图片能力检测内联 | 对话产物一键交给系统里最专业的软件 | P1 |
-| **P4** | `onecode run -p` 单发模式 + ssh/mosh 工作流 | 远程机器与手机上可用 | P1、P2 |
+| **P0** | 引擎与 TUI 解耦 | 引擎可脱离 TUI 运行，attach/守护进程的地基 | 无（已落地） |
+| **P1** | `onecode daemon` 无头守护进程 + 通知触发补齐 | TUI 关了定时任务照跑、审批消息弹 toast | P0 |
+| **P2** | `onecode sessions` / `attach` 跨终端接入 | 任意终端介入任意会话，会话不随终端死 | P0、P1 |
+| **P3** | 产物卡 + 本机软件调起 + 图片能力检测内联 | 对话产物一键交给系统里最专业的软件 | P0 |
+| **P4** | ssh/mosh 远程工作流文档化 | 远程机器与手机上可用 | P1、P2 |
 
-四项用户诉求与本路线的映射：并行会话监控台 → P1；桌面系统集成（通知/定时）→ P2（托盘为可选薄助手，§5）；
-富渲染与可视化 → P3；远程访问 → P4（ssh 即协议，用户已确认可接受）。
+四项用户诉求与本路线的映射：并行会话监控台 → 终端多窗/tmux 并置（新开控制台窗口即新会话，见 §2 原则 2），
+P1 daemon 让会话与定时任务常驻、P2 `sessions`/`attach` 提供跨终端可见与接入；桌面系统集成（通知/定时）→ P1
+（托盘为可选薄助手，§4）；富渲染与可视化 → P3；远程访问 → P4（ssh 即协议，用户已确认可接受）。
 
 ## 2. 设计原则（与 UI 形态战略决策一一对应）
 
 1. **TUI 是调度器，本机软件是渲染器**：TUI 只做摘要与入口，文件/网页/diff 的渲染委托系统默认应用与编辑器；不在 TUI 内追浏览器效果。
-2. **多路复用交给终端**：一个 OneCode 进程 = 一个项目；跨项目切换用终端 tab/tmux；跨进程接入用 attach。
+2. **多路复用交给终端**：一个 OneCode 进程 = 一个项目 = 一个前台会话视图；跨项目与跨会话的并置切换用终端
+   窗口/tab/tmux——新开一个控制台窗口即得一个新会话（无单实例锁、会话存储全局，`/new`/`/session`/`/resume` 既有）；
+   跨终端接入同一会话用 attach。进程内不建 tab 条（裁决见 §9）。
 3. **后台能力进守护进程，不进 UI**：定时任务、后台会话的宿主是无头进程；通知走 OS 现成设施（toast/OSC），托盘只是化妆品。
 4. **引擎零前端依赖**：业务核心不得反向引用 Tui/前端命名空间（P0 验收含 grep 守卫）。
 
-## 3. P0 · 引擎与 TUI 解耦（App 层内，无新项目）
+## 3. P0 · 引擎与 TUI 解耦
 
-### 3.1 现状
+### 3.1 当前结构（项目边界已落地）
 
-`using OneCode.App.Tui` 泄漏到 App 层 `Tui/` 目录之外共 **24 个文件**。有利事实：`Terminal.Gui` 包依赖本身封闭在
-`Tui/` 目录内（唯一例外 `Services/TuiHostConfigurator.cs`）；`IConversationRunner` 流式契约 public（`Query/IConversationRunner.cs`，
-`QueryStreamEngine.StreamQueryAsync` 实现）；QueryEvent 事件体系（16 种，`Query/QueryEventTypes.cs`）UI 无关；
-会话事件溯源全局存储（`Session/FileSessionEventStore.cs` 挂 `PathsHelper.UserHome`）；Automation 的 `CronJobExecutor`
-经 `IConversationRunner` headless 运行（引擎可脱离 TUI 的既有证明）。
+TUI 已独立为 `OneCode.Tui` 项目（Terminal.Gui 视图/浮层/渲染器 + TUI 装配件 + 进程入口），
+`OneCode.App` 零 Terminal.Gui 依赖（包引用 / global using / 类型使用三层均无命中）。
 
-泄漏分两类（初判，逐文件核实是 P0 第一步）：
+引擎与前端只经 `QueryEvent` 单层契约交互，四类交互走 Core 端口：
 
-- **A 类 · TUI 装配层（9 个，性质合理、位置混淆）**：`ClaudeCodeApp`（组合根）、`InteractiveBootstrapService`、
-  `InteractiveSession`、`InteractiveTuiDependencies`、`TuiInteractionBridge`、`TuiCatalogDependencies`、
-  `TuiHostConfigurator`、`TuiContextFactory`、`Setup/SetupServiceCollectionExtensions`。处置：收拢进 `Tui/`
-  或统一命名，归入 TUI 专属注册段。
-- **B 类 · 引擎层泄漏（14 个，真障碍）**：`Streaming/OrchestrationStreamService`、`Streaming/QueryStreamService`、
-  `PlanMode/PlanAgentRunDispatcher`、`PlanMode/PlanApprovalGate`、`PlanMode/PlanWorkflowApplicationService`
-  （含 `.Transitions.cs`）、`GoalMode/GoalWorkflowRuntime`、`GoalMode/GoalRuntimeProgress`、
-  `Agent/GoalSubGoalExecutor`、`Agent/GoalSubGoalLoop`、`Loop/IterativeLoopService`、
-  `BuildMode/BuildRunTuiReplayService`、`Mcp/McpConfigService`、`Services/UserQuestionService`
-  （AskUserQuestion 工具路径，经 `TuiInteractionBridge` 转发 TUI 形状请求）。已抽样：
-  `PlanApprovalGate` 真实引用 `PlanCardDecision`/`PlanCardPublisher`（交互类型需抽到 UI 无关层）；
-  `QueryStreamService`、`GoalRuntimeProgress` 疑似仅残留 using（可直删）。
-
-### 3.2 改动
-
-| # | 障碍 | 改造方向 |
+| 契约 | 文件 | 消费方 |
 |---|---|---|
-| O1 | Tui 命名空间泄漏约 25 文件 | A 类收拢进 TUI 装配层；B 类把被引用的交互类型（`PlanCardPublisher`/`PlanCardDecision` 等）迁到 UI 无关层，残留 using 直删 |
-| O2 | 审批应答经 `TaskCompletionSource<ApprovalDecision>` 回传（`QueryEventTypes.cs`） | TCS 本身 UI 无关，**不改**；attach 端经 `ApprovalBroker`（`Services/Agent/ApprovalBroker.cs`）同一待决面应答 |
-| O5 | `RegisterInteractiveServices` 注册 TUI 栈（`ServiceCollectionExtensions.*.cs`） | 拆分为 `RegisterInteractionCore`（UI 无关）+ `RegisterTuiServices`（Terminal.Gui 栈）；`OneCodeApp.Create` 串联，对外行为不变——这是 P2 守护进程复用同一组合根的前提 |
+| `QueryEvent` 事件层级（25 个子类型） | `src/OneCode.App/Query/QueryEventTypes.cs` | TUI 三处分发、WebUI 会话客户端 |
+| 契约基线（新增子类型必须同步两个前端渲染） | `src/OneCode.Tests/QueryEventContractTests.cs` | 两个前端的未知事件告警、基线守卫 |
+| 交互端口与 App 侧统一实现 | `src/OneCode.Core/Permissions/IApprovalBroker.cs`、`src/OneCode.Core/Permissions/IApprovalPromptSink.cs`、`src/OneCode.App/Services/Interaction/` | 审批 / 提问 / 向导 / 预算 |
+| `PlanCardDecision` / `PlanCardPhase` / `PlanStep` / `PlanStepStatus` | `src/OneCode.App/Services/PlanMode/PlanCardTypes.cs` | Plan 工作流、审批门 |
+| `SlashCommandEntry` | `src/OneCode.App/Commands/SlashCommandEntry.cs` | 交互会话、补全目录 |
+| `McpConfigServerEntry` / `McpConfigResult` / `McpConfigServerChange` | `src/OneCode.App/Services/Mcp/McpConfigTypes.cs` | `McpConfigService` |
 
-### 3.3 验收
+DI 注册按领域归属拆分：`AddStreamingServices`（App：流式管道、Build 回放、QueryEvent 旁路）+
+`AddAppRuntimeServices`（App：斜杠命令管线、模式桥、会话启动）+
+`AddInteractionCoreServices`（App：交互端口默认实现）+
+`AddTuiServices`（OneCode.Tui：Terminal.Gui 栈与交互装配件）。组合根 `OneCodeApp.Create(args, configureTuiStack)`
+经 App 侧 `InteractiveShellRunner` 委托驱动前端——无头宿主（daemon / attach）注册核心服务后自行驱动引擎，
+这是 P1 的前置条件。
 
-`dotnet build src/OneCode.slnx` 零新增警告（TreatWarningsAsErrors）+ `dotnet test src/OneCode.slnx` 全绿；
-grep 复查 App 层引擎/编排/流式目录无 `using OneCode.App.Tui`（TUI 装配层除外）。
+`OneCode.WebUI` 首版已落地：单会话对话、工具卡片、审批/提问/预算三类中断卡片、会话列表/切换/新建/关闭
+与斜杠命令分发（多问题向导暂按取消降级）；范围与边界见
+[UI 契约单层化](../adr/0017-ui-contract-single-layer.md)。
 
-## 4. P1 · 后台多会话并行 + tab + attach/sessions
+### 3.2 阶段 B · 契约下沉（已完成）
 
-### 4.1 两层结构（职责不越界）
+流式管道、Goal/Build/Loop 全部产出 `QueryEvent`；四类交互收敛为 Core 端口
+（`IApprovalBroker` / `IApprovalPromptSink` / `IUserQuestionService` / `IBudgetDecisionService`），
+端口实现统一在 App（经 `IInteractionDispatcher` 投递到前端），前端只替换投递通道；
+`TuiEvent` 层级、`TuiEventMapper` 与旧旁路桥删除，`src/OneCode.App/Tui/` 目录不再存在。
+非运行通知（MCP 连接变化 / LSP 诊断变化）由前端直接订阅源事件刷新。
 
-- **应用内 tab（一个进程 = 一个项目，tab = 该项目的会话）**：顶部 tab 条；每 tab 一套会话视图模型，
-  底栏复用 `SessionContextBar`（已有项目/分支/轮次/用量身份行）；待审批的 tab 高亮，审批状态汇聚到 `AgentStatusBar`。
-  切换键经 `KeybindingResolver` 注册（预案：`alt+1..9`、`alt+←/→`，走 `KeybindingContextManager` 上下文路由）。
-  新建/恢复会话从全局存储按当前项目过滤（`/session` 已存在，改造成按项目分组的列表；`/resume` 专用于恢复持久化的 Goal 任务）。
-- **跨项目交给终端**：每个项目一个终端 tab/窗口跑各自 cwd 的 `onecode`。**明确不做单进程多项目切换**
-  （项目级配置作用域、工具 cwd 语义、内存隔离会互相污染，且终端多路复用器已把这件事做得很好）。
+| # | 原障碍 | 处置 |
+|---|---|---|
+| B1 | 流式管道产出 UI 形状事件 | 引擎改产 `QueryEvent`，UI 契约层整体删除 |
+| B2 | 审批/提问经 `TaskCompletionSource` 回传 UI 形状请求 | 收敛为 Core 端口，App 统一实现经投递通道达前端；事件不再携带等待句柄 |
+| B3 | Terminal.Gui 视图寄生在组合层 | 视图迁入 `OneCode.Tui`，App 只保留 UI 无关契约（`QueryEvent` / 端口 / DTO），`src/OneCode.App/Tui/` 目录删除 |
 
-### 4.2 会话并行与 attach（引擎侧）
+### 3.3 验收（阶段 B）
+
+`grep -r "using OneCode.App.Tui" src/OneCode.App` 零命中；`grep -r "TuiEvent" src/` 零命中；
+`dotnet build src/OneCode.slnx` 零新增警告 + `dotnet test src/OneCode.slnx` 全绿。
+
+## 4. P1 · `onecode daemon` 无头守护进程 + 通知（已落地）
+
+### 4.1 交付内容
+
+- **`onecode daemon` 无头宿主**（`src/OneCode.App/Daemon/DaemonHost.cs`；启动分发 `LaunchMode.Daemon`，
+  分支在 `Program.Main`——全量 DI 路径不进 `FastPathDispatcher`）：核心组合根（不挂 TUI 注册段）
+  承载全部既有后台服务；单实例互斥体（兼作 `/daemon` 存活探针）+ 状态文件 + 停止哨兵
+  （`DaemonLifecycle` / `DaemonStopWatcher`）。daemon 是 `/daemon start` 与 OS 调度器共用的内部启动协议，
+  不作用户功能入口宣传。
+- **`/daemon` 命令**（TUI 管理面，`Commands/DaemonCommand.cs`）：状态视图（PID/启动时间 + 本项目
+  durable cron 概况 + 未运行时的安装指引）、`start`（分离启动，回报 PID 与日志目录）、
+  `stop`（停止哨兵，15 秒优雅上限，超时只报告不强杀）。
+- **cron 多进程正确性**：`CronJobEntry.ProjectDir` 项目归属盖章与加载过滤（别项目的 durable 作业不再被
+  误触发）；durable 触发前的跨进程逐作业锁（同项目 TUI + daemon 并存不双发）。语义详见
+  [docs/background-services.md](../background-services.md) §4.4。
+- **通知触发补齐**：审批挂起超 30 秒宽限 toast（`InteractionApprovalPromptSink`）、交互运行超 2 分钟
+  完成 toast（`QueryStreamEngine`，无人值守路径由 `CronJobExecutor` 通知，不双发）。
+- **开机自启**：`scripts/install-daemon.ps1`（Windows 任务计划程序，含卸载）、
+  `scripts/onecode-daemon.service`（systemd 模板）、`scripts/com.onecode.daemon.plist`（launchd 模板）。
+
+### 4.2 本阶段不做
+
+托盘（可选薄助手，daemon + toast 覆盖 90% 价值后再评估）；OSC 9 并发终端标记（全屏终端兼容性风险，后置）。
+
+### 4.3 验收
+
+TUI 完全关闭，daemon 常驻，cron 到点照跑、toast 到达；重开 TUI 经 `/session` 可见 cron 执行历史会话；
+TUI 内 `/daemon` 可见运行状态并显式启停；同项目多进程并存不双触发；别项目作业不在本项目触发。
+
+## 5. P2 · `onecode sessions` / `attach` 跨终端接入
+
+会话间切换不建进程内 tab（§2 原则 2、§9）：一个 OneCode 进程一个前台会话视图，「切到另一个会话」= attach 到它。
+本阶段交付引擎侧多会话基础设施与跨终端接入。
+
+### 5.1 引擎侧多会话
 
 - **多会话执行**：后台会话循环 headless 运行（`BackgroundSession` 已存在于 `Session/`，Automation 已验证
-  `IConversationRunner` 无 TUI 可跑），前台 tab attach 其一，其余在 tab 条/侧栏显示状态（空闲/执行中/待审批）。
+  `IConversationRunner` 无 TUI 可跑），宿主是 P1 的 daemon；前台任一终端 attach 其一，其余会话状态经
+  `onecode sessions` 查看（空闲/执行中/待审批）。
 - **`onecode sessions`**：全局会话列表（会话存储本就是全局的），按项目分组，显示运行状态与未决审批。
+  会话内已有的 `/session` 列表改造成按项目分组的同一视图；`/resume` 专用于恢复持久化的 Goal 任务。
 - **`onecode attach <id>`**：从另一终端接入运行中会话——`FileSessionEventStore` 回放到当前点
   （事件溯源已支持）+ 订阅增量；审批经 `ApprovalBroker` 同一待决面应答。
-- **事件缓冲**：`BackgroundSession.EventBuffer` 目前仅预留了属性槽位尚未启用；P1 在 App 层落地 `TranscriptEventBuffer`（有界环形缓冲，按序保存近期 `QueryEvent` 并支持不可变快照导出），
+- **事件缓冲**：`BackgroundSession.EventBuffer` 目前仅预留了属性槽位尚未启用；本阶段在 App 层落地
+  `TranscriptEventBuffer`（有界环形缓冲，按序保存近期 `QueryEvent` 并支持不可变快照导出），
   会话级单生产者写入；attach 时从快照全量重建视图再接增量。
 - **执行权互斥**：任一时刻一个会话至多一个活跃查询执行者（前台 TUI、attach 端或 daemon 三者之一）；
   其余连接只读观察 + 可应答审批。会话级执行权锁（进程内锁 + 跨进程文件锁），冲突提交明确提示「该会话正在
   其他终端执行中」。
 
-### 4.3 新增命令与验收
+### 5.2 新增命令与验收
 
-- CLI 分发扩展：`CliModeDetector` 增 `sessions`/`attach` 模式（`src/OneCode.Cli/CliModeDetector.cs` + `FastPathDispatcher.cs`）。
-- **验收**：终端 A 跑项目甲 BUILD 长任务，`alt+2` 切到项目甲第二会话继续提问；另开终端 `onecode attach`
-  项目乙会话看到实时进度并应答审批；同会话双端同时发起查询时后者被互斥提示。
-
-## 5. P2 · `onecode daemon` 无头守护进程 + OS 通知
-
-### 5.1 现状缺口
-
-`CronSchedulerService`（`src/OneCode.Automation/Cron/`）当前是寄宿在 TUI 主进程 `IHost` 内的 `BackgroundService`——**TUI 一关定时任务就停**（即使开启 `--durable` 将任务写入 `~/.onecode/cron/*.json`，也只能在用户下次重新启动 TUI 时由 `ReloadJobs` 补跑到期任务，无法在无 TUI 期间后台驻留触发）。本阶段引入独立 `onecode daemon` 进程正是为了彻底解决跨会话常驻调度问题。
-
-### 5.2 设计
-
-- **`onecode daemon`**：同一 IHost 组合根，剥掉 TUI 注册段（P0 的 O5 拆分正是为此），只挂
-  Automation（`CronSchedulerService`/`ModelCatalogRefreshService`）+ 后台会话执行（`IConversationRunner`
-  + `BackgroundSession`）+ 通知器。cron 到点 → headless 执行 → 结果写事件存储 → toast 通知；
-  TUI/attach 重开时从事件存储看到全部执行历史。
-- **开机自启交给 OS**：`scripts/install-daemon.ps1`（Windows 任务计划程序）/ systemd unit / launchd 各一份。
-- **通知器**（设置「通知开关」已有此位，落地为实现）：审批挂起、长任务完成、cron 结束触发。
-  Windows：PowerShell toast；macOS：`osascript`/terminal-notifier；Linux：`notify-send`；
-  并发终端标记（OSC 9）让任务栏/标题栏显示未决状态。诚实预期：点击 toast 聚焦回终端窗口尽力而为，不承诺各终端一致。
-- **托盘（可选、后置）**：极薄 `OneCode.Tray` 辅助进程，纯 C#（P/Invoke `Shell_NotifyIcon` 或 H.NotifyIcon），
-  **不承载任何 UI**——只做守护进程存活指示、最近任务结果菜单、退出守护进程，约 200 行。默认不做；
-  守护进程 + toast 覆盖 90% 价值后再评估。
-
-### 5.3 验收
-
-TUI 完全关闭，cron 到点照跑，toast 到达；重开 TUI/`attach` 能看到执行历史并可接管会话。
+- 启动分发扩展：`LaunchModeDetector` 增 `sessions`/`attach` 模式（`src/OneCode.Tui/LaunchModeDetector.cs` + `FastPathDispatcher.cs`）。
+- **验收**：终端 A 跑项目甲 BUILD 长任务，另开终端窗口（同项目）继续第二会话提问；终端 B `onecode sessions`
+  看到两个会话的运行状态，`onecode attach` 接入项目乙会话看到实时进度并应答审批；同会话双端同时发起查询时
+  后者被互斥提示。
 
 ## 6. P3 · 产物卡 + 本机软件调起 + 图片内联
 
@@ -142,10 +162,8 @@ livereload 预览小服务（~200 行，无任何 UI）——注意它不是 web
 agent 产出 `report.html` 与图片 → 会话尾部产物卡 → `o` 打开浏览器/照片查看器，diff 卡 `d` 在 VS Code
 看对比，全程零鼠标；Windows Terminal 内联显示缩略图，VS Code 内嵌终端自动降级为 `o`。
 
-## 7. P4 · `onecode run -p` 单发 + ssh/mosh 工作流
+## 7. P4 · ssh/mosh 远程工作流
 
-- **`onecode run -p "<task>"`**：非交互单发——headless 跑一轮查询，结果按 markdown/纯文本写 stdout，
-  退出码表达成败（Automation `CronJobExecutor` 已有同构先例，补 CLI 分发与输出格式化）。服务 cron/CI/远程。
 - **远程工作流文档化**（`docs/remote-workflow.md` 新增）：`ssh -t devbox onecode`（或登录后 `onecode attach`）、
   mosh 管漫游、tmux 管断线；Windows 开发机开 OpenSSH Server；手机 Termius/Blink 走同一套。
 - **验收**：手机 ssh 到家里机器 attach 会话、应答审批、看 cron 执行历史，全程 TUI。
@@ -157,16 +175,23 @@ agent 产出 `report.html` 与图片 → 会话尾部产物卡 → `o` 打开浏
 | 富渲染天花板（图片内联受终端模拟器割裂、HTML 永远要跳出终端） | 设计原则 1 写死：TUI 只做摘要与入口；能力检测 + 降级链（内联 → `o` 打开） |
 | 手机/远程 ssh TUI 体验一般 | 定位为可用而非精致；mosh/tmux 缓解断线；不为此建自有协议 |
 | 无 GUI 展示面，社区吸引力全押引擎与 TUI | asciinema/GIF 演示 + 引擎质量；与 UI 形态战略决策一致，硬需求出现再立项 |
-| daemon 与 TUI 并发写同一会话 | 执行权锁（§4.2）+ 事件存储追加写语义；契约测试走真实写入端 |
+| daemon 与 TUI 并发写同一会话 | 执行权锁（§5.1）+ 事件存储追加写语义；契约测试走真实写入端 |
 | toast 点击无法聚焦终端 | 承诺降级：通知只保证「知道有事」，介入靠 `attach`/重开 TUI |
-| O1 分类初判有误（个别文件归错类） | 逐文件核实是 P0 第一步；以「引用了什么类型」而非「文件在哪」定类 |
 
 ## 9. 明确不做清单
 
-- **Web UI**：`OneCode.Web`/Blazor/浏览器访问，不做。
+- **对外网络端点（含 AG-UI 协议端点）**：不做。依据是「无进程外消费端、不暴露端点」，
+  与协议包成熟度无关；AG-UI 协议的评估结论、自研单层契约的边界与重启判据见
+  [UI 契约单层化](../adr/0017-ui-contract-single-layer.md)。
+- **应用内 tab 条（进程内多会话切换 UI）**：不做。多会话并置交给终端（设计原则 2）——新开控制台窗口即新会话
+  （无单实例锁、会话存储全局，今天已零成本可用），「会话间切换」由 P2 的 attach 承担；tab 条的净增量
+  （省一次 alt-tab）撑不起每 tab 视图模型、输入路由、审批汇聚的实现与维护成本。
+- **`onecode run -p` 非交互单发**：暂缓。当前无真实消费场景（无 CI 集成、一次性任务开 TUI 即可、
+  定时走内置 cron、远程走 ssh + TUI）；headless 执行链路已由 `CronJobExecutor` 验证，出现脚本/CI 硬需求
+  随时可补（启动分发 + stdout 格式化 + 退出码映射，工作量以天计）。
 - **桌面壳**：Photino / Electron / Tauri / MAUI，不做。
-- **AG-UI 协议端点**：不做（`Microsoft.Agents.AI.*.AGUI` preview 包不进依赖面）。
-- **单进程多项目切换**：不做（§4.1）。
+- **单进程多项目切换**：不做。项目级配置作用域、工具 cwd 语义、内存隔离会互相污染，且终端多路复用器已把
+  这件事做得很好（设计原则 2）。
 - **HTML/富媒体内嵌渲染**：不做（§6.2）。
 - 以上任何一项若未来出现 TUI 无法覆盖的程序员场景硬需求，按 [UI 形态战略决策](../adr/0013-ui-surface-strategy.md)
-  重新立项评估——P0-P2 投入（引擎解耦/多会话/守护进程）届时原样复用。
+  重新立项评估——P0-P2 投入（引擎解耦/守护进程/attach）届时原样复用。

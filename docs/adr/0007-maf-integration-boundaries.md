@@ -194,16 +194,15 @@ provider 次序与状态 key、source/provider/client 所有权不误释放共�
 
 **`FileAccess` 例外条款**：2026-09-18 评估后仍不接管通用文件工具（多根工作区、ignore 单一清单、远程读取三项硬性不满足；Grep 能力净损失；provider 自动批准规则会成为第二套政策源）。若未来立项，须先满足：多根 store 适配（或显式放弃 `/add-dir`）、ignore 政策注入 store、远程读取扩展或显式排除，并同批迁移 `Read`/`Write`/`Edit`/`Delete`/`LS`/`Glob`/`Grep` 的全部引用方（`AutoDreamService.AllowedTools`、`ToolResultSummarizer`、提示词、权限元数据）。可复用资产：`SplitLines`/`ScanContent` 行号原语（作对照基准）、`file_access_replace_lines` 的过期行检测（作为独立新工具候选）。
 
-**StateMachineMiddleware 例外**：它不是 MAF 的重复实现，而是产品侧「连续失败 → Recovering/Blocked → 仅允许
-AskUser*」恢复闸。**禁止**用主 Harness `LoopEvaluators` 替代。
+**StateMachineMiddleware 例外**：它不是 MAF 的重复实现，而是产品侧双轨恢复闸（单工具连续失败定向阻拦该工具并允许切换到其他工具自愈；验证失败或跨工具连续失败升级为 `Recovering`/`Blocked`，仅放行 `AskUserQuestion`/`SubmitPlan` 逃生口）。**禁止**用主 Harness `LoopEvaluators` 替代。
 Profile 现状：Full 开（含 3-strike），Worker / Explore / Plan 全关。
 
 **`MainAgentRunner` 审批桥例外**：主路径的 `while (RunStreaming)` 审批桥**不落入**上述第一条禁令
 ——它桥接 MAF 的 `ToolApprovalRequestContent`，不是自写目标环。1.22 源码证据：`ToolApprovalAgent` 把多余的未批准
-请求排队、只 surface 一个（`agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgent.cs:211-216, 369-381`），
-工具执行只发生在宿主携响应重入之后（`InjectCollectedResponses`，同文件 `:565-582`）；官方示例驱动同一循环
-（`agent-framework/dotnet/samples/02-agents/Agents/Agent_Step01_UsingFunctionToolsWithApprovals/Program.cs:38-64`）。不存在可替代的
-框架 API（`AutoApprovalRules` 是策略而非人在环桥接）。
+请求排队、只 surface 一个（`agent-framework/dotnet/src/Microsoft.Agents.AI/Harness/ToolApproval/ToolApprovalAgent.cs`
+的排队与出队登记逻辑），工具执行只发生在宿主携响应重入之后（同文件 `InjectCollectedResponses`）；官方示例驱动同一循环
+（`agent-framework/dotnet/samples/02-agents/Agents/Agent_Step01_UsingFunctionToolsWithApprovals/Program.cs` 的审批响应重入段）。
+不存在可替代的框架 API（`AutoApprovalRules` 是策略而非人在环桥接）。
 
 ### 7. 提供商请求整形：只走公开扩展点与 MEAI 类型面
 
@@ -252,7 +251,7 @@ OpenAI `reasoning_effort`；Ollama 顶层 `think` + `options.num_ctx`）与 `Thi
 |---|---|---|
 | Hook 引擎 | 保留自研（终判） | 见 [Hook 模块设计](./0005-hook-module-design.md)：与 `HarnessAgent` 装配双重硬冲突 + 依赖仅 alpha |
 | 双预算（`PipelineOptions.MaxToolCalls` 计数闸 vs `MaximumIterationsPerRequest` 轮数） | 同源保留（有意） | 工具调用数 ≥ 迭代轮数，以 `MaxToolCalls` 作迭代上限是保守上界，不会提前截断；数值同源，避免新增调参面 |
-| WebSearch 自研提供方链 | 保留 | 官方仅服务端托管 `HostedWebSearchTool`（`agent-framework/dotnet/src/Microsoft.Agents.AI.Harness/HarnessAgent.cs:315`），无域过滤 / 缓存 / 多提供方故障转移 |
+| WebSearch 自研提供方链 | 保留 | 官方仅服务端托管 `HostedWebSearchTool`（`agent-framework/dotnet/src/Microsoft.Agents.AI.Harness/HarnessAgent.cs`），无域过滤 / 缓存 / 多提供方故障转移 |
 | Skills frontmatter 自研解析（`SkillFrontmatterParser`） | 保留 | 官方解析链路 `private`、`AgentFileSkill` 构造器 `internal`（`agent-framework/dotnet/src/Microsoft.Agents.AI/Skills/File/AgentFileSkillsSource.cs`），无公开解析入口；产品专有字段官方无对应 |
 | AgentMode 自建 opt-out（`ModeInstructionProvider`） | 保留 | 官方 `AgentModeProvider`（1.22 `AgentModeProviderOptions`）是 agent 内部模式：暴露 `mode_set` / `mode_get` 由模型自切换；OneCode 四模式由宿主控制且运行期可变，语义不同域 |
 | durable run registry（fencing / lease / CAS / 代次） | 保留 | `Microsoft.Agents.AI.Hosting` 不做单写者协调（`HostedWorkflowState.cs` remarks：an application that needs a single writer per session owns that coordination）；二者是不同层（ASP.NET 托管层 vs durable run 协调层） |

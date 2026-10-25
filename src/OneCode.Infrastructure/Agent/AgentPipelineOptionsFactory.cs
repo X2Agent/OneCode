@@ -33,7 +33,7 @@ public sealed record PipelineSecurityContext(
     long? MaxBudgetTokens = null,
     SessionId? ConversationId = null,
     long BudgetBaselineTokens = 0,
-    Func<long, long, CancellationToken, Task<ApprovalDecision>>? OnBudgetExceeded = null,
+    Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? OnBudgetExceeded = null,
     Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning = null);
 
 /// <summary>

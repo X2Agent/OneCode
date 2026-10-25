@@ -16,5 +16,5 @@ public sealed class VersionCommand : Command
         ?? ProductInfo.Default.Version;
 
     public override Task<CommandResult> ExecuteAsync(string[] args, CancellationToken ct = default) =>
-        Task.FromResult(CommandResult.Text($"OneCode CLI v{Version} (.NET implementation)"));
+        Task.FromResult(CommandResult.Text($"OneCode v{Version} (.NET implementation)"));
 }

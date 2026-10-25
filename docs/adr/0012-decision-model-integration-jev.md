@@ -106,8 +106,8 @@ OneCode 现有的辅助判断（工具筛选、子目标判定、澄清生成、
 
 - **不引用** MAF `[Experimental(MAAI001)]` 的决策类型，**也不预依赖**未受理的 MEAI API。
   依赖面只增加 OneCode 自己声明的类型。
-- 契约放在 `src/OneCode.Core/Decisions/`（命名空间 `OneCode.Core.Decisions`），**命名逐字镜像 MEAI 提案**，
-  以免上游落地后被迫做第二次改名：
+- 契约将放在 `src/OneCode.Core/Decisions/`（命名空间 `OneCode.Core.Decisions`；目录随 D2 落地创建，当前不存在），
+  **命名逐字镜像 MEAI 提案**，以免上游落地后被迫做第二次改名：
 
 | 契约类型 | 要点 |
 |---|---|

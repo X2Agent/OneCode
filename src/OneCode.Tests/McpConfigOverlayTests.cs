@@ -1,6 +1,7 @@
-using OneCode.App.Tui;
+using OneCode.App.Services.Mcp;
 using Terminal.Gui.Input;
 using Terminal.Gui.Views;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -151,13 +152,13 @@ public sealed class McpConfigOverlayTests
         overlay.ToolList.HasFocus.Should().BeFalse();
 
         overlay.NewKeyDownEvent(Key.Tab);
-        overlay.Actions.HasFocus.Should().BeTrue();
+        overlay.Actions!.HasFocus.Should().BeTrue();
         overlay.ServerEnabledCheck.HasFocus.Should().BeFalse();
 
         // Shift+Tab 沿链回退：操作栏 → 启用复选框。
         overlay.NewKeyDownEvent(Key.Tab.WithShift);
         overlay.ServerEnabledCheck.HasFocus.Should().BeTrue();
-        overlay.Actions.HasFocus.Should().BeFalse();
+        overlay.Actions!.HasFocus.Should().BeFalse();
     }
 
     [Fact]

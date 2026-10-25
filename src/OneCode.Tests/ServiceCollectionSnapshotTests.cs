@@ -2,32 +2,12 @@ using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OneCode.App;
-using OneCode.App.Commands;
-using OneCode.App.Services;
-using OneCode.App.Services.Agent;
-using OneCode.App.Services.GoalMode;
-using OneCode.App.Query;
-using OneCode.App.Services.BuildMode;
-using OneCode.App.Services.AutoDream;
-using OneCode.App.Services.Compact;
-using OneCode.App.Services.Setup;
-using OneCode.App.Services.Context;
-using OneCode.App.Services.Cron;
-using OneCode.App.Services.Hooks;
-using OneCode.App.Services.Lsp;
-using OneCode.App.Services.Loop;
-using OneCode.App.Services.Mcp;
-using OneCode.App.Services.Memory;
-using OneCode.App.Services.Observability;
-using OneCode.App.Services.Permissions;
-using OneCode.App.Services.PlanMode;
-using OneCode.App.Services.Search;
-using OneCode.App.Services.Skills;
-using OneCode.App.Services.Tasks;
-using OneCode.App.Session;
-using OneCode.App.Tui;
-using OneCode.App.Tools;
+using OneCode.App.Services.Interaction;
 using NSubstitute;
+using OneCode.Core.Goals;
+using OneCode.Core.Permissions;
+using OneCode.Core.Tools;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -126,9 +106,32 @@ public sealed class ServiceCollectionSnapshotTests
     }
 
     /// <summary>
-    /// 复现组合根 <see cref="OneCodeApp.Create"/> 的完整注册链（除 logging bootstrap 外，
-    /// 顺序逐一对应）。组合根的调用序列与本方法必须保持同步——任何一方的顺序变更都是
-    /// 行为变更，须重新生成快照基线。
+    /// 无头组合根（不传 configureFrontend）的交互端口守卫：daemon / attach 复用核心注册时，
+    /// 三个 Core 端口必须解析为 App 统一的交互式实现、dispatcher 必须是无头降级实现。
+    /// 若前端注册段被误删或无头默认实现回归为独立 Null 类，此测试与快照基线会同时失守。
+    /// </summary>
+    [Fact]
+    public async Task HeadlessRegistrationPipeline_ResolvesHeadlessInteractionPorts()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(Substitute.For<IHostApplicationLifetime>());
+        var workingDir = Path.Combine(Path.GetTempPath(), "onecode-snapshot-workingdir-headless");
+        Directory.CreateDirectory(workingDir);
+        OneCodeApp.AddOneCodeCore(services, workingDir);
+
+        await using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IInteractionDispatcher>().Should().BeOfType<HeadlessInteractionDispatcher>(
+            "无头宿主不得注册前端投递通道");
+        provider.GetRequiredService<IApprovalPromptSink>().Should().BeOfType<InteractionApprovalPromptSink>();
+        provider.GetRequiredService<IUserQuestionService>().Should().BeOfType<InteractionUserQuestionService>();
+        provider.GetRequiredService<IBudgetDecisionService>().Should().BeOfType<InteractionBudgetDecisionService>();
+    }
+
+    /// <summary>
+    /// 走真实组合根注册（<see cref="OneCodeApp.AddOneCodeCore"/> + TUI 注册段），
+    /// 不在此复刻注册链——注册顺序的唯一事实源是组合根本身。
     /// </summary>
     private static ServiceCollection CreateProductionRegistrations()
     {
@@ -142,38 +145,7 @@ public sealed class ServiceCollectionSnapshotTests
         var workingDir = Path.Combine(Path.GetTempPath(), "onecode-snapshot-workingdir");
         Directory.CreateDirectory(workingDir);
 
-        services
-            .AddSkillServices(workingDir)
-            .AddChatClientServices()
-            .AddSessionServices(workingDir)
-            .AddTaskServices()
-            .AddPlanModeServices()
-            .AddContextServices()
-            .AddSearchServices()
-            .AddMcpServices()
-            .AddTokenObservabilityServices()
-            .AddHookServices()
-            .AddPermissionServices()
-            .AddCommandSourceServices()
-            .AddCronSchedulingServices()
-            .AddModelCatalogServices()
-            .AddBuildModeServices()
-            .AddPlanWorkflowServices()
-            .AddChatQueryServices()
-            .AddSetupServices()
-            .AddAgentRuntimeServices()
-            .AddGoalServices()
-            .AddLoopServices()
-            .AddToolServices()
-            .AddMemoryServices()
-            .AddCompactServices()
-            .AddPromptServices(workingDir)
-            .AddLspServices()
-            .AddNamedHttpClients()
-            .AddAutoDreamServices()
-            .AddPlatformServices()
-            .AddCommands()
-            .AddInteractiveServices();
+        OneCodeApp.AddOneCodeCore(services, workingDir, static frontend => frontend.AddTuiServices());
     }
 
     /// <summary>

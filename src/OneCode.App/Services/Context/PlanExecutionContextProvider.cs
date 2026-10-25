@@ -24,7 +24,7 @@ public sealed class PlanExecutionContextProvider(
         CancellationToken ct)
     {
         // 仅在 Plan 或 GoalAuto 模式下跳过；Build 执行阶段可能处于 AcceptEdits，
-        // 也可能保留了 CLI 高级权限档（BypassPermissions / Auto / DontAsk）或会话内全部放行。
+        // 也可能保留了命令行高级权限档（BypassPermissions / Auto / DontAsk）或会话内全部放行。
         if (modeProvider.CurrentMode is PermissionMode.Plan or PermissionMode.GoalAuto)
             return new AIContext();
 

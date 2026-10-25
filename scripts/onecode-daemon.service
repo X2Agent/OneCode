@@ -1,0 +1,25 @@
+# OneCode daemon 用户级 systemd 模板单元（Linux）。
+# 一个 daemon 绑定一个项目；模板实例名是 systemd 转义后的项目路径。
+#
+# 安装（项目 /path/to/project）：
+#   cp onecode-daemon@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now "onecode-daemon@$(systemd-escape -p /path/to/project).service"
+#   # onecode 可执行文件需在 PATH 中，或把下面的 %h/.local/bin/onecode 改为实际路径。
+# 卸载：
+#   systemctl --user disable --now "onecode-daemon@$(systemd-escape -p /path/to/project).service"
+#   rm ~/.config/systemd/user/onecode-daemon@.service && systemctl --user daemon-reload
+
+[Unit]
+Description=OneCode daemon for project %i
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%i
+ExecStart=%h/.local/bin/onecode daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

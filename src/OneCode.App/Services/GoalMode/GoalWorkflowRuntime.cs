@@ -1,7 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
 using static OneCode.App.Services.GoalMode.GoalWorkflowStateMapper;
@@ -10,7 +10,7 @@ namespace OneCode.App.Services.GoalMode;
 
 public sealed record GoalWorkflowRuntimeContext(
     GoalRunOptions Options,
-    ChannelWriter<TuiEvent> EventWriter,
+    ChannelWriter<QueryEvent> EventWriter,
     Func<EditTransaction> TransactionFactory,
     bool PromptOnBudgetExhausted = false);
 
@@ -25,6 +25,7 @@ internal sealed class GoalWorkflowRuntimeFactory(
     IGoalRunStore goalRunStore,
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
+    IBudgetDecisionService budgetDecisionService,
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntimeFactory
 {
     public IGoalWorkflowRuntime Create(GoalWorkflowRuntimeContext context)
@@ -35,6 +36,7 @@ internal sealed class GoalWorkflowRuntimeFactory(
             workspaceService,
             completionService,
             context,
+            budgetDecisionService,
             logger);
 }
 
@@ -48,6 +50,7 @@ internal sealed class GoalWorkflowRuntime(
     IGoalWorkspaceService workspaceService,
     IGoalCompletionService completionService,
     GoalWorkflowRuntimeContext context,
+    IBudgetDecisionService budgetDecisionService,
     ILogger<GoalWorkflowRuntime>? logger = null) : IGoalWorkflowRuntime
 {
     private const int MaxRecursiveDecompositionDepth = 3;
@@ -410,15 +413,13 @@ internal sealed class GoalWorkflowRuntime(
         string stepDescription,
         CancellationToken ct)
     {
+        // 后台/无头运行不打扰用户，直接暂停（与未开启预算提示时的既有语义一致）。
         if (!context.PromptOnBudgetExhausted)
             return GoalBudgetDecision.Pause;
 
-        var request = new TuiGoalBudgetExhaustedRequest(reason, usage, _budget, stepDescription);
-        if (!context.EventWriter.TryWrite(request))
-            return GoalBudgetDecision.Pause;
-
-        using var reg = ct.Register(() => request.ResponseSource.TrySetCanceled(ct));
-        return await request.ResponseSource.Task.ConfigureAwait(false);
+        return await budgetDecisionService.DecideAsync(
+            new BudgetExhaustedContext(reason, usage, _budget, stepDescription),
+            ct).ConfigureAwait(false);
     }
 
     private void ExtendBudget(GoalBudgetUsage usage)

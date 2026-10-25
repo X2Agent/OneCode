@@ -6,6 +6,8 @@
 
 global using System.Globalization;
 global using OneCode.App.Modes;
+global using OneCode.Core.Domain;
+global using OneCode.Core.Workflows;
 global using FluentAssertions;
 global using Xunit;
 

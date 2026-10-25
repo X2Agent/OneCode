@@ -1,10 +1,9 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
+using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
-using OneCode.App.Tui;
-using OneCode.Core.Workflows;
-using OneCode.Core.Domain;
+using OneCode.App.Query;
 using OneCode.Core.Goals;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
@@ -232,10 +231,10 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             "失败态不得留在 plan，否则完成完整性检查永远不满足");
         applied.Plan.Last().Id.Should().Be(2, "replanned 步骤紧接保留步骤连续编号为 #2");
 
-        var published = new List<TuiEvent>();
+        var published = new List<QueryEvent>();
         while (events.Reader.TryRead(out var evt))
             published.Add(evt);
-        var lastPlanUpdate = published.OfType<TuiGoalPlanUpdated>().Last();
+        var lastPlanUpdate = published.OfType<GoalPlanUpdatedEvent>().Last();
         lastPlanUpdate.Steps.Select(s => s.Id).Should().Equal(new[] { 1, 2 },
             "重规划完成后必须立即向 TUI 推送更新后的计划快照，无需等待下一步开始");
         lastPlanUpdate.Steps[0].SupersededByReplan.Should().BeTrue();
@@ -337,10 +336,10 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         var first = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
         await runtime.ExecuteNextAsync(first, TestContext.Current.CancellationToken);
 
-        var published = new List<TuiEvent>();
+        var published = new List<QueryEvent>();
         while (events.Reader.TryRead(out var evt))
             published.Add(evt);
-        published.OfType<TuiGoalBudgetWarning>().Should().ContainSingle()
+        published.OfType<GoalBudgetWarningEvent>().Should().ContainSingle()
             .Which.Level.Should().Be(GoalBudgetWarningLevel.Early);
 
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
@@ -352,7 +351,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
     [Fact]
     public async Task PlanAsync_PublishesPlanListAndProgress()
     {
-        // P1：分解完成后必须发布 TuiGoalPlan（编号清单）+ 开始执行进度，消除规划期静默。
+        // P1：分解完成后必须发布 GoalPlanEvent（编号清单）+ 开始执行进度，消除规划期静默。
         var store = new JsonGoalRunStore(Path.Combine(_root, "plan-events"));
         var run = await CreateClaimedRunAsync(store);
         var (runtime, events) = CreateRuntimeWithEvents(
@@ -366,12 +365,12 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             new GoalWorkflowInput(run.Id, run.Goal, "model", "tools"),
             TestContext.Current.CancellationToken);
 
-        var published = new List<TuiEvent>();
+        var published = new List<QueryEvent>();
         while (events.Reader.TryRead(out var evt))
             published.Add(evt);
-        published.OfType<TuiGoalPlan>().Should().ContainSingle()
+        published.OfType<GoalPlanEvent>().Should().ContainSingle()
             .Which.Steps.Should().ContainSingle().Which.Should().NotBeNullOrEmpty();
-        published.OfType<TuiModeProgress>().Should()
+        published.OfType<ModeProgressEvent>().Should()
             .Contain(p => p.Message.Contains("已分解为"));
     }
 
@@ -392,11 +391,11 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
 
         await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
 
-        var published = new List<TuiEvent>();
+        var published = new List<QueryEvent>();
         while (events.Reader.TryRead(out var evt))
             published.Add(evt);
-        published.OfType<TuiModeProgress>().Should().Contain(p => p.Message.Contains("子目标 1/2"));
-        published.OfType<TuiModeProgress>().Should().Contain(p => p.Message.Contains("✓ 子目标 1/2 完成"));
+        published.OfType<ModeProgressEvent>().Should().Contain(p => p.Message.Contains("子目标 1/2"));
+        published.OfType<ModeProgressEvent>().Should().Contain(p => p.Message.Contains("✓ 子目标 1/2 完成"));
     }
 
     private GoalWorkflowRuntime CreateRuntime(
@@ -419,18 +418,19 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
                     ModelId = "model",
                     Tools = new List<AITool>(),
                 },
-                Channel.CreateUnbounded<TuiEvent>().Writer,
-                static () => new EditTransaction()));
+                Channel.CreateUnbounded<QueryEvent>().Writer,
+                static () => new EditTransaction()),
+            Substitute.For<IBudgetDecisionService>());
     }
 
-    private (GoalWorkflowRuntime Runtime, Channel<TuiEvent> Events) CreateRuntimeWithEvents(
+    private (GoalWorkflowRuntime Runtime, Channel<QueryEvent> Events) CreateRuntimeWithEvents(
         IGoalRunStore store,
         IGoalPlanningService planning,
         IGoalStepExecutionService steps,
         IGoalWorkspaceService workspace,
         GoalBudget? budget = null)
     {
-        var events = Channel.CreateUnbounded<TuiEvent>();
+        var events = Channel.CreateUnbounded<QueryEvent>();
         var options = new GoalRunOptions
         {
             Goal = "goal",
@@ -448,7 +448,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             new GoalWorkflowRuntimeContext(
                 options,
                 events.Writer,
-                static () => new EditTransaction()));
+                static () => new EditTransaction()),
+            Substitute.For<IBudgetDecisionService>());
         return (runtime, events);
     }
 
@@ -635,7 +636,7 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
             GoalItem goal,
             GoalRunOptions options,
             EditTransaction sharedTransaction,
-            ChannelWriter<TuiEvent> eventWriter,
+            ChannelWriter<QueryEvent> eventWriter,
             CancellationToken ct)
         {
             ExecuteCalls++;

@@ -8,8 +8,8 @@ namespace OneCode.Automation.Cron;
 /// <see cref="CronJobEntry"/> jobs by delegating their prompt to <see cref="ICronJobExecutor"/>
 /// (implemented by the App layer and reverse-injected via DI).
 ///
-/// Jobs live as long as the host process is running, unless a job is marked <see cref="CronJobEntry.Durable"/>
-/// AND the host opted in via <c>ONECODE_DURABLE_CRON=true</c>.
+/// Jobs live as long as the host process is running, unless a job is marked <see cref="CronJobEntry.Durable"/>,
+/// in which case it persists to <c>~/{ConfigDir}/cron/{Id}.json</c> and survives restarts.
 /// </summary>
 /// <remarks>
 /// The scheduling core (parsing, persistence, filesystem watching, polling loop) lives in
@@ -26,6 +26,7 @@ public sealed class CronSchedulerService : BackgroundService
     private readonly ICronParser _cronParser;
     private readonly ICronJobExecutor _executor;
     private readonly string _cronDir;
+    private readonly string? _projectDir;
     private readonly FileSystemWatcher? _watcher;
     private readonly object _reloadLock = new();
     private readonly HashSet<string> _pendingJobIds = new(StringComparer.OrdinalIgnoreCase);
@@ -36,15 +37,22 @@ public sealed class CronSchedulerService : BackgroundService
     public const int MaxJobs = 50;
     private bool _disposed;
 
+    /// <summary>
+    /// <paramref name="projectDir"/> 为本调度器服务的项目目录（进程工作目录），durable 作业按此过滤触发；
+    /// <paramref name="cronDir"/> 覆盖 cron 作业目录，测试注入临时目录用，缺省为全局 <c>~/{ConfigDir}/cron</c>。
+    /// </summary>
     public CronSchedulerService(
         ILogger<CronSchedulerService> logger,
         ICronParser cronParser,
-        ICronJobExecutor executor)
+        ICronJobExecutor executor,
+        string? projectDir = null,
+        string? cronDir = null)
     {
         _logger = logger;
         _cronParser = cronParser;
         _executor = executor;
-        _cronDir = CronPaths.GetCronDirectory();
+        _cronDir = cronDir ?? CronPaths.GetCronDirectory();
+        _projectDir = projectDir is null ? null : Path.GetFullPath(projectDir);
 
         // Always create the directory so the watcher can observe it. If the directory
         // doesn't exist at startup, FileSystemWatcher silently does nothing — durable
@@ -86,6 +94,9 @@ public sealed class CronSchedulerService : BackgroundService
         if (!CronPaths.IsValidJobId(entry.Id))
             return false;
 
+        // 归属盖章：durable 作业跨进程共享磁盘，ProjectDir 决定哪个项目的进程可触发它。
+        entry.ProjectDir ??= _projectDir;
+
         lock (_reloadLock)
         {
             if (_jobs.Count + _pendingJobIds.Count >= MaxJobs)
@@ -100,8 +111,6 @@ public sealed class CronSchedulerService : BackgroundService
         {
             if (entry.Durable)
             {
-                if (!CronPaths.IsDurableCronEnabled())
-                    return false;
                 await PersistJobCoreAsync(entry, ct).ConfigureAwait(false);
                 persisted = true;
             }
@@ -217,7 +226,7 @@ public sealed class CronSchedulerService : BackgroundService
             }
         }
 
-        if (job.Durable && CronPaths.IsDurableCronEnabled())
+        if (job.Durable)
         {
             // Await (not fire-and-forget) so that callers observe persistence failures and
             // the host doesn't exit before the file write completes.
@@ -260,7 +269,11 @@ public sealed class CronSchedulerService : BackgroundService
         base.Dispose();
     }
 
-    private async Task CheckAndFireJobsAsync(CancellationToken ct)
+    /// <summary>
+    /// 检查快照中到期的作业并触发。durable 作业触发前先取跨进程独占锁，
+    /// 被其他进程（同项目 TUI/daemon）持有时跳过本轮。
+    /// </summary>
+    internal async Task CheckAndFireJobsAsync(CancellationToken ct)
     {
         // Snapshot under the lock so we iterate a stable copy. AddJob / ReloadJobs /
         // TryRemoveJob / TrySetPaused may mutate _jobs concurrently from the
@@ -283,76 +296,126 @@ public sealed class CronSchedulerService : BackgroundService
             if (job.NextRunAt is null) continue;
             var nextRun = DateTimeOffset.FromUnixTimeSeconds(job.NextRunAt.Value);
 
-            if (now >= nextRun)
-            {
-                _logger.LogInformation("Firing cron job {Id}: {Prompt}", job.Id, job.Prompt);
+            if (now < nextRun) continue;
 
-                string lastStatus = "ok";
-                string? lastError = null;
+            FileStream? fireLock = null;
+            if (job.Durable)
+            {
+                fireLock = TryAcquireFireLock(job.Id);
+                if (fireLock is null)
+                {
+                    // 另一进程正在触发本作业：跳过。触发方落盘新 NextRunAt 后经
+                    // FileSystemWatcher 重载回本进程内存，后续轮询自然不再重试。
+                    _logger.LogInformation(
+                        "Skipping cron job {Id}: fire lock held by another process", job.Id);
+                    continue;
+                }
+            }
+
+            try
+            {
+                await FireJobAsync(job, now, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                fireLock?.Dispose();
+            }
+        }
+    }
+
+    private async Task FireJobAsync(CronJobEntry job, DateTimeOffset now, CancellationToken ct)
+    {
+        _logger.LogInformation("Firing cron job {Id}: {Prompt}", job.Id, job.Prompt);
+
+        string lastStatus = "ok";
+        string? lastError = null;
+        try
+        {
+            await _executor.ExecuteJobAsync(job.Prompt, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host is shutting down — propagate so ExecuteAsync's loop breaks.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            lastStatus = "error";
+            lastError = ex.Message;
+            _logger.LogError(ex, "Error triggering cron job {Id}", job.Id);
+        }
+
+        // Update job state under the lock. We hold the lock briefly (no awaits
+        // inside) so that concurrent mutation from TrySetPaused / TryRemoveJob
+        // is serialized — without this, two writers could clobber each other's
+        // updates to NextRunAt / LastRunAt / the in-memory list itself.
+        var isOneShot = false;
+        var durableId = job.Durable ? job.Id : null;
+        lock (_reloadLock)
+        {
+            job.LastRunAt = now.ToUnixTimeSeconds();
+            job.LastStatus = lastStatus;
+            job.LastError = lastError;
+
+            if (job.Recurring)
+            {
+                var next = _cronParser.ComputeNextRun(job.Cron, now.AddSeconds(1));
+                job.NextRunAt = next?.ToUnixTimeSeconds();
+            }
+            else
+            {
+                job.NextRunAt = null;
+                _jobs.Remove(job);
+                isOneShot = true;
+            }
+        }
+
+        if (durableId is not null)
+        {
+            if (isOneShot)
+            {
+                // One-shot job completed: delete the JSON file so it doesn't
+                // linger on disk and get re-loaded as a dead entry on restart.
                 try
                 {
-                    await _executor.ExecuteJobAsync(job.Prompt, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    // Host is shutting down — propagate so ExecuteAsync's loop breaks.
-                    throw;
+                    var path = CronPaths.GetJobFilePath(durableId);
+                    if (File.Exists(path)) File.Delete(path);
                 }
                 catch (Exception ex)
                 {
-                    lastStatus = "error";
-                    lastError = ex.Message;
-                    _logger.LogError(ex, "Error triggering cron job {Id}", job.Id);
-                }
-
-                // Update job state under the lock. We hold the lock briefly (no awaits
-                // inside) so that concurrent mutation from TrySetPaused / TryRemoveJob
-                // is serialized — without this, two writers could clobber each other's
-                // updates to NextRunAt / LastRunAt / the in-memory list itself.
-                var isOneShot = false;
-                var durableId = job.Durable ? job.Id : null;
-                lock (_reloadLock)
-                {
-                    job.LastRunAt = now.ToUnixTimeSeconds();
-                    job.LastStatus = lastStatus;
-                    job.LastError = lastError;
-
-                    if (job.Recurring)
-                    {
-                        var next = _cronParser.ComputeNextRun(job.Cron, now.AddSeconds(1));
-                        job.NextRunAt = next?.ToUnixTimeSeconds();
-                    }
-                    else
-                    {
-                        job.NextRunAt = null;
-                        _jobs.Remove(job);
-                        isOneShot = true;
-                    }
-                }
-
-                if (durableId is not null && CronPaths.IsDurableCronEnabled())
-                {
-                    if (isOneShot)
-                    {
-                        // One-shot job completed: delete the JSON file so it doesn't
-                        // linger on disk and get re-loaded as a dead entry on restart.
-                        try
-                        {
-                            var path = CronPaths.GetJobFilePath(durableId);
-                            if (File.Exists(path)) File.Delete(path);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex,
-                                "Failed to delete completed one-shot cron file {Id}", durableId);
-                        }
-                    }
-                    else
-                    {
-                        await PersistJobAsync(job, ct).ConfigureAwait(false);
-                    }
+                    _logger.LogWarning(ex,
+                        "Failed to delete completed one-shot cron file {Id}", durableId);
                 }
             }
+            else
+            {
+                await PersistJobAsync(job, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 尝试独占打开作业触发锁（<c>{cronDir}/locks/{id}.lock</c>）。拿不到说明另一进程
+    /// （同项目 TUI/daemon）正在触发，返回 null。条件只看 <see cref="CronJobEntry.Durable"/>：
+    /// durable 文件在进程间共享，多进程并存时须以锁仲裁。
+    /// 锁文件不删除复用：释放后立即删除可能恰逢另一进程刚打开同名锁，破坏其独占语义；
+    /// 每作业一个空文件、句柄关闭即失效，进程崩溃由 OS 回收句柄自愈。
+    /// </summary>
+    private FileStream? TryAcquireFireLock(string id)
+    {
+        var lockDir = Path.Combine(_cronDir, "locks");
+        try
+        {
+            Directory.CreateDirectory(lockDir);
+            return new FileStream(
+                Path.Combine(lockDir, $"{id}.lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 
@@ -361,7 +424,8 @@ public sealed class CronSchedulerService : BackgroundService
         _ = Task.Run(() => ReloadJobsAsync(CancellationToken.None));
     }
 
-    private async Task ReloadJobsAsync(CancellationToken ct)
+    /// <summary>从 cron 目录磁盘重载 durable 作业（FileSystemWatcher 事件与启动时的同一入口）。</summary>
+    internal async Task ReloadJobsAsync(CancellationToken ct)
     {
         lock (_reloadLock)
         {
@@ -395,6 +459,14 @@ public sealed class CronSchedulerService : BackgroundService
                 {
                     _logger.LogDebug(
                         "Skipping non-durable cron file {File} on reload", file);
+                    continue;
+                }
+
+                if (!BelongsToThisProject(entry))
+                {
+                    _logger.LogDebug(
+                        "Skipping cron job {Id} owned by other project {ProjectDir}",
+                        entry.Id, entry.ProjectDir);
                     continue;
                 }
 
@@ -439,6 +511,20 @@ public sealed class CronSchedulerService : BackgroundService
 
             _jobs = inMemoryOnly.Concat(loaded).ToList();
         }
+    }
+
+    /// <summary>
+    /// durable 作业按项目归属触发：<see cref="CronJobEntry.ProjectDir"/> 为 null（旧版 JSON）
+    /// 或与本调度器项目一致时触发；归属其他项目的作业不加载（一个 OneCode 进程只服务一个项目）。
+    /// </summary>
+    private bool BelongsToThisProject(CronJobEntry entry)
+    {
+        if (entry.ProjectDir is null || _projectDir is null) return true;
+
+        return string.Equals(
+            Path.GetFullPath(entry.ProjectDir),
+            _projectDir,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     private async Task PersistJobAsync(CronJobEntry job, CancellationToken ct)

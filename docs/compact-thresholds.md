@@ -56,8 +56,7 @@
 | `MaxTrackedSessions` | 100 | 会话告警状态缓存上限（超过后清理 1 小时前的陈旧条目） |
 
 - 使用率基于 `TokenBudget.Estimate`：`UsageRatio = EstimatedInputTokens / MaxInputTokens`，其中 `MaxInputTokens = MaxContextTokens − 输出预留`。预留与压缩装配同源解析（本地 Ollama 为 `min(8,192, 窗口 / 4)`，其余 provider 固定 8,192），避免出现「压缩按窗口比例正常工作、`/status` 却按固定预留持续告警」的矛盾。
-- `ConsumeWarning` 消费未读告警后由 `QueryStreamService` 发射 `TuiCompactSuggested` 事件；使用率降回 0.70 以下后标志重置，可再次告警。
-- Worker 进程（`ONECODE_IS_WORKER=1/true`）跳过告警检查。
+- `ConsumeWarning` 消费未读告警后由 `QueryStreamService` 发射 `CompactSuggestedEvent` 事件；使用率降回 0.70 以下后标志重置，可再次告警。
 
 ---
 

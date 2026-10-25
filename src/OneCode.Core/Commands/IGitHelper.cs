@@ -56,7 +56,7 @@ public interface IGitHelper
     /// Unified diff for one path vs HEAD (staged + unstaged).
     /// Accepts raw numstat rename paths; they are normalized before invoking git.
     /// Always resolves the repo root and uses <c>:(top)</c> pathspecs so this works
-    /// when the process cwd is a subdirectory (e.g. <c>dotnet run</c> from Cli).
+    /// when the process cwd is a subdirectory (e.g. <c>dotnet run</c> from the Tui project).
     /// </summary>
     Task<string> GetFileDiffAgainstHeadAsync(
         string filePath,

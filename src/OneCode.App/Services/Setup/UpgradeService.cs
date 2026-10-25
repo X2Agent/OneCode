@@ -50,7 +50,7 @@ public sealed class UpgradeService(
             return UpgradeResult.Failed("无法确定当前可执行文件路径(Environment.ProcessPath 为 null)。");
 
         var currentExeName = Path.GetFileName(currentExePath);
-        if (!currentExeName.Contains("OneCode.Cli", StringComparison.OrdinalIgnoreCase) &&
+        if (!currentExeName.Contains("OneCode.Tui", StringComparison.OrdinalIgnoreCase) &&
             !currentExeName.Contains("onecode", StringComparison.OrdinalIgnoreCase))
         {
             return UpgradeResult.Failed(
@@ -103,7 +103,7 @@ public sealed class UpgradeService(
             }
 
             // 8. 验证解压内容(发布包根目录必须包含主程序)
-            var sourceExeName = OperatingSystem.IsWindows() ? "OneCode.Cli.exe" : "OneCode.Cli";
+            var sourceExeName = OperatingSystem.IsWindows() ? "OneCode.Tui.exe" : "OneCode.Tui";
             var sourceExePath = Path.Combine(extractDir, sourceExeName);
             if (!File.Exists(sourceExePath))
             {

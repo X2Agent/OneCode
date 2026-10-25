@@ -103,8 +103,8 @@ public sealed class LspProjectMatcherTests
         var dir = Directory.CreateTempSubdirectory("lsp-bin-");
         try
         {
-            File.WriteAllText(Path.Combine(dir.FullName, "OneCode.Cli.dll"), "x");
-            File.WriteAllText(Path.Combine(dir.FullName, "OneCode.Cli.pdb"), "x");
+            File.WriteAllText(Path.Combine(dir.FullName, "OneCode.Tui.dll"), "x");
+            File.WriteAllText(Path.Combine(dir.FullName, "OneCode.Tui.pdb"), "x");
             var pack = BuiltInLanguagePacks.All.First(p => p.Id == "csharp");
 
             LspProjectMatcher.Matches(pack, dir.FullName).Should().BeFalse();

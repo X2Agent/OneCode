@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 
 namespace OneCode.App.Services.Agent;
 
@@ -32,7 +32,7 @@ internal sealed class GoalSubTaskDagRunner(
     public async Task<SubGoalExecution> RunAsync(
         GoalItem goal,
         GoalRunOptions options,
-        ChannelWriter<TuiEvent> eventWriter,
+        ChannelWriter<QueryEvent> eventWriter,
         CancellationToken ct)
     {
         var subTasks = goal.SubTasks ?? [];
@@ -66,7 +66,7 @@ internal sealed class GoalSubTaskDagRunner(
                 return Failed(goal.Id, $"Invalid sub-task graph: {ex.Message}");
             }
 
-            eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+            eventWriter.TryWrite(new ModeProgressEvent(WorkingMode.Goal,
                 $"子目标 #{goal.Id} · {subTasks.Count} 个并行子任务开始执行"));
 
             var parentCapabilities = ToolCapabilitySet.CreateUnrestricted(
@@ -96,7 +96,7 @@ internal sealed class GoalSubTaskDagRunner(
                 ct).ConfigureAwait(false);
 
             var status = allCompleted && hardValidation.Passed ? GoalStatus.Completed : GoalStatus.Failed;
-            eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+            eventWriter.TryWrite(new ModeProgressEvent(WorkingMode.Goal,
                 status == GoalStatus.Completed
                     ? $"子目标 #{goal.Id} · 并行子任务全部通过"
                     : $"子目标 #{goal.Id} · 并行子任务未全部通过（{failed.Count} 失败/阻塞）"));

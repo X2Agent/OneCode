@@ -1,0 +1,32 @@
+<aside class="activity">
+    <div class="activity-header">活动</div>
+    @if (Activities.Count == 0)
+    {
+        <div class="empty">暂无进行中的活动</div>
+    }
+    else
+    {
+        @foreach (var item in Activities)
+        {
+            <div class="activity-item">
+                <span class="kind">@item.Kind</span>
+                <div class="text">@item.Text</div>
+            </div>
+        }
+    }
+    @if (!string.IsNullOrEmpty(Thinking))
+    {
+        <details class="thinking">
+            <summary>思考过程</summary>
+            <pre>@Thinking</pre>
+        </details>
+    }
+</aside>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<WebActivity> Activities { get; set; } = [];
+
+    [Parameter]
+    public string Thinking { get; set; } = string.Empty;
+}

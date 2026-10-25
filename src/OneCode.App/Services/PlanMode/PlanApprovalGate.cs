@@ -1,4 +1,3 @@
-using OneCode.App.Tui;
 using OneCode.Core.PlanMode;
 
 namespace OneCode.App.Services.PlanMode;

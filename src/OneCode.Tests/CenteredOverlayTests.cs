@@ -1,6 +1,6 @@
-using OneCode.App.Tui;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

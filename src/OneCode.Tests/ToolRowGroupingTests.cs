@@ -1,8 +1,7 @@
 using NSubstitute;
-using OneCode.App.Tui;
-using OneCode.Core.Domain;
 using OneCode.Core.Tools;
 using Terminal.Gui.App;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

@@ -1,9 +1,10 @@
 using NSubstitute;
-using OneCode.App.Tui;
+using OneCode.App.Commands;
 using OneCode.Core.Keybindings;
 using OneCode.Core.Tools;
 using Terminal.Gui.App;
 using Terminal.Gui.Input;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

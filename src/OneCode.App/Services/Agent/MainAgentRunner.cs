@@ -20,6 +20,8 @@ public partial class MainAgentRunner(
     ILoggerFactory loggerFactory,
     IServiceProvider serviceProvider,
     Core.Tools.ToolMetadataRegistry toolMetadata,
+    Core.Permissions.IApprovalPromptSink approvalPromptSink,
+    Core.Goals.IBudgetDecisionService budgetDecisionService,
     IToolProtocolValidator? toolProtocolValidator = null,
     IVerificationProvider? verificationProvider = null,
     TodoProjectionService? todoProjection = null) : IMainAgentRunner
@@ -38,10 +40,15 @@ public partial class MainAgentRunner(
     private readonly IToolProtocolValidator _toolProtocolValidator = toolProtocolValidator ?? new ToolProtocolValidator();
     private readonly IVerificationProvider? _verificationProvider = verificationProvider;
     private readonly TodoProjectionService? _todoProjection = todoProjection;
+    private readonly Core.Permissions.IApprovalPromptSink _approvalPromptSink = approvalPromptSink;
+    private readonly Core.Goals.IBudgetDecisionService _budgetDecisionService = budgetDecisionService;
 
     // 输出预算耗尽（Length + 零文本零工具调用）时的升级值与默认输出上限共用
     // MaxOutputTokensDecorator.EscalatedMaxTokens 单一事实源。
     internal const int EscalatedZeroOutputRetryMaxTokens = MaxOutputTokensDecorator.EscalatedMaxTokens;
+
+    /// <summary>主 agent 在审批卡片等展示场合的固定名称。</summary>
+    internal const string MainAgentName = "main-agent";
 
     /// <summary>
     /// 构建已装配全部中间件的 <see cref="AIAgent"/>，供外部编排器（如 Goal 模式的 LoopAgent）包装使用。
@@ -142,17 +149,17 @@ public partial class MainAgentRunner(
                 ApprovalBroker = options.SuppressToolApproval
                     ? null
                     : ApprovalBroker.ForQuery(
-                        writer,
+                        _approvalPromptSink,
                         options.OnPermissionPrompt,
                         _loggerFactory.CreateLogger<ApprovalBroker>()),
                 // 预算预警：70%/90% 经事件流发横幅事件（TUI 渲染黄/橙预警）
                 OnBudgetWarning = (level, used, limit)
                     => writer.TryWrite(new Query.BudgetWarningEvent(level, used, limit)),
-                // 预算 100%：交互模式弹窗三选一（追加预算继续/收尾总结/直接停止）；
+                // 预算 100%：经 IBudgetDecisionService 端口询问（追加预算继续/收尾总结/停止）；
                 // 无人值守（SuppressToolApproval，如受控 Build/GOAL 编排）保持 null → 硬停短路
                 OnBudgetExceeded = options.SuppressToolApproval
                     ? null
-                    : (used, limit, token) => RequestBudgetDecisionAsync(writer, used, limit, token),
+                    : (used, limit, token) => RequestBudgetDecisionAsync(used, limit, token),
             };
 
             // 上下文超限不在 pipeline 内恢复（run 输入只有本轮用户消息，截断重试无效）：
@@ -169,6 +176,7 @@ public partial class MainAgentRunner(
                 builtAgent,
                 runOptions.ConversationId,
                 ct).ConfigureAwait(false);
+            session.StateBag.ResetStateMachineForNewTurn();
             _logger.LogDebug("MainAgentRunner session created, starting agent stream...");
 
             if (options.SeedTodoTasks is { Count: > 0 } seedTasks)
@@ -440,26 +448,6 @@ public partial class MainAgentRunner(
         => status == BuildValidationStatus.Failed;
 
     /// <summary>
-    /// 预算 100% 消耗时的用户询问（复用工具审批管道）：经 ApprovalRequestEvent 弹窗，
-    /// 决策语义映射 AllowOnce=追加预算继续 / AllowAlways=收尾总结 / Deny=直接停止。
-    /// 选项说明写入 Prompt 字段，由 TUI 审批组件原样呈现。
-    /// </summary>
-    private static async Task<ApprovalDecision> RequestBudgetDecisionAsync(
-        System.Threading.Channels.ChannelWriter<object> writer,
-        long usedTokens,
-        long limitTokens,
-        CancellationToken ct)
-    {
-        var evt = new Query.ApprovalRequestEvent(
-            RequestId: Guid.NewGuid().ToString("N"),
-            ToolName: "预算已达上限",
-            ToolInput: $"可计费 token 已消耗 {usedTokens:N0}，达到本次执行上限 {limitTokens:N0}",
-            Prompt: "allow_once=追加预算继续（上限加倍） · allow_always=收尾总结 · deny=直接停止");
-        await writer.WriteAsync(evt, ct).ConfigureAwait(false);
-        return await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// 流式零输出的重试判定：仅当 run 尚未重试过、且产出完全为零（零文本零轮次零工具调用）、
     /// 且终因为输出上限（Length）时才重试。已有工具调用的 run 绝不重试——重放有副作用的
     /// run 会重复执行工具；其他终因（Stop/取消/错误）重跑也不会改变结果。
@@ -470,84 +458,4 @@ public partial class MainAgentRunner(
             && turnCount == 0
             && toolCallCount == 0
             && finishReason == ChatFinishReason.Length;
-
-    internal static ChatOptions BuildChatOptions(MainAgentRunOptions options)
-    {
-        // 开启扩展思考时不能再用低默认上限：Anthropic 要求 budget_tokens < max_tokens，
-        // 显式设了 MaxOutputTokens 时适配器只能把 budget 压到 max_tokens - 1，输出预算会被吃光。
-        // 留空则由适配器按 budget 自行抬高 max_tokens。
-        var reasoningEffort = ResolveReasoningEffort(options);
-
-        // 默认输出上限与 Length 升级恢复统一由底层客户端管道（MaxOutputTokensDecorator）处理；
-        // 业务层仅透传调用方显式指定的 MaxOutputTokens，避免与扩展思考预算冲突或各处散落硬编码。
-        var chatOptions = new ChatOptions
-        {
-            ModelId = options.ModelId,
-            MaxOutputTokens = options.MaxOutputTokens,
-            // 主体正文走 MAF 的 agent-instructions 入口，而不是自己拼一条 system 消息：
-            // HarnessAgent 会把 harness 片段拼在它前面（片段缺失时用 MAF 默认文案）。
-            Instructions = string.IsNullOrEmpty(options.SystemPrompt) ? null : options.SystemPrompt,
-        };
-
-        // 思考意图走 MEAI 标准 ChatOptions.Reasoning，由各 provider 适配器翻译成自家参数。
-        // 不要往 AdditionalProperties 里塞 provider 私有 wire key：那不是任何 SDK 的契约。
-        if (reasoningEffort is { } effort)
-            chatOptions.Reasoning = new ReasoningOptions { Effort = effort };
-
-        // Tool approval wrapping is centralized in AgentPipelineBuilder from
-        // ToolMetadataRegistry. Keeping it there prevents Main/Worker policy drift.
-        if (options.Tools is { Count: > 0 })
-        {
-            chatOptions.Tools = options.Tools.ToList();
-            chatOptions.ToolMode = ChatToolMode.Auto;
-        }
-
-        return chatOptions;
-    }
-
-    /// <summary>
-    /// 解析本轮的思考档位。未开启思考返回 <c>null</c>（不设置 <see cref="ChatOptions.Reasoning"/>，
-    /// 让 provider 使用自身默认值）；显式 effort 字符串优先于 budget 推导。
-    /// </summary>
-    private static ReasoningEffort? ResolveReasoningEffort(MainAgentRunOptions options)
-    {
-        if (!options.EnableThinking)
-            return null;
-
-        if (!string.IsNullOrEmpty(options.ThinkingEffort))
-            return ParseReasoningEffort(options.ThinkingEffort);
-
-        if (options.ThinkingBudgetTokens > 0)
-            return EffortThinking.ToReasoningEffort(options.ThinkingBudgetTokens);
-
-        return null;
-    }
-
-    private static ReasoningEffort? ParseReasoningEffort(string effort) => effort.ToLowerInvariant() switch
-    {
-        "none" or "disabled" or "off" => ReasoningEffort.None,
-        "low" => ReasoningEffort.Low,
-        "medium" => ReasoningEffort.Medium,
-        "high" => ReasoningEffort.High,
-        "max" or "extrahigh" => ReasoningEffort.ExtraHigh,
-        _ => null,
-    };
-
-    internal static List<ChatMessage> BuildMessages(MainAgentRunOptions options)
-    {
-        List<ChatMessage> messages = [];
-
-        // 正文已由 BuildChatOptions 交给 ChatOptions.Instructions，这里不能再加一条 system
-        // 消息，否则同一段正文会既作指令又作对话消息重复送达模型。
-        if (options.Messages is { Count: > 0 })
-            messages.AddRange(options.Messages);
-
-        // Prefer pre-built UserMessage (may contain multimodal content) over plain text.
-        if (options.UserMessage is not null)
-            messages.Add(options.UserMessage);
-        else if (!string.IsNullOrEmpty(options.UserPrompt))
-            messages.Add(new ChatMessage(ChatRole.User, options.UserPrompt));
-
-        return messages;
-    }
 }

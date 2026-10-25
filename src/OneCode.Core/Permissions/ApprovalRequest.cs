@@ -1,8 +1,7 @@
 namespace OneCode.Core.Permissions;
 
 /// <summary>
-/// Immutable approval request shared by Main, Worker, TUI and headless
-/// execution paths.
+/// 不可变审批请求，供主 agent、子代理、各前端与无头执行路径共用。
 /// </summary>
 public sealed record ApprovalRequest(
     string RequestId,

@@ -23,9 +23,6 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" />
-    <PackageReference Include="Terminal.Gui" />
-    <PackageReference Include="Terminal.Gui.Editor" />
-    <PackageReference Include="Markdig" />
     <PackageReference Include="CliWrap" />
     <!-- AngleSharp: WebFetchTool HTML→Markdown DOM 解析（替代正则，消除 ReDoS 风险） -->
     <PackageReference Include="AngleSharp" />

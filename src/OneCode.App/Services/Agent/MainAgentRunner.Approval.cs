@@ -1,22 +1,19 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OneCode.App.Query;
 
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
 /// <see cref="MainAgentRunner"/> 的工具审批处理。
 ///
-/// 完全事件驱动：审批请求通过 <see cref="ApprovalRequestEvent"/> 推送到 channel，
-/// TUI 消费 <see cref="OneCode.App.Tui.TuiApprovalRequest"/> 后自主渲染审批组件，
-/// 通过 <see cref="ApprovalRequestEvent.ResponseSource"/> 回传 <see cref="ApprovalDecision"/>。
-/// Main 路径完全脱离同步阻塞调用。
+/// 审批请求经 <see cref="IApprovalBroker"/> 转到 App 统一实现的 <see cref="IApprovalPromptSink"/>，
+/// 经 <c>IInteractionDispatcher</c> 投递到前端渲染并回传 <see cref="ApprovalDecision"/>；事件流不承载交互。
 /// </summary>
 public partial class MainAgentRunner
 {
     /// <summary>
     /// 处理单个 MAF ToolApprovalRequestContent（流式 + 非流式统一路径）。
-    /// 推送 <see cref="ApprovalRequestEvent"/> 到 channel，await ResponseSource 回传决策。
+    /// 经审批端口等待用户决策，再映射为 MAF 的审批响应。
     /// </summary>
     internal async Task<AIContent> HandleToolApprovalAsync(
         ToolApprovalRequestContent request,
@@ -46,11 +43,17 @@ public partial class MainAgentRunner
                 $"Tool '{toolName}' requires approval but no approval channel is available in this run.");
         }
 
+        // 审批卡片展示所需的代理归属与原因：主 agent 固定名，原因取工具风险分级。
+        var toolRisk = _toolMetadata.Get(toolName)?.Risk;
         var decision = await broker.RequestAsync(
             new ApprovalRequest(
                 RequestId: request.RequestId,
                 ToolName: toolName,
-                ToolInput: toolInput.GetRawText()),
+                ToolInput: toolInput.GetRawText(),
+                AgentName: MainAgentName,
+                Reason: toolRisk is { } risk
+                    ? $"Tool '{toolName}' (risk: {risk}) requires user approval."
+                    : $"Tool '{toolName}' requires user approval."),
             ct).ConfigureAwait(false);
 
         _logger.LogDebug("ToolApprovalResponse: tool={Tool}, decision={Decision}", toolName, decision);

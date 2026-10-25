@@ -1,10 +1,10 @@
+using OneCode.App.Services.PlanMode;
 using OneCode.App.Services.Lsp;
-using OneCode.App.Tui;
-using OneCode.Core.Domain;
 
 using OneCode.Core.Tools;
 
 using OneCode.Core.Lsp;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

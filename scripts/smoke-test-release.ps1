@@ -14,7 +14,7 @@
     覆盖边界:交互式 TUI 需要真实 TTY,无法在 CI 里启动,因此不在本脚本范围内;
     它的驱动级验证由 OneCode.Tests 的 TuiHeadless* 用例(真实 ANSI 驱动 + 按键/鼠标注入)承担。
 .PARAMETER PublishDir
-    dotnet publish 的输出目录,包含 OneCode.Cli(.exe) 及运行时资源。
+    dotnet publish 的输出目录,包含 OneCode.Tui(.exe) 及运行时资源。
 .PARAMETER ExpectedVersion
     期望的语义版本号(不带 v 前缀,如 1.0.0),来自 git tag。
 .PARAMETER Runtime
@@ -58,7 +58,7 @@ if (-not (Test-Path -LiteralPath $PublishDir -PathType Container)) {
 
 # ── 1. 定位可执行文件 ─────────────────────────────────────────────
 $isWindowsRid = $Runtime -like "win-*"
-$exeName = if ($isWindowsRid) { "OneCode.Cli.exe" } else { "OneCode.Cli" }
+$exeName = if ($isWindowsRid) { "OneCode.Tui.exe" } else { "OneCode.Tui" }
 $exePath = Join-Path $PublishDir $exeName
 
 Write-Step "定位可执行文件: $exeName"
@@ -129,7 +129,7 @@ function Get-CommandLine {
     ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + $_ + '"' } else { $_ } }) -join ' '
 }
 
-function Invoke-Cli {
+function Invoke-OneCodeBinary {
     param([string[]]$Arguments)
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -156,7 +156,8 @@ function Invoke-Cli {
 }
 
 $missingDir = Join-Path $PublishDir ("__missing__" + [guid]::NewGuid().ToString("N"))
-$versionShape = '^\d+\.\d+\.\d+ \(OneCode\)$'
+# 形状允许 semver 预发布后缀（如 1.0.0-beta.1 (OneCode)）。
+$versionShape = '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)? \(OneCode\)$'
 
 $startupCases = @(
     @{ Name = "--version 快路径";            Args = @("--version"); Exit = 0; OutLike = $versionShape; Err = $null }
@@ -171,7 +172,7 @@ $startupCases = @(
 
 foreach ($case in $startupCases) {
     Write-Step $case.Name
-    $result = Invoke-Cli $case.Args
+    $result = Invoke-OneCodeBinary $case.Args
 
     if ($result.ExitCode -ne $case.Exit) {
         Write-Fail "退出码不符: 期望 $($case.Exit),实际 $($result.ExitCode)"

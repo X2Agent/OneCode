@@ -1,0 +1,43 @@
+<aside class="sessions">
+    <div class="sessions-header">会话</div>
+    <button class="new-session" @onclick="OnNew">
+        <span class="new-plus">+</span><span class="new-label">新建会话</span>
+    </button>
+    @foreach (var session in Sessions)
+    {
+        <div class="session @(session.IsForeground ? "active" : "")"
+             @onclick="() => OnSwitch.InvokeAsync(session.Id)">
+            <span class="dot @(session.IsForeground && Running ? "live" : "")"></span>
+            <div class="session-body">
+                <div class="session-title" title="@session.Id">@session.Title</div>
+                <div class="session-meta">@session.Mode · @session.MessageCount 条 · @session.LastActivityAt.ToString("MM-dd HH:mm")</div>
+            </div>
+            @if (session.IsForeground)
+            {
+                <button class="session-action" @onclick="OnClose" @onclick:stopPropagation="true" title="关闭当前会话">关闭</button>
+            }
+            else
+            {
+                <button class="session-action" @onclick="() => OnSwitch.InvokeAsync(session.Id)" @onclick:stopPropagation="true" title="切换到该会话">切换</button>
+            }
+        </div>
+    }
+    @if (Sessions.Count == 0)
+    {
+        <div class="session-meta">（暂无会话）</div>
+    }
+    <div class="sessions-footer">
+        <div class="path" title="@WorkingDirectory">@WorkingDirectory</div>
+    </div>
+</aside>
+
+@code {
+    [Parameter] public string Mode { get; set; } = "BUILD";
+    [Parameter] public string ModelName { get; set; } = "";
+    [Parameter] public string WorkingDirectory { get; set; } = "";
+    [Parameter] public bool Running { get; set; }
+    [Parameter] public IReadOnlyList<WebSessionItem> Sessions { get; set; } = [];
+    [Parameter] public EventCallback<string> OnSwitch { get; set; }
+    [Parameter] public EventCallback OnNew { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+}

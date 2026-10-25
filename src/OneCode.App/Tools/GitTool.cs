@@ -137,9 +137,18 @@ public sealed class GitTool(
         var trimmed = value.Trim();
         return trimmed.Length > 0
             && !trimmed.StartsWith('-')
-            && !Path.IsPathRooted(trimmed)
+            && !IsRootedToken(trimmed)
             && trimmed.All(c => !char.IsControl(c));
     }
+
+    /// <summary>
+    /// 平台无关的根路径判定：Path.IsPathRooted 在 Unix 上不认 "C:\x" 与 "\\unc"，
+    /// Windows 风格的根 token 会被当 ref 放行（跨平台语义由 GitToolTests 锚定）。
+    /// </summary>
+    private static bool IsRootedToken(string value) =>
+        Path.IsPathRooted(value)
+        || value.StartsWith('\\')
+        || (value.Length >= 2 && value[1] == ':' && char.IsAsciiLetter(value[0]));
 
     private static List<string> BuildLogArguments(int count, string? refName)
     {

@@ -26,7 +26,7 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public sealed class ToolArgumentBindingMiddleware(ILogger? logger = null)
 {
-    private const string ArrayFixHint =
+    internal const string ArrayFixHint =
         "Array parameters must be sent as a JSON array (e.g. [\"a\",\"b\"]), not a string or a single object.";
 
     /// <summary>创建 MAF 中间件委托。须注册在 <see cref="ToolResultUnwrapMiddleware"/> 的内层。</summary>

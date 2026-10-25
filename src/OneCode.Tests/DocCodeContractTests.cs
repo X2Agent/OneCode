@@ -90,11 +90,6 @@ public sealed class DocCodeContractTests
         doc.Should().NotContain("是否已接受当前项目根目录信任", "该描述会让读者误以为它只影响当前项目");
     }
 
-    /// <summary>不走 ConfigManager 的环境变量表必须包含持久化 Cron 开关。</summary>
-    [Fact]
-    public void SettingsDoc_MentionsDurableCronEnvironmentVariable()
-        => Read(SettingsDocFile).Should().Contain("ONECODE_DURABLE_CRON");
-
     // ---------------------------------------------------------------- ADR 决策落地
 
     /// <summary>Cron 以 Build + unattended 运行：既不使用 Goal，也不丢弃事件。</summary>

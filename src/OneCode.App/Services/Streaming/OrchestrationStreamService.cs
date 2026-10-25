@@ -2,7 +2,7 @@ using OneCode.Core.Config;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Infrastructure.Agent;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
@@ -15,7 +15,7 @@ namespace OneCode.App.Services.Streaming;
 /// Bridges GOAL orchestration backend to the TUI streaming pipeline.
 /// GOAL mode runs through the durable MAF pipeline
 /// (<see cref="GoalMode.GoalWorkflowHost"/>), converting
-/// <see cref="OrchestrationEvent"/> streams into <see cref="TuiEvent"/> streams.
+/// <see cref="OrchestrationEvent"/> streams into <see cref="QueryEvent"/> streams.
 /// </summary>
 public sealed class OrchestrationStreamService(
     IConfigManager configManager,
@@ -28,10 +28,10 @@ public sealed class OrchestrationStreamService(
     /// <summary>
     /// GOAL mode streaming: runs through the durable MAF pipeline
     /// (<see cref="GoalMode.GoalWorkflowHost"/> + GoalRun aggregate), bridges
-    /// OrchestrationEvent → TuiEvent via the shared skeleton, then emits
-    /// Goal-produced TuiEvents (text deltas, summary, etc.).
+    /// OrchestrationEvent → QueryEvent via the shared skeleton, then emits
+    /// Goal-produced QueryEvents (text deltas, summary, etc.).
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamGoalAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamGoalAsync(
         InteractiveSession session,
         string text,
         string currentModelId,
@@ -66,7 +66,7 @@ public sealed class OrchestrationStreamService(
         // 展示 Goal 隔离 worktree 位置，便于用户定位新建目录。
         if (goalRun.Workspace is { } workspace)
         {
-            yield return new TuiNotice(
+            yield return new NoticeEvent(
                 $"🔒 Goal 隔离 worktree：{effectiveWorktreeDir}"
                 + $"（分支 {workspace.WorktreeBranch}，基于 {workspace.TargetBranch}）");
         }
@@ -95,7 +95,7 @@ public sealed class OrchestrationStreamService(
     /// 通过 <see cref="GoalMode.GoalWorkflowHost"/> 开启新执行世代，
     /// 业务事实来自 GoalRun 聚合与步骤 Git 回执。
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamResumeGoalAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamResumeGoalAsync(
         SessionId sessionId,
         string currentModelId,
         string systemPrompt,
@@ -148,7 +148,7 @@ public sealed class OrchestrationStreamService(
     /// 共享 Goal 工作流流式执行骨架（首次启动与 Checkpoint 恢复共用）：
     /// 负责 worktree 切换与恢复、TUI 事件通道合并、GoalWorkflowHost 执行世代驱动与终态事件写回。
     /// </summary>
-    private async IAsyncEnumerable<TuiEvent> ExecuteGoalWorkflowStreamAsync(
+    private async IAsyncEnumerable<QueryEvent> ExecuteGoalWorkflowStreamAsync(
         GoalRun goalRun,
         string systemPrompt,
         string currentModelId,
@@ -169,12 +169,12 @@ public sealed class OrchestrationStreamService(
         if (switchWorkingDir)
         {
             await session!.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
-            yield return new TuiWorkingDirectoryChanged(effectiveWorktreeDir);
+            yield return new WorkingDirectoryChangedEvent(effectiveWorktreeDir);
         }
 
         try
         {
-            var mergedChannel = Channel.CreateUnbounded<TuiEvent>(new UnboundedChannelOptions
+            var mergedChannel = Channel.CreateUnbounded<QueryEvent>(new UnboundedChannelOptions
             {
                 SingleReader = true,
             });
@@ -189,8 +189,8 @@ public sealed class OrchestrationStreamService(
                 Budget = budget.ToGoalBudget(),
                 OrchestrationEventSink = orchEvt =>
                 {
-                    if (TuiEventMapper.MapOrchestrationEventToTuiEvent(orchEvt) is { } mapped
-                        && mapped is not TuiTextDelta)
+                    if (MapOrchestrationEvent(orchEvt) is { } mapped
+                        && mapped is not TextDeltaEvent)
                     {
                         mergedChannel.Writer.TryWrite(mapped);
                     }
@@ -218,11 +218,13 @@ public sealed class OrchestrationStreamService(
                     var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
                         ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
                     mergedChannel.Writer.TryWrite(ToGoalResult(final));
-                    mergedChannel.Writer.TryWrite(new TuiDone(
-                        InputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                        OutputTokens: checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens)),
-                        TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
+                    mergedChannel.Writer.TryWrite(new DoneEvent(
+                        FullText: null,
+                        Usage: new TokenUsage(
+                            checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
+                            checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens))),
                         TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
+                        TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
                         SessionId: final.SessionId,
                         TransactionRolledBack: false,
                         ValidationFailureSummary: final.FailureSummary));
@@ -233,7 +235,7 @@ public sealed class OrchestrationStreamService(
                 }
                 catch (Exception ex)
                 {
-                    mergedChannel.Writer.TryWrite(new TuiError(ex.Message));
+                    mergedChannel.Writer.TryWrite(new ErrorEvent(ex.Message));
                 }
                 finally
                 {
@@ -255,12 +257,33 @@ public sealed class OrchestrationStreamService(
 
         if (switchWorkingDir)
         {
-            yield return new TuiWorkingDirectoryChanged(originalWorkingDirectory);
+            yield return new WorkingDirectoryChangedEvent(originalWorkingDirectory);
         }
     }
 
+    /// <summary>
+    /// 编排事件 → 流内事件投影。文本增量由执行器自行写入通道，此处排除以免重复；
+    /// Harness 注入的工具不进入对话流。
+    /// </summary>
+    private static QueryEvent? MapOrchestrationEvent(OrchestrationEvent orchEvt) => orchEvt switch
+    {
+        OrchestrationEvent.AgentMessage am
+            => new AgentMessageEvent(am.AgentName, am.Content),
+        OrchestrationEvent.ToolStart ts when !HarnessProviderTools.Names.Contains(ts.Name)
+            => new ToolStartEvent(ts.ToolId, ts.Name, ts.ToolInput, ts.AgentName),
+        OrchestrationEvent.ToolDone td when !HarnessProviderTools.Names.Contains(td.Name)
+            => new ToolDoneEvent(td.ToolId, td.Name, td.IsError, td.Result, td.ToolInput, td.AgentName),
+        OrchestrationEvent.TextDelta td
+            => new TextDeltaEvent(td.Text),
+        OrchestrationEvent.FileChanged fc
+            => new FileChangeEvent(fc.FileName, fc.AddedLines, fc.RemovedLines, fc.AgentName),
+        OrchestrationEvent.Error err
+            => new ErrorEvent(err.Message),
+        _ => null,
+    };
+
     /// <summary>构建 GOAL 结果投影（完成/失败/跳过计数、验证门摘要与产物文件列表）。</summary>
-    private static TuiGoalResult ToGoalResult(GoalRun run)
+    private static GoalResultEvent ToGoalResult(GoalRun run)
     {
         var changedFiles = run.PublishReceipt?.ChangedFiles
             ?? run.Executions.SelectMany(e => e.ChangedFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();

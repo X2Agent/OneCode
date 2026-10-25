@@ -55,7 +55,7 @@ public sealed class WorkingModeController
         return Mode;
     }
 
-    /// <summary>Uppercase short tag displayed by <see cref="OneCode.App.Tui.AgentStatusBar"/>.</summary>
+    /// <summary>Uppercase short tag displayed by <c>AgentStatusBar</c> (OneCode.Tui).</summary>
     public string ModeTag => Mode switch
     {
         WorkingMode.Build => "BUILD",

@@ -17,7 +17,7 @@ namespace OneCode.App.Services.Compact;
 /// 保留的职责仅剩 70% 告警——提醒用户主动整理会话历史。</para>
 ///
 /// <para><b>运行时集成点</b>：<see cref="Streaming.QueryStreamService"/> 在每次 agent turn 结束后
-/// 调用 <c>CheckAndWarnAsync</c>，通过 <see cref="ConsumeWarning"/> 发射 <c>TuiCompactSuggested</c> 事件。</para>
+/// 调用 <c>CheckAndWarnAsync</c>，发射 <see cref="Query.CompactSuggestedEvent"/> 事件供前端提示。</para>
 ///
 /// <para><b>阈值即语义</b>：
 ///   0.70 (<see cref="WarningThreshold"/>) — transcript 规模首次跨越时发射告警（无 LLM，无压缩）
@@ -32,9 +32,6 @@ public sealed class AutoCompactService(
 {
     private const double WarningThreshold = 0.70;
     private const int MaxTrackedSessions = 100;
-
-    private static bool IsRunningAsWorkerAgent() =>
-        Environment.GetEnvironmentVariable(OneCode.Core.Constants.EnvVars.IsWorker) is "1" or "true";
 
     private readonly CompactService _compactService = compactService;
     private readonly ISessionConversationAccess _sessionManager = sessionManager;
@@ -61,18 +58,15 @@ public sealed class AutoCompactService(
         string? systemPrompt = null,
         CancellationToken ct = default)
     {
-        if (!IsRunningAsWorkerAgent())
-        {
-            var budgetStatus = _compactService.GetBudgetStatus(session, systemPrompt);
-            CheckAndWarn(session, budgetStatus.UsageRatio);
-        }
+        var budgetStatus = _compactService.GetBudgetStatus(session, systemPrompt);
+        CheckAndWarn(session, budgetStatus.UsageRatio);
 
         return Task.CompletedTask;
     }
 
     /// <summary>
     /// 消费未读的 70% 告警。若存在首次跨越 <see cref="WarningThreshold"/> 的告警，
-    /// 返回 true 并清除标志。调用方（QueryStreamService）据此发射 <c>TuiCompactSuggested</c> 事件，
+    /// 返回 true 并清除标志。调用方（QueryStreamService）据此发射 <c>CompactSuggestedEvent</c> 事件，
     /// 提醒用户执行 /compact。降回阈值以下后标志重置，可再次告警。
     /// </summary>
     public bool ConsumeWarning(SessionId? sessionId = null)

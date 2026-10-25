@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

@@ -79,6 +79,8 @@ public sealed class BashCommandInvariant : ISafetyInvariant
     {
         if (parameters.TryGetValue("command", out var cmdObj) && cmdObj is string cmd)
             return cmd;
+        if (parameters.TryGetValue("cmd", out var aliasObj) && aliasObj is string aliasCmd)
+            return aliasCmd;
         return null;
     }
 

@@ -24,7 +24,7 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
         [Description("The prompt to enqueue on each trigger (for create).")] string? prompt = null,
         [Description("Cron job ID (for delete/pause/resume).")] string? id = null,
         [Description("true=recurring, false=one-shot (for create, default true).")] bool recurring = true,
-        [Description("true=persist to disk so the job survives process restarts (for create). Requires ONECODE_DURABLE_CRON=true; otherwise forced to false.")] bool durable = false,
+        [Description("true=persist to disk so the job survives process restarts (for create).")] bool durable = false,
         CancellationToken ct = default)
     {
         return action.ToLowerInvariant() switch
@@ -52,7 +52,6 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
             return ToolResult.Error($"No future matches for: {cron}");
 
         var id = Guid.NewGuid().ToString("N")[..8];
-        var effectiveDurable = durable && CronPaths.IsDurableCronEnabled();
 
         var entry = new CronJobEntry
         {
@@ -60,7 +59,7 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
             Cron = cron,
             Prompt = prompt,
             Recurring = recurring,
-            Durable = effectiveDurable,
+            Durable = durable,
             Paused = false,
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             NextRunAt = nextRun.Value.ToUnixTimeSeconds(),
@@ -74,9 +73,12 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
         {
             id,
             recurring,
-            durable = effectiveDurable,
+            durable,
             humanSchedule = CronExpressionHelper.CronToHumanReadable(cron),
             nextRunAt = entry.NextRunAt,
+            hint = durable
+                ? "durable 作业仅在 onecode 进程存活期间触发；常驻运行用 /daemon 或 scripts/install-daemon.ps1"
+                : null,
         });
     }
 
@@ -91,6 +93,7 @@ public sealed class CronTool(ICronParser cronParser, CronSchedulerService schedu
             promptPreview = j.Prompt.Length > 80 ? j.Prompt[..80] + "..." : j.Prompt,
             j.Recurring,
             j.Durable,
+            projectDir = j.ProjectDir,
             j.Paused,
             j.LastRunAt,
             j.LastStatus,

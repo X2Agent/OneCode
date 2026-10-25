@@ -1,0 +1,118 @@
+@inject MarkdownRenderer Renderer
+@inject IJSRuntime Js
+
+<div class="messages">
+    @for (var index = 0; index < Messages.Count; index++)
+    {
+        var message = Messages[index];
+        <article class="message @RoleClass(message.Role) @(message.IsStreaming ? "streaming" : "")">
+            @if (message.Role == WebRole.System)
+            {
+                <div class="system-line">@message.Content</div>
+            }
+            else if (string.IsNullOrEmpty(message.Content))
+            {
+                <div class="streaming-caret"></div>
+            }
+            else if (message.IsStreaming)
+            {
+                var (head, tail) = SplitStreamingTail(message.Content);
+                if (!string.IsNullOrEmpty(head))
+                {
+                    <div class="markdown">@((MarkupString)Renderer.ToHtml(head))</div>
+                }
+                if (tail is not null)
+                {
+                    <div class="stream-tail" @key="head.Length">@((MarkupString)Renderer.ToHtml(tail))</div>
+                }
+                <span class="streaming-caret inline"></span>
+            }
+            else
+            {
+                <div class="markdown">@((MarkupString)Renderer.ToHtml(message.Content))</div>
+            }
+            @if (message.Role != WebRole.System && !string.IsNullOrEmpty(message.Content))
+            {
+                <div class="msg-actions">
+                    <button type="button" class="msg-copy @(_copiedIndex == index ? "copied" : "")"
+                            title="@(_copiedIndex == index ? "已复制" : "复制")"
+                            @onclick="() => CopyMessageAsync(message, index)">
+                        @if (_copiedIndex == index)
+                        {
+                            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 5"/></svg>
+                        }
+                        else
+                        {
+                            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5h-7a1 1 0 0 0-1 1v7"/></svg>
+                        }
+                    </button>
+                </div>
+            }
+        </article>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<WebMessage> Messages { get; set; } = [];
+
+    private int? _copiedIndex;
+    private int _copyGeneration;
+
+    private static string RoleClass(WebRole role) => role switch
+    {
+        WebRole.User => "user",
+        WebRole.Assistant => "assistant",
+        _ => "system",
+    };
+
+    /// <summary>
+    /// 流式渲染拆分：已完结块走稳定渲染，最后一个未完成块独立成尾段，
+    /// 由尾段容器（随块重建）承载「模糊→清晰」入场动效。
+    /// 拆分点只取不在未闭合代码围栏内的空行之后，避免把代码块拦腰截断。
+    /// </summary>
+    private static (string Head, string? Tail) SplitStreamingTail(string content)
+    {
+        var safeSplit = -1;
+        var inFence = false;
+        var lineStart = 0;
+        for (var i = 0; i <= content.Length; i++)
+        {
+            if (i < content.Length && content[i] != '\n')
+                continue;
+
+            var line = content[lineStart..i].TrimEnd('\r');
+            if (line.StartsWith("```", StringComparison.Ordinal))
+                inFence = !inFence;
+            else if (!inFence && line.Length == 0 && lineStart > 0 && i + 1 < content.Length)
+                safeSplit = i + 1;
+            lineStart = i + 1;
+        }
+
+        if (safeSplit <= 0)
+            return (string.Empty, content.Length == 0 ? null : content);
+
+        var tail = content[safeSplit..];
+        return string.IsNullOrWhiteSpace(tail) ? (content, null) : (content[..safeSplit], tail);
+    }
+
+    private async Task CopyMessageAsync(WebMessage message, int index)
+    {
+        if (_copiedIndex == index)
+            return;
+
+        var ok = await Js.InvokeAsync<bool>("app.copyText", message.Content);
+        if (!ok)
+            return;
+
+        var generation = ++_copyGeneration;
+        _copiedIndex = index;
+        StateHasChanged();
+        await Task.Delay(2500);
+        if (generation != _copyGeneration)
+            return;
+
+        _copiedIndex = null;
+        StateHasChanged();
+    }
+}

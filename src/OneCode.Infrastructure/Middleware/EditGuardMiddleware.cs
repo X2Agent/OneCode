@@ -85,6 +85,10 @@ public static class EditGuardMiddleware
                 return result;
             }
 
+            var execCtx = stateBag.GetOrInitializeToolExecutionContext();
+            if (result is ToolResult { IsError: true } || execCtx.IsError)
+                return result;
+
             stateBag.GetOrInitializeModifiedFiles().Add(editedPath);
             stateBag.IncrementEditsSinceLastBuild();
 
@@ -110,11 +114,14 @@ public static class EditGuardMiddleware
                 return result;
             }
 
-            stateBag.GetOrInitializeToolExecutionContext().IsVerificationFailure = true;
+            execCtx.IsVerificationFailure = true;
+            execCtx.IsError = true;
             logger.LogWarning("Verification failed with {ErrorCount} errors", checkResult.Errors.Count);
 
             var errorSummary = checkResult.FormatForLlm();
             var existingResult = result as string ?? result?.ToString() ?? "";
+            if (DisplayJsonSerializer.TryUnwrapEnvelope(existingResult, out var unwrappedExisting))
+                existingResult = unwrappedExisting;
             var combinedContent = $"{existingResult}\n\n[VERIFICATION ERROR]\n{errorSummary}";
             return ToolResult.Error(combinedContent, "Fix the verification errors above before making further edits.");
         };

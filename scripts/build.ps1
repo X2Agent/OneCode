@@ -34,10 +34,10 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptDir
-$ProjectFile = Join-Path $RepositoryRoot "src/OneCode.Cli/OneCode.Cli.csproj"
+$ProjectFile = Join-Path $RepositoryRoot "src/OneCode.Tui/OneCode.Tui.csproj"
 
 if (-not (Test-Path -LiteralPath $ProjectFile -PathType Leaf)) {
-    throw "找不到 OneCode CLI 项目: $ProjectFile"
+    throw "找不到 OneCode TUI 项目: $ProjectFile"
 }
 
 # ── 自动检测当前平台 RID ──────────────────────────────────────────
@@ -108,7 +108,7 @@ Write-Host "✅ 构建完成!" -ForegroundColor Green
 Write-Host "   输出目录: $OutputDir" -ForegroundColor White
 
 if ($Mode -eq "Publish") {
-    $exeName = if ($Runtime -like "win-*") { "OneCode.Cli.exe" } else { "OneCode.Cli" }
+    $exeName = if ($Runtime -like "win-*") { "OneCode.Tui.exe" } else { "OneCode.Tui" }
     $exePath = Join-Path $OutputDir $exeName
     if (Test-Path $exePath) {
         $size = (Get-Item $exePath).Length

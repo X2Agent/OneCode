@@ -2,8 +2,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Query;
-using OneCode.App.Tui;
 using Terminal.Gui.App;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -530,7 +530,7 @@ public sealed class ChatTranscriptViewTests
 
         view.BeginStreaming();
         view.AddToolStart("Agent", summary, "call_agent_1");
-        view.UpdateSubagentProgress(new TuiSubagentProgress(
+        view.UpdateSubagentProgress(new SubagentProgressEvent(
             ForkId: "fork-1",
             AgentName: "Explore",
             OneCode.App.Query.SubagentProgressPhase.Running,
@@ -558,13 +558,13 @@ public sealed class ChatTranscriptViewTests
         var view = new ChatTranscriptView(CreateImmediateApp());
         view.BeginStreaming();
         view.AddToolStart("Agent", """{"agent":"Explore","description":"调研"}""", "call_agent_2");
-        view.UpdateSubagentProgress(new TuiSubagentProgress(
+        view.UpdateSubagentProgress(new SubagentProgressEvent(
             ForkId: "fork-2",
             AgentName: "Explore",
             OneCode.App.Query.SubagentProgressPhase.Running,
             ToolCallCount: 3,
             ElapsedMs: 5_000));
-        view.UpdateSubagentProgress(new TuiSubagentProgress(
+        view.UpdateSubagentProgress(new SubagentProgressEvent(
             ForkId: "fork-2",
             AgentName: "Explore",
             OneCode.App.Query.SubagentProgressPhase.Completed));

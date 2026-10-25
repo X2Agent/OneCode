@@ -161,5 +161,5 @@ agent 对上一轮产出**零记忆**，不回显就会重复已完成的动作�
 | GoalAuto 审批放行（决策 1.4） | `src/OneCode.App/Services/Agent/AgentPipelineAssembly.cs` |
 | `/loop` 运行时循环 | `src/OneCode.App/Services/Loop/IterativeLoopService.cs` |
 | `/loop` 参数解析与权限门 | `src/OneCode.App/Commands/LoopCommand.cs` |
-| 命令结果 → dispatch 路由 | `src/OneCode.Core/Commands/ICommand.cs`、`src/OneCode.App/Services/SlashCommandPipeline.cs`、`src/OneCode.App/Tui/OneCodeToplevel.Dispatch.cs` |
+| 命令结果 → dispatch 路由 | `src/OneCode.Core/Commands/ICommand.cs`、`src/OneCode.App/Services/SlashCommandPipeline.cs`、`src/OneCode.Tui/Tui/OneCodeToplevel.Dispatch.cs` |
 | 循环守卫测试 | `src/OneCode.Tests/GoalSubGoalLoopTests.cs`、`src/OneCode.Tests/IterativeLoopServiceTests.cs`、`src/OneCode.Tests/LoopCommandTests.cs` |

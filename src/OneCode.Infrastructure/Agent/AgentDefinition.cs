@@ -61,7 +61,11 @@ public static partial class AgentDefinitionParser
 
         var name = metadata.Name?.Trim();
         if (string.IsNullOrEmpty(name))
-            name = Path.GetFileNameWithoutExtension(sourcePath);
+        {
+            // '\' 先归一为 '/' 再取文件名：Unix 的 Path API 不认 '\'，
+            // Windows 风格路径会被整体当作文件名（跨平台语义由 CustomAgentTests 锚定）。
+            name = Path.GetFileNameWithoutExtension(sourcePath.Replace('\\', '/'));
+        }
 
         var description = metadata.Description?.Trim();
         if (string.IsNullOrEmpty(description))

@@ -29,23 +29,27 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 ### 数据流
 
 ```
-工具调用请求（按 AgentPipelineBuilder 源码注册序；`.Use()` 先注册者最外层）
+工具调用请求（从外到内运行时顺序；AIAgentBuilder.Build() 逆序遍历工厂，后 .Use() 的中间件处于更外层）
+  → [ToolCallEventMiddleware（按挂载条件，最外层发射 ToolStart/ToolDone 事件）]
+  → ToolResultUnwrapMiddleware [外层出口兜底]（短路返回的 ToolResult 统一解包并序列化为字符串）
+  → ToolArgumentBindingMiddleware（参数名/类型别名归一化：如 cmd→command, file/path/file_path→filePath）
   → SafetyInvariantMiddleware（安全不变量校验，fail-closed）
-  → [HookMiddleware / ToolCallEventMiddleware（按挂载条件）]
-  → Permission Middleware（PermissionAndLimitMiddleware：白名单过滤 + Allow/Deny/Ask 决策 + MaxToolCalls 计数）
+  → [HookMiddleware（按挂载条件：pre_tool_call / post_tool_call 拦截与审计）]
+  → Permission Middleware（PermissionAndLimitMiddleware：封条 + 白名单过滤 + Allow/Deny/Ask 决策 + MaxToolCalls/MaxExternalWebToolCalls 配额）
       ├─ Allow  → 放行到 next
       ├─ Deny   → 返回 ToolResult.Error
       └─ Ask    → 断言该工具带 ApprovalRequiredAIFunction 标记
                       ├─ 有标记 → 放行到 next（交给 ToolApproval 层）
                       └─ 无标记 → fail-closed 返回 ToolResult.Error（无审批依据，不执行）
-  → [StateMachineMiddleware（失败追踪恢复闸，仅 Full）]
-  → [EditTransactionMiddleware（编辑事务收纳，按启用条件）]
+  → [StateMachineMiddleware（双轨故障追踪恢复闸：单工具连续失败定向阻拦 + 验证失败全局恢复，仅 Full）]
   → EditGuardMiddleware（FileEdit 契约前置校验 + 编辑后验证，契约失败 fail-closed）
-  → [ResultBudget / ResultUnwrap（工具结果预算与解包）]
+  → [EditTransactionMiddleware（编辑前快照与编辑后增量 Diff，按启用条件）]
+  → ToolExecutionBudgetMiddleware（单次工具输出 150K 字符预算截断）
+  → ToolResultUnwrapMiddleware [内层核心]（捕获编组/执行异常 + 解包 JsonElement/ToolResult 写 IsError）
   → ToolApproval（AutoApprovalRules / ApprovalBroker 事件桥）
       ├─ 规则匹配 → 自动放行
       └─ 不匹配   → ToolApprovalRequestContent → ApprovalBroker 事件桥（Main 流式拆分）→ 续跑
-  → 实际工具执行
+  → 实际工具执行（AIFunction.InvokeAsync）
 （图外：Agent Run 级最外层还有 BudgetGuard / UsageTracking 两个 .Use() 观测中间件，
     见「当前实现形态」。）
 ```

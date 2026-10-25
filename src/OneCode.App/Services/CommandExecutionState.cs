@@ -3,7 +3,7 @@ namespace OneCode.App.Services;
 /// <summary>
 /// Shared mutable state for the slash-command pipeline, letting
 /// <c>TryResolvePromptCommandAsync</c> / <c>ExecuteCommandAsync</c> live as
-/// instance methods on <see cref="InteractiveModeExecutor"/>.
+/// instance methods on <c>InteractiveModeExecutor</c>.
 /// </summary>
 /// <remarks>
 /// Holds two pieces of state shared between the resolution and execution halves:
@@ -12,7 +12,7 @@ namespace OneCode.App.Services;
 /// produced by <c>TryResolvePromptCommandAsync</c> so <c>ExecuteCommandAsync</c>
 /// can return it without re-executing the command.</item>
 /// <item><c>_refreshSessionUi</c> — callback set inside <c>TuiHost.Run</c> factory
-/// (by <see cref="TuiHostConfigurator"/>) and invoked by command execution after
+/// (by <c>TuiHostConfigurator</c>) and invoked by command execution after
 /// session-affecting commands (e.g. <c>/session</c>).</item>
 /// </list>
 /// Session-scoped mutable bridge (not a DI defect): the UI refresh callback is only

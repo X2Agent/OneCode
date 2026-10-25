@@ -18,7 +18,7 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   CONFIGURATION: Release
   SOLUTION: src/OneCode.slnx
-  CLI_PROJECT: src/OneCode.Cli/OneCode.Cli.csproj
+  TUI_PROJECT: src/OneCode.Tui/OneCode.Tui.csproj
   TEST_PROJECT: src/OneCode.Tests/OneCode.Tests.csproj
 
 jobs:
@@ -95,7 +95,7 @@ jobs:
           VERSION: 0.0.0
           BINARY_VERSION: 0.0.0.0
         run: |
-          dotnet publish $env:CLI_PROJECT `
+          dotnet publish $env:TUI_PROJECT `
             -c $env:CONFIGURATION `
             -r win-x64 `
             --self-contained true `

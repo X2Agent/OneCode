@@ -28,18 +28,18 @@
 - [文件和目录命名约定](#文件和目录命名约定)
 - [参考资源](#参考资源)
 
-> **项目级补充文件：** [OneCode.Core/AGENTS.md](OneCode.Core/AGENTS.md)（依赖约束 + 接口规范）| [OneCode.Infrastructure/AGENTS.md](OneCode.Infrastructure/AGENTS.md)（外部集成约束）| [OneCode.Automation/AGENTS.md](OneCode.Automation/AGENTS.md)（后台调度服务约束）| [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md)（业务逻辑 + TUI 约束）| [OneCode.Cli/AGENTS.md](OneCode.Cli/AGENTS.md)（入口点规范）| [OneCode.Tests/AGENTS.md](OneCode.Tests/AGENTS.md)（单元测试约束，禁止敷衍测试）
+> **项目级补充文件：** [OneCode.Core/AGENTS.md](OneCode.Core/AGENTS.md)（依赖约束 + 接口规范）| [OneCode.Infrastructure/AGENTS.md](OneCode.Infrastructure/AGENTS.md)（外部集成约束）| [OneCode.Automation/AGENTS.md](OneCode.Automation/AGENTS.md)（后台调度服务约束）| [OneCode.App/AGENTS.md](OneCode.App/AGENTS.md)（业务逻辑 + UI 契约约束）| [OneCode.Tui/AGENTS.md](OneCode.Tui/AGENTS.md)（入口点规范）| [OneCode.Tests/AGENTS.md](OneCode.Tests/AGENTS.md)（单元测试约束，禁止敷衍测试）
 
 ---
 
 ## 项目背景
 
-`src` 下的 `OneCode.slnx` 是基于 .NET 10 的 CLI AI 编程助手实现，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。
+`src` 下的 `OneCode.slnx` 是基于 .NET 10 的 TUI AI 编程助手实现，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。
 
 | 维度 | 选型 |
 |------|------|
 | 运行时 | .NET 10 |
-| UI | Terminal.Gui v2（全屏 TUI）；仅交互式 TUI，无独立非交互打印模式 |
+| UI | Terminal.Gui v2（全屏 TUI）+ Blazor Server（OneCode.WebUI）；两者均为进程内消费端，无独立非交互打印模式 |
 | 异步 | Task + async-await |
 | 包管理 | NuGet（Central Package Management） |
 | 类型系统 | C# records/interfaces |
@@ -67,8 +67,8 @@ dotnet build src/OneCode.slnx
 dotnet build src/OneCode.Core/OneCode.Core.csproj
 dotnet build src/OneCode.App/OneCode.App.csproj
 
-# 发布 CLI
-dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release
+# 发布 TUI 前端
+dotnet publish src/OneCode.Tui/OneCode.Tui.csproj -c Release
 ```
 
 ### 测试命令
@@ -275,7 +275,7 @@ var result = ExecuteAsync(input).Result;
 - 所有 I/O 操作必须是异步的
 - 所有公共异步方法接受 `CancellationToken ct` 参数（最后一个参数）
 - 不允许 `.Result`、`.Wait()`、`.GetAwaiter().GetResult()`、`Task.Run(() => syncCode).Result`
-- **CLI 入口点 `Main` 必须返回 `Task<int>`**（详见 [Cli/AGENTS.md](OneCode.Cli/AGENTS.md)）
+- **TUI 入口点 `Main` 必须返回 `Task<int>`**（详见 [OneCode.Tui/AGENTS.md](OneCode.Tui/AGENTS.md)）
 - 使用 `ConfigureAwait(false)` 在库代码中（非 UI 代码）
 
 #### 3.1 IAsyncEnumerable / Channel 的强制使用场景
@@ -420,7 +420,7 @@ MCP、SSE 及子代理间错误传播**必须使用 `ProblemDetails` 风格的�
 
 ```json
 {
-  "type": "https://errors.claudecode.dev/tool-execution-failed",
+  "type": "https://onecode/errors/tool-execution-failed",
   "title": "Tool execution failed",
   "status": 500,
   "detail": "BashTool: command timed out after 30s",
@@ -430,7 +430,7 @@ MCP、SSE 及子代理间错误传播**必须使用 `ProblemDetails` 风格的�
 
 #### 5.3 全局错误处理策略
 
-- **CLI 入口**：顶层 `try-catch` 捕获未处理异常，记录结构化日志后返回非零退出码
+- **进程入口**：顶层 `try-catch` 捕获未处理异常，记录结构化日志后返回非零退出码
 - **TUI 模式**：未处理异常通过 `Application.Invoke` 显示错误对话框，避免崩溃
 - **异常到用户消息映射**：内部异常不得直接暴露给用户，需转换为友好提示
 - **结构化日志**：所有异常必须通过 `ILogger` 记录，包含 `CorrelationId` / `TraceId`
@@ -472,7 +472,7 @@ services.AddHttpClient("anthropic")
 | 内存缓存 | `Microsoft.Extensions.Caching.Memory` | 官方内置，支持过期策略 | 自定义字典缓存 |
 | DI 容器 | `Microsoft.Extensions.DependencyInjection` | 官方标准，与 .NET 生态完全集成 | Autofac/Castle/自建 |
 | LSP 客户端 | 自实现 JSON-RPC（LspClient） | 轻量化实现，无需额外依赖 | -- |
-| 命令行解析 | 自写 args 解析（`CliWorkingDirectory` / `CliModeDetector`） | 入口只有 `--cwd` 与 `--version` 两个选项，无需解析框架 | 为两个选项引入解析库 |
+| 命令行解析 | 自写 args 解析（`LaunchWorkingDirectory` / `LaunchModeDetector`） | 入口只有 `--cwd` 与 `--version` 两个选项，无需解析框架 | 为两个选项引入解析库 |
 | 密钥存储 | Windows DPAPI / `SecretService`（Linux） | OS 级安全存储，跨平台 | 明文文件/环境变量 |
 
 ---
@@ -484,16 +484,17 @@ services.AddHttpClient("anthropic")
 ```
 OneCode.Core          ← 仅 BCL + MS.Ext.Abstractions + MS.Extensions.AI.Abstractions
 OneCode.Infrastructure← 依赖 Core + Microsoft.ML.Tokenizers + YamlDotNet
-OneCode.Automation    ← 依赖 Core + Infrastructure（后台调度服务：Cron / Hooks 清理 / ModelCatalog 刷新 / YOLO 规则加载）
-OneCode.App           ← 依赖 Core + Infrastructure + Automation（主业务逻辑 + TUI）
-OneCode.Cli           ← 依赖 App（命令行入口）
+OneCode.Automation    ← 依赖 Core + Infrastructure（后台调度服务：Cron / ModelCatalog 刷新 / YOLO 规则加载）
+OneCode.App           ← 依赖 Core + Infrastructure + Automation（主业务逻辑 + UI 事件契约 + 交互端口默认实现）
+OneCode.Tui           ← 依赖 App（进程入口 + Terminal.Gui 前端）
+OneCode.WebUI         ← 依赖 App（Blazor Server 浏览器客户端，不引用 OneCode.Tui）
 OneCode.Tests         ← 依赖上述所有（xUnit v3 测试）
 ```
 
 **禁止：**
 - Core 依赖任何具体库（详见 [Core/AGENTS.md](OneCode.Core/AGENTS.md)）
 - 低层项目依赖高层项目（循环依赖）
-- 任何项目直接依赖 Cli/App（反向依赖）
+- 任何项目直接依赖 Tui/WebUI/App（反向依赖）
 - Automation 反向依赖 App（Automation 通过 DI 反向注入接口消费 App 实现，如 `ICronJobExecutor`，禁止 ProjectReference）
 
 > 编写代码时，以本文件为工程规范基线；各子项目的补充约束见上方"项目级补充文件"链接。
@@ -510,7 +511,7 @@ OneCode.Tests         ← 依赖上述所有（xUnit v3 测试）
 4. **无 TODO 泄漏** — `// TODO` 注释必须有对应 GitHub Issue 编号
 5. **禁止 `.GetAwaiter().GetResult()` / `.Result` / `.Wait()`** — 任何路径不允许同步阻塞 async
 6. **禁止 ServiceLocator** — 禁止在业务逻辑中使用 `GetService<T>()`；DI 工厂委托中 `sp.GetService<T>()` 允许
-7. **CLI 入口点必须返回 `Task<int>`** — 全链路 async（详见 [Cli/AGENTS.md](OneCode.Cli/AGENTS.md)）
+7. **TUI 入口点必须返回 `Task<int>`** — 全链路 async（详见 [OneCode.Tui/AGENTS.md](OneCode.Tui/AGENTS.md)）
 
 ### 测试规范
 
@@ -652,7 +653,7 @@ var chatOptions = new ChatOptions
 
 两者都是 MAF 标准 API，**不是**自定义实现。
 
-**MAF 未提供类型化的函数调用 Filter 接口**：`IFunctionInvocationFilter` 在 MAF 1.22 / Microsoft.Extensions.AI 10.10.0 中均不存在（结论见 [docs/adr/0001-permission-vs-toolapproval-vs-filter.md](../docs/adr/0001-permission-vs-toolapproval-vs-filter.md)），所有拦截都必须走 `.Use()`。
+**MAF 未提供类型化的函数调用 Filter 接口**：`IFunctionInvocationFilter` 在 Microsoft.Agents.AI 与 Microsoft.Extensions.AI 中均不存在（结论见 [docs/adr/0001-permission-vs-toolapproval-vs-filter.md](../docs/adr/0001-permission-vs-toolapproval-vs-filter.md)），所有拦截都必须走 `.Use()`。
 
 **约定：**
 - `AgentPipelineBuilder` 中的 `.Use()` 管道是**唯一**拦截路径，新增中间件继续使用 `.Use()` 委托模式

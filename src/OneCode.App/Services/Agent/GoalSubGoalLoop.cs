@@ -3,7 +3,6 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
-using OneCode.App.Tui;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -39,7 +38,7 @@ internal sealed class GoalSubGoalLoop(
         GoalItem goal,
         GoalRunOptions options,
         EditTransaction sharedTransaction,
-        ChannelWriter<TuiEvent> eventWriter,
+        ChannelWriter<QueryEvent> eventWriter,
         List<GoalToolExecutionEvidence> toolExecutions,
         string userPrompt,
         CancellationToken ct)
@@ -92,7 +91,7 @@ internal sealed class GoalSubGoalLoop(
                         goal.Id,
                         state.Iterations,
                         hardValidation.Feedback);
-                    eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+                    eventWriter.TryWrite(new ModeProgressEvent(WorkingMode.Goal,
                         $"子目标 #{goal.Id} · 第 {state.Iterations}/{GoalLoopDefaults.MaxAttemptsPerSubGoal} 轮未通过验证，反馈注入重试"));
                     return LoopEvaluation.Continue(BuildFeedback(hardValidation.Feedback, lastOutput));
                 }
@@ -119,7 +118,7 @@ internal sealed class GoalSubGoalLoop(
                 _logger.LogInformation("Sub-goal {Id} iteration {Iteration} not completed, feedback: {Feedback}",
                     goal.Id, state.Iterations, feedback ?? "(none)");
 
-                eventWriter.TryWrite(new TuiModeProgress(WorkingMode.Goal,
+                eventWriter.TryWrite(new ModeProgressEvent(WorkingMode.Goal,
                     $"子目标 #{goal.Id} · 第 {state.Iterations}/{GoalLoopDefaults.MaxAttemptsPerSubGoal} 轮未完成，继续迭代"));
 
                 return LoopEvaluation.Continue(BuildFeedback(feedback, lastOutput));

@@ -37,7 +37,8 @@
     <ProjectReference Include="..\OneCode.Core\OneCode.Core.csproj" />
     <ProjectReference Include="..\OneCode.Infrastructure\OneCode.Infrastructure.csproj" />
     <ProjectReference Include="..\OneCode.App\OneCode.App.csproj" />
-    <ProjectReference Include="..\OneCode.Cli\OneCode.Cli.csproj" />
+    <ProjectReference Include="..\OneCode.Tui\OneCode.Tui.csproj" />
+    <ProjectReference Include="..\OneCode.WebUI\OneCode.WebUI.csproj" />
   </ItemGroup>
 
 </Project>

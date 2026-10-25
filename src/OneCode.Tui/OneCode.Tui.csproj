@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OneCode.Tui</AssemblyName>
+    <RootNamespace>OneCode.Tui</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneCode.App\OneCode.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- TUI 渲染栈：仅本项目允许引用 Terminal.Gui（App 层零 Terminal.Gui 依赖） -->
+    <PackageReference Include="Terminal.Gui" />
+    <PackageReference Include="Terminal.Gui.Editor" />
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneCode.Tests" />
+  </ItemGroup>
+
+</Project>

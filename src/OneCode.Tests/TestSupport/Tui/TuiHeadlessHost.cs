@@ -1,12 +1,12 @@
 using System.Text;
 
-using OneCode.App.Tui;
 
 using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.Testing;
 using Terminal.Gui.Text;
+using OneCode.Tui;
 
 namespace OneCode.Tests.TestSupport.Tui;
 
@@ -209,8 +209,10 @@ internal sealed class TuiHeadlessHost : IDisposable
     /// </summary>
     public async Task SubmitQueryAsync(string text)
     {
-        var sessionGate = new Latch();
-        var exhaustedGate = new Latch();
+        var sessionGate = new TuiLatch();
+        var exhaustedGate = new TuiLatch();
+        sessionGate.Arm();
+        exhaustedGate.Arm();
         _builder
             .OnSessionCreated(sessionGate.Release)
             .OnStreamExhausted(exhaustedGate.Release);
@@ -343,14 +345,4 @@ internal sealed class TuiHeadlessHost : IDisposable
 
     private bool IsStreaming() =>
         Toplevel.SubViews.OfType<ReplShell>().Single().Transcript.MessageView.IsStreaming;
-
-    /// <summary>一次性完成信号（与 L2 宿主同一实现：脚本流观测点的收敛闸门）。</summary>
-    private sealed class Latch
-    {
-        private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public void Release() => _tcs.TrySetResult();
-
-        public Task WaitAsync(TimeSpan timeout, CancellationToken ct) => _tcs.Task.WaitAsync(timeout, ct);
-    }
 }

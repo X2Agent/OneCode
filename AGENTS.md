@@ -5,7 +5,7 @@ Keep it updated as the project evolves.
 
 ## Project Overview
 
-OneCode .NET 是一个基于 .NET 10 的生产级 CLI AI 编程助手，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。三种工作模式（BUILD / PLAN / GOAL），44 个斜杠命令，27 个工具。
+OneCode .NET 是一个基于 .NET 10 的生产级 TUI AI 编程助手，采用 Terminal.Gui v2 全屏 TUI + Microsoft.Extensions.AI 抽象 + Microsoft.Agents.AI (MAF) 编排框架。三种工作模式（BUILD / PLAN / GOAL），45 个斜杠命令，27 个工具。
 
 **语言**：代码注释与文档以中文为主。详细规范见 [src/AGENTS.md](src/AGENTS.md)（强制编码规范）及各 csproj 的专属 AGENTS.md。
 
@@ -15,7 +15,7 @@ OneCode .NET 是一个基于 .NET 10 的生产级 CLI AI 编程助手，采用 T
 dotnet restore src/OneCode.slnx
 dotnet build src/OneCode.slnx        # 无新增警告（历史警告不得扩大）
 dotnet test src/OneCode.slnx         # 全部通过
-dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
+dotnet publish src/OneCode.Tui/OneCode.Tui.csproj -c Release   # 发布 TUI 前端
 ```
 
 要求 .NET SDK 10。测试栈：xUnit v3 + FluentAssertions + NSubstitute。
@@ -24,27 +24,28 @@ dotnet publish src/OneCode.Cli/OneCode.Cli.csproj -c Release   # 发布 CLI
 
 ```
 src/
-├── OneCode.Cli/            # CLI 入口 · 快速路径分发（6 文件）
-├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Tui/Services/DI 注册（~465 文件）
+├── OneCode.Tui/            # 进程入口（快速路径）+ Terminal.Gui 视图/浮层/渲染 + TUI 装配
+├── OneCode.WebUI/          # Blazor Server 浏览器客户端（进程内消费 QueryEvent）
+├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Services/DI 注册
 ├── OneCode.Core/           # 纯接口与领域模型（仅依赖 *.Abstractions）
 ├── OneCode.Infrastructure/ # 外部系统适配：MCP / MAF 管道 / 配置 / Git / Memory
 ├── OneCode.Automation/     # 后台调度：Cron / ModelCatalog 刷新 / YOLO 规则加载
 └── OneCode.Tests/          # xUnit v3 测试套件
 ```
 
-依赖方向单向：Cli → App → Infrastructure → Core。SDK 特化代码只允许出现在 Infrastructure。
+依赖方向单向：Tui → App → Infrastructure → Core。SDK 特化代码只允许出现在 Infrastructure；Terminal.Gui 只允许出现在 OneCode.Tui。
 
 ## Coding Conventions
 
 - **强制规范**：全部见 [src/AGENTS.md](src/AGENTS.md)。要点：简洁优先、不留兼容层、不保留死代码、C# 最新语法、源生成器优先、Central Package Management、单类 ≤500 行（硬上限 600）、构造注入 ≤8 参数。
-- **测试**：见 [src/OneCode.Tests/AGENTS.md](src/OneCode.Tests/AGENTS.md)——测试即防回归，8 类无意义测试禁写；跨存储边界的契约测试须走真实写入端，守卫类逻辑须做反证。
+- **测试**：见 [src/OneCode.Tests/AGENTS.md](src/OneCode.Tests/AGENTS.md)——测试即防回归，9 类无意义测试禁写；跨存储边界的契约测试须走真实写入端，守卫类逻辑须做反证。
 - **Prompt 管理**：文件化 prompt（三层覆盖），缺失处理双策略见 [src/OneCode.App/AGENTS.md](src/OneCode.App/AGENTS.md)。
 - **快捷键**：默认绑定源头在 `src/OneCode.Core/Keybindings/KeybindingDefaults.cs`，参考 [docs/keybindings.md](docs/keybindings.md)。
 - **命令注册真相源**：`src/OneCode.App/Commands/CommandServiceCollectionExtensions.cs` 的 `AddCommands()`，新增/删除命令须同步 [docs/commands.md](docs/commands.md)。
 - **MAF 接入**：装配顺序、扩展点与现状对照见 [docs/maf/integration-guide.md](docs/maf/integration-guide.md)；集成边界与禁令见 [docs/adr/0007-maf-integration-boundaries.md](docs/adr/0007-maf-integration-boundaries.md)；结构化输出采用策略（结构化请求 + 文本降级）见 [docs/adr/0008-structured-output-text-fallback.md](docs/adr/0008-structured-output-text-fallback.md)。
 - **子代理派工**：派工入口、profile 能力矩阵、TaskService 生命周期与 DAG 语义见 [docs/sub-agents.md](docs/sub-agents.md)；「不起子代理的决定权归属」边界（为何不用 MAF BackgroundAgents 作底层）见 [docs/adr/0011-background-agents-delegation-boundary.md](docs/adr/0011-background-agents-delegation-boundary.md)。
 - **决策模型接入**：抽象归属、接入点白名单与禁令见 [docs/adr/0012-decision-model-integration-jev.md](docs/adr/0012-decision-model-integration-jev.md)——决策模型（如 TypeSafe Jev）只能收窄已授权候选集或把 Allow 升级为 Ask/Deny，**绝不能产生 Allow**；上游未定型期间实验类型不进依赖面。
-- **UI 形态战略**：TUI 是唯一交互前端，路线见 [docs/plan/tui-roadmap.md](docs/plan/tui-roadmap.md)（引擎解耦 → 多会话/attach → daemon → 产物卡调起本机软件 → run -p/ssh）；Web UI、桌面壳、AG-UI 端点**不做**，边界与禁令见 [docs/adr/0013-ui-surface-strategy.md](docs/adr/0013-ui-surface-strategy.md)。
+- **UI 形态**：TUI 与 Blazor Server 浏览器客户端（OneCode.WebUI）同为 `OneCode.App` 的进程内消费端，共享 `QueryEvent` 契约与交互端口；对外网络端点不做。边界与禁令见 [docs/adr/0017-ui-contract-single-layer.md](docs/adr/0017-ui-contract-single-layer.md)，路线见 [docs/plan/tui-roadmap.md](docs/plan/tui-roadmap.md)。
 
 ## Agent Guidelines
 
@@ -61,4 +62,4 @@ src/
 ## Tool Permissions
 
 - 禁止直接实例化 `HttpClient`（用 `IHttpClientFactory`）。
-- Terminal.Gui 依赖仅允许在 `OneCode.App/Tui/` 子目录内使用。
+- Terminal.Gui 依赖仅允许在 `src/OneCode.Tui/` 项目内使用（App 层零 Terminal.Gui 依赖，见 [docs/adr/0016-tui-project-boundary.md](docs/adr/0016-tui-project-boundary.md)）。

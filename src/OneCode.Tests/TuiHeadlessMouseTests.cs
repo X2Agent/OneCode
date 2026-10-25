@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Tests.TestSupport.Tui;
 
 namespace OneCode.Tests;
@@ -31,9 +31,9 @@ public sealed class TuiHeadlessMouseTests
     public async Task ClickToolRow_InjectedThroughRealDriver_ExpandsToolDetail()
     {
         using var host = TuiHeadlessHost.Start(b => b.Stream(
-            new TuiToolStart("t-1", "read_file", ToolInput: ToolInput),
-            new TuiToolDone("read_file", IsError: false, Result: ToolResultMarker, ToolInput: ToolInput, ToolId: "t-1"),
-            new TuiDone(10, 20)));
+            new ToolStartEvent("t-1", "read_file", ToolInput: ToolInput),
+            new ToolDoneEvent("t-1", "read_file", IsError: false, Result: ToolResultMarker, ToolInput: ToolInput),
+            new DoneEvent(null, new TokenUsage(10, 20), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("读一下配置");
         await host.SettleAsync();
@@ -61,9 +61,9 @@ public sealed class TuiHeadlessMouseTests
     public async Task ClickToolRowTwice_InjectedThroughRealDriver_CollapsesBackToSingleLine()
     {
         using var host = TuiHeadlessHost.Start(b => b.Stream(
-            new TuiToolStart("t-1", "read_file", ToolInput: ToolInput),
-            new TuiToolDone("read_file", IsError: false, Result: ToolResultMarker, ToolInput: ToolInput, ToolId: "t-1"),
-            new TuiDone(10, 20)));
+            new ToolStartEvent("t-1", "read_file", ToolInput: ToolInput),
+            new ToolDoneEvent("t-1", "read_file", IsError: false, Result: ToolResultMarker, ToolInput: ToolInput),
+            new DoneEvent(null, new TokenUsage(10, 20), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("读一下配置");
         await host.SettleAsync();
@@ -92,7 +92,7 @@ public sealed class TuiHeadlessMouseTests
     public async Task WheelUpOverTranscript_InjectedThroughRealDriver_ScrollsBackToEarlierContent()
     {
         var body = string.Join('\n', new[] { TopMarker }.Concat(FillerLines));
-        using var host = TuiHeadlessHost.Start(b => b.Stream(new TuiTextDelta(body), new TuiDone(80, 5)));
+        using var host = TuiHeadlessHost.Start(b => b.Stream(new TextDeltaEvent(body), new DoneEvent(null, new TokenUsage(80, 5), 0, RunTerminalReason.Completed)));
 
         await host.SubmitQueryAsync("滚一下");
         await host.SettleAsync();

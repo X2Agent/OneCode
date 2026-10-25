@@ -51,7 +51,7 @@ public sealed class GitHelperTests
         var ct = TestContext.Current.CancellationToken;
         const string renameNumstat =
             "3\t1\tsrc/{OneCode.Infrastructure => OneCode.Automation}/Cron/CronosCronParser.cs\n";
-        const string normalNumstat = "2\t0\tsrc/OneCode.App/Tui/TuiTheme.cs\n";
+        const string normalNumstat = "2\t0\tsrc/OneCode.Tui/Tui/TuiStyles.cs\n";
 
         _runner.ExecuteWithArgumentListAsync(
                 "git",
@@ -67,7 +67,7 @@ public sealed class GitHelperTests
         entries[0].Path.Should().Be("src/OneCode.Automation/Cron/CronosCronParser.cs");
         entries[0].Added.Should().Be(3);
         entries[0].Removed.Should().Be(1);
-        entries[1].Path.Should().Be("src/OneCode.App/Tui/TuiTheme.cs");
+        entries[1].Path.Should().Be("src/OneCode.Tui/Tui/TuiStyles.cs");
     }
 
     [Fact]

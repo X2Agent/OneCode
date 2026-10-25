@@ -85,12 +85,6 @@ internal sealed class StreamingSession(
     /// </summary>
     public IEnumerable<QueryEvent> Digest(object evt)
     {
-        // 事件驱动审批：ApprovalRequestEvent 直接透传给 TUI 消费
-        if (evt is ApprovalRequestEvent approvalEvt)
-        {
-            yield return approvalEvt;
-            yield break;
-        }
 
         // 预算预警横幅（BudgetGuard 经 MainAgentRunner 写入）：直接透传给 TUI 消费
         if (evt is BudgetWarningEvent budgetWarning)
@@ -143,8 +137,6 @@ internal sealed class StreamingSession(
             _currentTurnCacheWriteTokens = usage.CacheWriteTokens;
             if (!string.IsNullOrEmpty(update.ResponseId))
                 _currentUsageResponseId = update.ResponseId;
-
-            yield return new UsageUpdateEvent(FinalUsage);
         }
 
         // 检测工具调用、工具结果、推理内容，发射对应事件
@@ -165,6 +157,10 @@ internal sealed class StreamingSession(
                     // Skip duplicates replayed by MAF across turn-boundary updates
                     if (fcc.CallId is null || !_emittedToolCallIds.Add("start:" + fcc.CallId))
                         continue;
+
+                    if (AdvanceTurnAtBoundaryIfPending(out var toolTurnEvt))
+                        yield return toolTurnEvt;
+
                     var toolInput = AgentEventDigester.ExtractToolInputSummary(fcc, _logger);
                     // Collect for persistence so /files can extract paths.
                     // Serialization failure must not forge "{}" — skip persistence of that block.
@@ -212,7 +208,11 @@ internal sealed class StreamingSession(
                     // MAF may replay it across turn-boundary updates. Collapsing to true
                     // increments keeps the TUI's append-only ThinkingBuffer free of duplicates.
                     foreach (var delta in DedupReasoning(trc.Text))
+                    {
+                        if (AdvanceTurnAtBoundaryIfPending(out var reasoningTurnEvt))
+                            yield return reasoningTurnEvt;
                         yield return new ThinkingDeltaEvent(delta);
+                    }
                 }
             }
         }
@@ -368,5 +368,30 @@ internal sealed class StreamingSession(
 
     /// <summary>Returns the turn-completion event if any turn was started during the run.</summary>
     public TurnCompletedEvent? CompleteTurnIfStarted()
-        => _turnStarted ? new TurnCompletedEvent(_turnCount, false) : null;
+        => _turnStarted ? new TurnCompletedEvent(_turnCount) : null;
+
+    /// <summary>
+    /// 当上一轮工具结果已返回（<c>_pendingTurnBoundary == true</c>）且新一轮率先到达非正文内容
+    /// （如 <see cref="TextReasoningContent"/> 或纯工具轮的 <see cref="FunctionCallContent"/>）时，
+    /// 立即推进轮次边界并发射 <see cref="TurnStartedEvent"/>，确保 TUI 先归档上一轮状态行。
+    /// </summary>
+    private bool AdvanceTurnAtBoundaryIfPending(out TurnStartedEvent turnStartedEvent)
+    {
+        if (!_pendingTurnBoundary)
+        {
+            turnStartedEvent = null!;
+            return false;
+        }
+
+        _pendingTurnBoundary = false;
+        if (_turnCount == 0)
+            _turnCount = 1;
+        _turnCount++;
+        _turnStarted = true;
+        _lastTurnTextBuilder.Clear();
+        if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
+            _textBuilder.Append("\n\n");
+        turnStartedEvent = new TurnStartedEvent(_turnCount);
+        return true;
+    }
 }

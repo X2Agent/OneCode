@@ -29,7 +29,7 @@ internal static class PipelineSecurityContextBuilder
         SessionId? conversationId = null,
         long? maxBudgetTokens = null,
         long budgetBaselineTokens = 0,
-        Func<long, long, CancellationToken, Task<ApprovalDecision>>? onBudgetExceeded = null,
+        Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? onBudgetExceeded = null,
         Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null)
         => new(
             WorkingDirectory: workingDirectory,

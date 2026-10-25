@@ -79,8 +79,8 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 | 文件 | [OneCode.Automation/Cron/CronSchedulerService.cs](../src/OneCode.Automation/Cron/CronSchedulerService.cs) |
 | 类型 | `BackgroundService` |
 | 执行时机 | 启动加载 + **30 秒轮询** + FileSystemWatcher（2 秒去抖） |
-| 职责 | 扫描 `~/.onecode/cron/*.json`，到期则委托 `ICronJobExecutor` 执行 prompt |
-| 依赖 | `ICronParser`（Core）、`ICronJobExecutor`（App 实现，DI 反向注入） |
+| 职责 | 扫描 `~/.onecode/cron/*.json`（仅加载归属本项目的 durable 作业），到期经跨进程触发锁仲裁后委托 `ICronJobExecutor` 执行 prompt |
+| 依赖 | `ICronParser`（Core）、`ICronJobExecutor`（App 实现，DI 反向注入）、projectDir（App 组合根注入的进程工作目录） |
 
 详见 [Cron 子系统详解](#4-cron-子系统详解)。
 
@@ -194,12 +194,12 @@ services.AddCronScheduler();  // Automation 提供的扩展方法
 
 | 定时器 | 文件 | 周期 | 用途 |
 |--------|------|------|------|
-| `SpinnerController` | [OneCode.App/Tui/SpinnerController.cs](../src/OneCode.App/Tui/SpinnerController.cs) | 帧间隔 | Braille spinner 帧动画 |
-| `AgentStatusBar` 模式闪烁 | [OneCode.App/Tui/AgentStatusBar.cs](../src/OneCode.App/Tui/AgentStatusBar.cs) | 400ms，一次性 | 模式切换时的高亮闪烁，到时清除标记 |
-| `AgentStatusBar` 停滞监测（Stall Watchdog） | [OneCode.App/Tui/AgentStatusBar.cs](../src/OneCode.App/Tui/AgentStatusBar.cs) | 5s 周期 | 监测流式无响应时长（≥45s 显示已等待秒数） |
-| 流式预览重建 | [OneCode.App/Tui/ChatTranscriptView.Streaming.cs](../src/OneCode.App/Tui/ChatTranscriptView.Streaming.cs) | 16ms（约 60 FPS 上限），一次性 | 合并同一节拍窗口内的多次 token 到达，把每 token 重排的 O(n²) 降为每窗口一次 |
-| 窗口尺寸变化重排防抖 | [OneCode.App/Tui/ChatTranscriptView.cs](../src/OneCode.App/Tui/ChatTranscriptView.cs) | 40ms，一次性 | 合并拖拽终端边缘产生的高频 `SubViewsLaidOut` 事件，减少 Markdown 重排次数 |
-| 启动首帧调度 | [OneCode.App/Tui/OneCodeToplevel.cs](../src/OneCode.App/Tui/OneCodeToplevel.cs) | `TimeSpan.Zero`，一次性 | 界面就绪后补一次欢迎页、MCP 状态栏刷新与焦点设置 |
+| `SpinnerController` | [OneCode.Tui/Tui/SpinnerController.cs](../src/OneCode.Tui/Tui/SpinnerController.cs) | 帧间隔 | Braille spinner 帧动画 |
+| `AgentStatusBar` 模式闪烁 | [OneCode.Tui/Tui/AgentStatusBar.cs](../src/OneCode.Tui/Tui/AgentStatusBar.cs) | 400ms，一次性 | 模式切换时的高亮闪烁，到时清除标记 |
+| `AgentStatusBar` 停滞监测（Stall Watchdog） | [OneCode.Tui/Tui/AgentStatusBar.cs](../src/OneCode.Tui/Tui/AgentStatusBar.cs) | 5s 周期 | 监测流式无响应时长（≥45s 显示已等待秒数） |
+| 流式预览重建 | [OneCode.Tui/Tui/ChatTranscriptView.Streaming.cs](../src/OneCode.Tui/Tui/ChatTranscriptView.Streaming.cs) | 16ms（约 60 FPS 上限），一次性 | 合并同一节拍窗口内的多次 token 到达，把每 token 重排的 O(n²) 降为每窗口一次 |
+| 窗口尺寸变化重排防抖 | [OneCode.Tui/Tui/ChatTranscriptView.cs](../src/OneCode.Tui/Tui/ChatTranscriptView.cs) | 40ms，一次性 | 合并拖拽终端边缘产生的高频 `SubViewsLaidOut` 事件，减少 Markdown 重排次数 |
+| 启动首帧调度 | [OneCode.Tui/Tui/OneCodeToplevel.cs](../src/OneCode.Tui/Tui/OneCodeToplevel.cs) | `TimeSpan.Zero`，一次性 | 界面就绪后补一次欢迎页、MCP 状态栏刷新与焦点设置 |
 
 均通过 `IApplication.AddTimeout` 注册，没有业务调度：不轮询后台状态，不替代 `BackgroundService`。
 
@@ -217,8 +217,10 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │             CronSchedulerService                     │   │
 │  │  - 扫描 ~/.onecode/cron/*.json                       │   │
+│  │  - 按 ProjectDir 过滤（只触发本项目归属的 durable）   │   │
 │  │  - FileSystemWatcher 监视变更（2s 去抖）              │   │
 │  │  - 30s 轮询检查到期                                  │   │
+│  │  - durable 触发前取跨进程锁（locks/{id}.lock）        │   │
 │  │  - 到期 → ICronJobExecutor.ExecuteJobAsync(prompt)  │   │
 │  └──────────────────────┬──────────────────────────────┘   │
 │                         │ ICronJobExecutor（接口）           │
@@ -261,7 +263,8 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 | `Cron` | string | 标准 5 字段 cron 表达式（本地时间） |
 | `Prompt` | string | 每次触发时入队的 prompt |
 | `Recurring` | bool | true=循环，false=一次性 |
-| `Durable` | bool | 是否持久化到磁盘（需 `ONECODE_DURABLE_CRON=true`） |
+| `Durable` | bool | 是否持久化到磁盘 |
+| `ProjectDir` | string? | 归属项目目录（创建时由调度器盖章）；durable 作业只在归属项目的进程中触发，null（旧版 JSON）保持跟随任意进程 |
 | `Paused` | bool | 是否暂停 |
 | `CreatedAt` | long | 创建时间（Unix 秒） |
 | `LastRunAt` | long? | 上次执行时间 |
@@ -271,9 +274,17 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 
 ### 4.4 持久化策略与进程生命周期边界
 
-- **宿主生命周期绑定**：当前 `CronSchedulerService` 寄宿在 TUI 进程 `IHost` 内（无独立后台守护进程；跨进程常驻调度由 [TUI 极致化路线图](./plan/tui-roadmap.md) P2 `onecode daemon` 承接）。用户退出 TUI 时宿主停止，调度器随之停止。
+- **宿主生命周期**：`CronSchedulerService` 寄宿在任意 onecode 进程（TUI 或 `onecode daemon`）的 `IHost` 内。
+  **durable 作业在任意 onecode 进程存活期间照常触发；`onecode daemon`（[TUI 极致化路线图](./plan/tui-roadmap.md) P1）
+  提供无头常驻宿主**——TUI 关闭后 daemon 继续调度，重开 TUI 或 `/session` 可见执行历史会话。
+  daemon 的查看与显式启停在 TUI 内经 `/daemon` 命令完成；开机自启注册走 `scripts/install-daemon.ps1`。
+- **项目归属**：durable 作业带 `ProjectDir` 盖章（创建进程的工作目录），只被归属项目的调度器加载触发；
+  一个 daemon 绑定一个项目（进程 cwd，`--cwd/-C` 可指定）。
+- **跨进程仲裁**：同项目多进程（TUI + daemon）并存时，durable 作业触发前先取
+  `~/.onecode/cron/locks/{id}.lock` 独占锁（`FileShare.None`），拿不到即跳过本轮——不双发；
+  锁文件复用不删除，进程崩溃由 OS 回收句柄自愈。
 - **默认会话级**：`Durable = false`，仅存在于内存，进程退出即失。
-- **持久化需显式启用**：`ONECODE_DURABLE_CRON=true` + `durable=true`，通过 `DurableFile.WriteAtomicAsync` 原子写入 `~/.onecode/cron/{id}.json`。当 TUI 下次启动时，`ReloadJobs()` 会重新加载磁盘上的持久化任务，并对离线期间已到期的任务（`now >= nextRun`）在启动后首个轮询周期（≤30 秒）触发一次补跑。
+- **持久化**：`durable=true` 时通过 `DurableFile.WriteAtomicAsync` 原子写入 `~/.onecode/cron/{id}.json`。进程下次启动时，`ReloadJobs()` 会重新加载磁盘上的持久化任务，并对离线期间已到期的任务（`now >= nextRun`）在启动后首个轮询周期（≤30 秒）触发一次补跑。
 - **上限**：单进程最多 50 个 job。
 
 ### 4.5 执行隔离与无人值守保护

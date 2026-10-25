@@ -1,4 +1,6 @@
-using OneCode.App.Tui;
+using OneCode.App.Services.PlanMode;
+using OneCode.App.Query;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -24,7 +26,7 @@ public sealed class ChatBlockRenderersTests
     [Fact]
     public void RenderBuildRunPanel_Planned_HidesInternalState()
     {
-        var state = new TuiBuildRunState(
+        var state = new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-1"),
             OneCode.Core.Build.BuildRunState.Planned,
             4,
@@ -51,7 +53,7 @@ public sealed class ChatBlockRenderersTests
         OneCode.Core.Build.BuildRunState state,
         string expectedLabel)
     {
-        var lines = ChatBlockRenderers.RenderBuildRunPanel(new TuiBuildRunState(
+        var lines = ChatBlockRenderers.RenderBuildRunPanel(new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-1"),
             state,
             5,
@@ -68,7 +70,7 @@ public sealed class ChatBlockRenderersTests
     [Fact]
     public void RenderBuildRunPanel_MultiTask_ShowsActiveAndBlockedCounts()
     {
-        var state = new TuiBuildRunState(
+        var state = new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-dag"),
             OneCode.Core.Build.BuildRunState.Implementing,
             8,
@@ -86,7 +88,7 @@ public sealed class ChatBlockRenderersTests
     [Fact]
     public void RenderBuildRunPanel_ReplaySameSnapshot_IsDeterministic()
     {
-        var state = new TuiBuildRunState(
+        var state = new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-replay"),
             OneCode.Core.Build.BuildRunState.Verifying,
             8,
@@ -113,7 +115,7 @@ public sealed class ChatBlockRenderersTests
                 true)],
             "user",
             DateTimeOffset.Parse("2026-07-31T10:00:00+00:00", CultureInfo.InvariantCulture));
-        var state = new TuiBuildRunState(
+        var state = new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-scope"),
             OneCode.Core.Build.BuildRunState.Planned,
             5,
@@ -141,7 +143,7 @@ public sealed class ChatBlockRenderersTests
             [],
             "user",
             DateTimeOffset.Parse("2026-07-31T10:00:00+00:00", CultureInfo.InvariantCulture));
-        var state = new TuiBuildRunState(
+        var state = new BuildRunStateEvent(
             new OneCode.Core.Build.BuildRunId("br-narrow"),
             OneCode.Core.Build.BuildRunState.Verifying,
             12,
@@ -360,7 +362,7 @@ public sealed class ChatBlockRenderersTests
         ModeProgressState state)
     {
         var lines = ChatBlockRenderers.RenderModeProgress(
-            new TuiModeProgress(mode, message, state, 2, 5),
+            new ModeProgressEvent(mode, message, state, 2, 5),
             viewWidth: 48);
 
         lines.Should().ContainSingle();
@@ -374,7 +376,7 @@ public sealed class ChatBlockRenderersTests
     [Fact]
     public void RenderAgentMessage_HasHeaderAndContent()
     {
-        var lines = ChatBlockRenderers.RenderAgentMessage("executor", "orange", "done");
+        var lines = ChatBlockRenderers.RenderAgentMessage("executor", "done");
         lines.Should().Contain(l => l.FullText.Contains("Executor"));
         lines.Should().Contain(l => l.FullText.Contains("done"));
         var headerLine = lines.First(l => l.FullText.Contains("Executor"));

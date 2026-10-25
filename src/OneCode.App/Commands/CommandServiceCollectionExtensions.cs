@@ -42,6 +42,7 @@ public static class CommandServiceExtensions
         s.AddSingleton<ICommand, ConfigCommand>();
         s.AddSingleton<ICommand, CopyCommand>();
         s.AddSingleton<ICommand, CronCommand>();
+        s.AddSingleton<ICommand, DaemonCommand>();
         s.AddSingleton<ICommand, DesignInitCommand>();
         s.AddSingleton<ICommand, ExitCommand>();
         s.AddSingleton<ICommand, FastModelCommand>();

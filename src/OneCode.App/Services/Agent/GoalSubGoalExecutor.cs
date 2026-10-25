@@ -2,7 +2,7 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.GoalMode;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Prompt;
 using OneCode.Infrastructure.Agent;
@@ -21,7 +21,7 @@ internal interface IGoalStepExecutionService
         GoalItem goal,
         GoalRunOptions options,
         EditTransaction sharedTransaction,
-        ChannelWriter<TuiEvent> eventWriter,
+        ChannelWriter<QueryEvent> eventWriter,
         CancellationToken ct);
     void UpdateGoalContext(
         GoalPlan plan,
@@ -64,7 +64,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
         GoalItem goal,
         GoalRunOptions options,
         EditTransaction sharedTransaction,
-        ChannelWriter<TuiEvent> eventWriter,
+        ChannelWriter<QueryEvent> eventWriter,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(eventWriter);

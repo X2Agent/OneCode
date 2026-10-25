@@ -1,7 +1,6 @@
 using OneCode.Core.Config;
 using System.Drawing;
-using OneCode.App.Services;
-using OneCode.App.Tui;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

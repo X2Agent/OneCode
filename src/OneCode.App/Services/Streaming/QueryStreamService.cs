@@ -1,17 +1,17 @@
 using OneCode.Core.Config;
 using OneCode.App.Services.Compact;
 using OneCode.App.Services.Loop;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Models;
+using OneCode.Infrastructure.Agent;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.App.Services.Streaming;
 
 /// <summary>
-/// Orchestrates the TUI query streaming pipeline: dispatches user input to
-/// Normal / GOAL streams based on <see cref="WorkingMode"/>, and streams
-/// command-produced prompts (e.g. <c>/review</c>) through the normal TuiEvent
-/// pipeline so the user sees the same UX as a regular query.
+/// 查询流编排：按 <see cref="WorkingMode"/> 把用户输入派发给 Normal / GOAL 流水线，
+/// 并把命令产出的 prompt（如 <c>/review</c>）经同一条 <c>QueryEvent</c> 流水线流出，
+/// 使命令查询与普通查询呈现一致。消费端为各前端（TUI / WebUI）。
 /// </summary>
 /// <remarks>
 /// GOAL streaming is
@@ -24,7 +24,7 @@ public sealed class QueryStreamService(
     QueryRuntimeDependencies runtime,
     QueryOrchestrationDependencies orchestration,
     ReviewCacheService reviewCacheService,
-    ILogger<QueryStreamService> logger)
+    ILogger<QueryStreamService> logger) : IQueryStreamService
 {
     private IModelManager modelManager => runtime.ModelManager;
     private IAppStateAccessor appStateAccessor => runtime.AppState;
@@ -38,7 +38,7 @@ public sealed class QueryStreamService(
     /// Main streaming entry point: logs the user message, resolves the current
     /// model, and dispatches to Normal/Goal streams based on WorkingMode.
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamQueryAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamQueryAsync(
         InteractiveSession session,
         string text,
         IReadOnlyList<string>? imagePaths,
@@ -48,7 +48,7 @@ public sealed class QueryStreamService(
 
         if (BuildConfigMissingMessage(configManager) is { } configError)
         {
-            yield return new TuiError(configError);
+            yield return new ErrorEvent(configError);
             yield break;
         }
 
@@ -79,7 +79,7 @@ public sealed class QueryStreamService(
     /// Normal mode streaming: IConversationRunner.StreamQueryAsync with file-change
     /// queue draining and next-prompt suggestion generation.
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamNormalAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamNormalAsync(
         InteractiveSession session,
         string text,
         IReadOnlyList<string>? imagePaths,
@@ -93,10 +93,10 @@ public sealed class QueryStreamService(
 
     /// <summary>
     /// Streams a command-produced prompt (e.g. /review) through the normal
-    /// TuiEvent pipeline so the user sees spinner, tool calls, and streaming
+    /// QueryEvent pipeline so the user sees spinner, tool calls, and streaming
     /// text — same UX as a regular query.
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamCommandPromptAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamCommandPromptAsync(
         InteractiveSession session,
         string prompt,
         string[]? allowedTools,
@@ -106,7 +106,7 @@ public sealed class QueryStreamService(
 
         if (BuildConfigMissingMessage(configManager) is { } configError)
         {
-            yield return new TuiError(configError);
+            yield return new ErrorEvent(configError);
             yield break;
         }
 
@@ -134,7 +134,7 @@ public sealed class QueryStreamService(
         }
     }
 
-    private async IAsyncEnumerable<TuiEvent> StreamCommandPromptCoreAsync(
+    private async IAsyncEnumerable<QueryEvent> StreamCommandPromptCoreAsync(
         InteractiveSession session,
         string prompt,
         string[]? allowedTools,
@@ -154,7 +154,7 @@ public sealed class QueryStreamService(
     /// Runs a bounded deterministic loop (<c>/loop</c>). Called directly by the TUI dispatch layer
     /// when <see cref="CommandResult.LoopResult"/> is returned, bypassing the LLM query pipeline.
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamLoopAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamLoopAsync(
         InteractiveSession session,
         string task,
         string? checkCommand,
@@ -163,7 +163,7 @@ public sealed class QueryStreamService(
     {
         if (BuildConfigMissingMessage(configManager) is { } configError)
         {
-            yield return new TuiError(configError);
+            yield return new ErrorEvent(configError);
             yield break;
         }
 
@@ -188,7 +188,7 @@ public sealed class QueryStreamService(
     /// Called directly by the TUI dispatch layer when <see cref="CommandResult.ResumeWorkflowResult"/>
     /// is returned by a command, bypassing the LLM query pipeline entirely.
     /// </summary>
-    public async IAsyncEnumerable<TuiEvent> StreamResumeWorkflowAsync(
+    public async IAsyncEnumerable<QueryEvent> StreamResumeWorkflowAsync(
         InteractiveSession session,
         string sessionId,
         WorkflowResumeKind kind,
@@ -196,7 +196,7 @@ public sealed class QueryStreamService(
     {
         if (BuildConfigMissingMessage(configManager) is { } configError)
         {
-            yield return new TuiError(configError);
+            yield return new ErrorEvent(configError);
             yield break;
         }
 
@@ -215,7 +215,7 @@ public sealed class QueryStreamService(
     /// <summary>
     /// Shared conversation-runner streaming loop: thinking params, file-change drain, auto-compact.
     /// </summary>
-    private async IAsyncEnumerable<TuiEvent> StreamChatCoreAsync(
+    private async IAsyncEnumerable<QueryEvent> StreamChatCoreAsync(
         InteractiveSession session,
         string prompt,
         string systemPrompt,
@@ -239,15 +239,15 @@ public sealed class QueryStreamService(
             imagePaths: imagePaths,
             harnessPrompt: session.HarnessPrompt).ConfigureAwait(false))
         {
-            if (TuiEventMapper.MapQueryEventToTuiEvent(evt) is { } mapped)
-                yield return mapped;
+            if (ShouldSurface(evt))
+                yield return evt;
 
             while (fileChangeQueue.TryDequeue(out var fc))
-                yield return new TuiFileChange(fc.FileName, fc.AddedLines, fc.RemovedLines);
+                yield return new FileChangeEvent(fc.FileName, fc.AddedLines, fc.RemovedLines);
         }
 
         while (fileChangeQueue.TryDequeue(out var fc))
-            yield return new TuiFileChange(fc.FileName, fc.AddedLines, fc.RemovedLines);
+            yield return new FileChangeEvent(fc.FileName, fc.AddedLines, fc.RemovedLines);
 
         await foreach (var evt in EmitAutoCompactIfNeededAsync(
             conversationId is { } id
@@ -283,12 +283,12 @@ public sealed class QueryStreamService(
 
     /// <summary>
     /// Shared post-turn auto-compaction check for all streaming paths (Normal/Goal/Command).
-    /// Yields a <see cref="TuiCompactSuggested"/> event when token usage crosses 70%.
+    /// Yields a <see cref="CompactSuggestedEvent"/> event when token usage crosses 70%.
     ///
     /// Actual compaction runs inside the MAF CompactionProvider pipeline; this method
     /// only surfaces the 70% warning.
     /// </summary>
-    private async IAsyncEnumerable<TuiEvent> EmitAutoCompactIfNeededAsync(
+    private async IAsyncEnumerable<QueryEvent> EmitAutoCompactIfNeededAsync(
         OneCode.Core.Domain.Conversation? conversation,
         string? systemPrompt,
         [EnumeratorCancellation] CancellationToken ct)
@@ -301,8 +301,19 @@ public sealed class QueryStreamService(
 
         if (autoCompactService.ConsumeWarning(conversation.Id))
         {
-            yield return new TuiCompactSuggested(
+            yield return new CompactSuggestedEvent(
                 "Context is at 70%. Consider running /compact to summarize the conversation.");
         }
     }
+
+    /// <summary>
+    /// Harness 注入的工具（读取规范文件等）不进入对话流，
+    /// 否则用户会看到与自身操作无关的工具行。
+    /// </summary>
+    private static bool ShouldSurface(QueryEvent evt) => evt switch
+    {
+        ToolStartEvent { ToolName: var name } => !HarnessProviderTools.Names.Contains(name),
+        ToolDoneEvent { ToolName: var name } => !HarnessProviderTools.Names.Contains(name),
+        _ => true,
+    };
 }

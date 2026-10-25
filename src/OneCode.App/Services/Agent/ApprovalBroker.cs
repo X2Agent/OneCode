@@ -1,12 +1,9 @@
-using System.Threading.Channels;
-using OneCode.App.Query;
-
 namespace OneCode.App.Services.Agent;
 
 /// <summary>
-/// Bridges the shared Core approval contract to an application event stream.
-/// The broker owns timeout/cancellation behavior; UI code only completes the
-/// response source carried by the emitted event.
+/// Run 级审批代理：持有会话级全放行标志与超时/取消语义，把 Core 的
+/// <see cref="ApprovalRequest"/> 经 <see cref="IApprovalPromptSink"/> 端口下发到前端，
+/// 等待前端回传 <see cref="ApprovalDecision"/>。事件流不承载交互，等待逻辑集中在此。
 /// </summary>
 public sealed class ApprovalBroker : IApprovalBroker
 {
@@ -46,15 +43,15 @@ public sealed class ApprovalBroker : IApprovalBroker
     }
 
     /// <summary>
-    /// Main 路径 broker。在 TUI 审批请求下发前触发 Notification hook
-    /// （matcher=permission_prompt）；hook 失败/取消仅记录，不影响审批链路。
+    /// Main 路径 broker。把「怎么问用户」委托给前端的 <see cref="IApprovalPromptSink"/>；
+    /// 发出提示前触发 Notification hook（matcher=permission_prompt），hook 失败仅记录，不影响审批链路。
     /// </summary>
     public static ApprovalBroker ForQuery(
-        ChannelWriter<object> writer,
+        IApprovalPromptSink promptSink,
         Func<string, CancellationToken, Task>? onPermissionPrompt = null,
         ILogger<ApprovalBroker>? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(promptSink);
 
         // 实例在闭包构造完成后才可引用，故先用局部变量持有；请求委托收到
         // AllowAllConversation 决策时置位 run 级全放行标志。
@@ -78,20 +75,14 @@ public sealed class ApprovalBroker : IApprovalBroker
                 }
             }
 
-            var evt = new ApprovalRequestEvent(
-                request.RequestId,
-                request.ToolName,
-                request.ToolInput,
-                request.Reason);
-
-            await writer.WriteAsync(evt, ct).ConfigureAwait(false);
             // 无进展诊断锚点：状态栏若长时间停在"执行 <上一工具>"，看日志即可区分
             // "卡在审批等待（本条日志是最后一条）"与"卡在模型请求"。
             logger?.LogInformation(
                 "Waiting for approval decision on tool {ToolName} (request {RequestId})",
                 request.ToolName,
                 request.RequestId);
-            var decision = await evt.ResponseSource.Task.WaitAsync(ct).ConfigureAwait(false);
+
+            var decision = await promptSink.AskAsync(request, ct).ConfigureAwait(false);
             if (decision == ApprovalDecision.AllowAllConversation)
                 Volatile.Write(ref broker!._allowAllForRun, 1);
             return decision;

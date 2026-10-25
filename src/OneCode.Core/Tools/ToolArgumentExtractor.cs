@@ -16,6 +16,7 @@ public static class ToolArgumentExtractor
         "filePath",
         "file_path",
         "path",
+        "file",
     ];
 
     /// <summary>
@@ -155,11 +156,13 @@ public static class ToolArgumentExtractor
         if (input.ValueKind != JsonValueKind.Object)
             return null;
 
-        // Shell 工具优先查 command
+        // Shell 工具优先查 command / cmd
         if (IsShellTool(toolName))
         {
             if (input.TryGetProperty("command", out var cmd) && cmd.ValueKind == JsonValueKind.String)
                 return cmd.GetString();
+            if (input.TryGetProperty("cmd", out var cmdAlias) && cmdAlias.ValueKind == JsonValueKind.String)
+                return cmdAlias.GetString();
         }
 
         // WebFetch 查 url
@@ -189,7 +192,9 @@ public static class ToolArgumentExtractor
     }
 
     private static bool IsShellTool(string toolName) =>
-        IsToolName(toolName, "Bash");
+        IsToolName(toolName, "Bash")
+        || IsToolName(toolName, "Shell")
+        || IsToolName(toolName, "BackgroundRun");
 
     private static bool IsToolName(string toolName, string expected) =>
         string.Equals(toolName, expected, StringComparison.OrdinalIgnoreCase);
@@ -224,6 +229,6 @@ public static class ToolArgumentExtractor
 
     private static readonly string[] s_descriptionFields =
     [
-        "command", "filePath", "file_path", "url", "query", "description"
+        "command", "cmd", "filePath", "file_path", "path", "file", "url", "query", "description"
     ];
 }

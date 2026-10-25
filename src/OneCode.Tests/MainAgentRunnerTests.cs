@@ -72,7 +72,9 @@ public sealed class MainAgentRunnerTests : IDisposable
             chatClient,
             NullLoggerFactory.Instance,
             Substitute.For<IServiceProvider>(),
-            new ToolMetadataRegistry());
+            new ToolMetadataRegistry(),
+            approvalPromptSink: Substitute.For<Core.Permissions.IApprovalPromptSink>(),
+            budgetDecisionService: Substitute.For<Core.Goals.IBudgetDecisionService>());
     }
 
     public void Dispose()

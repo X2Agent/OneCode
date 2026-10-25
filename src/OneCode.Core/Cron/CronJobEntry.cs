@@ -14,9 +14,7 @@ public sealed class CronJobEntry
     /// Whether this job survives a process restart. When <c>false</c> (default) the job is
     /// in-memory only and is dropped on shutdown/reload. When <c>true</c> the scheduler
     /// persists <c>{Id}.json</c> to <c>~/.onecode/cron/</c> after every state change so the
-    /// next process start can resume it. Honoured only when the host process opts in via
-    /// <c>ONECODE_DURABLE_CRON=true</c>; otherwise the field is forced to <c>false</c> on
-    /// creation and never persisted.
+    /// next process start can resume it.
     /// </summary>
     public bool Durable { get; set; }
 
@@ -27,6 +25,13 @@ public sealed class CronJobEntry
     /// from "now + 1s" on resume so they don't fire a backlog of missed runs.
     /// </summary>
     public bool Paused { get; set; }
+
+    /// <summary>
+    /// 作业归属的项目目录（绝对路径），创建时由调度器以进程工作目录盖章。
+    /// durable 作业只被项目匹配的调度器触发；<c>null</c>（旧版 durable JSON）保持
+    /// 「任意进程都可触发」的历史行为。非 durable 作业不出创建进程，该字段仅作展示。
+    /// </summary>
+    public string? ProjectDir { get; set; }
 
     public long CreatedAt { get; set; }
     public long? LastRunAt { get; set; }

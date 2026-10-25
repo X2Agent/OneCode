@@ -1,0 +1,33 @@
+<details class="tool-card @(Call.IsError ? "failed" : Call.IsRunning ? "running" : "done")">
+    <summary>
+        <span class="tool-status">@(Call.IsRunning ? "●" : Call.IsError ? "✕" : "✓")</span>
+        <span class="tool-name">@Call.Name</span>
+        <span class="tool-target">@Summarize()</span>
+        @if (!string.IsNullOrEmpty(Call.AgentName))
+        {
+            <span class="tool-agent">@Call.AgentName</span>
+        }
+    </summary>
+    @if (!string.IsNullOrEmpty(Call.Input))
+    {
+        <pre class="tool-block">@Call.Input</pre>
+    }
+    @if (!string.IsNullOrEmpty(Call.Result))
+    {
+        <pre class="tool-block result">@Call.Result</pre>
+    }
+</details>
+
+@code {
+    [Parameter, EditorRequired]
+    public WebToolCall Call { get; set; } = default!;
+
+    private string Summarize()
+    {
+        var source = Call.Input;
+        if (string.IsNullOrWhiteSpace(source))
+            return string.Empty;
+        var line = source.ReplaceLineEndings(" ").Trim();
+        return line.Length <= 72 ? line : line[..71] + "…";
+    }
+}

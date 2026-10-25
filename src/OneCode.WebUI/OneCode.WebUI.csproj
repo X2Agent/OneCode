@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <AssemblyName>OneCode.WebUI</AssemblyName>
+    <RootNamespace>OneCode.WebUI</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneCode.App\OneCode.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Markdown 渲染：与 TUI 共用同一解析库，不经 CDN、不依赖外网。 -->
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
+
+</Project>

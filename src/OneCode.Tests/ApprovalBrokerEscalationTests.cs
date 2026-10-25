@@ -1,5 +1,3 @@
-using System.Threading.Channels;
-using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Permissions;
 
@@ -13,116 +11,136 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class ApprovalBrokerEscalationTests
 {
-    /// <summary>等待下一个审批提示；超时返回 null（反证：升级后不再弹窗）。</summary>
-    private static async Task<ApprovalRequestEvent?> NextPromptAsync(
-        Channel<object> channel,
-        TimeSpan timeout)
+    /// <summary>记录提问次数的端口替身：请求挂起，直到测试显式应答。</summary>
+    private sealed class RecordingSink : IApprovalPromptSink
     {
-        using var cts = new CancellationTokenSource(timeout);
-        try
+        private readonly Lock _gate = new();
+        private readonly List<TaskCompletionSource<ApprovalDecision>> _pending = [];
+
+        public int AskCount
         {
-            var surfaced = await channel.Reader.ReadAsync(cts.Token).ConfigureAwait(false);
-            surfaced.Should().BeOfType<ApprovalRequestEvent>();
-            return (ApprovalRequestEvent)surfaced;
+            get
+            {
+                lock (_gate)
+                    return _pending.Count;
+            }
         }
-        catch (OperationCanceledException)
+
+        public Task<ApprovalDecision> AskAsync(ApprovalRequest request, CancellationToken ct = default)
         {
-            return null;
+            var response = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_gate)
+                _pending.Add(response);
+            return response.Task;
+        }
+
+        /// <summary>应答第 index 次提问；越界返回 false（反证：不应出现新的提问）。</summary>
+        public bool TryAnswer(int index, ApprovalDecision decision)
+        {
+            TaskCompletionSource<ApprovalDecision>? pending;
+            lock (_gate)
+                pending = index < _pending.Count ? _pending[index] : null;
+
+            return pending is not null && pending.TrySetResult(decision);
+        }
+    }
+
+    /// <summary>等待端口收到第 count 次提问；超时即判失败。</summary>
+    private static async Task WaitForAskAsync(RecordingSink sink, int count)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (sink.AskCount < count)
+        {
+            cts.Token.ThrowIfCancellationRequested();
+            await Task.Delay(10, cts.Token).ConfigureAwait(false);
         }
     }
 
     [Fact]
     public async Task RequestAsync_UserAllowsAllForConversation_SubsequentCallsAutoApproveWithoutPrompting()
     {
-        var channel = Channel.CreateUnbounded<object>();
-        var broker = ApprovalBroker.ForQuery(channel.Writer);
+        var sink = new RecordingSink();
+        var broker = ApprovalBroker.ForQuery(sink);
 
         var firstRequest = broker.RequestAsync(
             new ApprovalRequest("req-1", "Write", "{}"), TestContext.Current.CancellationToken);
-        (await NextPromptAsync(channel, TimeSpan.FromSeconds(5)))!.ResponseSource
-            .TrySetResult(ApprovalDecision.AllowAllConversation);
+        await WaitForAskAsync(sink, 1);
 
-        var firstDecision = await firstRequest;
-        firstDecision.Should().Be(ApprovalDecision.AllowAllConversation);
+        sink.TryAnswer(0, ApprovalDecision.AllowAllConversation).Should().BeTrue();
+        (await firstRequest).Should().Be(ApprovalDecision.AllowAllConversation);
 
-        var secondRequest = broker.RequestAsync(
+        var secondDecision = await broker.RequestAsync(
             new ApprovalRequest("req-2", "Bash", "{}"), TestContext.Current.CancellationToken);
 
-        // 先断言「没有新弹窗」再 await 决策：守卫回归时（第二次调用重新进入弹窗路径）
-        // 用例在 2s 内失败，而不是永远挂在一个无人应答的审批上。
-        (await NextPromptAsync(channel, TimeSpan.FromSeconds(2))).Should().BeNull(
-            "an escalated conversation must not surface a second approval prompt in the same run");
-
-        var secondDecision = await secondRequest;
         secondDecision.Should().Be(ApprovalDecision.AllowOnce,
             "the user already allowed every tool call for this conversation");
+        sink.AskCount.Should().Be(1,
+            "an escalated conversation must not surface a second approval prompt in the same run");
     }
 
     [Fact]
     public async Task RequestAsync_SingleApproval_DoesNotSuppressLaterPrompts()
     {
-        var channel = Channel.CreateUnbounded<object>();
-        var broker = ApprovalBroker.ForQuery(channel.Writer);
+        var sink = new RecordingSink();
+        var broker = ApprovalBroker.ForQuery(sink);
 
         var firstRequest = broker.RequestAsync(
             new ApprovalRequest("req-1", "Write", "{}"), TestContext.Current.CancellationToken);
-        (await NextPromptAsync(channel, TimeSpan.FromSeconds(5)))!.ResponseSource
-            .TrySetResult(ApprovalDecision.AllowOnce);
+        await WaitForAskAsync(sink, 1);
+        sink.TryAnswer(0, ApprovalDecision.AllowOnce).Should().BeTrue();
         (await firstRequest).Should().Be(ApprovalDecision.AllowOnce);
 
         var secondRequest = broker.RequestAsync(
             new ApprovalRequest("req-2", "Bash", "{}"), TestContext.Current.CancellationToken);
-        var secondPrompt = await NextPromptAsync(channel, TimeSpan.FromSeconds(5));
+        await WaitForAskAsync(sink, 2);
 
-        secondPrompt.Should().NotBeNull(
+        sink.TryAnswer(1, ApprovalDecision.Deny).Should().BeTrue();
+        (await secondRequest).Should().Be(ApprovalDecision.Deny,
             "a one-off approval must leave the next call to be reviewed again");
-        secondPrompt!.ResponseSource.TrySetResult(ApprovalDecision.Deny);
-        (await secondRequest).Should().Be(ApprovalDecision.Deny);
     }
 
     [Fact]
     public async Task RequestAsync_UserDenies_StaysInteractive()
     {
         // 反证：Deny 不是升级信号，不得触发 run 级自动放行。
-        var channel = Channel.CreateUnbounded<object>();
-        var broker = ApprovalBroker.ForQuery(channel.Writer);
+        var sink = new RecordingSink();
+        var broker = ApprovalBroker.ForQuery(sink);
 
         var firstRequest = broker.RequestAsync(
             new ApprovalRequest("req-1", "Write", "{}"), TestContext.Current.CancellationToken);
-        (await NextPromptAsync(channel, TimeSpan.FromSeconds(5)))!.ResponseSource
-            .TrySetResult(ApprovalDecision.Deny);
+        await WaitForAskAsync(sink, 1);
+        sink.TryAnswer(0, ApprovalDecision.Deny).Should().BeTrue();
         (await firstRequest).Should().Be(ApprovalDecision.Deny);
 
         var secondRequest = broker.RequestAsync(
             new ApprovalRequest("req-2", "Bash", "{}"), TestContext.Current.CancellationToken);
-        var secondPrompt = await NextPromptAsync(channel, TimeSpan.FromSeconds(5));
+        await WaitForAskAsync(sink, 2);
 
-        secondPrompt.Should().NotBeNull(
+        sink.TryAnswer(1, ApprovalDecision.Deny).Should().BeTrue();
+        (await secondRequest).Should().Be(ApprovalDecision.Deny,
             "a denied call must not silently escalate the conversation to allow-all");
-        secondPrompt!.ResponseSource.TrySetResult(ApprovalDecision.Deny);
-        (await secondRequest).Should().Be(ApprovalDecision.Deny);
     }
 
     [Fact]
     public async Task RequestAsync_EscalatedRun_IsIsolatedPerBrokerInstance()
     {
         // 每个 run 一个 broker：升级只影响本 run，新 run 的审批通道不得继承自动放行。
-        var channel = Channel.CreateUnbounded<object>();
-        var escalated = ApprovalBroker.ForQuery(channel.Writer);
-        var request = escalated.RequestAsync(
-            new ApprovalRequest("req-1", "Write", "{}"), TestContext.Current.CancellationToken);
-        (await NextPromptAsync(channel, TimeSpan.FromSeconds(5)))!.ResponseSource
-            .TrySetResult(ApprovalDecision.AllowAllConversation);
-        await request;
+        var sink = new RecordingSink();
+        var escalated = ApprovalBroker.ForQuery(sink);
 
-        var freshBroker = ApprovalBroker.ForQuery(channel.Writer);
+        var firstRequest = escalated.RequestAsync(
+            new ApprovalRequest("req-1", "Write", "{}"), TestContext.Current.CancellationToken);
+        await WaitForAskAsync(sink, 1);
+        sink.TryAnswer(0, ApprovalDecision.AllowAllConversation).Should().BeTrue();
+        await firstRequest;
+
+        var freshBroker = ApprovalBroker.ForQuery(sink);
         var freshRequest = freshBroker.RequestAsync(
             new ApprovalRequest("req-2", "Bash", "{}"), TestContext.Current.CancellationToken);
-        var freshPrompt = await NextPromptAsync(channel, TimeSpan.FromSeconds(5));
 
-        freshPrompt.Should().NotBeNull(
+        await WaitForAskAsync(sink, 2);
+        sink.TryAnswer(1, ApprovalDecision.Deny).Should().BeTrue();
+        (await freshRequest).Should().Be(ApprovalDecision.Deny,
             "session-wide escalation is owned by the permission-mode override, not by a leaked broker flag");
-        freshPrompt!.ResponseSource.TrySetResult(ApprovalDecision.Deny);
-        (await freshRequest).Should().Be(ApprovalDecision.Deny);
     }
 }

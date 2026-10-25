@@ -1,5 +1,4 @@
 using OneCode.App.Services.Agent;
-using OneCode.App.Tui;
 using OneCode.Core.Coordinator;
 using OneCode.Core.PlanMode;
 

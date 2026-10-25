@@ -5,11 +5,9 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Session;
-using OneCode.App.Tui;
+using OneCode.App.Query;
 using OneCode.Core.Config;
-using OneCode.Core.Domain;
 using OneCode.Core.Goals;
-using OneCode.Core.Workflows;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
 
@@ -98,7 +96,7 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
                 WorkingDirectory = _root,
                 Tools = new List<AITool>(),
             },
-            Channel.CreateUnbounded<TuiEvent>().Writer,
+            Channel.CreateUnbounded<QueryEvent>().Writer,
             static () => new EditTransaction());
         var runtime = new GoalWorkflowRuntime(
             new FakePlanningService(),
@@ -106,7 +104,8 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
             store,
             workspace,
             new FakeCompletionService(),
-            context);
+            context,
+            Substitute.For<IBudgetDecisionService>());
         await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
         var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
 
@@ -143,26 +142,14 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
         var store = new JsonGoalRunStore(Path.Combine(_root, "runs-continue"));
         var step = CreateStep(1);
         var run = await CreateClaimedRunAsync(store, [step], totalAttempts: 5);
-        var channel = Channel.CreateUnbounded<TuiEvent>();
-        var runtime = CreateRuntimeWithPrompt(store, channel.Writer, maxAttempts: 5);
+        var budgetDecisions = new StubBudgetDecisionService(GoalBudgetDecision.ContinueWithExtraBudget);
+        var runtime = CreateRuntimeWithPrompt(store, Channel.CreateUnbounded<QueryEvent>().Writer, maxAttempts: 5, budgetDecisions);
         await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
         var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
 
-        var responder = Task.Run(async () =>
-        {
-            await foreach (var evt in channel.Reader.ReadAllAsync(TestContext.Current.CancellationToken))
-            {
-                if (evt is TuiGoalBudgetExhaustedRequest req)
-                {
-                    req.ResponseSource.TrySetResult(GoalBudgetDecision.ContinueWithExtraBudget);
-                    break;
-                }
-            }
-        }, TestContext.Current.CancellationToken);
-
         var next = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
-        await responder;
 
+        budgetDecisions.LastContext.Should().NotBeNull("预算耗尽必须经端口向用户询问");
         next.CurrentIndex.Should().Be(1, "selecting ContinueWithExtraBudget must extend the budget and execute the step");
         next.Plan[0].State.Should().Be(GoalStepState.Completed);
     }
@@ -174,26 +161,14 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
         var step1 = CreateStep(1);
         var step2 = CreateStep(2);
         var run = await CreateClaimedRunAsync(store, [step1, step2], totalAttempts: 5);
-        var channel = Channel.CreateUnbounded<TuiEvent>();
-        var runtime = CreateRuntimeWithPrompt(store, channel.Writer, maxAttempts: 5);
+        var budgetDecisions = new StubBudgetDecisionService(GoalBudgetDecision.SkipCurrentStep);
+        var runtime = CreateRuntimeWithPrompt(store, Channel.CreateUnbounded<QueryEvent>().Writer, maxAttempts: 5, budgetDecisions);
         await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
         var state = new GoalWorkflowState(run.Id, [step1, step2], [], run.Budget, 0, false, GoalRunState.Executing);
 
-        var responder = Task.Run(async () =>
-        {
-            await foreach (var evt in channel.Reader.ReadAllAsync(TestContext.Current.CancellationToken))
-            {
-                if (evt is TuiGoalBudgetExhaustedRequest req)
-                {
-                    req.ResponseSource.TrySetResult(GoalBudgetDecision.SkipCurrentStep);
-                    break;
-                }
-            }
-        }, TestContext.Current.CancellationToken);
-
         var next = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
-        await responder;
 
+        budgetDecisions.LastContext.Should().NotBeNull();
         next.CurrentIndex.Should().Be(1, "skipping the current step must advance the cursor to the next sub-goal");
         next.Plan[0].State.Should().Be(GoalStepState.Skipped);
         next.Executions.Should().ContainSingle()
@@ -219,8 +194,11 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
             ct);
         var pausedRun = (await store.LoadByIdAsync(run.Id, ct))!;
 
-        var channel = Channel.CreateUnbounded<TuiEvent>();
-        var runtime = CreateRuntimeWithPrompt(store, channel.Writer, maxAttempts: 15);
+        var runtime = CreateRuntimeWithPrompt(
+            store,
+            Channel.CreateUnbounded<QueryEvent>().Writer,
+            maxAttempts: 15,
+            new StubBudgetDecisionService(GoalBudgetDecision.Pause));
         await runtime.BindAsync(pausedRun, 7, ct);
 
         var state = await runtime.PlanAsync(new GoalWorkflowInput(pausedRun.Id, pausedRun.Goal, "test-model", "hash"), ct);
@@ -239,26 +217,14 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
         var store = new JsonGoalRunStore(Path.Combine(_root, "runs-abort"));
         var step = CreateStep(1);
         var run = await CreateClaimedRunAsync(store, [step], totalAttempts: 5);
-        var channel = Channel.CreateUnbounded<TuiEvent>();
-        var runtime = CreateRuntimeWithPrompt(store, channel.Writer, maxAttempts: 5);
+        var budgetDecisions = new StubBudgetDecisionService(GoalBudgetDecision.Abort);
+        var runtime = CreateRuntimeWithPrompt(store, Channel.CreateUnbounded<QueryEvent>().Writer, maxAttempts: 5, budgetDecisions);
         await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
         var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
 
-        var responder = Task.Run(async () =>
-        {
-            await foreach (var evt in channel.Reader.ReadAllAsync(TestContext.Current.CancellationToken))
-            {
-                if (evt is TuiGoalBudgetExhaustedRequest req)
-                {
-                    req.ResponseSource.TrySetResult(GoalBudgetDecision.Abort);
-                    break;
-                }
-            }
-        }, TestContext.Current.CancellationToken);
-
         var next = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
-        await responder;
 
+        budgetDecisions.LastContext.Should().NotBeNull();
         next.State.Should().Be(GoalRunState.Cancelled);
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         persisted!.State.Should().Be(GoalRunState.Cancelled);
@@ -267,8 +233,9 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
 
     private GoalWorkflowRuntime CreateRuntimeWithPrompt(
         IGoalRunStore store,
-        ChannelWriter<TuiEvent> writer,
-        int maxAttempts)
+        ChannelWriter<QueryEvent> writer,
+        int maxAttempts,
+        IBudgetDecisionService budgetDecisionService)
     {
         var stepExecutor = new FakeStepExecutionService();
         var workspace = Substitute.For<IGoalWorkspaceService>();
@@ -301,7 +268,23 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
             store,
             workspace,
             new FakeCompletionService(),
-            context);
+            context,
+            logger: null,
+            budgetDecisionService: budgetDecisionService);
+    }
+
+    /// <summary>记录最后一次预算上下文并返回固定决策的端口替身。</summary>
+    private sealed class StubBudgetDecisionService(GoalBudgetDecision decision) : IBudgetDecisionService
+    {
+        public BudgetExhaustedContext? LastContext { get; private set; }
+
+        public Task<GoalBudgetDecision> DecideAsync(
+            BudgetExhaustedContext context,
+            CancellationToken ct = default)
+        {
+            LastContext = context;
+            return Task.FromResult(decision);
+        }
     }
 
     private sealed class FakeCompletionService : IGoalCompletionService
@@ -339,7 +322,7 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
             GoalItem goal,
             GoalRunOptions options,
             EditTransaction sharedTransaction,
-            ChannelWriter<TuiEvent> eventWriter,
+            ChannelWriter<QueryEvent> eventWriter,
             CancellationToken ct)
         {
             onExecute?.Invoke(sharedTransaction);

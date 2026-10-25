@@ -2,11 +2,12 @@ using System.Runtime.CompilerServices;
 
 using NSubstitute;
 
-using OneCode.App.Tui;
+using OneCode.App.Query;
 
 using OneCode.Tests.TestSupport.Tui;
 
 using Terminal.Gui.Input;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -25,9 +26,9 @@ public sealed class OneCodeToplevelSubmitLoopTests
     public async Task Submit_StreamedReply_RendersUserPromptAndAssistantText()
     {
         using var shell = TuiTestShell.Create(b => b.Stream(
-            new TuiTextDelta("流式回复甲"),
-            new TuiTextDelta("流式回复乙"),
-            new TuiDone(10, 20)));
+            new TextDeltaEvent("流式回复甲"),
+            new TextDeltaEvent("流式回复乙"),
+            new DoneEvent(null, new TokenUsage(10, 20), 0, RunTerminalReason.Completed)));
 
         await shell.SubmitQueryAsync(UserPrompt);
 
@@ -44,9 +45,9 @@ public sealed class OneCodeToplevelSubmitLoopTests
     public async Task Submit_ToolCallCycle_RendersToolNameAndResult()
     {
         using var shell = TuiTestShell.Create(b => b.Stream(
-            new TuiToolStart("t-1", "read_file"),
-            new TuiToolDone("read_file", IsError: false, Result: "工具输出标记", ToolId: "t-1"),
-            new TuiDone(10, 20)));
+            new ToolStartEvent("t-1", "read_file"),
+            new ToolDoneEvent("t-1", "read_file", IsError: false, Result: "工具输出标记"),
+            new DoneEvent(null, new TokenUsage(10, 20), 0, RunTerminalReason.Completed)));
 
         await shell.SubmitQueryAsync("读一下配置");
 
@@ -62,7 +63,7 @@ public sealed class OneCodeToplevelSubmitLoopTests
     [Fact]
     public async Task Submit_QueryFails_ErrorTextReachesTranscript()
     {
-        using var shell = TuiTestShell.Create(b => b.Stream(new TuiError("查询失败标记")));
+        using var shell = TuiTestShell.Create(b => b.Stream(new ErrorEvent("查询失败标记")));
 
         await shell.SubmitQueryAsync("随便问问");
 
@@ -125,7 +126,7 @@ public sealed class OneCodeToplevelSubmitLoopTests
             // 仅第一轮查询挂起；第二轮换成已结束的脚本，用于观察「新一轮取消旧一轮」。
             if (Interlocked.Increment(ref started) == 1)
                 return Blocked(entered, gate.Task, ct);
-            return Completed(new TuiTextDelta("第二轮回复"));
+            return Completed(new TextDeltaEvent("第二轮回复"));
         }));
 
         await shell.SubmitQueryBeginAsync("第一轮");
@@ -137,7 +138,7 @@ public sealed class OneCodeToplevelSubmitLoopTests
         shell.App.DidNotReceive().RequestStop(Arg.Any<Terminal.Gui.App.IRunnable>());
     }
 
-    private static async IAsyncEnumerable<TuiEvent> Blocked(
+    private static async IAsyncEnumerable<QueryEvent> Blocked(
         TaskCompletionSource streamEntered,
         Task gate,
         [EnumeratorCancellation] CancellationToken ct)
@@ -147,7 +148,7 @@ public sealed class OneCodeToplevelSubmitLoopTests
         yield break;
     }
 
-    private static async IAsyncEnumerable<TuiEvent> Completed(params TuiEvent[] events)
+    private static async IAsyncEnumerable<QueryEvent> Completed(params QueryEvent[] events)
     {
         foreach (var evt in events)
         {

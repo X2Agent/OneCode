@@ -125,7 +125,7 @@ private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 - 启动时同步扫描 `~/{ConfigDir}/cron/*.json`，加载所有 `CronJobEntry`
 - 使用 `FileSystemWatcher` 监视目录变更，触发去抖动重载（推荐 2 秒去抖）
 - 轮询间隔 30 秒（既时又不过度），到期 job 委托给 `ICronJobExecutor.ExecuteJobAsync`
-- 持久化 cron（`Durable = true`）需通过 `ONECODE_DURABLE_CRON=true` 显式启用；默认仅会话级
+- 持久化由作业级 `Durable = true` 控制，落盘后跨进程重启存活；默认仅会话级
 
 ### CronJobEntry 持久化
 

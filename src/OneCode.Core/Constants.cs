@@ -11,10 +11,6 @@ public static class Constants
         public const string TavilyApiKey = "TAVILY_API_KEY";
         /// <summary>WebSearch 主提供方（tavily | duckduckgo）。</summary>
         public const string OneCodeWebSearchProvider = "ONECODE_WEB_SEARCH_PROVIDER";
-        /// <summary>Worker 子代理标志：为 1/true 时表示为 Worker 进程。</summary>
-        public const string IsWorker = "ONECODE_IS_WORKER";
-        /// <summary>启用持久化 Cron 任务开关（为 true 时允许 --durable 落盘）。</summary>
-        public const string DurableCron = "ONECODE_DURABLE_CRON";
     }
 
     public static class ConfigKeys

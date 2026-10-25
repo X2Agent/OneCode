@@ -14,6 +14,12 @@ public static class SessionStateKeys
     /// <summary>连续失败计数（由 StateMachineMiddleware 独占递增）。</summary>
     public const string ConsecutiveFailures = "state_machine.consecutive_failures";
 
+    /// <summary>最近连续失败的工具名称（用于单工具定向阻拦）。</summary>
+    public const string LastFailedToolName = "state_machine.last_failed_tool_name";
+
+    /// <summary>同一工具连续失败次数（切换到其他工具成功时归零）。</summary>
+    public const string SameToolConsecutiveFailures = "state_machine.same_tool_consecutive_failures";
+
     /// <summary>累计工具调用次数。</summary>
     public const string TotalToolCalls = "state_machine.total_tool_calls";
 

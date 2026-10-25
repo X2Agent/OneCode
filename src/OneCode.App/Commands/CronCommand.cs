@@ -89,10 +89,7 @@ public sealed class CronCommand(
             return CommandResult.Error($"Invalid cron expression: {cron}");
 
         var recurring = !args.Contains("--once", StringComparer.OrdinalIgnoreCase);
-        var durable = args.Contains("--durable", StringComparer.OrdinalIgnoreCase)
-                      && CronPaths.IsDurableCronEnabled();
-        if (args.Contains("--durable", StringComparer.OrdinalIgnoreCase) && !CronPaths.IsDurableCronEnabled())
-            return CommandResult.Error("--durable requires ONECODE_DURABLE_CRON=true in the environment.");
+        var durable = args.Contains("--durable", StringComparer.OrdinalIgnoreCase);
 
         // Compose prompt from positional args (skip "create", the cron expr, and any flag tokens).
         var promptTokens = args.Skip(2)
@@ -125,10 +122,13 @@ public sealed class CronCommand(
         var schedule = CronExpressionHelper.CronToHumanReadable(cron);
         var next = DateTimeOffset.FromUnixTimeSeconds(entry.NextRunAt!.Value).LocalDateTime
             .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var daemonHint = durable
+            ? "\n  note: durable jobs fire only while a onecode process is alive; run /daemon or scripts/install-daemon.ps1 for an always-on daemon."
+            : "";
         return CommandResult.Text(
             $"Created cron job {entry.Id} ({schedule}){(durable ? " [durable]" : "")}.\n" +
             $"  prompt: {prompt}\n" +
-            $"  next run: {next}");
+            $"  next run: {next}{daemonHint}");
     }
 
     private CommandResult Delete(string[] args)

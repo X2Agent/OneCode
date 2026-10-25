@@ -1,6 +1,6 @@
 using NSubstitute;
-using OneCode.App.Tui;
 using Terminal.Gui.App;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

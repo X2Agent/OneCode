@@ -1,12 +1,12 @@
 using NSubstitute;
 
-using OneCode.App.Tui;
 using OneCode.Core.Commands;
 
 using OneCode.Tests.TestSupport.Tui;
 
 using Terminal.Gui.Input;
 using Terminal.Gui.Views;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 
@@ -19,7 +19,7 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class OneCodeToplevelDiffOverlayTests
 {
-    private const string FilePath = "src/OneCode.App/Tui/OneCodeToplevel.cs";
+    private const string FilePath = "src/OneCode.Tui/Tui/OneCodeToplevel.cs";
     private const string DiffText = "@@ -1,2 +1,2 @@\n-旧行\n+新行";
 
     [Fact]

@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services.Context;
-using OneCode.App.Tui;
 using OneCode.Core.Config;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;
@@ -8,8 +7,9 @@ using OneCode.Infrastructure.Config;
 namespace OneCode.App.Services.Setup;
 
 /// <summary>
-/// 启动/升级/信任领域 DI 注册——与启动引导实现（<see cref="StartupFlowCoordinator"/> /
-/// <see cref="TrustService"/>，位于 Tui）同层维护。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
+/// 启动/升级领域 DI 注册——启动引导数据、发布说明与自升级。
+/// 信任门（TrustService）与启动流程协调（StartupFlowCoordinator）随 TUI 栈
+/// 在 OneCode.Tui 的 AddTuiServices 注册。由组合根 <see cref="OneCode.App.OneCodeApp"/> 显式调用。
 /// </summary>
 public static class SetupServiceCollectionExtensions
 {
@@ -18,7 +18,6 @@ public static class SetupServiceCollectionExtensions
         services.AddSingleton<GitInfo>();
         services.AddSingleton<ContextBuilder>();
 
-        services.AddSingleton<StartupFlowCoordinator>();
         services.AddSingleton<ReleaseNotesService>();
         services.AddSingleton<UpgradeService>();
 
@@ -32,7 +31,6 @@ public static class SetupServiceCollectionExtensions
                 sp.GetService<ILogger<ConfigManager>>());
         });
         services.AddSingleton<IConfigManager>(sp => sp.GetRequiredService<ConfigManager>());
-        services.AddSingleton<TrustService>();
 
         return services;
     }

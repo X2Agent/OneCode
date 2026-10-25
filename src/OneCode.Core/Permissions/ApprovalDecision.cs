@@ -2,7 +2,7 @@ namespace OneCode.Core.Permissions;
 
 /// <summary>
 /// 用户对工具调用审批的决策结果。
-/// 事件驱动审批中由 TUI 通过 TaskCompletionSource 回传给发起运行的管线。
+/// 由前端审批端口（<see cref="IApprovalPromptSink"/>）回传给发起运行的管线。
 /// </summary>
 public enum ApprovalDecision
 {

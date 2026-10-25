@@ -1,6 +1,6 @@
-using OneCode.App.Tui;
 using OneCode.Core.Keybindings;
 using Terminal.Gui.Input;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

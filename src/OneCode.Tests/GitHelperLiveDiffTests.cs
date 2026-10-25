@@ -18,7 +18,9 @@ public sealed class GitHelperLiveDiffTests
     {
         var ct = TestContext.Current.CancellationToken;
         var repo = FindRepoRoot();
-        var subdir = Path.Combine(repo, "src", "OneCode.Cli");
+        if (repo is null)
+            Assert.Skip("无法定位仓库根目录（src/OneCode.slnx），跳过冒烟测试");
+        var subdir = Path.Combine(repo, "src", "OneCode.Tui");
         Directory.Exists(subdir).Should().BeTrue();
 
         // Reproduce the TUI failure mode: process cwd is a repo subdirectory,
@@ -32,7 +34,7 @@ public sealed class GitHelperLiveDiffTests
             Assert.Skip("工作区没有待处理的文本变更，无法执行本冒烟测试");
 
         diff.Should().Contain("diff --git",
-            "file detail must work when cwd is src/OneCode.Cli (uses repo root + :(top) pathspec)");
+            "file detail must work when cwd is src/OneCode.Tui (uses repo root + :(top) pathspec)");
     }
 
     [Fact]
@@ -40,6 +42,8 @@ public sealed class GitHelperLiveDiffTests
     {
         var ct = TestContext.Current.CancellationToken;
         var repo = FindRepoRoot();
+        if (repo is null)
+            Assert.Skip("无法定位仓库根目录（src/OneCode.slnx），跳过冒烟测试");
         Directory.SetCurrentDirectory(repo);
         var git = new GitHelper(new ProcessRunner(NullLogger<ProcessRunner>.Instance));
         var entries = await git.GetPendingDiffStatAsync(ct);
@@ -65,7 +69,7 @@ public sealed class GitHelperLiveDiffTests
         return null;
     }
 
-    private static string FindRepoRoot()
+    private static string? FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
@@ -76,6 +80,6 @@ public sealed class GitHelperLiveDiffTests
                 return dir.FullName;
             dir = dir.Parent;
         }
-        return @"C:\Users\mayue\Desktop\ClaudeCode";
+        return null;
     }
 }

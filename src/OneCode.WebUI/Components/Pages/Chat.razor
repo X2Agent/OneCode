@@ -1,0 +1,148 @@
+@page "/"
+@implements IAsyncDisposable
+@inject ChatSessionClient Client
+@inject IJSRuntime Js
+
+@if (_navOpen)
+{
+    <div class="nav-backdrop" @onclick="() => _navOpen = false"></div>
+}
+
+<div class="shell @(_navOpen ? "nav-open" : "") @(_activityOpen ? "activity-open" : "")">
+    <SessionList Mode="Client.Mode"
+                 ModelName="Client.ModelName ?? string.Empty"
+                 WorkingDirectory="@_workingDirectory"
+                 Running="Client.IsRunning"
+                 Sessions="Client.Sessions"
+                 OnSwitch="SwitchSessionAsync"
+                 OnNew="NewSessionAsync"
+                 OnClose="() => Client.CloseCurrentAsync()" />
+
+    <main class="main">
+        <header class="context">
+            <div class="context-left">
+                <button type="button" class="context-toggle nav-toggle" title="会话列表" @onclick="ToggleNav">
+                    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 5h14M3 10h14M3 15h14"/></svg>
+                </button>
+                <div class="title">OneCode</div>
+            </div>
+            <div class="meta nums">
+                @if (Client.IsRunning)
+                {
+                    <span class="running">运行中</span>
+                }
+                <span>@Client.InputTokens / @Client.OutputTokens tok</span>
+            </div>
+            <button type="button" class="context-toggle activity-toggle" title="活动面板" @onclick="ToggleActivity">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M13 4v12"/></svg>
+            </button>
+        </header>
+
+        <div class="transcript">
+            <MessageList Messages="Client.Messages" />
+
+            @if (Client.ToolCalls.Count > 0)
+            {
+                <div class="tools">
+                    @foreach (var call in Client.ToolCalls)
+                    {
+                        <ToolCallCard Call="call" />
+                    }
+                </div>
+            }
+        </div>
+
+        @if (Client.Pending is { } pending)
+        {
+            <InteractionCard Pending="pending" OnRespond="RespondAsync" />
+        }
+
+        <footer class="composer">
+            <textarea @bind="_input"
+                      @bind:event="oninput"
+                      @onkeydown="OnKeyDown"
+                      rows="1"
+                      placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+            @if (Client.IsRunning)
+            {
+                <button class="stop" @onclick="Client.Stop">停止</button>
+            }
+            else
+            {
+                <button class="send" disabled="@(string.IsNullOrWhiteSpace(_input))" @onclick="SendAsync">发送</button>
+            }
+        </footer>
+    </main>
+
+    <ActivityPanel Activities="Client.Activities" Thinking="Client.Thinking" />
+</div>
+
+@code {
+    private string _input = string.Empty;
+    private string _workingDirectory = string.Empty;
+    private bool _navOpen;
+    private bool _activityOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _workingDirectory = Directory.GetCurrentDirectory();
+        Client.Changed += OnClientChanged;
+        await Client.InitializeAsync();
+    }
+
+    private void OnClientChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void ToggleNav() => _navOpen = !_navOpen;
+
+    private void ToggleActivity() => _activityOpen = !_activityOpen;
+
+    private async Task NewSessionAsync()
+    {
+        _navOpen = false;
+        await Client.NewSessionAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        var text = _input;
+        if (string.IsNullOrWhiteSpace(text) || Client.IsRunning)
+            return;
+
+        _input = string.Empty;
+        await Client.SendAsync(text);
+        await Js.InvokeVoidAsync("app.fitComposer");
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !args.ShiftKey)
+            await SendAsync();
+    }
+
+    private async Task SwitchSessionAsync(string conversationId)
+    {
+        if (Client.IsRunning)
+            return;
+
+        _navOpen = false;
+        await Client.SwitchSessionAsync(conversationId);
+    }
+
+    private Task RespondAsync(InteractionAnswer answer)
+    {
+        if (answer.Approval is { } approval)
+            Client.RespondApproval(approval);
+        else if (answer.Budget is { } budget)
+            Client.RespondBudget(budget);
+        else
+            Client.RespondQuestion(answer.Text);
+
+        return Task.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Client.Changed -= OnClientChanged;
+        return ValueTask.CompletedTask;
+    }
+}

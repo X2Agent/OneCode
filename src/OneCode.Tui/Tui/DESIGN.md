@@ -1,0 +1,168 @@
+---
+name: OneCode TUI
+description: Terminal.Gui v2 character-cell design system for OneCode.
+colors:
+  accent: "#4D94FF"
+  accent-dim: "#2F7BE0"
+  success: "#22C55E"
+  error: "#EF4444"
+  warning: "#F59E0B"
+  info: "#58A6FF"
+  in-progress: "#4D94FF"
+  streaming: "#8B949E"
+  thinking: "#5BB8C8"
+  fg-primary: "#F5F7FA"
+  fg-secondary: "#8B949E"
+  fg-muted: "#6B7280"
+  bg-primary: "#0D0D0D"
+  bg-input: "#131313"
+  bg-terminal: "#161616"
+  bg-terminal-header: "#1A1A1A"
+  bg-card: "#131313"
+  bg-error: "#1A0A0A"
+  bg-success: "#0A160A"
+  border: "#242424"
+  border-accent: "#4D94FF"
+  separator: "#242424"
+  user-message: "#58A6FF"
+  assistant-message: "#F5F7FA"
+  tool-use: "#F59E0B"
+  tool-result: "#D29922"
+  system-message: "#BC8CFF"
+  diff-added: "#22C55E"
+  diff-removed: "#EF4444"
+  diff-hunk: "#4D94FF"
+  diff-context: "#8B949E"
+  mode-build: "#4CAF84"
+  mode-plan: "#5B8DEE"
+  mode-goal: "#5BB8C8"
+  tool-detail: "#8B949E"
+  thought-timing: "#D29922"
+---
+
+# OneCode TUI Design System
+
+OneCode 是基于 Terminal.Gui v2 的字符单元格界面。本文是 TUI 的可移植设计规范：颜色、网格、间距、组件、层级和交互必须可直接映射到实现。运行时颜色的唯一来源是 `TuiPalette.DesignTokens`；本文颜色表由自动测试校验。
+
+## Colors
+
+颜色使用 TrueColor 语义值；终端能力不足时由 Terminal.Gui/宿主调色板降级。重要状态必须同时使用符号或文字表达，不能只依赖颜色。
+
+品牌基色为 #0066FF（与 WebUI 一致）；`accent` 是它在暗底上的可读亮阶（同 WebUI 的 `--accent-text`），终端前景一律使用 `accent`，不直接使用品牌基色。
+
+背景分层遵循微对比色阶原则：`bg-primary`(0D) < `bg-input`/`bg-card`(13) < `bg-terminal`(16) < `bg-terminal-header`/`bg-active`(1A)，相邻层级仅保留 1%–3% 的微弱亮度差，靠色阶而非强对比或粗线条区分区域。
+
+### Core
+
+| Token | Hex | 用途 |
+|---|---|---|
+| `accent` | `#4D94FF` | 焦点、快捷键、链接、活动边界 |
+| `accent-dim` | `#2F7BE0` | 弱强调、非活动焦点 |
+| `success` | `#22C55E` | 成功、完成、允许 |
+| `warning` | `#F59E0B` | 等待确认、执行中、警告 |
+| `error` | `#EF4444` | 失败、拒绝、错误 |
+| `info` | `#58A6FF` | 信息、连接状态、辅助提示 |
+| `in-progress` | `#4D94FF` | 进行中状态 |
+| `streaming` | `#8B949E` | 流式文本和次级状态 |
+| `thinking` | `#5BB8C8` | 思考摘要和过程信息 |
+
+### Text and Surfaces
+
+| Token | Hex | 用途 |
+|---|---|---|
+| `fg-primary` | `#F5F7FA` | 正文和主要控件文字 |
+| `fg-secondary` | `#8B949E` | 描述、次要信息 |
+| `fg-muted` | `#6B7280` | 分隔线、弱提示 |
+| `bg-primary` | `#0D0D0D` | 消息区、状态栏、上下文栏和根画布 |
+| `bg-input` | `#131313` | 输入区与待办横条（中性微亮深灰，与主背景形成克制分层） |
+| `bg-terminal` | `#161616` | 终端型内容区域 |
+| `bg-terminal-header` | `#1A1A1A` | 表单字段和终端头部 |
+| `bg-card` | `#131313` | 卡片和模态浮层 |
+| `bg-error` | `#1A0A0A` | 错误详情 |
+| `bg-success` | `#0A160A` | 成功详情 |
+| `border` | `#242424` | 普通边界和分隔线 |
+| `border-accent` | `#4D94FF` | 活动边界和顶层浮层 |
+| `separator` | `#21262D` | 横向或纵向分隔线 |
+
+### Roles and Modes
+
+`user-message`、`assistant-message`、`tool-use`、`tool-result`、`system-message` 用于消息角色。`diff-added`、`diff-removed`、`diff-hunk`、`diff-context` 用于差异视图。`mode-build`、`mode-plan`、`mode-goal` 用于工作模式。
+
+
+## Grid and Spacing
+
+- 所有尺寸使用整数字符列和行。
+- ASCII 字符按 1 列计算；CJK、emoji 和其他宽字符按实际显示宽度计算。
+- 行高固定为 1 个字符行。
+- 间距 token：`none=0`、`xs=1`、`sm=2`、`md=4`。
+- 禁止在布局规范中使用像素、字体大小、阴影或圆角等连续屏幕概念。
+
+## Layout
+
+根布局从上到下由消息区、Agent 状态栏、聊天输入区和会话上下文栏组成；OverlayHost 覆盖在最上层。
+
+- 消息区使用 `bg-primary`，弹性占据剩余空间。
+- Agent 状态栏和会话上下文栏各占 1 行，使用 `bg-primary` 融入主画布；仅输入区与待办横条使用 `bg-input` 作为微亮分层，不形成底部大面积异色色块。
+- 输入区使用 `bg-input`，单行输入总高度为 2 行，多行输入最多 6 行。
+- 输入区父级负责设置动态高度和底部位置；输入控件只报告内容所需行数并绘制自身。
+- 侧栏默认宽度按屏宽 40% 比例计算（封顶 100 列），最小宽度 28 列；主会话区保底 65 列。
+- 当终端宽度不足以同时容纳主会话区、侧栏和 1 列分隔时，侧栏自动隐藏；宽度恢复后恢复原可见状态。
+
+## Components
+
+### Chat Input
+
+- 顶部分隔线常规状态下使用低调的 `border` / `separator`，仅在搜索模式（`Ctrl+F`）等显式状态激活时高亮为 `in-progress`。
+- 编辑器背景始终使用 `bg-input`，空闲、聚焦、忙碌、只读和补全状态不得暴露默认背景。
+- `Enter` 提交；`Shift+Enter` 换行；`Ctrl+V` 智能粘贴。
+- 普通输入状态下 `Tab` 循环工作模式；补全激活时 `Tab` 接受补全；空输入有建议时 `Tab` 接受建议。
+- `Escape` 按层级处理：关闭顶层浮层、关闭补全、取消交互、取消任务、清空输入，空闲空输入时无动作。
+
+### Conversation
+
+- `MessageListView` 不持有键盘焦点，避免与输入区争夺焦点。
+- `PageUp/PageDown` 按当前视口高度翻页。
+- `Shift+Up/Down` 和 `Ctrl+PageUp/PageDown` 小步滚动。
+- 用户离开底部跟随模式时显示新内容提示，回到底部后隐藏提示。
+- 流式输出尾部光标 `▌` 在静默期按 500ms 闪烁指示等待，新 token 到达时重置为常亮（打字暂停闪烁惯例）。
+- 可展开内容使用 `▸`/`▾`，错误、成功、进行中状态使用符号和文字辅助颜色。
+- 工具行展开详情先解包结果信封再按工具格式化：WebSearch 渲染为"搜索: query · provider · N 条"列表（URL 用 `accent`，标题与摘要先经 HTML 剥离），其余工具回退缩进 JSON；历史回放与流式展开共用同一格式化源。
+- 同轮相邻同名的已完成工具调用合并为一行组行（`WebSearch ×N · 累计时长`），异名工具打断合并；组行展开为逐条"目标 · 结果摘要 · 单条时长"列表。单条调用（N=1）与普通完成行形态一致，展开为完整 Args/Result 详情。历史回放按连续工具段聚合出相同形态。
+
+### Welcome
+
+- 启动欢迎屏是消息区内的一组无框居中行：块状 OneCode logo（`fg-secondary`）、版本行与两行使用提示（按键用 `accent`）。
+- 内容块整体在视口中垂直居中，上下留白均衡；不留边框与底色。
+- 欢迎屏只承担品牌与可发现性，模型 / 工作区 / 分支 / MCP 状态一律以状态栏为唯一出口，不重复渲染。
+
+### Status Bars
+
+- 状态栏左侧优先显示活动状态和模型，右侧显示当前工作模式。
+- 工具完成即把 activity 从"执行 <工具>"归还为"处理中"；距最近事件超过 45s 显示"等待模型响应 Ns · Esc 中断"（工具静默期显示"工具已执行 Ns"；不自动取消，慢本地模型与长工具是合法状态）。
+- 上下文栏左侧显示工作区和分支，右侧显示轮次和上下文使用情况。
+- 空间不足时按优先级隐藏次要信息；错误、警告和取消状态必须保留可识别摘要。
+
+### Sidebars and Overlays
+
+- Plan 侧栏右侧停靠；分隔线支持鼠标拖动和键盘宽度调整。
+- 侧栏使用左侧竖向分隔线；拖动或悬停时使用 `accent`。
+- Overlay 使用 `bg-card` 和圆角单线边界（╭ ╮ ╰ ╯，内部分隔仍用直线 T 型接头）；顶层 Overlay 使用 `border-accent`，非顶层使用 `border`。
+- Overlay 打开后焦点必须落在可交互叶子控件上，不能停在容器或标题上。
+- 所有鼠标操作必须有等效键盘操作。
+
+## Interaction
+
+交互必须保持单焦点模型。全局与跨视图快捷键在输入区获得焦点时由输入区委托 `ReplShell.TryExecuteShellAction`，在其他焦点状态由根 Shell 兜底；同一个动作只能有一个权威执行路径。
+
+键盘路由遵循五层互斥优先级（`app:exit` 退出 → `OverlayHost` 模态键盘结界截停未消费按键并禁止穿透 → `Autocomplete` 补全浮窗 → `InteractionSession` 内联选择器/提问向导，其中挂起态放行只读检视动作白名单 → `Search` 行内搜索与编辑器本地动作）。
+
+快捷键的默认绑定、上下文和显示名称以 `KeybindingDefaults` 为准；文档只描述稳定语义，不复制完整绑定表。
+
+## Guidelines
+
+- 会话流优先于装饰和次要状态。
+- 语义颜色必须来自 `TuiPalette`；控件 `Scheme` 通过 `TuiStyles` 组合。
+- 状态不能只通过颜色表达，必须提供符号、文字或结构提示。
+- 所有文本绘制必须按显示宽度裁剪和换行，不能直接使用字符串长度推断 CJK/emoji 宽度。
+- 渲染器必须主动填充其负责的背景区域，不能依赖父控件默认背景。
+- 设计文档只保留稳定设计规则；实现状态、历史决策和未来路线放在其他文档中。

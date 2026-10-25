@@ -65,6 +65,68 @@ public static class SessionStateExtensions
     public static void ResetConsecutiveFailures(this AgentSessionStateBag stateBag)
         => stateBag.SetConsecutiveFailures(0);
 
+    /// <summary>获取最近连续失败的工具名称；未设置或已重置时返回 null。</summary>
+    public static string? GetLastFailedToolName(this AgentSessionStateBag stateBag)
+    {
+        var val = stateBag.GetValue<string>(SessionStateKeys.LastFailedToolName);
+        return string.IsNullOrEmpty(val) ? null : val;
+    }
+
+    public static void SetLastFailedToolName(this AgentSessionStateBag stateBag, string? toolName)
+        => stateBag.SetValue(SessionStateKeys.LastFailedToolName, toolName ?? string.Empty);
+
+    /// <summary>获取同一工具的连续失败次数；未设置时返回 0。</summary>
+    public static int GetSameToolConsecutiveFailures(this AgentSessionStateBag stateBag)
+    {
+        var val = stateBag.GetValue<object>(SessionStateKeys.SameToolConsecutiveFailures);
+        return val is int i ? i : 0;
+    }
+
+    public static void SetSameToolConsecutiveFailures(this AgentSessionStateBag stateBag, int value)
+        => stateBag.SetValue(SessionStateKeys.SameToolConsecutiveFailures, (object)value);
+
+    /// <summary>
+    /// 记录一次工具执行失败：若与上次失败工具同名则递增单工具连续失败计数，否则切换目标工具并从 1 开始计数。
+    /// </summary>
+    public static int RecordToolFailure(this AgentSessionStateBag stateBag, string toolName)
+    {
+        lock (GetLock(stateBag))
+        {
+            var lastTool = stateBag.GetLastFailedToolName();
+            var nextCount = string.Equals(lastTool, toolName, StringComparison.OrdinalIgnoreCase)
+                ? stateBag.GetSameToolConsecutiveFailures() + 1
+                : 1;
+            stateBag.SetLastFailedToolName(toolName);
+            stateBag.SetSameToolConsecutiveFailures(nextCount);
+            return nextCount;
+        }
+    }
+
+    /// <summary>重置所有连续失败计数与单工具故障追踪。</summary>
+    public static void ResetToolFailureTracking(this AgentSessionStateBag stateBag)
+    {
+        lock (GetLock(stateBag))
+        {
+            stateBag.SetConsecutiveFailures(0);
+            stateBag.SetSameToolConsecutiveFailures(0);
+            stateBag.SetLastFailedToolName(null);
+        }
+    }
+
+    /// <summary>
+    /// 在新一轮用户消息启动时重置上一轮遗留的恢复/阻拦状态，防止跨用户轮次永久死锁。
+    /// </summary>
+    public static void ResetStateMachineForNewTurn(this AgentSessionStateBag stateBag)
+    {
+        lock (GetLock(stateBag))
+        {
+            stateBag.SetCurrentState(AgentState.Active);
+            stateBag.SetConsecutiveFailures(0);
+            stateBag.SetSameToolConsecutiveFailures(0);
+            stateBag.SetLastFailedToolName(null);
+        }
+    }
+
     /// <summary>未设置时返回 0。</summary>
     public static int GetTotalToolCalls(this AgentSessionStateBag stateBag)
     {

@@ -1,6 +1,5 @@
 using OneCode.Core.Mcp;
 using OneCode.Infrastructure.Mcp;
-using OneCode.App.Tui;
 
 namespace OneCode.App.Services.Mcp;
 

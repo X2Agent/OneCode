@@ -1,4 +1,4 @@
-using OneCode.App.Tui;
+using OneCode.App.Services.Interaction;
 using OneCode.Core.Permissions;
 
 using OneCode.Tests.TestSupport.Tui;
@@ -8,8 +8,7 @@ using Terminal.Gui.Input;
 namespace OneCode.Tests;
 
 /// <summary>
-/// 审批选择器的交互契约（keybindings 计划 §6#8）：查询流里的
-/// <see cref="TuiApprovalRequest"/> 到达界面 → 内联选择器接管键盘 → 用户选择经
+/// 审批选择器的交互契约：审批端口收到请求 → 内联选择器接管键盘 → 用户选择经
 /// <c>ResponseSource</c> 回传成 <see cref="ApprovalDecision"/>。
 ///
 /// 断言面是「回传给调用方的决策」而不是选择器内部字段：同一串按键在不同选项集合
@@ -23,10 +22,11 @@ public sealed class OneCodeToplevelApprovalTests
     [Fact]
     public async Task ApprovalRequest_ValidShellInput_RendersPromptAndAllFourOptions()
     {
-        var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput);
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
+        var approval = new ApprovalInteractionRequest("req-1", "Bash", ValidShellInput);
+        using var shell = TuiTestShell.Create();
 
-        await shell.SubmitQueryAsync("执行构建");
+        shell.OnUiThread<bool>(() => { shell.Toplevel.HandleInteraction(approval); return true; });
+        await shell.WaitUntilAsync(() => shell.Shell.HasActiveInteractionSession(), "审批选择器接管键盘");
 
         shell.Shell.HasActiveInteractionSession().Should().BeTrue("审批未决时必须接管键盘");
 
@@ -42,10 +42,11 @@ public sealed class OneCodeToplevelApprovalTests
     [Fact]
     public async Task ApprovalRequest_EnterOnDefaultOption_ReturnsAllowOnce()
     {
-        var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput);
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
+        var approval = new ApprovalInteractionRequest("req-1", "Bash", ValidShellInput);
+        using var shell = TuiTestShell.Create();
 
-        await shell.SubmitQueryAsync("执行构建");
+        shell.OnUiThread<bool>(() => { shell.Toplevel.HandleInteraction(approval); return true; });
+        await shell.WaitUntilAsync(() => shell.Shell.HasActiveInteractionSession(), "审批选择器接管键盘");
         shell.TypeKey(Key.Enter);
 
         // Enter → 选择器确认 → 收尾经 Invoke 回到 UI 线程后才回传决策，
@@ -57,20 +58,19 @@ public sealed class OneCodeToplevelApprovalTests
 
         decision.Should().Be(ApprovalDecision.AllowOnce, "默认停在「仅本次」，不得升级成永久放行");
         shell.Shell.HasActiveInteractionSession().Should().BeFalse("决策回传后选择器必须收尾");
-        shell.RenderedLines.Should().ContainSingle(
-            line => line.Contains("执行构建", StringComparison.Ordinal),
-            "选择器挂起期间 Enter 只能确认选项，不得再触发一次聊天提交");
+        // Enter 已被选择器消费（决策已回传），不会再落回聊天输入。
     }
 
     [Fact]
     public async Task ApprovalRequest_SelectSessionEscalation_ReturnsAllowAllAndAppliesRuntimeOverride()
     {
         var applied = false;
-        var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput);
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
+        var approval = new ApprovalInteractionRequest("req-1", "Bash", ValidShellInput);
+        using var shell = TuiTestShell.Create();
         shell.Toplevel.ConfigureSessionPermissionEscalation(() => applied = true);
 
-        await shell.SubmitQueryAsync("执行构建");
+        shell.OnUiThread<bool>(() => { shell.Toplevel.HandleInteraction(approval); return true; });
+        await shell.WaitUntilAsync(() => shell.Shell.HasActiveInteractionSession(), "审批选择器接管键盘");
         shell.TypeKey(Key.CursorDown);
         shell.TypeKey(Key.CursorDown);
         shell.TypeKey(Key.Enter);
@@ -87,10 +87,11 @@ public sealed class OneCodeToplevelApprovalTests
     [Fact]
     public async Task ApprovalRequest_EscDismiss_ReturnsDeny()
     {
-        var approval = new TuiApprovalRequest("req-1", "Bash", ValidShellInput);
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
+        var approval = new ApprovalInteractionRequest("req-1", "Bash", ValidShellInput);
+        using var shell = TuiTestShell.Create();
 
-        await shell.SubmitQueryAsync("执行构建");
+        shell.OnUiThread<bool>(() => { shell.Toplevel.HandleInteraction(approval); return true; });
+        await shell.WaitUntilAsync(() => shell.Shell.HasActiveInteractionSession(), "审批选择器接管键盘");
         shell.TypeKey(Key.Esc);
 
         var decision = await approval.ResponseSource.Task.WaitAsync(
@@ -103,10 +104,11 @@ public sealed class OneCodeToplevelApprovalTests
     [Fact]
     public async Task ApprovalRequest_MalformedToolInput_OffersDenyOnlyAndCannotBeEscalated()
     {
-        var approval = new TuiApprovalRequest("req-1", "Bash", MalformedInput);
-        using var shell = TuiTestShell.Create(b => b.Stream(approval, new TuiDone(1, 1)));
+        var approval = new ApprovalInteractionRequest("req-1", "Bash", MalformedInput);
+        using var shell = TuiTestShell.Create();
 
-        await shell.SubmitQueryAsync("执行构建");
+        shell.OnUiThread<bool>(() => { shell.Toplevel.HandleInteraction(approval); return true; });
+        await shell.WaitUntilAsync(() => shell.Shell.HasActiveInteractionSession(), "审批选择器接管键盘");
 
         shell.TranscriptText.Should().Contain("⚠ 参数无法解析");
         shell.TranscriptText.Should().Contain("拒绝");

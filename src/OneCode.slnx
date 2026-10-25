@@ -1,7 +1,8 @@
 <Solution>
   <Project Path="OneCode.App/OneCode.App.csproj" />
   <Project Path="OneCode.Automation/OneCode.Automation.csproj" />
-  <Project Path="OneCode.Cli/OneCode.Cli.csproj" />
+  <Project Path="OneCode.Tui/OneCode.Tui.csproj" />
+  <Project Path="OneCode.WebUI/OneCode.WebUI.csproj" />
   <Project Path="OneCode.Core/OneCode.Core.csproj" />
   <Project Path="OneCode.Infrastructure/OneCode.Infrastructure.csproj" />
   <Project Path="OneCode.Tests/OneCode.Tests.csproj" />

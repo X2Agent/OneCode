@@ -365,6 +365,6 @@
 | [KeybindingParser.cs](../src/OneCode.Core/Keybindings/KeybindingParser.cs) | 按键字符串解析 |
 | [KeybindingValidator.cs](../src/OneCode.Core/Keybindings/KeybindingValidator.cs) | 绑定验证 |
 | [KeybindingsCommand.cs](../src/OneCode.App/Commands/KeybindingsCommand.cs) | `/keybindings` 命令实现 |
-| [ReplShell.Keyboard.cs](../src/OneCode.App/Tui/ReplShell.Keyboard.cs) | TUI 键盘分发 |
-| [ChatInputView.Keys.cs](../src/OneCode.App/Tui/ChatInputView.Keys.cs) | 输入框键盘处理 |
-| [TuiKeyAdapter.cs](../src/OneCode.App/Tui/TuiKeyAdapter.cs) | Terminal.Gui 按键适配器 |
+| [ReplShell.Keyboard.cs](../src/OneCode.Tui/Tui/ReplShell.Keyboard.cs) | TUI 键盘分发 |
+| [ChatInputView.Keys.cs](../src/OneCode.Tui/Tui/ChatInputView.Keys.cs) | 输入框键盘处理 |
+| [TuiKeyAdapter.cs](../src/OneCode.Tui/Tui/TuiKeyAdapter.cs) | Terminal.Gui 按键适配器 |

@@ -1,7 +1,6 @@
 using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
-using OneCode.App.Tui;
 using OneCode.Core.Build;
 using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
@@ -23,12 +22,13 @@ public interface IPlanAgentRunDispatcher
 
 /// <summary>
 /// Application-level dispatcher for approved-plan execution. It owns the fresh agent-run
-/// boundary, Build mode switch, workflow events, and TUI event projection.
+/// boundary, Build mode switch, workflow events, and run-event projection to frontends
+/// (via <see cref="RunEventBridge"/>).
 /// </summary>
 public sealed class PlanAgentRunDispatcher(
     IPlanWorkflowApplicationService workflowService,
     PlanCardPublisher publisher,
-    TuiInteractionBridge tui,
+    OneCode.App.Services.RunEventBridge runEvents,
     IModelManager modelManager,
     IAppStateAccessor appState,
     ILogger<PlanAgentRunDispatcher> logger)
@@ -216,7 +216,7 @@ public sealed class PlanAgentRunDispatcher(
             }
 
             publisher.Publish(current);
-            tui.EmitEvent?.Invoke(new TuiWorkflowRunStarted(
+            runEvents.Publish(new WorkflowRunStartedEvent(
                 current.Id.ToString(),
                 approvedSnapshot.Revision,
                 approvedSnapshot.ContentHash));
@@ -261,8 +261,7 @@ public sealed class PlanAgentRunDispatcher(
                         buildRunBound = true;
                     }
                 }
-                if (TuiEventMapper.MapQueryEventToTuiEvent(queryEvent) is { } tuiEvent)
-                    tui.EmitEvent?.Invoke(tuiEvent);
+                runEvents.Publish(queryEvent);
             }
 
             // 计划成败只看 BuildRun 终态：Completed = run 正常结束且最终验证通过。
@@ -309,16 +308,16 @@ public sealed class PlanAgentRunDispatcher(
             }
             if (latest is not null)
                 publisher.Publish(latest);
-            tui.EmitEvent?.Invoke(new TuiError(
+            runEvents.Publish(new ErrorEvent(
                 latest?.State == PlanWorkflowState.StartingExecution
                     ? $"Approved plan start failed and will retry after {latest.NextRetryAt:u}: {ex.Message}"
                     : $"Approved plan execution failed: {ex.Message}"));
         }
         finally
         {
-            // 与 TuiWorkflowRunStarted 配对：无论成功、失败还是异常收尾都要复位 TUI 的
+            // 与 WorkflowRunStartedEvent 配对：无论成功、失败还是异常收尾都要复位前端的
             // 忙碌/流式状态，否则 run 结束后界面会一直停留在"等待模型响应"。
-            tui.EmitEvent?.Invoke(new TuiWorkflowRunEnded(current.Id.ToString()));
+            runEvents.Publish(new WorkflowRunEndedEvent(current.Id.ToString()));
         }
     }
 

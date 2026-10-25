@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "OneCode.Tui": {
+      "commandName": "Project",
+      "commandLineArgs": "--cwd E:\\OneCode\\.dev-workspace"
+    }
+  }
+}

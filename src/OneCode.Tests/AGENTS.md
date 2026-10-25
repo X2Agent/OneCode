@@ -103,19 +103,22 @@ public void MemoryExtract_TooFewMessages_Skips()
 ```
 代码里根本没有 `>= 4` 这个表达式，这是把测试代码当被测代码。
 
-### 2.6 反射计数 / 类型枚举
+### 2.6 反射计数 / 数量断言
 
 ❌ 禁止：
 ```csharp
 [Fact]
-public void AllConcreteTuiEventTypes_AreAccountedFor()
+public void AllConcreteQueryEventTypes_AreAccountedFor()
 {
-    var allTypes = typeof(TuiEvent).Assembly.GetTypes()
-        .Where(t => t.IsAssignableTo(typeof(TuiEvent)) && !t.IsAbstract);
-    allTypes.Should().HaveCount(10);
+    var allTypes = typeof(QueryEvent).Assembly.GetTypes()
+        .Where(t => t.IsAssignableTo(typeof(QueryEvent)) && !t.IsAbstract);
+    allTypes.Should().HaveCount(25);
 }
 ```
 脆弱的数字硬编码，新增一个事件类型就失败，但不代表任何业务错误。
+
+✅ 允许（契约基线）：`QueryEventContractTests` 用显式类型名清单与程序集反射做**集合相等**断言——
+新增或删除子类型必须同步清单与两个前端渲染，这才是真缺陷；基线与数量断言无关。
 
 ### 2.7 纯 Mock 行为验证（无业务断言）
 

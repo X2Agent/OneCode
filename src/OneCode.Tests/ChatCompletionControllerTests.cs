@@ -1,5 +1,6 @@
-using OneCode.App.Tui;
+using OneCode.App.Commands;
 using OneCode.Core.Commands;
+using OneCode.Tui;
 
 namespace OneCode.Tests;
 

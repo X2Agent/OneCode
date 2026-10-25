@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.Automation.Cron;
 using OneCode.Automation.ModelCatalog;
 using OneCode.Automation.Yolo;
+using OneCode.Core.Cron;
 using OneCode.Core.Tools;
 
 namespace OneCode.Automation;
@@ -18,11 +19,16 @@ public static class ServiceCollectionExtensions
     /// Register <see cref="CronSchedulerService"/> as both a singleton and a hosted service
     /// (double-register so the rest of the app can resolve the singleton while the hosted
     /// lifecycle wraps the same instance). Caller must register an <see cref="ICronJobExecutor"/>
-    /// implementation separately.
+    /// implementation separately. <paramref name="projectDir"/> 为调度器服务的项目目录，
+    /// durable 作业按此过滤，只在归属项目的进程中触发。
     /// </summary>
-    public static IServiceCollection AddCronScheduler(this IServiceCollection services)
+    public static IServiceCollection AddCronScheduler(this IServiceCollection services, string? projectDir = null)
     {
-        services.AddSingleton<CronSchedulerService>();
+        services.AddSingleton<CronSchedulerService>(sp => new CronSchedulerService(
+            sp.GetRequiredService<ILogger<CronSchedulerService>>(),
+            sp.GetRequiredService<ICronParser>(),
+            sp.GetRequiredService<ICronJobExecutor>(),
+            projectDir));
         services.AddHostedService(sp => sp.GetRequiredService<CronSchedulerService>());
         return services;
     }

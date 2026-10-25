@@ -39,16 +39,6 @@ public sealed class AskUserQuestionTool(IUserQuestionService userQuestionService
                 suggestedNextAction: "Provide at least one question with 'question' text (and 'id' when asking more than one).");
         }
 
-        // Headless 路径：没有交互式服务可用。
-        // 返回 Error 而非 Success，防止 agent 把固定字符串误当作用户的真实回答写进后续决策。
-        if (_userQuestionService is null)
-        {
-            return ToolResult.Error(
-                $"AskUserQuestion failed: no interactive terminal is available. Questions were: {string.Join("; ", list.Select(q => q.Question))}. " +
-                "Do NOT treat this as user answers — proceed with a safe default or skip the action that required clarification.",
-                suggestedNextAction: "Choose reasonable defaults or skip the step that required user input.");
-        }
-
         // 单题：简单问答（id 仅向导引用答案时才需要）。
         if (list.Length == 1)
         {
@@ -59,8 +49,8 @@ public sealed class AskUserQuestionTool(IUserQuestionService userQuestionService
                 return ToolResult.Success($"Question: {single.Question}\nAnswer: {answer}");
             }
 
-            // 服务返回 null：可能是用户取消，也可能是 TUI 环境不可用（TuiContext 未注入）。
-            // 同样返回 Error，避免 agent 把取消标记当作用户意图。
+            // 服务返回 null：用户取消或无头宿主无接收者。
+            // 返回 Error 而非 Success，防止 agent 把取消标记误当作用户的真实回答写进后续决策。
             return ToolResult.Error(
                 $"AskUserQuestion failed: the user did not provide an answer (cancelled or no interactive UI). Question was: {single.Question}. " +
                 "Do NOT treat this as a user answer.",

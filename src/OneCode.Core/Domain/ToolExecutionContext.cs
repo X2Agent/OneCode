@@ -14,6 +14,9 @@ public enum GuidanceKind
 
     /// <summary>StateMachineMiddleware 的任务级恢复指导（[STATE MACHINE]）。</summary>
     TaskRecovery,
+
+    /// <summary>配额上限或运行封口等编排门控信号，引导模型收敛或切换后续动作，不计入工具故障。</summary>
+    NextSteps,
 }
 
 /// <summary>

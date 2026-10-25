@@ -12,7 +12,6 @@ using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.App.Tools;
 using OneCode.Core.Build;
-using OneCode.Core.Domain;
 using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
@@ -103,34 +102,6 @@ public sealed partial class QueryStreamEngineTests
         seenByFork.ModelId.Should().Be("model1");
         seenByFork.Tools.Should().NotBeNull("an empty tool list is what starved the sub-agent of WebSearch");
         seenByFork.Tools.Should().Contain(t => t.Name == "WebSearch");
-    }
-
-    [Fact]
-    public void NormalizeForToolCallingTransport_StripsEmptyText_WhenToolContentsExist()
-    {
-        var messages = new[]
-        {
-            new ChatMessage(ChatRole.Assistant, new AIContent[]
-            {
-                new TextContent(string.Empty),
-                new FunctionCallContent("call_1", "LS", null)
-            }),
-            new ChatMessage(ChatRole.User, new AIContent[]
-            {
-                new TextContent(string.Empty),
-                new FunctionResultContent("call_1", "ok")
-            })
-        };
-
-        var normalized = MessageApiInvariantHelper.NormalizeForToolCallingTransport(messages);
-
-        foreach (var message in normalized)
-        {
-            message.Contents.Should().NotContain(
-                c => c is TextContent && ((TextContent)c).Text == string.Empty);
-        }
-        normalized[0].Contents.Should().Contain(c => c is FunctionCallContent);
-        normalized[1].Contents.Should().Contain(c => c is FunctionResultContent);
     }
 
     // Core streaming logic tests — verify tool dedup, usage extraction, turn boundary
@@ -267,32 +238,6 @@ public sealed partial class QueryStreamEngineTests
             Arg.Any<SessionId>(),
             Arg.Any<IReadOnlyList<CompletedToolBatch>>(),
             Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StreamQueryAsync_ExtractsUsageFromUpdate_EmitsUsageEvent()
-    {
-        var usageDetails = new UsageDetails
-        {
-            InputTokenCount = 500,
-            OutputTokenCount = 200,
-            CachedInputTokenCount = 100,
-        };
-
-        var (sut, _) = CreateSutWithMockedRunner(writer =>
-        {
-            writer.TryWrite(new AgentResponseUpdate
-            {
-                Contents = { new UsageContent(usageDetails), new TextContent("response") }
-            });
-        });
-
-        var events = await CollectEventsAsync(sut);
-
-        var usageEvents = events.OfType<UsageUpdateEvent>().ToList();
-        usageEvents.Should().HaveCount(1, "usage update should be emitted exactly once");
-        usageEvents[0].Usage.InputTokens.Should().Be(500);
-        usageEvents[0].Usage.OutputTokens.Should().Be(200);
     }
 
     [Fact]
@@ -614,7 +559,9 @@ public sealed partial class QueryStreamEngineTests
             chatClient,
             NullLoggerFactory.Instance,
             serviceProvider,
-            toolMetadata);
+            toolMetadata,
+            approvalPromptSink: Substitute.For<Core.Permissions.IApprovalPromptSink>(),
+            budgetDecisionService: Substitute.For<Core.Goals.IBudgetDecisionService>());
 
         return new QueryStreamEngine(logger,
             mainAgentRunner: mainAgentRunner,
@@ -629,6 +576,19 @@ public sealed partial class QueryStreamEngineTests
                 Substitute.For<ITokenUsageTracker>(),
                 new TokenBreakdownEstimator(TestSupport.TestTokenEstimators.Default),
                 Substitute.For<INotifierService>()));
+    }
+
+    [Fact]
+    public void ShouldNotifyLongRunCompletion_GatesOnUnattendedAndThreshold()
+    {
+        var longRun = TimeSpan.FromMinutes(3);
+
+        QueryStreamEngine.ShouldNotifyLongRunCompletion(unattended: false, elapsed: longRun)
+            .Should().BeTrue("长交互任务完成时终端可能在后台，需要 toast 抢回注意力");
+        QueryStreamEngine.ShouldNotifyLongRunCompletion(unattended: true, elapsed: longRun)
+            .Should().BeFalse("无人值守路径（cron）由 CronJobExecutor 通知，此处放行会双发");
+        QueryStreamEngine.ShouldNotifyLongRunCompletion(unattended: false, elapsed: TimeSpan.FromSeconds(30))
+            .Should().BeFalse("短任务不通知");
     }
 }
 

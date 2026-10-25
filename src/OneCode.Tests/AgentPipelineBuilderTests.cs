@@ -602,4 +602,31 @@ public sealed class AgentPipelineBuilderTests
         metrics.ExternalWebToolCallCount.Should().Be(3);
         metrics.ToolCallCount.Should().Be(5);
     }
+
+    [Fact]
+    public async Task ToolResultUnwrapMiddleware_UnwrapsJsonElementEnvelopeFromAIFunction()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // 1) JSON 原生模型（如 claude-sonnet-4-5）：还原 ToolResult 后输出 PascalCase JSON 信封
+        var unwrapJson = new ToolResultUnwrapMiddleware(modelId: "claude-sonnet-4-5", providerId: "anthropic").CreateDelegate();
+        // 2) 非 JSON 降级模型（如 ollama 本地模型）：还原 ToolResult 后输出 [ERROR] 文本前缀
+        var unwrapText = new ToolResultUnwrapMiddleware(modelId: "llama3", providerId: "ollama").CreateDelegate();
+        var dummyAgent = Substitute.For<AIAgent>();
+        var ctx = CreateContext("WebFetch");
+
+        // 模拟 MEAI ReflectionAIFunction.InvokeAsync 将 Task<ToolResult> 序列化为 JsonElement（camelCase）
+        var jsonElement = JsonSerializer.SerializeToElement(
+            ToolResult.Error("HTTP 502 Bad Gateway"),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var jsonOutput = await unwrapJson(dummyAgent, ctx, (_, _) => new ValueTask<object?>(jsonElement), ct);
+        jsonOutput.Should().BeOfType<string>()
+            .Which.Should().Contain("\"IsError\":true")
+            .And.Contain("HTTP 502 Bad Gateway");
+
+        var textOutput = await unwrapText(dummyAgent, ctx, (_, _) => new ValueTask<object?>(jsonElement), ct);
+        textOutput.Should().BeOfType<string>()
+            .Which.Should().StartWith("[ERROR]")
+            .And.Contain("HTTP 502 Bad Gateway");
+    }
 }

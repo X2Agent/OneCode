@@ -12,9 +12,10 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | 子目录 | 职责 |
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
+| `Daemon/` | 无头守护进程：`DaemonHost` 宿主 + `DaemonLifecycle`（互斥体/状态文件/停止哨兵）+ `DaemonStopWatcher` |
 | `Tools/` | AI 工具实现：Agent 调用的 27 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
 | `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Hooks、Lsp、Mcp 等 |
-| `Tui/` | Terminal.Gui 界面组件（TUI 独有依赖隔离在此） |
+| `Query/` | 运行事件契约：`QueryEvent` 层级（唯一 UI 契约）、`StreamingSession`、`QueryStreamEngine`（**零 Terminal.Gui、零前端引用**） |
 | `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
 | `Session/` | 会话上下文和生命周期管理 |
 | `prompts/` | Prompt 模板文件（`system/*.prompt`） |
@@ -29,11 +30,11 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 |------|------|----|
 | `OneCode.Core` | 接口与领域模型 | Core |
 | `OneCode.Infrastructure` | 外部系统适配 | Infrastructure |
-| `Terminal.Gui` | TUI 渲染（仅 `Tui/` 子目录） | App |
+| `Terminal.Gui` | **禁止**——TUI 渲染栈只允许出现在 `OneCode.Tui` 项目 | OneCode.Tui |
 | `Microsoft.Extensions.AI` | AI 调用抽象（`IChatClient` / `ChatMessage` 等核心接口） | App |
 | `Microsoft.Extensions.Hosting` | DI + 生命周期 | App |
 | `YamlDotNet` | YAML 解析（Skill frontmatter、主题文件） | App |
-| `Markdig` | Markdown 渲染（TUI 消息展示） | App |
+| `Markdig` | **禁止**——Markdown 渲染在 `OneCode.Tui` | OneCode.Tui |
 | `CliWrap` | 进程调用（Bash/PowerShell 工具执行） | App |
 | `Microsoft.Extensions.FileSystemGlobbing` | 文件 Glob 匹配 | App |
 
@@ -86,7 +87,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 
 **判断准则**：
 - **下沉到 Infrastructure**：纯 SDK 适配代码（无状态、仅依赖 Core 抽象）→ Infrastructure。例：`ChatClientFactory`、MAF 中间件。
-- **下沉到 Automation**：仅依赖 Core 抽象的后台调度/启动加载服务（`BackgroundService` / `IHostedService`）→ Automation。例：Cron 调度、Hook 清理、ModelCatalog 刷新、YOLO 规则加载。
+- **下沉到 Automation**：仅依赖 Core 抽象的后台调度/启动加载服务（`BackgroundService` / `IHostedService`）→ Automation。例：Cron 调度、ModelCatalog 刷新、YOLO 规则加载。
 - **保留在 App**：业务编排代码（有状态、依赖多个 App 服务、组合多个组件）→ App。例：Runners、ContextProviders。
 
 ### 已迁出到 OneCode.Automation 的服务
@@ -283,12 +284,15 @@ var harness = await promptManager.GetPromptAsync(HarnessPromptName, ct).Configur
 
 ---
 
-## TUI 组件规范（Tui/）
+## UI 事件契约规范
 
-- **颜色**：所有颜色通过 `TuiPalette` 语义 token 取值，Terminal.Gui `Scheme` 通过 `TuiStyles` 组合，**禁止硬编码**颜色值
-- **状态指示器**：新增全局状态（如沙箱模式 🔒、Plan 模式 📋）须在 `AgentStatusBar` 中注册
-- **Terminal.Gui 限制**：不支持字体大小/行间距配置，不支持鼠标精确位置，不支持透明背景
-- **文件体量与拆分原则**：~300 行是**参考信号而非硬上限**，内聚优先于行数。超限时的拆分优先级：① 提取**真实类型**（协作者类 / 静态工具类，如 `ChatCompletionController`、`CompletionTextMetrics`、`IInteractionSession`）；② 仅当成员被框架绑定（View 的 `OnDrawingContent` / 按键处理）或强耦合共享私有状态时才用 partial（如 `ChatInputView.Keys.cs`、`MessageListView.Rendering.cs`）；③ **禁止**为凑行数把无状态方法组或互不相关的功能捆进新 partial 文件。partial 文件名与类名对齐（`OneCodeToplevel*.cs`），头注释标明自身职责
+- 唯一契约是 `Query/QueryEventTypes.cs` 的 `QueryEvent` 层级：引擎只产 UI 无关的强类型事件，前端只消费它
+- 新增子类型必须同时更新 `src/OneCode.Tests/QueryEventContractTests.cs` 的基线清单、TUI 分发器与 WebUI 客户端；该测试对程序集内全部具体子类型做集合相等断言，不同步即失败
+- 「穷尽性」指每个子类型在两个前端都有显式渲染分支的行为测试；不得用「反射计数硬编码数字」代替。未知子类型必须在两个前端各留一处 Warning 日志，不得静默丢弃
+- 交互（审批 / 提问 / 向导 / 预算）走 Core 端口，事件不携带 `TaskCompletionSource`；端口默认实现留在 App（无头语义），交互式前端用 `Replace` 覆盖
+- **零 Terminal.Gui 依赖**：不得 `using Terminal.Gui`，也不得引用 `OneCode.Tui` / `OneCode.WebUI` 类型
+- 非运行通知（MCP 连接 / LSP 诊断）不经事件流，由前端直接订阅源事件
+- Terminal.Gui 组件规范（颜色 token、状态栏注册、文件拆分原则）与 TUI 项目约束见 [OneCode.Tui/AGENTS.md](../OneCode.Tui/AGENTS.md)
 
 ---
 

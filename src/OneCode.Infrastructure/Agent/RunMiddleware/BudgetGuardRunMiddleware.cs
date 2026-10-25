@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Goals;
-using OneCode.Core.Permissions;
 using OneCode.Core.Tokens;
 using System.Runtime.CompilerServices;
 
@@ -45,9 +44,10 @@ public static class BudgetGuardRunMiddleware
     /// BUILD 模式传 run 启动快照，使 Plan 阶段调研消耗不占用计划执行的预算。
     /// </param>
     /// <param name="onBudgetExceeded">
-    /// 预算 100% 消耗时的用户询问回调（交互模式）。返回 <see cref="ApprovalDecision.AllowOnce"/> =
-    /// 追加预算继续（上限加倍放行本轮）；<see cref="ApprovalDecision.AllowAlways"/> = 收尾总结（注入收尾
-    /// turn 后正常结束，后续 run 硬停）；<see cref="ApprovalDecision.Deny"/> = 直接停止。
+    /// 预算 100% 消耗时的用户询问回调（交互模式），经 <see cref="IBudgetDecisionService"/> 端口
+    /// 取得 <see cref="GoalBudgetDecision"/>。返回 <see cref="GoalBudgetDecision.ContinueWithExtraBudget"/> =
+    /// 追加预算继续（上限加倍放行本轮）；<see cref="GoalBudgetDecision.WrapUpAndStop"/> = 收尾总结（注入收尾
+    /// turn 后正常结束，后续 run 硬停）；其余取值（Pause / Abort / SkipCurrentStep）= 直接停止。
     /// null（GOAL/cron 等无人值守路径）时硬停短路。
     /// </param>
     /// <param name="onBudgetWarning">70%/90% 预警回调（参数：级别、超出基线的已消耗量、预算上限）。</param>
@@ -60,7 +60,7 @@ public static class BudgetGuardRunMiddleware
             long? maxBudgetTokens,
             ILogger? logger,
             long budgetBaselineTokens = 0,
-            Func<long, long, CancellationToken, Task<ApprovalDecision>>? onBudgetExceeded = null,
+            Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? onBudgetExceeded = null,
             Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null)
     {
         // 无 ITokenLedger 或无预算上限 → 不执行预算检查（测试/无预算场景）
@@ -106,14 +106,14 @@ public static class BudgetGuardRunMiddleware
                 if (onBudgetExceeded is not null)
                 {
                     var decision = await onBudgetExceeded(delta, budgetLimit, ct).ConfigureAwait(false);
-                    if (decision == ApprovalDecision.AllowOnce)
+                    if (decision == GoalBudgetDecision.ContinueWithExtraBudget)
                     {
                         effectiveLimit = budgetLimit * 2;
                         logger?.LogWarning(
                             "BudgetGuard: user approved doubling the budget to {NewLimit:N0} for this run (delta {Delta:N0})",
                             effectiveLimit, delta);
                     }
-                    else if (decision == ApprovalDecision.AllowAlways)
+                    else if (decision == GoalBudgetDecision.WrapUpAndStop)
                     {
                         // 收尾总结：注入最后一个收尾 turn，之后本 pipeline 实例硬停
                         exhausted = true;
@@ -159,14 +159,14 @@ public static class BudgetGuardRunMiddleware
                 if (onBudgetExceeded is not null)
                 {
                     var decision = await onBudgetExceeded(delta, budgetLimit, ct).ConfigureAwait(false);
-                    if (decision == ApprovalDecision.AllowOnce)
+                    if (decision == GoalBudgetDecision.ContinueWithExtraBudget)
                     {
                         effectiveLimit = budgetLimit * 2;
                         logger?.LogWarning(
                             "BudgetGuard: user approved doubling the budget to {NewLimit:N0} for this run (delta {Delta:N0})",
                             effectiveLimit, delta);
                     }
-                    else if (decision == ApprovalDecision.AllowAlways)
+                    else if (decision == GoalBudgetDecision.WrapUpAndStop)
                     {
                         exhausted = true;
                         logger?.LogWarning(
