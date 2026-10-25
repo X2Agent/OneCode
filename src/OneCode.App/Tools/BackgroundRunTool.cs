@@ -48,7 +48,8 @@ public sealed class BackgroundRunTool
         var cwdResult = PathsHelper.SafeResolve(cwd, _wd.WorkingDirectory);
         if (!cwdResult.IsSuccess)
             return ToolResult.Error($"Error: working directory '{cwd}' is outside the allowed workspace");
-        cwd = cwdResult.Value;
+        // IsSuccess 已保证 Value 非空
+        var resolvedCwd = cwdResult.Value!;
 
         var task = _taskService.CreateTask(
             command,
@@ -61,47 +62,16 @@ public sealed class BackgroundRunTool
         // Use a tracked background task instead of fire-and-forget
         var bgTask = Task.Run(async () =>
         {
-            System.Diagnostics.Process? proc = null;
             try
             {
                 _taskService.UpdateTask(task.Id, status: TaskStatus.InProgress);
-                var isWindows = OperatingSystem.IsWindows();
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = isWindows ? "cmd" : "sh",
-                    WorkingDirectory = cwd,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                psi.ArgumentList.Add(isWindows ? "/c" : "-c");
-                psi.ArgumentList.Add(command);
-
-                proc = System.Diagnostics.Process.Start(psi);
-                if (proc is null) { _taskService.UpdateTask(task.Id, status: TaskStatus.Failed); return; }
-
-                // Task 'stop' 取消 token 时杀掉整个进程树（cmd/sh 启动的子进程一并终止）
-                using var killReg = taskToken.Register(() =>
-                {
-                    try { proc.Kill(entireProcessTree: true); }
-                    catch (Exception killEx)
-                    {
-                        _logger.LogDebug(killEx, "Failed to kill process tree for task {TaskId}", task.Id);
-                    }
-                });
-
-                var stdoutTask = proc.StandardOutput.ReadToEndAsync(taskToken);
-                var stderrTask = proc.StandardError.ReadToEndAsync(taskToken);
-                await proc.WaitForExitAsync(taskToken).ConfigureAwait(false);
-                var stdout = await stdoutTask.ConfigureAwait(false);
-                var stderr = await stderrTask.ConfigureAwait(false);
+                var (exitCode, stdout, stderr) = await BackgroundShellProcess.RunAsync(command, resolvedCwd, taskToken, _logger).ConfigureAwait(false);
 
                 var output = stdout + stderr;
                 if (!string.IsNullOrWhiteSpace(output))
                     _taskService.AppendTaskOutput(task.Id, output.TrimEnd());
                 _taskService.UpdateTask(task.Id,
-                    status: proc.ExitCode == 0 ? TaskStatus.Completed : TaskStatus.Failed);
+                    status: exitCode == 0 ? TaskStatus.Completed : TaskStatus.Failed);
             }
             catch (OperationCanceledException) when (taskToken.IsCancellationRequested)
             {
@@ -113,10 +83,6 @@ public sealed class BackgroundRunTool
                 _logger.LogError(ex, "Background task {TaskId} failed", task.Id);
                 _taskService.AppendTaskOutput(task.Id, $"Error: {ex.Message}");
                 _taskService.UpdateTask(task.Id, status: TaskStatus.Failed);
-            }
-            finally
-            {
-                proc?.Dispose();
             }
         }, CancellationToken.None);
 
