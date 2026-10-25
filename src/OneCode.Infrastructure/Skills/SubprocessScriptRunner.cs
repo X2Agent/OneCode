@@ -1,6 +1,6 @@
 using Microsoft.Agents.AI;
 
-namespace OneCode.App.Skills;
+namespace OneCode.Infrastructure.Skills;
 
 /// <summary>
 /// Runs file-based skill scripts as child processes.

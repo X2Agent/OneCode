@@ -1,5 +1,5 @@
 using Microsoft.Agents.AI;
-using OneCode.App.Skills;
+using OneCode.Infrastructure.Skills;
 using OneCode.Core.Mcp;
 using OneCode.Core.Skills;
 using OneCode.Infrastructure.Mcp;

@@ -1,7 +1,5 @@
-using System.Text;
-using OneCode.Infrastructure;
 
-namespace OneCode.App.Logging;
+namespace OneCode.Infrastructure;
 
 /// <summary>
 /// 调试文件日志通道——按会话写 <c>{configDir}/debug/{sessionId}.log</c>。

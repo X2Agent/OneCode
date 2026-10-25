@@ -2,7 +2,7 @@ using OneCode.Core.Config;
 using OneCode.App.Query;
 using OneCode.Automation.Cron;
 using OneCode.App.Services.Mcp;
-using OneCode.App.Services.Notifier;
+using OneCode.Infrastructure;
 
 namespace OneCode.App.Services.Cron;
 

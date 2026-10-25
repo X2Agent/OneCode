@@ -6,7 +6,7 @@ using OneCode.App.Services;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.App.Services.Compact;
-using OneCode.App.Services.Notifier;
+using OneCode.Infrastructure;
 using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;

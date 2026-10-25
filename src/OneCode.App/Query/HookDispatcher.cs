@@ -1,4 +1,4 @@
-using OneCode.App.Services.Notifier;
+using OneCode.Infrastructure;
 using OneCode.Core.Config;
 
 namespace OneCode.App.Query;

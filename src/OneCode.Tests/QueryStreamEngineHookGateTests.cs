@@ -6,7 +6,7 @@ using NSubstitute;
 using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.Agent;
-using OneCode.App.Services.Notifier;
+using OneCode.Infrastructure;
 using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.App.Tools;

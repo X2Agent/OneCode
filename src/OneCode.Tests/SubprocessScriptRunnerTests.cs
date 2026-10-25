@@ -2,7 +2,7 @@ using System.Reflection;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using OneCode.App.Skills;
+using OneCode.Infrastructure.Skills;
 
 namespace OneCode.Tests;
 

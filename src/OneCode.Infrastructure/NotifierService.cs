@@ -1,4 +1,4 @@
-namespace OneCode.App.Services.Notifier;
+namespace OneCode.Infrastructure;
 
 public interface INotifierService
 {

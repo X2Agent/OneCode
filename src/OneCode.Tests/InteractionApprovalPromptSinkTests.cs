@@ -1,6 +1,6 @@
 using NSubstitute;
 using OneCode.App.Services.Interaction;
-using OneCode.App.Services.Notifier;
+using OneCode.Infrastructure;
 using OneCode.Core.Config;
 using OneCode.Core.Permissions;
 using OneCode.Tui;

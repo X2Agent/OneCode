@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using OneCode.Core.IO;
 using OneCode.Core.Lsp;
-using OneCode.App.Services.Notifier;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Media;
 using OneCode.Infrastructure.Remote;
