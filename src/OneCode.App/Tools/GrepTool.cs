@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using OneCode.App.Services.Search;
+using OneCode.Infrastructure.Search;
 
 namespace OneCode.App.Tools;
 

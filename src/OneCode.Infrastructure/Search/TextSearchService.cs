@@ -1,10 +1,8 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileSystemGlobbing;
-using OneCode.App.Tools;
+using OneCode.Infrastructure.Tools;
 using OneCode.Core.IO;
-using OneCode.Infrastructure;
 
-namespace OneCode.App.Services.Search;
+namespace OneCode.Infrastructure.Search;
 
 /// <summary>
 /// 文本搜索内核实现。ripgrep 可用时优先（速度 + 原生 PCRE 语义），否则回退到 C# Regex 逐文件扫描。
@@ -408,7 +406,7 @@ public sealed class TextSearchService(
         return results;
     }
 
-    internal static string TruncateLongLine(string line, int matchIndex = 0)
+    public static string TruncateLongLine(string line, int matchIndex = 0)
     {
         if (string.IsNullOrEmpty(line) || line.Length <= MaxLineColumns)
             return line;

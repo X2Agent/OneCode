@@ -5,7 +5,7 @@ using OneCode.Infrastructure;
 using OneCode.Core.IO;
 
 using Microsoft.Extensions.Logging.Abstractions;
-using OneCode.App.Services.Search;
+using OneCode.Infrastructure.Search;
 
 namespace OneCode.Tests;
 

@@ -1,4 +1,4 @@
-namespace OneCode.App.Services.Search;
+namespace OneCode.Infrastructure.Search;
 
 /// <summary>
 /// 文本搜索请求参数。OutputMode 取值：files_with_matches / count / content（默认）。

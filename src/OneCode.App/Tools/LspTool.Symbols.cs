@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using OneCode.App.Services.Search;
+using OneCode.Infrastructure.Search;
 using OneCode.Core.Results;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Config;

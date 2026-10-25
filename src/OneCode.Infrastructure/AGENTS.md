@@ -30,12 +30,12 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底），供 Build / Goals / Workflows 的 run store 复用 |
 | `Prompt/` | 文件 Prompt 存储（`FilePromptStore`） |
 | `Remote/` | 远程 Agent 通信（`SshRemoteService` / `SshToolHelper`，SSH.NET） |
-| `Search/` | Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |
+| `Search/` | 文本搜索内核（`TextSearchService`：ripgrep 优先 + C# Regex 回退，契约 `ITextSearchService`）与 Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |
 | `Skills/` | Skill frontmatter 解析（`SkillFrontmatterParser`，YamlDotNet）+ Skill 模型（`SkillTypes`） |
 | `Setup/` | 自更新域：GitHub Release 版本检查（`ReleaseNotesService`）+ 下载/校验/解压/原地替换流水线（`UpgradeService`） |
 | `Tasks/` | 子代理任务落盘（`JsonTaskStore`） |
 | `Text/` | 纯文本处理：统一 diff（`UnifiedDiff`）、HTML→Markdown（`HtmlToMarkdownConverter`，AngleSharp）、文件编码/行尾检测（`FileEncodingHelper`）、LSP URI 转换（`LspUriHelper`） |
-| `Tools/` | 工具域适配（`GenericVerificationProvider` / `ProjectCommandDetector`） |
+| `Tools/` | 工具域适配（`GenericVerificationProvider` / `ProjectCommandDetector`）+ 内置忽略规则表（`FileIgnore`）与 `.onecodeignore` 工作区忽略引擎（`WorkspaceIgnoreProvider` / `WorkspaceIgnoreSnapshot`） |
 | `Workflows/` | Workflow run 注册表落盘（`JsonWorkflowRunRegistry`） |
 
 根级适配器文件：`ProcessRunner`（CliWrap 子进程执行，`IProcessRunner` 实现）、`GitInfo`（git CLI 探测）、`LocalAgentFileStore`（工作目录边界校验 + glob 枚举）、`CodeIndexService` / `CodeIndexHotReloader`（代码符号索引）、`TokenEstimator`（字符加权启发式估算，`ITokenEstimator` 实现）、`ClipboardService`、`MtlsHelper`、`ProtectedPaths`（受保护路径策略）、`GeneratedFilesDetector`（生成物模式表）、`PathsHelper`（特殊目录解析）、`ServiceCollectionExtensions`（DI 装配入口）。

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.FileSystemGlobbing;
 
-namespace OneCode.App.Tools;
+namespace OneCode.Infrastructure.Tools;
 
 /// <summary>
 /// Predefined ignore rules for file system tools (Glob, LS, tree scans).

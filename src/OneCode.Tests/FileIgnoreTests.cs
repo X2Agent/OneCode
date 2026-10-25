@@ -1,8 +1,8 @@
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using OneCode.App.Services.Search;
-using OneCode.App.Tools;
+using OneCode.Infrastructure.Search;
+using OneCode.Infrastructure.Tools;
 using OneCode.Core.IO;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;

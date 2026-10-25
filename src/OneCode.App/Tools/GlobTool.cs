@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.FileSystemGlobbing;
+using OneCode.Infrastructure.Tools;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 
 namespace OneCode.App.Tools;
@@ -44,7 +45,7 @@ public sealed class GlobTool
         try
         {
             var ignore = _ignoreProvider is null
-                ? new WorkspaceIgnoreSnapshot(null, [], [])
+                ? WorkspaceIgnoreSnapshot.Empty
                 : await _ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
             var workspaceRoot = Path.GetFullPath(_wd.WorkingDirectory);
             // 搜索目标位于工作区外的附加目录（如 ~/.onecode/events 或 /add-dir 外部目录）时，

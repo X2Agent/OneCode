@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using OneCode.App.Tools;
+using OneCode.Infrastructure.Tools;
+using OneCode.Infrastructure.Search;
 
 namespace OneCode.App.Services.Search;
 

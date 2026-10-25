@@ -1,5 +1,5 @@
 using NSubstitute;
-using OneCode.App.Services.Search;
+using OneCode.Infrastructure.Search;
 using OneCode.App.Tools;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure;

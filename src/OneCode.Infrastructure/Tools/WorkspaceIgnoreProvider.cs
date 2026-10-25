@@ -1,6 +1,7 @@
 using Microsoft.Extensions.FileSystemGlobbing;
+using OneCode.Core.Tools;
 
-namespace OneCode.App.Tools;
+namespace OneCode.Infrastructure.Tools;
 
 /// <summary>Provides the current workspace's built-in and user ignore rules.</summary>
 public interface IWorkspaceIgnoreProvider
@@ -19,6 +20,9 @@ public sealed class WorkspaceIgnoreSnapshot
         _rules = rules;
         Diagnostics = diagnostics;
     }
+
+    /// <summary>无 `.onecodeignore` 时的空快照（无用户规则，仅内置规则生效）。</summary>
+    public static WorkspaceIgnoreSnapshot Empty { get; } = new(null, [], []);
 
     /// <summary>Gets the loaded `.onecodeignore` path, or null when it does not exist.</summary>
     public string? Path { get; }

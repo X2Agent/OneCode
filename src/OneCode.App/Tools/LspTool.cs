@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using OneCode.Infrastructure.Lsp;
-using OneCode.App.Services.Search;
+using OneCode.Infrastructure.Search;
 using OneCode.Core.Lsp;
 using OneCode.Infrastructure.Config;
 using OneCode.Infrastructure.Text;

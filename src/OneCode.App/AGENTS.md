@@ -80,6 +80,11 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `ReleaseNotesService` + `UpgradeService` | `Services/Setup/` | `OneCode.Infrastructure.Setup`（GitHub Release 检查 + 自更新流水线） |
 | `HookSecretExpander` | `Services/Hooks/HookSecretExpander.cs` | `OneCode.Infrastructure.Hooks.HookSecretExpander`（DPAPI/环境变量展开；`ProtectedData` 包随迁） |
 | LSP 进程域 9 件 | `Services/Lsp/`（Client/ServerInstance/ServerManager/Protocol/DiagnosticRegistry/LanguagePackInstaller/LanguagePackRegistry/BuiltInLanguagePacks/LspProjectMatcher） | `OneCode.Infrastructure.Lsp`；App 保留 `LspHostedService` / `EnhancedLspService` / `LspNotifier` / DI 装配 |
+| `NotifierService`（含 `INotifierService`） | `Services/Notifier/` | `OneCode.Infrastructure.NotifierService`（三平台桌面通知 OS 适配） |
+| `SubprocessScriptRunner` | `Skills/SubprocessScriptRunner.cs` | `OneCode.Infrastructure.Skills`（子进程脚本运行器） |
+| `DebugFileLoggerProvider` | `Logging/` | `OneCode.Infrastructure`（调试文件日志提供器；App/Logging 留组合根日志引导 DI） |
+| `FileIgnore` + `WorkspaceIgnoreProvider` | `Tools/` | `OneCode.Infrastructure.Tools`（内置忽略表 + `.onecodeignore` 引擎；依赖 FileSystemGlobbing 故不进 Core） |
+| `TextSearchService` + `ITextSearchService` | `Services/Search/` | `OneCode.Infrastructure.Search`（ripgrep/Regex 搜索内核） |
 | MAF 中间件集 + Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码
