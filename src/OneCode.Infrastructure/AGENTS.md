@@ -11,13 +11,31 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 
 | 子目录 | 职责 |
 |--------|------|
-| `Mcp/` | 传输级 MCP 客户端与配置适配：`McpClient` 封装官方 ModelContextProtocol SDK（stdio / SSE / HTTP 传输），自定义 WebSocket / InProcess transport，`.mcp.json` 解析（`McpConfigParser`）与多作用域加载（`McpMultiScopeConfigLoader`），官方 registry 客户端（`OfficialMcpRegistryClient`）。连接池管理器 `McpConnectionManager` 在 App 层（`OneCode.App/Services/Mcp/`），其接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`） |
-| `Git/` | Git 操作（blame 解析 + worktree 布局） |
-| `Config/` | 配置解析与持久化 |
-| `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
 | `Agent/` | **MAF 管道装配层**：Agent 构建与中间件栈（`AgentPipelineBuilder`）、Harness 产品化默认值（`OneCodeHarnessDefaults` / `PipelineProfile`）、上下文压缩策略（`CompactionPipelineBuilder` / `GuardedSummarizationCompactionStrategy`）、工具审批标记与自动批准规则（`ToolApprovalMarker` 装配期标记 + `ToolApprovalMarkingContextProvider` 请求期标记 provider + `HarnessProviderTools` provider 工具名单/元数据/按名放行规则 + `AutoApprovalRulesFactory`）、Run 级中间件（`RunMiddleware/`：BudgetGuard / UsageTracking）、会话状态扩展（`SessionStateExtensions`）、Hyperlight 代码执行服务（`HyperlightCodeActService`）、SSH shell（`SshShellExecutor`） |
+| `Ai/` | AI 模型客户端工厂、IChatClient 装饰器链、Token 估算、OpenAI 响应消毒 |
+| `Api/` | 跨轮 API 用量账本（`TokenLedger`） |
+| `Build/` | Build run 落盘（`JsonBuildRunStore`）+ 工作区指纹（`WorkspaceFingerprintProvider`） |
+| `Config/` | 配置解析与持久化（`ConfigManager`）、配置目录解析（`ConfigDirPaths`）、共享常量（`Constants` 系列） |
+| `Goals/` | Goal 工作区准备（`GitGoalWorkspaceService`）+ Goal run 落盘（`JsonGoalRunStore`） |
+| `Git/` | Git 操作（blame 解析 + worktree 布局） |
+| `Keybindings/` | 用户快捷键配置加载（`KeybindingLoader`） |
+| `Mcp/` | 传输级 MCP 客户端与配置适配：`McpClient` 封装官方 ModelContextProtocol SDK（stdio / SSE / HTTP 传输），自定义 WebSocket / InProcess transport，`.mcp.json` 解析（`McpConfigParser`）与多作用域加载（`McpMultiScopeConfigLoader`），官方 registry 客户端（`OfficialMcpRegistryClient`）。连接池管理器 `McpConnectionManager` 在 App 层（`OneCode.App/Services/Mcp/`），其接口 `IMcpConnectionManager` 在 Core 层（`OneCode.Core/Mcp/`） |
+| `Media/` | 图像处理管道（`ImagePipeline`，截图缩放/格式转换） |
+| `Memory/` | 记忆条目文件实现（`MemoryEntryStore` / `MemdirPaths`；契约在 `OneCode.Core/Memory/`，领域编排在 App） |
+| `Middleware/` | MAF 中间件集（工具参数绑定 / 审批与限流 / Hook / Edit 事务 / 状态机 / 预算等）+ `Invariants/` 守卫（Bash / FileSystem / Resource） |
+| `Model/` | 模型目录缓存服务（`ModelCatalogCacheService`）+ models.dev 客户端（`ModelsDevClient`） |
+| `Permissions/` | YOLO 规则落盘（`Yolo/YoloRuleFileStore`；规则引擎本体在 `OneCode.Core/Permissions/`） |
 | `Persistence/` | 落盘共享原语（`DurableFile`：跨进程文件锁 + 临时文件原子替换 + `.bak` 兜底），供 Build / Goals / Workflows 的 run store 复用 |
-| `Remote/` | 远程 Agent 通信 |
+| `Prompt/` | 文件 Prompt 存储（`FilePromptStore`） |
+| `Remote/` | 远程 Agent 通信（`SshRemoteService` / `SshToolHelper`，SSH.NET） |
+| `Search/` | Web 搜索 provider（`DuckDuckGoSearchProvider` / `TavilySearchProvider`） |
+| `Skills/` | Skill frontmatter 解析（`SkillFrontmatterParser`，YamlDotNet）+ Skill 模型（`SkillTypes`） |
+| `Tasks/` | 子代理任务落盘（`JsonTaskStore`） |
+| `Text/` | 纯文本处理：统一 diff（`UnifiedDiff`）、文件编码/行尾检测（`FileEncodingHelper`）、LSP URI 转换（`LspUriHelper`） |
+| `Tools/` | 工具域适配（`GenericVerificationProvider` / `ProjectCommandDetector`） |
+| `Workflows/` | Workflow run 注册表落盘（`JsonWorkflowRunRegistry`） |
+
+根级适配器文件：`ProcessRunner`（CliWrap 子进程执行，`IProcessRunner` 实现）、`GitInfo`（git CLI 探测）、`LocalAgentFileStore`（工作目录边界校验 + glob 枚举）、`CodeIndexService` / `CodeIndexHotReloader`（代码符号索引）、`TokenEstimator`（字符加权启发式估算，`ITokenEstimator` 实现）、`ClipboardService`、`MtlsHelper`、`ProtectedPaths`（受保护路径策略）、`GeneratedFilesDetector`（生成物模式表）、`PathsHelper`（特殊目录解析）、`ServiceCollectionExtensions`（DI 装配入口）。
 
 > Memory 记忆持久化契约在 `OneCode.Core/Memory/`（`IMemoryEntryStore` / `MemoryEntry` / `MemoryScope`），
 > 文件实现位于 `OneCode.Infrastructure/Memory/`（`MemoryEntryStore` / `MemdirPaths`）；
@@ -33,7 +51,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 |------|------|
 | `OneCode.Core` | Core 接口与领域模型（只能向上依赖） |
 | `System.*` BCL | 文件系统、网络、进程 |
-| `Microsoft.Extensions.*` | DI、日志（MEL console + 自定义 file provider）、HTTP、缓存、配置、文件 Glob |
+| `Microsoft.Extensions.*` | DI、日志、HTTP、缓存、配置、文件 Glob |
 | `YamlDotNet` | YAML 解析（MCP 配置、主题文件） |
 | `ModelContextProtocol` | MCP 官方 SDK |
 | `Microsoft.ML.Tokenizers` + Tokenizer 数据包 | Token 估算（Cl100kBase / O200kBase） |

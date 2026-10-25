@@ -5,6 +5,50 @@
 
 ---
 
+## 目录职责
+
+| 目录 | 职责 |
+|------|------|
+| `Agent/` | 子代理能力枚举（`AgentCapability`） |
+| `Ai/` | AI 客户端工厂契约（`IChatClientFactory`） |
+| `Build/` | Build 运行领域模型（`BuildRun` 状态迁移） |
+| `Commands/` | 命令契约：`Command` 抽象基类、`ICommand`、`CommandResult`、参数辅助 |
+| `Config/` | 配置模型（`ConfigModels` 及字段描述符） |
+| `Coordinator/` | 编排事件族（`OrchestrationEvent`） |
+| `Cron/` | `ICronParser` 契约 + `CronExpressionHelper` 纯格式化（Cronos 实现在 Automation） |
+| `Domain/` | 会话领域模型：`Conversation` / `Message` / `ContentBlock` / `MessageCloner` |
+| `Errors/` | 错误记录类型 |
+| `Exec/` | Shell 执行契约（`IShellExecutor` + DTO） |
+| `Goals/` | Goal 运行领域模型：`GoalRun` 状态机、`GoalBudget` |
+| `Hooks/` | Hook 契约 + 纯聚合逻辑（`HookResultAggregator`、`HookTypeParser`） |
+| `IO/` | 纯路径算法（`PathBoundary`、`PathComparer`），无系统调用 |
+| `Keybindings/` | 快捷键引擎：解析（`KeybindingParser`）、校验（`KeybindingValidator`）、默认表、冲突解析 |
+| `Lsp/` | LSP 契约：`ILspServerManager`、`LanguagePack`、`ICodeIndexService` |
+| `Mcp/` | MCP 契约（`IMcpConnectionManager` 等）+ `McpToolFilter` 白名单匹配 |
+| `Memory/` | 记忆持久化契约（`IMemoryEntryStore` / `MemoryEntry`） |
+| `Models/` | 模型目录（`ModelCatalog`，含 JSON 流解析） |
+| `Permissions/` | 权限引擎：Shell 分类器（PowerShell/Bash）、`ShellTokenizer`、YOLO 规则存储（持久化经 `IYoloRuleFileStore` 外移 Infrastructure） |
+| `PlanMode/` | Plan 记录族 + `PlanStepValidator` |
+| `Product/` | 产品信息（`ProductInfo`） |
+| `Prompt/` | `PromptTemplate` 插值 + `PromptManager` 责任链（存储经 `IPromptStore` 外移） |
+| `Results/` | `Result<T>` 操作结果单子 |
+| `Search/` | Web 搜索契约（`IWebSearchProvider`） |
+| `Session/` | 会话事件类型与投影（`ConversationEventMapper`、`SessionEventProjection`） |
+| `Skills/` | 内置技能文本（`BundledSkills`） |
+| `Tasks/` | 子代理任务：`TaskService` 内存任务表（持久化经 `ITaskStore` 外移） |
+| `Text/` | 纯文本算法（`StringDistance`、`TextTokenizer`） |
+| `Tokens/` | 计费算式（`UsageMath`）与用量累加器（`SessionTokenUsage`） |
+| `Tools/` | 工具注册/元数据/检索引擎（`ToolMetadataRegistry`、`ToolArgumentExtractor`、`ToolRetrievalIndex`、`DisplayJsonSerializer`） |
+| `Workflows/` | Workflow 定义、拓扑排序（`WorkflowTopology`）、幂等记录 |
+
+根文件：`Constants.cs`（跨层共享常量，分层归置规则见 [AGENTS.md](../AGENTS.md) §10.2）、`ITokenEstimator.cs`。
+
+### 内容构成规则
+
+Core = 契约（接口 / 记录类型）+ 领域模型 + **无副作用的纯内存引擎**。带真实逻辑的引擎（权限分类器、快捷键解析、工具检索索引等）允许且应当放在 Core，前提是：纯内存运算、无环境副作用、所需 I/O 一律经接口外移（由 Infrastructure 实现并注册）。引擎居 Core 是消费方驱动的结构性必然——Infrastructure 中间件（如 `PermissionAndLimitMiddleware`）只能依赖 Core，权限与工具引擎必须在其可及范围内。判断某个类型是否该进 Core：消费方是否跨到 Infrastructure（是 → 必须在 Core）；否则纯逻辑可就近放在消费方所在层，不为对称性而搬家。
+
+---
+
 ## 依赖约束（不可违反）
 
 Core 是整个系统的契约层，其依赖纯洁性决定了架构的健康度。
@@ -37,6 +81,7 @@ Core 是整个系统的契约层，其依赖纯洁性决定了架构的健康度
 | `ModelContextProtocol` | 协议实现 | Infrastructure |
 | `Microsoft.ML.Tokenizers` | 计算实现 | Infrastructure |
 | 任何 `OneCode.*` 项目 | 反向依赖 | -- |
+| BCL 副作用 I/O（`File.` / `Directory.` / `Process.` 的创建/删除/探测、`Environment.GetFolderPath`、`Console.*`） | Core 必须无环境副作用（无副作用的内存解析不受限，如 `ModelCatalog.LoadFromStream` 吃 Stream 入参） | 外移接口实现（Infrastructure）或由 App 调用方执行 |
 
 ### 新增依赖的评审流程
 

@@ -68,7 +68,7 @@ src/
 │   ├── Query/                  #   查询编排 + 唯一 UI 事件契约（QueryEvent / StreamingSession / QueryStreamEngine）
 │   └── Session/                #   会话上下文与事件溯源存储
 │
-├── OneCode.Core/                # 纯接口与领域模型（168 文件，仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
+├── OneCode.Core/                # 契约 + 领域模型 + 无副作用纯内存引擎（仅依赖 3 个 Microsoft.Extensions.*.Abstractions 抽象包）
 │   ├── Permissions/            #   权限系统（7 种模式 + Bash/PowerShell 分类器）
 │   ├── Hooks/                  #   6 种开放钩子拦截点 + 3 种执行器
 │   ├── Keybindings/            #   按键绑定系统
@@ -107,9 +107,10 @@ src/
 ┌───────────▼──────────┐          ┌───────────▼───────────────────┐
 │  OneCode.Core        │◄─────────│  OneCode.Infrastructure        │
 │  (168 文件)          │          │  (120 文件)                    │
-│  纯接口与领域模型     │          │  外部系统适配                  │
-│  Permissions/Hooks/  │          │  MCP · Ai · Config ·         │
-│  Tasks/Tools/Domain  │          │  Agent/MAF · Middleware · LSP │
+│  契约 + 领域模型      │          │  外部系统适配                  │
+│  + 纯内存引擎         │          │  MCP · Ai · Config ·         │
+│  Permissions/Hooks/  │          │  Agent/MAF · Middleware ·     │
+│  Tasks/Tools/Domain  │          │  Keybindings · Persistence   │
 └──────────────────────┘          └──────────────┬────────────────┘
                                                  │
                                     ┌────────────▼────────────────┐

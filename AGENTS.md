@@ -27,7 +27,7 @@ src/
 ├── OneCode.Tui/            # 进程入口（快速路径）+ Terminal.Gui 视图/浮层/渲染 + TUI 装配
 ├── OneCode.WebUI/          # Blazor Server 浏览器客户端（进程内消费 QueryEvent）
 ├── OneCode.App/            # 组合与实现层：Modes/Tools/Commands/Services/DI 注册
-├── OneCode.Core/           # 纯接口与领域模型（仅依赖 *.Abstractions）
+├── OneCode.Core/           # 契约 + 领域模型 + 无副作用纯内存引擎（I/O 一律经接口外移；仅依赖 *.Abstractions）
 ├── OneCode.Infrastructure/ # 外部系统适配：MCP / MAF 管道 / 配置 / Git / Memory
 ├── OneCode.Automation/     # 后台调度：Cron / ModelCatalog 刷新 / YOLO 规则加载
 └── OneCode.Tests/          # xUnit v3 测试套件

@@ -13,10 +13,12 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 |--------|------|
 | `Commands/` | CLI 命令：`/review`、`/commit` 等斜杠命令 |
 | `Daemon/` | 无头守护进程：`DaemonHost` 宿主 + `DaemonLifecycle`（互斥体/状态文件/停止哨兵）+ `DaemonStopWatcher` |
+| `Logging/` | 调试文件日志提供器（`DebugFileLoggerProvider`）与日志 DI 扩展 |
+| `Modes/` | 工作模式定义（`WorkingMode`：BUILD / PLAN / GOAL） |
 | `Tools/` | AI 工具实现：Agent 调用的 27 个工具（`sealed class` + `[Description]` + `AddToolInstance<T>` 注册） |
 | `Services/` | 应用层服务：Agent、Memory、PlanMode、BuildMode、GoalMode、Hooks、Lsp、Mcp 等 |
 | `Query/` | 运行事件契约：`QueryEvent` 层级（唯一 UI 契约）、`StreamingSession`、`QueryStreamEngine`（**零 Terminal.Gui、零前端引用**） |
-| `Skills/` | Skills 执行引擎（frontmatter 解析、参数替换） |
+| `Skills/` | 子进程脚本运行器（`SubprocessScriptRunner`）；Skills 执行引擎在 `Services/Skills/`，frontmatter 解析在 `OneCode.Infrastructure/Skills/` |
 | `Session/` | 会话上下文和生命周期管理 |
 | `prompts/` | Prompt 模板文件（`system/*.prompt`） |
 
@@ -33,7 +35,8 @@ App 层是系统的**组合与实现层**，负责将 Core 接口与 Infrastruct
 | `Terminal.Gui` | **禁止**——TUI 渲染栈只允许出现在 `OneCode.Tui` 项目 | OneCode.Tui |
 | `Microsoft.Extensions.AI` | AI 调用抽象（`IChatClient` / `ChatMessage` 等核心接口） | App |
 | `Microsoft.Extensions.Hosting` | DI + 生命周期 | App |
-| `YamlDotNet` | YAML 解析（Skill frontmatter、主题文件） | App |
+| `AngleSharp` | HTML DOM 解析（WebFetchTool 的 HTML→Markdown 转换） | App |
+| `System.Security.Cryptography.ProtectedData` | Windows DPAPI 密钥解密（HookSecretExpander） | App |
 | `Markdig` | **禁止**——Markdown 渲染在 `OneCode.Tui` | OneCode.Tui |
 | `CliWrap` | 进程调用（Bash/PowerShell 工具执行） | App |
 | `Microsoft.Extensions.FileSystemGlobbing` | 文件 Glob 匹配 | App |
@@ -74,7 +77,7 @@ App 层**不直接引用**任何具体 AI SDK 包；以下 SDK 已下沉至 Infr
 | `CompactionPipelineBuilder` | `Services/Agent/CompactionPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.CompactionPipelineBuilder` |
 | `AgentPipelineBuilder` | `Services/Agent/AgentPipelineBuilder.cs` | `OneCode.Infrastructure.Agent.AgentPipelineBuilder` |
 | `UnifiedDiff` | `Tools/UnifiedDiff.cs` | `OneCode.Infrastructure.Text.UnifiedDiff` |
-| 9 个 MAF 中间件 + 3 个 Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
+| MAF 中间件集 + Invariants | `Services/Agent/`、`Middleware/` | `OneCode.Infrastructure.Middleware` / `Middleware.Invariants` |
 
 ### 保留在 App 层的 MAF 编排代码
 
