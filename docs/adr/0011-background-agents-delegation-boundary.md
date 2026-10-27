@@ -112,7 +112,9 @@ TUI 呈现）、`ForkedAgentRunner` 的 fail-closed 审批检测。
   都只管执行期名字闸，不改变 provider 工具直注 `AIContext.Tools`、不经产品目录这一根本问题。）
 
 **证据 2 — 审批不转发导致写代理静默失效。** `ToolApprovalAgent` 源码
-（`Harness/ToolApproval/ToolApprovalAgent.cs`；pinned 包与本地 checkout 同处 `dotnet-1.22.0` 基线）：
+（`Harness/ToolApproval/ToolApprovalAgent.cs`；pinned 包为 `1.26.0`，本地 checkout 未建立，源码核对基线为最近一次
+checkout `dotnet-1.22.0-6-g669c8b95e`。该文件在 1.22.0 被 `#8432` 重写，「哪些请求算已浮出」的登记语义随之变化，
+本条属版本敏感断言，须按 [ADR-0007 §5.1](./0007-maf-integration-boundaries.md) 的升级复查清单重核）：
 审批请求未自动批准时，把带 pending `ToolApprovalRequestContent` 的响应**返回调用方、工具不执行**。OneCode Worker profile 保留
 `ToolApproval` 且继承父权限模式（`SubAgentPipelineFactory.BuildSecurityContext`），Default 模式下
 写工具（`ToolRisk.Safe → Conditional`）触发 Ask。BackgroundAgents 的 `start_task` 只取子代理最终文本：

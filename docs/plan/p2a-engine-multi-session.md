@@ -50,9 +50,14 @@ SwitchToSessionAsync`）重置的是进程级全局用量；`SessionIdHolder` �
 
 1. `InteractiveSession`（`src/OneCode.App/Services/InteractiveSession.cs`）增加会话绑定（创建时确定
    `SessionId`；`/new`、`/session switch`、`/close` 后由前端重建或重绑）。
-2. `IConversationRunner` 交互入口（`StreamQueryAsync` / `StreamCommandPromptAsync` /
-   `StreamResumeWorkflowAsync` / `StreamLoopAsync`）透传 `sessionId`；引擎侧仅在 `sessionId == null`
-   时回退 `ForegroundConversation`（TUI 单前端路径的兼容默认）。
+2. 会话归属不新增入口参数：`IQueryStreamService` 四个入口（`StreamQueryAsync` /
+   `StreamCommandPromptAsync` / `StreamLoopAsync` / `StreamResumeWorkflowAsync`，
+   `src/OneCode.App/Services/Streaming/IQueryStreamService.cs`）已统一以 `InteractiveSession session`
+   作归属载体（`StreamResumeWorkflowAsync` 的 `sessionId` 参数是工作流恢复 id，不是会话归属）。
+   落点是 `QueryStreamEngine.StreamInteractiveAsync`（`src/OneCode.App/Query/QueryStreamEngine.cs:152-153`）
+   改取该绑定值，仅在无绑定时回退 `ForegroundConversation`（TUI 单前端路径的兼容默认）。
+   `IConversationRunner` 不参与会话归属——它是 TUI 与 headless 触发器（cron / AutoDream）的最小入口，
+   `unattended` 路径自带 `SessionId.NewId()`；受控 Build 的归属由 `WorkflowRunRequest.SessionId` 显式携带。
 3. `SessionManager` 前台指针语义收窄：保留 `EnsureActiveSessionAsync` / `SwitchToSessionAsync` /
    `BackgroundCurrentAndCreateNewAsync` 作为默认会话管理，新增按 id 直达的会话获取（已有
    `GetConversation`）。

@@ -12,6 +12,9 @@ public interface ISessionSummaryIndex
     Task<ConversationSummary?> ReadAsync(SessionEventLogStamp stamp, CancellationToken ct = default);
 
     /// <summary>写入摘要索引，覆盖同会话的旧索引。</summary>
+    /// <remarks>
+    /// 实现必须吞掉写入失败与取消：索引只是加速层，任何异常都不得让调用方的保存路径失败。
+    /// </remarks>
     Task WriteAsync(SessionEventLogStamp stamp, ConversationSummary summary, CancellationToken ct = default);
 
     /// <summary>删除摘要索引。</summary>

@@ -110,6 +110,11 @@ public sealed class FileSessionSummaryIndex : ISessionSummaryIndex
 
             File.Move(temporary, path, overwrite: true);
         }
+        catch (OperationCanceledException)
+        {
+            // 保存路径带业务取消令牌：丢弃索引即可，不得让已经落盘的会话保存失败。
+            _logger.LogDebug("会话摘要索引写入被取消：{Path}", path);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 索引只是加速层：写失败最多让下一次多解析一份日志，不得影响会话保存。
@@ -117,8 +122,23 @@ public sealed class FileSessionSummaryIndex : ISessionSummaryIndex
         }
         finally
         {
-            if (File.Exists(temporary))
-                File.Delete(temporary);
+            TryDeleteTemporary(temporary);
+        }
+    }
+
+    /// <summary>清理临时文件：残留的 <c>.tmp-*</c> 只是垃圾，清理失败同样不得逃逸。</summary>
+    private void TryDeleteTemporary(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return;
+
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "会话摘要索引临时文件清理失败：{Path}", path);
         }
     }
 
