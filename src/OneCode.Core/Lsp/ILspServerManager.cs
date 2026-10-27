@@ -1,8 +1,8 @@
 namespace OneCode.Core.Lsp;
 
 /// <summary>
-/// LSP server 管理器契约。
-/// 由 <c>OneCode.Infrastructure.Lsp.LspServerManager</c> 实现。
+/// LSP server manager abstraction.
+/// Implemented by OneCode.App.Services.Lsp.LspServerManager.
 /// </summary>
 public interface ILspServerManager
 {

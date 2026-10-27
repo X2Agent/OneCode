@@ -73,7 +73,7 @@ PR #8563 作者已表态认同抽象应由 MEAI 持有，会等 #7764 受理后�
 ### 4. 版本证据（OneCode pinned 包）
 
 按 [MAF 集成边界](./0007-maf-integration-boundaries.md)「不得用本地 checkout 为已发布包行为作证」的要求，
-对 OneCode 锁定版本逐符号计数（pinned 见 `src/Directory.Packages.props`：MEAI 主包 `10.10.0`、Abstractions/OpenAI `10.10.1`、MAF `1.26.0`）：
+对 OneCode 锁定版本逐符号计数（pinned 见 `src/Directory.Packages.props`：MEAI `10.10.1`、MAF `1.26.0`）：
 
 | 程序集 | `IDecisionClient` | `DecisionQuestion` | `DecisionResponse` | `DecisionAnswer` | `TypeSafe` | `SystemOne` |
 |---|---|---|---|---|---|---|
@@ -221,7 +221,7 @@ OneCode 只认「决策客户端」一种形态。
 
 - 上游：`dotnet/extensions#7764`、`microsoft/agent-framework#8545`、`#8562`/`#8563`、`#8592`
 - TypeSafe 文档：`/concepts/system-one`、`/introduction/coding-agents`、`/api.md`、`/models.md`
-- 版本证据：MEAI Abstractions `10.10.1` 与 MAF `1.26.0` 程序集的逐符号计数（§4 表）
+- 版本证据：MEAI `10.10.1` 与 MAF `1.26.0` 程序集的逐符号计数（§4 表）
 - 产品现状：`src/OneCode.App/Query/SessionToolSet.cs`、`src/OneCode.App/Services/Agent/GoalSubGoalJudge.cs`、
   `src/OneCode.App/Services/Agent/GoalSubGoalLoop.cs`、`src/OneCode.App/Services/Loop/IterativeLoopService.cs`、
   `src/OneCode.Core/Permissions/PermissionChecker.cs`、`src/OneCode.Core/Permissions/Yolo/YoloClassifier.cs`、

@@ -22,45 +22,43 @@ public sealed class ChatSessionClient(
     ILogger<ChatSessionClient> logger) : IAsyncDisposable
 {
     private IDisposable? _runEventsSubscription;
-    private readonly WebTranscript _transcript = new();
 
-    // 本电路的稳定标识：交互接收者按电路注册，路由到活跃电路。
-    private readonly string _circuitId = Guid.NewGuid().ToString("N");
+    private readonly List<WebMessage> _messages = [];
+    private readonly List<WebToolCall> _toolCalls = [];
+    private readonly List<WebActivity> _activities = [];
+    private readonly List<WebContextItem> _context = [];
     private readonly object _gate = new();
 
     private InteractiveSession? _session;
     private Task? _sessionReady;
-    private Task? _activeRun;
-    private WebPendingInteraction? _pendingInteraction;
     private TaskCompletionSource<ApprovalDecision>? _pendingApproval;
     private TaskCompletionSource<string?>? _pendingQuestion;
     private TaskCompletionSource<GoalBudgetDecision>? _pendingBudget;
     private CancellationTokenSource? _runCts;
+    // 本电路的稳定标识：交互接收者按电路注册，路由到活跃电路。
+    private readonly string _circuitId = Guid.NewGuid().ToString("N");
 
     /// <summary>状态变化通知；组件订阅后触发重绘。</summary>
     public event Action? Changed;
 
-    public IReadOnlyList<WebMessage> Messages => _transcript.Messages;
+    public IReadOnlyList<WebMessage> Messages { get { lock (_gate) return [.. _messages]; } }
 
-    public IReadOnlyList<WebToolCall> ToolCalls => _transcript.ToolCalls;
+    public IReadOnlyList<WebToolCall> ToolCalls { get { lock (_gate) return [.. _toolCalls]; } }
 
-    public IReadOnlyList<WebActivity> Activities => _transcript.Activities;
+    public IReadOnlyList<WebActivity> Activities { get { lock (_gate) return [.. _activities]; } }
 
     /// <summary>会话级上下文：读写过的文件与访问过的链接（切换会话后由历史重建）。</summary>
-    public IReadOnlyList<WebContextItem> ContextItems => _transcript.ContextItems;
+    public IReadOnlyList<WebContextItem> ContextItems { get { lock (_gate) return [.. _context]; } }
 
-    public WebPendingInteraction? Pending => _pendingInteraction;
+    public WebPendingInteraction? Pending { get; private set; }
 
     public bool IsRunning { get; private set; }
 
-    /// <summary>首屏初始化进行中：UI 显示会话列表与转录的加载占位。</summary>
-    public bool IsInitializing { get; private set; }
-
     public string? ModelName { get; private set; }
 
-    public int InputTokens => _transcript.InputTokens;
+    public int InputTokens { get; private set; }
 
-    public int OutputTokens => _transcript.OutputTokens;
+    public int OutputTokens { get; private set; }
 
     public string Mode => deps.ModeController.Mode.ToString().ToUpperInvariant();
 
@@ -72,60 +70,55 @@ public sealed class ChatSessionClient(
     {
         var total = Stopwatch.StartNew();
         IsInitializing = true;
-        long shellMs = 0, sidebarMs = 0, buildRunMs = 0;
-        try
+        ModelName = deps.ModelManager.GetMainModel(deps.AppState.Current.MainLoopModel).Id;
+
+        // 只有「活跃会话存在 + 交互接收者就位」必须先完成，其余都可延后。
+        await deps.SessionManager.EnsureActiveSessionAsync(
+            new ConversationOptions(Environment.CurrentDirectory, ModelName), ct).ConfigureAwait(false);
+
+        // 电路打开即注册交互接收者并抢占活跃电路：多窗口场景下交互卡片只投给用户当前操作的窗口。
+        dispatcher.Register(_circuitId, OnInteraction);
+        dispatcher.MarkActive(_circuitId);
+
+        // 旁路事件（已批准计划的 Build run 不经查询流）：每个浏览器电路独立订阅，销毁时释放。
+        _runEventsSubscription?.Dispose();
+        _runEventsSubscription = runEvents.Subscribe(evt =>
         {
-            ModelName = deps.ModelManager.GetMainModel(deps.AppState.Current.MainLoopModel).Id;
-
-            // 只有「活跃会话存在 + 交互接收者就位」必须先完成，其余都可延后。
-            await deps.SessionManager.EnsureActiveSessionAsync(
-                new ConversationOptions(Environment.CurrentDirectory, ModelName), ct).ConfigureAwait(false);
-
-            // 电路打开即注册交互接收者并抢占活跃电路：多窗口场景下交互卡片只投给用户当前操作的窗口。
-            dispatcher.Register(_circuitId, OnInteraction);
-            dispatcher.MarkActive(_circuitId);
-
-            // 旁路事件（已批准计划的 Build run 不经查询流）：每个浏览器电路独立订阅，销毁时释放。
-            _runEventsSubscription?.Dispose();
-            _runEventsSubscription = runEvents.Subscribe(evt =>
-            {
-                _transcript.Apply(evt, logger);
-                Notify();
-            });
-
-            // 到这里 UI 已经可以渲染，下面的 I/O 与后续构建都在骨架之后发生。
+            Apply(evt);
             Notify();
-            shellMs = total.ElapsedMilliseconds;
+        });
 
-            // 会话列表：冷启动读摘要索引（小文件），不再全量解析事件日志。
-            await RefreshSessionsAsync(ct).ConfigureAwait(false);
-            sidebarMs = total.ElapsedMilliseconds - shellMs;
+        // 到这里 UI 已经可以渲染，下面的 I/O 与后续构建都在骨架之后发生。
+        Notify();
+        var shellMs = total.ElapsedMilliseconds;
 
-            // 与 TUI 启动同语义：回放当前会话最近一次 BuildRun 快照，
-            // 避免 Web 端 Plan/Build 状态投影缺失历史（不重新执行工具、无副作用）。
-            var buildRun = deps.SessionManager.ForegroundConversation is { } foreground
-                ? await deps.BuildRunReplay.ReplayLatestAsync(foreground.Id, ct).ConfigureAwait(false)
-                : null;
-            if (buildRun is not null)
-                _transcript.Apply(buildRun, logger);
-            buildRunMs = total.ElapsedMilliseconds - shellMs - sidebarMs;
+        // 会话列表：冷启动读摘要索引（小文件），不再全量解析事件日志。
+        await RefreshSessionsAsync(ct).ConfigureAwait(false);
+        var sidebarMs = total.ElapsedMilliseconds - shellMs;
 
-            // 提示词/harness 与首条消息无关的部分后台预热：发送时通常已就绪，未就绪则等待同一任务。
-            lock (_gate)
-                _sessionReady = BuildSessionAsync(ModelName, ct);
-            _ = ObserveSessionReadyAsync(_sessionReady);
-        }
-        finally
-        {
-            // 失败也必须退出初始化态：否则 UI 永远停在加载占位，切换会话也被 IsInitializing 拦截。
-            IsInitializing = false;
-            Notify();
-        }
+        // 与 TUI 启动同语义：回放当前会话最近一次 BuildRun 快照，
+        // 避免 Web 端 Plan/Build 状态投影缺失历史（不重新执行工具、无副作用）。
+        var buildRun = deps.SessionManager.ForegroundConversation is { } foreground
+            ? await deps.BuildRunReplay.ReplayLatestAsync(foreground.Id, ct).ConfigureAwait(false)
+            : null;
+        if (buildRun is not null)
+            Apply(buildRun);
+        var buildRunMs = total.ElapsedMilliseconds - shellMs - sidebarMs;
+
+        IsInitializing = false;
+        Notify();
+
+        // 提示词/harness 与首条消息无关的部分后台预热：发送时通常已就绪，未就绪则等待同一任务。
+        _sessionReady = BuildSessionAsync(ModelName, ct);
+        _ = ObserveSessionReadyAsync(_sessionReady);
 
         logger.LogInformation(
             "首页初始化完成 {Total}ms（骨架 {Shell}ms / 侧栏 {Sidebar}ms / BuildRun {BuildRun}ms，提示词后台预热）",
             total.ElapsedMilliseconds, shellMs, sidebarMs, buildRunMs);
     }
+
+    /// <summary>首屏初始化进行中：UI 显示会话列表与转录的加载占位。</summary>
+    public bool IsInitializing { get; private set; }
 
     /// <summary>后台构建交互会话：系统提示词、harness 与斜杠命令清单。</summary>
     private async Task BuildSessionAsync(string modelId, CancellationToken ct)
@@ -142,22 +135,17 @@ public sealed class ChatSessionClient(
         logger.LogInformation("交互会话就绪（提示词构建与命令装配）耗时 {Elapsed}ms", watch.ElapsedMilliseconds);
     }
 
-    /// <summary>
-    /// 取已就绪的交互会话；预热失败或已被取消时重新构建。
-    /// 在锁内 compare-and-set：并发调用共享同一构建任务，不重复构建两个会话。
-    /// </summary>
+    /// <summary>取已就绪的交互会话；预热失败或已被取消时重新构建。</summary>
     private Task EnsureSessionReadyAsync(CancellationToken ct)
     {
-        lock (_gate)
-        {
-            if (_session is not null)
-                return Task.CompletedTask;
+        if (_session is not null)
+            return Task.CompletedTask;
 
-            if (_sessionReady is { IsFaulted: false, IsCanceled: false } ready)
-                return ready;
+        if (_sessionReady is { IsFaulted: false, IsCanceled: false })
+            return _sessionReady;
 
-            return _sessionReady = BuildSessionAsync(ModelName ?? string.Empty, ct);
-        }
+        _sessionReady = BuildSessionAsync(ModelName ?? string.Empty, ct);
+        return _sessionReady;
     }
 
     /// <summary>观察预热任务：记录失败但不让异常逃逸，首条消息会再次抛出同一异常并提示用户。</summary>
@@ -220,19 +208,20 @@ public sealed class ChatSessionClient(
             readMs = total.ElapsedMilliseconds;
             if (conversation is null)
             {
-                _transcript.AddSystem($"会话 {conversationId} 不存在。");
+                AddSystem($"会话 {conversationId} 不存在。");
                 return;
             }
 
             // 先整体替换再通知：避免「先清空再逐条追加」触发两次重绘。
-            _transcript.LoadHistory(conversation, logger);
+            var projection = ProjectTranscript(conversation);
+            ReplaceTranscript(projection.Messages, projection.Context);
             projectMs = total.ElapsedMilliseconds - readMs;
             Notify();
 
             // 切换后同步回放新前台会话的 BuildRun 快照（与初始化同语义）。
             var buildRun = await deps.BuildRunReplay.ReplayLatestAsync(conversation.Id, ct).ConfigureAwait(false);
             if (buildRun is not null)
-                _transcript.Apply(buildRun, logger);
+                Apply(buildRun);
             buildRunMs = total.ElapsedMilliseconds - readMs - projectMs;
         }
         finally
@@ -253,64 +242,83 @@ public sealed class ChatSessionClient(
     /// <summary>新建会话：当前会话转入后台（可经 <c>/session switch</c> 恢复），对齐 <c>/new</c> 语义。</summary>
     public async Task NewSessionAsync(CancellationToken ct = default)
     {
-        await AbortActiveRunAsync().ConfigureAwait(false);
-
         var modelId = deps.ModelManager.GetMainModel(deps.AppState.Current.MainLoopModel).Id;
         var cwd = deps.SessionManager.ForegroundConversation?.WorkingDirectory ?? Directory.GetCurrentDirectory();
         await deps.SessionManager.BackgroundCurrentAndCreateNewAsync(
             new ConversationOptions(cwd, modelId), ct).ConfigureAwait(false);
 
-        _transcript.Reset();
-        _transcript.AddSystem("已创建新会话，原会话转入后台。");
+        ResetTranscript();
+        AddSystem("已创建新会话，原会话转入后台。");
         await RefreshSessionsAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>关闭当前前台会话；下一条消息会惰性开启新会话（与 <c>/close</c> 语义一致）。</summary>
     public async Task CloseCurrentAsync(CancellationToken ct = default)
     {
-        await AbortActiveRunAsync().ConfigureAwait(false);
-
         var foregroundId = deps.SessionManager.ForegroundConversation?.Id;
         if (foregroundId is null)
         {
-            _transcript.AddSystem("没有可关闭的活动会话。");
+            AddSystem("没有可关闭的活动会话。");
             Notify();
             return;
         }
 
         await deps.SessionManager.CloseAsync(ct).ConfigureAwait(false);
-        _transcript.Reset();
-        _transcript.AddSystem($"已关闭会话 {foregroundId}。");
+        ResetTranscript();
+        AddSystem($"已关闭会话 {foregroundId}。");
         await RefreshSessionsAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 停止在途运行并等待事件流收尾，再清空待答交互；新建/关闭会话前调用，
-    /// 避免旧 run 的增量继续写入新会话转录、或中断卡片串线到新会话。
-    /// </summary>
-    private async Task AbortActiveRunAsync()
+    /// <summary>清空转录渲染状态（新建/关闭会话时调用）。</summary>
+    private void ResetTranscript() => ReplaceTranscript([], []);
+
+    /// <summary>整体替换转录渲染状态与上下文清单，并重置本会话用量计数。</summary>
+    private void ReplaceTranscript(IReadOnlyList<WebMessage> messages, IReadOnlyList<WebContextItem> context)
     {
-        // 先回终局决策再取消：管线可能正阻塞在待答 TCS 上，
-        // 若先取消并等待收尾，事件流要等 TCS 解除后才会结束，等待会变相悬挂。
-        ClearPendingInteractions();
-        if (IsRunning)
+        lock (_gate)
         {
-            Stop();
-            if (_activeRun is { } run)
-                await run.ConfigureAwait(false);
+            _messages.Clear();
+            _messages.AddRange(messages);
+            _toolCalls.Clear();
+            _activities.Clear();
+            _context.Clear();
+            _context.AddRange(context);
         }
+        InputTokens = 0;
+        OutputTokens = 0;
     }
 
-    /// <summary>给所有待答交互回终局决策并清空中断卡片：审批按拒绝、提问按取消、预算按终止。</summary>
-    private void ClearPendingInteractions()
+    /// <summary>
+    /// 把会话历史投影为可见消息与上下文清单（纯内存无 I/O）：
+    /// 上下文从历史里的工具入参重建，因此切换回来的会话也有内容。
+    /// </summary>
+    private (List<WebMessage> Messages, List<WebContextItem> Context) ProjectTranscript(Conversation conversation)
     {
-        _pendingApproval?.TrySetResult(ApprovalDecision.Deny);
-        _pendingQuestion?.TrySetResult(null);
-        _pendingBudget?.TrySetResult(GoalBudgetDecision.Abort);
-        _pendingApproval = null;
-        _pendingQuestion = null;
-        _pendingBudget = null;
-        _pendingInteraction = null;
+        List<WebMessage> messages = [];
+        List<WebContextItem> context = [];
+        foreach (var message in conversation.Messages)
+        {
+            switch (message)
+            {
+                case UserMessage { IsMeta: false } user:
+                    messages.Add(new WebMessage(WebRole.User, user.Content));
+                    break;
+                case AssistantMessage assistant:
+                    var text = string.Concat(assistant.Content.OfType<TextBlock>().Select(b => b.Text));
+                    var thinking = string.Concat(assistant.Content.OfType<ThinkingBlock>().Select(b => b.Thinking));
+                    if (text.Length > 0 || thinking.Length > 0)
+                        messages.Add(new WebMessage(WebRole.Assistant, text) { Thinking = thinking });
+
+                    foreach (var toolUse in assistant.Content.OfType<ToolUseBlock>())
+                        WebContextTracker.AccumulateToolUse(context, toolUse.Name, toolUse.Input, logger);
+                    break;
+                case SystemMessage system:
+                    messages.Add(new WebMessage(WebRole.System, system.Content));
+                    break;
+            }
+        }
+
+        return (messages, context);
     }
 
     /// <summary>提交一条用户消息或斜杠命令并消费整条事件流。</summary>
@@ -329,7 +337,7 @@ public sealed class ChatSessionClient(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Web 会话初始化失败");
-            _transcript.AddSystem($"会话初始化失败：{ex.Message}");
+            AddSystem($"会话初始化失败：{ex.Message}");
             Notify();
             return;
         }
@@ -339,18 +347,21 @@ public sealed class ChatSessionClient(
 
         if (text.StartsWith('/'))
         {
-            await TrackRunAsync(SendCommandAsync(session, text, ct)).ConfigureAwait(false);
+            await SendCommandAsync(session, text, ct).ConfigureAwait(false);
             return;
         }
 
         BeginRun(ct);
-        _transcript.AddUser(text);
-        _transcript.BeginStreamingReply();
+        lock (_gate)
+        {
+            _messages.Add(new WebMessage(WebRole.User, text));
+            _messages.Add(new WebMessage(WebRole.Assistant, string.Empty) { IsStreaming = true });
+        }
         Notify();
 
-        await TrackRunAsync(ConsumeEventsAsync(
+        await ConsumeEventsAsync(
             deps.Streams.StreamQueryAsync(session, text, imagePaths: null, ct: RunToken()),
-            "查询")).ConfigureAwait(false);
+            "查询").ConfigureAwait(false);
     }
 
     /// <summary>
@@ -362,7 +373,8 @@ public sealed class ChatSessionClient(
     private async Task SendCommandAsync(InteractiveSession session, string text, CancellationToken ct)
     {
         BeginRun(ct);
-        _transcript.AddUser(text);
+        lock (_gate)
+            _messages.Add(new WebMessage(WebRole.User, text));
         Notify();
 
         try
@@ -395,16 +407,16 @@ public sealed class ChatSessionClient(
 
             var result = await commands.ExecuteCommandAsync(session, text, ct).ConfigureAwait(false);
             if (result is not null)
-                _transcript.AddSystem(result);
+                AddSystem(result);
         }
         catch (OperationCanceledException)
         {
-            _transcript.AddSystem("已停止。");
+            AddSystem("已停止。");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Web 斜杠命令执行失败");
-            _transcript.AddSystem($"命令执行失败：{ex.Message}");
+            AddSystem($"命令执行失败：{ex.Message}");
         }
         finally
         {
@@ -421,26 +433,16 @@ public sealed class ChatSessionClient(
         IsRunning = true;
     }
 
-    /// <summary>登记在途运行，供中断会话的操作等待事件流收尾后再重置转录。</summary>
-    private async Task TrackRunAsync(Task run)
-    {
-        _activeRun = run;
-        try
-        {
-            await run.ConfigureAwait(false);
-        }
-        finally
-        {
-            _activeRun = null;
-        }
-    }
-
     private CancellationToken RunToken() => _runCts?.Token ?? throw new InvalidOperationException("运行尚未开始。");
 
     private void EndRun()
     {
         IsRunning = false;
-        _transcript.FinishStreaming();
+        lock (_gate)
+        {
+            foreach (var message in _messages.Where(m => m.IsStreaming))
+                message.IsStreaming = false;
+        }
         _runCts?.Dispose();
         _runCts = null;
         Notify();
@@ -453,18 +455,18 @@ public sealed class ChatSessionClient(
         {
             await foreach (var evt in events.ConfigureAwait(false))
             {
-                _transcript.Apply(evt, logger);
+                Apply(evt);
                 Notify();
             }
         }
         catch (OperationCanceledException)
         {
-            _transcript.AddSystem("已停止。");
+            AddSystem("已停止。");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Web {Source}流异常终止", source);
-            _transcript.AddSystem($"运行失败：{ex.Message}");
+            AddSystem($"运行失败：{ex.Message}");
         }
         finally
         {
@@ -480,7 +482,7 @@ public sealed class ChatSessionClient(
     {
         var pending = _pendingApproval;
         _pendingApproval = null;
-        _pendingInteraction = null;
+        Pending = null;
         pending?.TrySetResult(decision);
         Notify();
     }
@@ -490,7 +492,7 @@ public sealed class ChatSessionClient(
     {
         var pending = _pendingQuestion;
         _pendingQuestion = null;
-        _pendingInteraction = null;
+        Pending = null;
         pending?.TrySetResult(answer);
         Notify();
     }
@@ -500,7 +502,7 @@ public sealed class ChatSessionClient(
     {
         var pending = _pendingBudget;
         _pendingBudget = null;
-        _pendingInteraction = null;
+        Pending = null;
         pending?.TrySetResult(decision);
         Notify();
     }
@@ -514,7 +516,7 @@ public sealed class ChatSessionClient(
         {
             case ApprovalInteractionRequest approval:
                 _pendingApproval = approval.ResponseSource;
-                _pendingInteraction = new WebPendingInteraction(
+                Pending = new WebPendingInteraction(
                     WebInteractionKind.Approval,
                     $"需要批准：{approval.ToolName}",
                     approval.ToolInput,
@@ -524,7 +526,7 @@ public sealed class ChatSessionClient(
 
             case QuestionInteractionRequest question:
                 _pendingQuestion = question.ResponseSource;
-                _pendingInteraction = new WebPendingInteraction(
+                Pending = new WebPendingInteraction(
                     WebInteractionKind.Question,
                     question.Question,
                     null,
@@ -534,7 +536,7 @@ public sealed class ChatSessionClient(
 
             case BudgetInteractionRequest budget:
                 _pendingBudget = budget.ResponseSource;
-                _pendingInteraction = new WebPendingInteraction(
+                Pending = new WebPendingInteraction(
                     WebInteractionKind.Budget,
                     budget.Context.Scope == BudgetPromptScope.AgentRun ? "执行预算已耗尽" : "Goal 预算已耗尽",
                     budget.Context.Reason,
@@ -553,6 +555,176 @@ public sealed class ChatSessionClient(
         Notify();
     }
 
+    private void Apply(QueryEvent evt)
+    {
+        switch (evt)
+        {
+            case TextDeltaEvent delta:
+                AppendAssistant(delta.Text);
+                break;
+
+            case ThinkingDeltaEvent thinking:
+                AppendThinking(thinking.Text);
+                break;
+
+            case ToolStartEvent start:
+                lock (_gate)
+                {
+                    _toolCalls.Add(new WebToolCall(start.ToolId, start.ToolName, start.ToolInput, start.AgentName));
+                    WebContextTracker.AccumulateToolUse(_context, start.ToolName, start.ToolInput, logger);
+                }
+                break;
+
+            case ToolDoneEvent done:
+                lock (_gate)
+                {
+                    var call = _toolCalls.FirstOrDefault(c => c.ToolId == done.ToolId);
+                    if (call is null)
+                    {
+                        call = new WebToolCall(done.ToolId, done.ToolName, done.ToolInput, done.AgentName);
+                        _toolCalls.Add(call);
+                    }
+                    call.Complete(done.IsError, done.Result);
+                }
+                break;
+
+            case SubagentProgressEvent progress:
+                UpsertActivity($"subagent:{progress.ForkId}", "子代理",
+                    $"{progress.AgentName} · {progress.Phase} · {progress.CurrentToolName ?? "运行中"}");
+                break;
+
+            case ModeProgressEvent mode:
+                UpsertActivity("mode", "进度", mode.Message);
+                break;
+
+            case FileChangeEvent change:
+                lock (_gate)
+                    WebContextTracker.AccumulateFileChange(_context, change);
+                break;
+
+            case NoticeEvent notice:
+                AddSystem(notice.Message);
+                break;
+
+            case ErrorEvent error:
+                AddSystem($"⚠ {error.Message}");
+                break;
+
+            case CompactSuggestedEvent compact:
+                AddSystem($"💡 {compact.Message}");
+                break;
+
+            case BudgetWarningEvent budget:
+                AddSystem($"⚠ 预算预警：已消耗 {budget.UsedTokens:N0} / {budget.LimitTokens:N0} tokens");
+                break;
+
+            case GoalBudgetWarningEvent goalBudget:
+                AddSystem($"⚠ Goal 预算预警（{goalBudget.Level}）：attempts={goalBudget.TotalAttempts}, tokens={goalBudget.TotalTokens}");
+                break;
+
+            case GoalPlanEvent plan:
+                AddSystem($"已分解为 {plan.Steps.Count} 个子目标");
+                lock (_gate)
+                {
+                    _activities.RemoveAll(a => a.Key == "goal-plan");
+                    _activities.Add(new WebActivity("goal-plan", "Goal 计划", string.Join(" / ", plan.Steps)));
+                }
+                break;
+
+            case GoalPlanUpdatedEvent planUpdated:
+                UpsertActivity("goal-plan-updated", "Goal 进度",
+                    $"第 {planUpdated.CurrentIndex + 1} / {planUpdated.Steps.Count} 步");
+                break;
+
+            case GoalResultEvent goalResult:
+                AddSystem($"Goal 结束：✓ {goalResult.Completed} · ✗ {goalResult.Failed} · ○ {goalResult.Skipped}");
+                break;
+
+            case BuildRunStateEvent build:
+                UpsertActivity("build", "Build",
+                    $"{build.State} · {build.CompletedTasks}/{build.TotalTasks}");
+                break;
+
+            case BuildRunCompletedEvent:
+                AddSystem("Build 运行已结束，产物清单已生成。");
+                break;
+
+            case WorkflowRunStartedEvent workflow:
+                AddSystem($"已批准计划 {workflow.PlanId}（修订 {workflow.Revision}），开始执行");
+                break;
+
+            case WorkflowRunEndedEvent workflowEnded:
+                AddSystem($"Build run {workflowEnded.PlanId} 结束");
+                break;
+
+            case DoneEvent done:
+                InputTokens = done.Usage?.InputTokens ?? 0;
+                OutputTokens = done.Usage?.OutputTokens ?? 0;
+                break;
+
+            case WorkingDirectoryChangedEvent cwd:
+                UpsertActivity("cwd", "工作目录", cwd.WorkingDirectory);
+                break;
+
+            case AgentMessageEvent agent:
+                AddSystem($"[{agent.AgentName}] {agent.Content}");
+                break;
+
+            case SuggestionsEvent or TurnStartedEvent or TurnCompletedEvent:
+                break;
+
+            default:
+                // 契约新增子类型未渲染时的兜底：基线由 QueryEventContractTests 守卫，这里不静默丢弃。
+                logger.LogWarning(
+                    "未渲染的 QueryEvent 子类型 {EventType}：请补 TUI / WebUI 两处渲染并更新契约基线",
+                    evt.GetType().Name);
+                break;
+        }
+    }
+
+    private void AppendAssistant(string text)
+    {
+        lock (_gate)
+            GetOrCreateStreamingAssistant().Content += text;
+    }
+
+    /// <summary>思考增量挂到当前这一轮的助手消息上：思考属于该轮回复，不能脱离消息流单独累积。</summary>
+    private void AppendThinking(string text)
+    {
+        lock (_gate)
+            GetOrCreateStreamingAssistant().Thinking += text;
+    }
+
+    private WebMessage GetOrCreateStreamingAssistant()
+    {
+        var last = _messages.LastOrDefault();
+        if (last is null || last.Role != WebRole.Assistant || !last.IsStreaming)
+        {
+            last = new WebMessage(WebRole.Assistant, string.Empty) { IsStreaming = true };
+            _messages.Add(last);
+        }
+
+        return last;
+    }
+
+    private void AddSystem(string text)
+    {
+        lock (_gate)
+            _messages.Add(new WebMessage(WebRole.System, text));
+    }
+
+    private void UpsertActivity(string key, string kind, string text)
+    {
+        lock (_gate)
+        {
+            var existing = _activities.FirstOrDefault(a => a.Key == key);
+            if (existing is null)
+                _activities.Add(new WebActivity(key, kind, text));
+            else
+                existing.Text = text;
+        }
+    }
+
     private void Notify() => Changed?.Invoke();
 
     public ValueTask DisposeAsync()
@@ -566,3 +738,76 @@ public sealed class ChatSessionClient(
         return ValueTask.CompletedTask;
     }
 }
+
+/// <summary>消息角色。</summary>
+public enum WebRole { User, Assistant, System }
+
+/// <summary>一条对话消息。</summary>
+public sealed class WebMessage(WebRole role, string content)
+{
+    public WebRole Role { get; } = role;
+
+    public string Content { get; set; } = content;
+
+    /// <summary>该轮回复的思考过程（为空表示没有）。</summary>
+    public string Thinking { get; set; } = string.Empty;
+
+    public bool IsStreaming { get; set; }
+}
+
+/// <summary>工具调用卡片状态。</summary>
+public sealed class WebToolCall(string toolId, string name, string? input, string? agentName)
+{
+    public string ToolId { get; } = toolId;
+
+    public string Name { get; } = name;
+
+    public string? Input { get; } = input;
+
+    public string? AgentName { get; } = agentName;
+
+    public bool IsRunning { get; private set; } = true;
+
+    public bool IsError { get; private set; }
+
+    public string? Result { get; private set; }
+
+    public void Complete(bool isError, string? result)
+    {
+        IsRunning = false;
+        IsError = isError;
+        Result = result;
+    }
+}
+
+/// <summary>活动抽屉中的一条状态。</summary>
+public sealed class WebActivity(string key, string kind, string text)
+{
+    public string Key { get; } = key;
+
+    public string Kind { get; } = kind;
+
+    public string Text { get; set; } = text;
+}
+
+/// <summary>待用户应答的中断类型。</summary>
+public enum WebInteractionKind { Approval, Question, Budget }
+
+/// <summary>侧栏会话列表中的一项。</summary>
+public sealed record WebSessionItem(
+    string Id,
+    string Title,
+    string Mode,
+    int MessageCount,
+    DateTimeOffset LastActivityAt,
+    bool IsForeground);
+
+/// <summary>中断卡片数据。</summary>
+public sealed record WebPendingInteraction(
+    WebInteractionKind Kind,
+    string Title,
+    string? Description,
+    IReadOnlyList<string>? Options,
+    bool AllowAlways,
+    // 预算中断的场景：决定选项集（Goal 子目标工作流或单次 Agent 运行）。
+    BudgetPromptScope BudgetScope = BudgetPromptScope.GoalRun);

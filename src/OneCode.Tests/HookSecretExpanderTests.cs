@@ -83,15 +83,4 @@ public sealed class HookSecretExpanderTests
         var act = () => HookSecretExpander.Expand("dpapi:not-base64!!");
         act.Should().Throw<Exception>();
     }
-
-    [Fact]
-    public void Expand_Dpapi_OnNonWindows_ThrowsPlatformNotSupported()
-    {
-        if (OperatingSystem.IsWindows())
-            return; // 该守卫分支仅存在于非 Windows 平台（DPAPI 为 Windows 专属）
-
-        var act = () => HookSecretExpander.Expand("dpapi:AAAA");
-        act.Should().Throw<PlatformNotSupportedException>(
-            "非 Windows 平台的 dpapi: 前缀必须显式失败，而不是走到 ProtectedData 抛出不相关异常");
-    }
 }

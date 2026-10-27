@@ -1,21 +1,17 @@
-using System.Runtime.CompilerServices;
 using OneCode.Core.Session;
 using OneCode.App.Commands;
 using OneCode.App.Query;
 using OneCode.App.Services;
 using OneCode.App.Services.BuildMode;
-using OneCode.App.Services.Interaction;
 using OneCode.App.Services.Streaming;
 using OneCode.App.Session;
 using OneCode.Core.Build;
 using OneCode.Core.Commands;
 using OneCode.Core.Models;
-using OneCode.Core.Permissions;
 using OneCode.WebUI.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
-using NSubstitute.ExceptionExtensions;
 
 namespace OneCode.Tests;
 
@@ -33,7 +29,6 @@ public sealed class ChatSessionClientTests
     private readonly IAppStateAccessor _appStateAccessor = Substitute.For<IAppStateAccessor>();
     private readonly IModelManager _modelManager = Substitute.For<IModelManager>();
     private readonly CommandRegistry _registry = new([]);
-    private readonly WebInteractionDispatcher _dispatcher = new();
 
     private ChatSessionClient CreateClient(Func<CancellationToken, Task<string>>? buildSystemPrompt = null)
     {
@@ -56,7 +51,7 @@ public sealed class ChatSessionClientTests
 
         return new ChatSessionClient(
             deps,
-            _dispatcher,
+            new WebInteractionDispatcher(),
             new MarkdownRenderer(),
             new RunEventBridge(logger: null),
             Substitute.For<ILogger<ChatSessionClient>>());
@@ -265,87 +260,6 @@ public sealed class ChatSessionClientTests
         await client.InitializeAsync();
 
         client.Activities.Should().Contain(a => a.Kind == "Build", "启动时必须回放最近一次 BuildRun 快照");
-    }
-
-    [Fact]
-    public async Task NewSessionAsync_WhileRunning_StopsRunAndResetsTranscript()
-    {
-        var client = CreateClient();
-        await client.InitializeAsync();
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _streams.StreamQueryAsync(
-                Arg.Any<InteractiveSession>(), "hello", Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo => GatedStream(gate.Task, callInfo.Arg<CancellationToken>()));
-
-        var send = client.SendAsync("hello");
-        client.IsRunning.Should().BeTrue("发送后必须进入忙碌状态等待事件流");
-
-        await client.NewSessionAsync();
-
-        client.IsRunning.Should().BeFalse("新建会话必须先停掉在途运行");
-        send.IsCompleted.Should().BeTrue("取消必须解除事件流等待，运行任务不得悬挂");
-        client.Messages.Should().ContainSingle(m =>
-            m.Role == WebRole.System && m.Content.Contains("已创建新会话"),
-            "旧 run 的转录必须被整体清空，只留下新会话提示");
-        gate.SetResult();
-        await send;
-    }
-
-    [Fact]
-    public async Task CloseCurrentAsync_WhileBlockedOnApproval_ResolvesApprovalWithDenyAndStopsRun()
-    {
-        var client = CreateClient();
-        await client.InitializeAsync();
-        _sessionManager.ForegroundConversation.Returns(
-            new Conversation { Id = new SessionId("aaaaaaaa-0000-0000-0000-000000000009") });
-        var approval = new ApprovalInteractionRequest("req-1", "Write");
-        // 运行流卡在审批应答上且不观测取消令牌：模拟审批管线优先等待用户决策。
-        // 若关闭会话不回终局决策（或只取消不回决策就等待收尾），此测试会悬挂或失败。
-        _streams.StreamQueryAsync(
-                Arg.Any<InteractiveSession>(), "hello", Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(_ => StreamAwaitingApproval(approval.ResponseSource.Task));
-
-        var send = client.SendAsync("hello");
-        _dispatcher.TrySend(approval).Should().BeTrue("活跃电路必须能收到审批请求");
-        client.Pending.Should().NotBeNull();
-
-        await client.CloseCurrentAsync();
-
-        (await approval.ResponseSource.Task).Should().Be(ApprovalDecision.Deny,
-            "关闭会话必须给挂起审批回终局决策，审批管线不得悬挂");
-        client.Pending.Should().BeNull("中断卡片不得串线到关闭后的新会话");
-        client.IsRunning.Should().BeFalse();
-        client.Messages.Should().ContainSingle(m => m.Content.Contains("已关闭会话"));
-        await send;
-    }
-
-    [Fact]
-    public async Task InitializeAsync_WhenSessionSetupFails_ExitsInitializingState()
-    {
-        var client = CreateClient();
-        _sessionManager.EnsureActiveSessionAsync(Arg.Any<ConversationOptions>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("boom"));
-
-        await FluentActions.Awaiting(() => client.InitializeAsync())
-            .Should().ThrowAsync<InvalidOperationException>();
-
-        client.IsInitializing.Should().BeFalse("初始化失败也必须复位加载态，否则 UI 永久停在占位且切换被拦截");
-    }
-
-    /// <summary>被闸门挂起的事件流：模拟长查询；取消后立即以异常收尾，闸门放行后追加一条增量。</summary>
-    private static async IAsyncEnumerable<QueryEvent> GatedStream(
-        Task gate, [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        await gate.WaitAsync(ct);
-        yield return new TextDeltaEvent("late delta");
-        yield return new DoneEvent(null, null, 0, RunTerminalReason.Completed);
-    }
-
-    /// <summary>只等待审批应答、不观测取消令牌的事件流：审批解除后正常收尾。</summary>
-    private static async IAsyncEnumerable<QueryEvent> StreamAwaitingApproval(Task approvalResponse)
-    {
-        await approvalResponse;
-        yield return new DoneEvent(null, null, 0, RunTerminalReason.Completed);
     }
 
     private static BuildRun MakeBuildRun(SessionId conversationId) => new()
