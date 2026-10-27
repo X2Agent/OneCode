@@ -9,10 +9,10 @@
 }
 
 <div class="shell @(_navOpen ? "nav-open" : "") @(_activityOpen ? "activity-open" : "")">
-    <SessionList Mode="Client.Mode"
-                 ModelName="Client.ModelName ?? string.Empty"
-                 WorkingDirectory="@_workingDirectory"
+    <SessionList WorkingDirectory="@_workingDirectory"
                  Running="Client.IsRunning"
+                 Busy="@(Client.IsSwitchingSession || Client.IsInitializing)"
+                 Loading="Client.IsInitializing"
                  Sessions="Client.Sessions"
                  OnSwitch="SwitchSessionAsync"
                  OnNew="NewSessionAsync"
@@ -27,19 +27,27 @@
                 <div class="title">OneCode</div>
             </div>
             <div class="meta nums">
+                <span class="mode">@Client.Mode</span>
                 @if (Client.IsRunning)
                 {
                     <span class="running">运行中</span>
                 }
                 <span>@Client.InputTokens / @Client.OutputTokens tok</span>
             </div>
-            <button type="button" class="context-toggle activity-toggle" title="活动面板" @onclick="ToggleActivity">
+            <button type="button" class="context-toggle activity-toggle" title="上下文面板" @onclick="ToggleActivity">
                 <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M13 4v12"/></svg>
             </button>
         </header>
 
-        <div class="transcript">
-            <MessageList Messages="Client.Messages" />
+        <div class="transcript @(Client.IsSwitchingSession || Client.IsInitializing ? "busy" : "")">
+            <MessageList Messages="Client.Messages" SessionKey="@Client.ForegroundSessionId" />
+
+            @if (Client.IsSwitchingSession || Client.IsInitializing)
+            {
+                <div class="transcript-loading" role="status">
+                    @(Client.IsInitializing ? "正在初始化会话…" : "正在加载会话…")
+                </div>
+            }
 
             @if (Client.ToolCalls.Count > 0)
             {
@@ -69,12 +77,12 @@
             }
             else
             {
-                <button class="send" disabled="@(string.IsNullOrWhiteSpace(_input))" @onclick="SendAsync">发送</button>
+                <button class="send" disabled="@(string.IsNullOrWhiteSpace(_input) || Client.IsSwitchingSession)" @onclick="SendAsync">发送</button>
             }
         </footer>
     </main>
 
-    <ActivityPanel Activities="Client.Activities" Thinking="Client.Thinking" />
+    <ActivityPanel Activities="Client.Activities" ContextItems="Client.ContextItems" />
 </div>
 
 @code {
@@ -105,7 +113,7 @@
     private async Task SendAsync()
     {
         var text = _input;
-        if (string.IsNullOrWhiteSpace(text) || Client.IsRunning)
+        if (string.IsNullOrWhiteSpace(text) || Client.IsRunning || Client.IsSwitchingSession)
             return;
 
         _input = string.Empty;
@@ -121,10 +129,15 @@
 
     private async Task SwitchSessionAsync(string conversationId)
     {
-        if (Client.IsRunning)
+        if (Client.IsRunning || Client.IsSwitchingSession || Client.IsInitializing)
             return;
 
         _navOpen = false;
+
+        // 点的就是当前会话：只需收起抽屉，不必重放一遍历史。
+        if (string.Equals(conversationId, Client.ForegroundSessionId, StringComparison.Ordinal))
+            return;
+
         await Client.SwitchSessionAsync(conversationId);
     }
 

@@ -11,12 +11,13 @@ public sealed class InMemorySessionEventStoreTests
         var sessionId = SessionId.NewId();
         var now = DateTimeOffset.UtcNow;
 
-        var sequences = await store.AppendAsync([
+        var stamp = await store.AppendAsync([
             new SessionMarkerEvent(sessionId, 99, now, SessionEventType.TurnStarted),
             new SessionMarkerEvent(sessionId, 1, now, SessionEventType.TurnEnded),
         ]);
 
-        sequences.Should().Equal(1, 2);
+        stamp.Should().NotBeNull("写入必须回传日志戳供摘要索引回填");
+        stamp.GetValueOrDefault().Length.Should().Be(2);
         var events = await store.ReadAsync(sessionId);
         events.Select(item => item.Sequence).Should().Equal(1, 2);
     }
@@ -48,14 +49,15 @@ public sealed class InMemorySessionEventStoreTests
         var sessionId = SessionId.NewId();
         var now = DateTimeOffset.UtcNow;
 
-        var sequences = await Task.WhenAll(Enumerable.Range(0, 32)
+        var stamps = await Task.WhenAll(Enumerable.Range(0, 32)
             .Select(_ => store.AppendAsync([
                 new SessionMarkerEvent(sessionId, 0, now, SessionEventType.StepStarted),
             ])));
 
-        sequences.SelectMany(sequence => sequence).Should().OnlyHaveUniqueItems();
-        sequences.SelectMany(sequence => sequence)
-            .OrderBy(sequence => sequence)
+        // 每次追加 1 条事件：内存实现的 Length 即累计条数，必然覆盖 1..32 且互不重复。
+        var lengths = stamps.Select(stamp => stamp.GetValueOrDefault().Length).ToArray();
+        lengths.Should().OnlyHaveUniqueItems();
+        lengths.OrderBy(length => length)
             .Should().Equal(Enumerable.Range(1, 32).Select(value => (long)value));
     }
 }

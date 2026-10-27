@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using OneCode.App.Logging;
 using OneCode.App.Services;
 using OneCode.Core.Models;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Daemon;
 
@@ -38,6 +39,8 @@ public static class DaemonHost
         builder.ConfigureApplicationLogging();
 
         var host = builder.Build();
+        // 遥测监听须在 agent 首次运行前挂上：立即解析一次转发器，订阅 MAF ActivitySource。
+        _ = host.Services.GetRequiredService<AgentTelemetryLogForwarder>();
         _ = host.Services.GetRequiredService<IModelCatalogCache>();
 
         await host.StartAsync(ct).ConfigureAwait(false);

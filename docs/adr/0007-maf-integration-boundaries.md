@@ -113,8 +113,8 @@ Agent 工具路径已站在 MAF 上（`ListAgentToolsWithTasksAsync` + `UseMcpSk
 
 ### 5.1 版本敏感行为与升级复查
 
-**项目引用的 NuGet 为 `1.24.0`，本地 `agent-framework/` checkout 基线为 `dotnet-1.22.0-6-g669c8b95e`**。
-版本敏感断言以「**1.24.0 真实包行为 + 源码核对**」双证为准，不得仅凭本地 checkout 源码为发布包行为作证（详见 [MAF C# 接入指引 §1.1](../maf/integration-guide.md)）。
+**项目引用的 NuGet 为 `1.26.0`（本地 `agent-framework/` checkout 未建立；最近一次 checkout 基线为 `dotnet-1.22.0-6-g669c8b95e`）**。
+版本敏感断言以「**1.26.0 真实包行为 + 源码核对**」双证为准，不得仅凭本地 checkout 源码为发布包行为作证（详见 [MAF C# 接入指引](../maf/integration-guide.md)）。
 
 **包与目录不等同**：`Microsoft.Agents.AI.Harness` 包只有 `HarnessAgent.cs` / `HarnessAgentOptions.cs` /
 `ChatClientHarnessExtensions.cs` / `FeatureIndex.cs`；被使用的默认 provider（Todo / AgentMode / FileMemory /
@@ -127,7 +127,7 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
 有版本对应证据；不向其他模块外推。`Harness/**` 整体与 `Skills/**` **不能**标【已核对】——其中 `ToolApproval/**` 与
 `AgentMode/**` 在该区间有改动，见下。
 
-**同一 range 内确有改动（结论已在 `1.24.0` 正式包上通过行为测试锁定；`dotnet-1.21.0` tag 是升级前旧行为，仅作 diff 对照）**：
+**同一 range 内确有改动（结论已在 `1.26.0` 正式包上通过行为测试锁定；`dotnet-1.21.0` tag 是升级前旧行为，仅作 diff 对照）**：
 
 - `dotnet/src/Microsoft.Agents.AI/ChatClient/` 的审批协议实现被 `[BREAKING]` 改写：
   `ApprovalResponseBindingChatClient` 共 139 行变动（+112/-27）重写、`ApprovalNotRequiredFunctionBypassingChatClient`
@@ -149,7 +149,7 @@ FileAccess / BackgroundAgents / Loop / ToolApproval）实际位于 **`Microsoft.
   模式工具」变成官方开关——与 §1 的「AgentMode 归宿主」同向，升级后可评估用它替代自建 opt-out。
 - `OpenTelemetryAgent.cs` / `AgentExtensions.cs` 亦有变化，**agent 级遥测结论同样版本敏感**。
 
-**升级复查必做**（升级 MAF 版本时逐条执行；当前 pinned 为 `1.24.0`）：
+**升级复查必做**（升级 MAF 版本时逐条执行；当前 pinned 为 `1.26.0`）：
 
 1. 重跑「暂停 → 恢复 → 审批响应绑定」与「只回显响应、不回放请求」两组用例——注意 1.22.0（`#8432`）同时改写了
    `ToolApprovalAgent` 与 `ApprovalResponseBindingChatClient` 两侧的"已浮出"登记语义，用例必须覆盖上限轮与排队出队两条路径。

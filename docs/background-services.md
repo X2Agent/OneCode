@@ -275,8 +275,7 @@ Cron 是项目唯一面向用户的"定时任务"功能，通过 AI 工具暴露
 ### 4.4 持久化策略与进程生命周期边界
 
 - **宿主生命周期**：`CronSchedulerService` 寄宿在任意 onecode 进程（TUI 或 `onecode daemon`）的 `IHost` 内。
-  **durable 作业在任意 onecode 进程存活期间照常触发；`onecode daemon`（[TUI 极致化路线图](./plan/tui-roadmap.md) P1）
-  提供无头常驻宿主**——TUI 关闭后 daemon 继续调度，重开 TUI 或 `/session` 可见执行历史会话。
+  **durable 作业在任意 onecode 进程存活期间照常触发；`onecode daemon` 提供无头常驻宿主**——TUI 关闭后 daemon 继续调度，重开 TUI 或 `/session` 可见执行历史会话。
   daemon 的查看与显式启停在 TUI 内经 `/daemon` 命令完成；开机自启注册走 `scripts/install-daemon.ps1`。
 - **项目归属**：durable 作业带 `ProjectDir` 盖章（创建进程的工作目录），只被归属项目的调度器加载触发；
   一个 daemon 绑定一个项目（进程 cwd，`--cwd/-C` 可指定）。

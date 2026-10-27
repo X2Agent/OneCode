@@ -2,7 +2,8 @@
 
 **状态**: Accepted（UI 形态部分由 [UI 契约单层化](./0017-ui-contract-single-layer.md) 取代）
 **日期**: 2026-09-30
-**关联**: [TUI 极致化路线图](../plan/tui-roadmap.md)（本决策的工程落地图纸，P0-P4）、
+**关联**: 分阶段实施计划 [P1 daemon 验收](../plan/p1-daemon-acceptance.md)、[P2a 引擎侧多会话](../plan/p2a-engine-multi-session.md)、
+[P2b sessions/attach](../plan/p2b-sessions-attach.md)、[P3 产物卡](../plan/p3-artifact-cards.md)、[P4 远程工作流](../plan/p4-remote-workflow.md)、
 [子代理派工边界](./0011-background-agents-delegation-boundary.md)（后台会话/attach/守护进程复用引擎与权限门禁，
 不构成背景代理派工触发）、[决策模型接入](./0012-decision-model-integration-jev.md)（决策模型不得产生 Allow 的授权边界）
 
@@ -36,8 +37,8 @@ opencode 直接 server-first）；TUI 仍是程序员用户旗舰（Claude Code/
 安全 key 存储，「审批等你决策」必须能抢回注意力；③ localhost HTTP 安立面（token/CSRF/本机其他进程）；
 ④ 并行会话窗口管理是桌面范式。
 
-逐项核实后，这些优势在**程序员使用场景**下均有 TUI 等效解（详细设计见路线图）：并行监控 → 后台会话 +
-终端多窗/tmux 并置 + `onecode sessions/attach`（引擎能力，与 UI 框架无关；进程内 tab 条已裁决不做，见路线图 §9）；桌面集成 → `onecode daemon` 无头守护进程 +
+逐项核实后，这些优势在**程序员使用场景**下均有 TUI 等效解（详细设计见 `docs/plan/` 分阶段实施计划）：并行监控 → 后台会话 +
+终端多窗/tmux 并置 + `onecode sessions/attach`（引擎能力，与 UI 框架无关；进程内 tab 条已裁决不做，见决策 §6）；桌面集成 → `onecode daemon` 无头守护进程 +
 OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → ssh/mosh + attach（比自有协议更普适，用户已确认可接受）；
 富渲染 → 「TUI 是调度器，本机软件是渲染器」（产物卡一键调起系统默认应用与编辑器；图片仅在终端图形协议支持时内联）。
 **唯一无等效解的是 HTML/富媒体内嵌渲染与为非程序员设计的 GUI 面貌**——前者本就该交给浏览器，
@@ -69,20 +70,21 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
    （`o` 打开 / `d` 调 diff 工具 / `e` 跳编辑器）；图片仅在 Sixel/kitty 能力检测通过时内联；HTML 预览一律交系统浏览器。
 3. **并行会话与多项目**：一个进程 = 一个项目 = 一个前台会话视图，跨项目与跨会话的并置切换交给终端
    多路复用器（tmux/Windows Terminal，新开窗口即新会话）+ 全局会话存储 + `onecode sessions/attach`
-   跨终端接入同一会话；不重造窗口管理，进程内不建 tab 条（裁决见路线图 §9）。
+   跨终端接入同一会话；不重造窗口管理，进程内不建 tab 条（决策 §6 裁决不做）。
 4. **定时任务与后台执行进无头守护进程**：`onecode daemon` 复用引擎组合根（剥掉 TUI 注册段），
    开机自启交给 OS 调度器（任务计划程序/systemd/launchd），通知走 OS 通知器 + OSC；托盘为可选薄助手、默认不做。
 5. **远程访问 = ssh/mosh + attach**，不建自有协议、不做自有客户端。
 6. **以下各项「不做」（非门控缓做）**：桌面壳（Photino/Electron/Tauri/MAUI）、单进程多项目切换、
+   进程内 tab 条（多路复用交给终端，净增量撑不起每 tab 视图模型/输入路由/审批汇聚的成本）、
    HTML/富媒体内嵌渲染。**Web UI 与 AG-UI 协议端点两项已由 [UI 契约单层化](./0017-ui-contract-single-layer.md) 取代**：
    浏览器客户端以 Blazor Server 形式立项，与 TUI 同为进程内消费端；对外网络端点仍然不做。
 
 ## 边界与禁令
 
 1. **业务核心不得反向依赖 TUI/前端**：引擎/编排/流式层出现 `Terminal.Gui` 或前端命名空间引用即回归；
-   P0 验收含 grep 复查（路线图 §3.3）。
+   P0 验收含 grep 复查（见 [TUI 项目边界](./0016-tui-project-boundary.md)）。
 2. **不在 TUI 内追浏览器渲染效果**：HTML/CSS/富媒体一律委托本机软件；能力检测失败就走「打开」，不做像素级内嵌。
-3. **不做单进程多项目切换**：项目级配置作用域与工具 cwd 语义不得被多项目混居破坏（路线图 §4.1）。
+3. **不做单进程多项目切换**：项目级配置作用域与工具 cwd 语义不得被多项目混居破坏。
 4. **托盘助手不得承载 UI**：只做存活指示/快捷菜单/退出；任何「顺手加个面板」都违反本决策。
 5. **preview 类静态服务器（若立项）不是 web UI 的例外通道**：只服务文件预览，不得在其上长出任何界面。
 6. **AG-UI 协议不引入**。排除依据是「无进程外消费端、不暴露任何端点」，与协议包或托管包的
@@ -90,16 +92,16 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
 
 ## 后续工作
 
-均不在本 ADR 实施范围，各自独立立项；工程细节以 [TUI 极致化路线图](../plan/tui-roadmap.md)为准。
+均不在本 ADR 实施范围，各自独立立项；工程细节见 `docs/plan/` 分阶段实施计划。
 门禁：`dotnet build src/OneCode.slnx` 无新增警告 + `dotnet test src/OneCode.slnx` 全绿。
 
 | ID | 事项 | 阶段 | 状态 |
 |---|---|---|---|
 | U1 | P0 引擎解耦（Tui 项目边界 + 契约单层化） | P0 | 已落地（见 [UI 契约单层化](./0017-ui-contract-single-layer.md)） |
-| U2 | P1 `onecode daemon` 常驻调度 + 通知触发补齐 + 安装脚本（托盘可选；OS 通知器已实现并接线） | P1 | 待立项 |
-| U3 | P2 `onecode sessions/attach` 跨终端接入 + `TranscriptEventBuffer`（进程内 tab 条已裁决不做，见路线图 §9） | P2 | 待立项 |
-| U4 | P3 产物卡 + 三平台 open helper + 图片能力检测内联 | P3 | 待立项 |
-| U5 | P4 ssh/mosh 远程工作流文档（`onecode run -p` 已裁决暂缓，见路线图 §9） | P4 | 待立项 |
+| U2 | P1 `onecode daemon` 常驻调度 + 通知触发补齐 + 安装脚本（托盘可选；OS 通知器已实现并接线） | P1 | 已落地，端到端验收待补（[P1 daemon 验收](../plan/p1-daemon-acceptance.md)） |
+| U3 | P2 引擎侧多会话 + `onecode sessions/attach` 跨终端接入 + `TranscriptEventBuffer`（进程内 tab 条已裁决不做，见决策 §6） | P2 | 已立项（[P2a](../plan/p2a-engine-multi-session.md) / [P2b](../plan/p2b-sessions-attach.md)） |
+| U4 | P3 产物卡 + 三平台 open helper + 图片能力检测内联 | P3 | 已立项（[P3 产物卡](../plan/p3-artifact-cards.md)） |
+| U5 | P4 ssh/mosh 远程工作流文档（`onecode run -p` 非交互单发已裁决暂缓：headless 链路已由 `CronJobExecutor` 验证，出现脚本/CI 硬需求随时可补） | P4 | 已立项（[P4 远程工作流](../plan/p4-remote-workflow.md)） |
 
 ## 后果
 
@@ -111,7 +113,8 @@ OS 通知器（toast/OSC 9），托盘降为可选薄助手；远程访问 → s
   GUI 展示面限于本机 loopback 的浏览器客户端，不对远程与移动端开放；社区吸引力主要押在引擎与 TUI 质量上
   （Claude Code 证明此路可通，但天花板真实）；原多前端计划的交互协议/REST 设计随之废弃。
 - **中性**：TUI 用户感知零变化；`docs/plan/web-host-plan.md` 撤稿删除，仍成立的设计（解耦清单、事件底座、
-  attach 并发模型）已并入 [TUI 极致化路线图](../plan/tui-roadmap.md)。
+  attach 并发模型）已并入 [P2a 引擎侧多会话](../plan/p2a-engine-multi-session.md) 与
+  [P2b sessions/attach](../plan/p2b-sessions-attach.md)。
 
 ## 引用
 

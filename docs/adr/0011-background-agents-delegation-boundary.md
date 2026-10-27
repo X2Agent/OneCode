@@ -60,18 +60,18 @@ MAF 提供三层「子代理委派」入口，BackgroundAgents 占中间层：
   `[Experimental]`（诊断 ID `MAAI001`）。该能力在 .NET / Python 两侧先后落地，.NET 侧发布更早：
   .NET 于 `dotnet-1.4.0` 引入 SubAgents、`dotnet-1.6.2` 改名 BackgroundAgents；Python 侧至 `python-1.7.0` 才提供。
 
-### 4. 版本证据（OneCode pinned 包 1.24.0）
+### 4. 版本证据（OneCode pinned 包 1.26.0）
 
 按 [MAF 集成边界](./0007-maf-integration-boundaries.md)「不得用本地 checkout 为已发布包行为作证」的要求，
 做双层取证：
 
-1. **DLL 字符串验证**（`Microsoft.Agents.AI` 1.24.0 `lib/net10.0/Microsoft.Agents.AI.dll`）：
+1. **DLL 字符串验证**（`Microsoft.Agents.AI` 1.26.0 `lib/net10.0/Microsoft.Agents.AI.dll`，1.24.0 → 1.26.0 升级复查重跑）：
    `BackgroundAgentsProvider` / `BackgroundAgentRuntimeState` / `GetIncompleteTasks` /
    `ReleaseSessionAsync` / `CreateTools` / `StartTrackedRun` / `BackgroundTaskCompletionLoopEvaluator` /
    `BackgroundAgentsProviderOptions` 均在；**`StartTaskAsync` 不存在**（无编程式起任务入口）。
 2. **源码比对**：`BackgroundAgentsProvider.cs` 在 `Harness/BackgroundAgents/**` 目录无差异，六个工具名与四成员公共面一致。
 
-> Microsoft Learn 后台代理文档的 .NET zone 写「主机端后台智能体会话版本目前在 .NET 中不可用」，与 pinned 1.24.0 不符
+> Microsoft Learn 后台代理文档的 .NET zone 写「主机端后台智能体会话版本目前在 .NET 中不可用」，与 pinned 1.26.0 不符
 > （`ReleaseSessionAsync` / `GetIncompleteTasks` 均已存在）。以本地源码与 pinned 包为准。
 
 ### 5. OneCode 现状（并非「四模式都是单主代理」）
@@ -180,7 +180,8 @@ Workflows 才是，而且已经切过了。
 
 1. 上游暴露编程式任务 API（如 `provider.StartTaskAsync(...)`）或 .NET harness 侧释放配套补全
    → 重评 F4/F5/F6 能否改用框架能力；
-2. 出现**刻意不带产品闸**的轻量代理面。注意：`docs/plan/tui-roadmap.md` 的后台会话/attach/守护进程明确复用
+2. 出现**刻意不带产品闸**的轻量代理面。注意：`docs/plan/` 的后台会话/attach 计划
+   （[P2a](../plan/p2a-engine-multi-session.md)/[P2b](../plan/p2b-sessions-attach.md)）与 `onecode daemon` 守护进程明确复用
    `QueryStreamEngine` / 权限 / Build 门禁，**不构成触发**；
 3. 产品要求「一次委派周期内按发现增量加任务」的自适应 fan-out（编译期 DAG 表达不了）
    → 与「扩展 `ParallelAgents` 增加动态相」二选一比较后立项。
@@ -213,11 +214,11 @@ Workflows 才是，而且已经切过了。
 ## 引用
 
 - MAF 源码（`agent-framework/`，版本关系见 [integration-guide §1.1](../maf/integration-guide.md)；
-  pinned 包为 `1.24.0`，下述路径中 `BackgroundAgents/`、`Loop/` 无差异，`ToolApproval/` 已被 `#8432` 重写、`AgentMode/` 被 `#8458` 扩展）：
+  pinned 包为 `1.26.0`，下述路径中 `BackgroundAgents/`、`Loop/` 无差异，`ToolApproval/` 已被 `#8432` 重写、`AgentMode/` 被 `#8458` 扩展）：
   `dotnet/src/Microsoft.Agents.AI/Harness/BackgroundAgents/`（6 文件）、
   `Harness/Loop/BackgroundTaskCompletionLoopEvaluator.cs`、
   `Harness/ToolApproval/ToolApprovalAgent.cs`、`Microsoft.Agents.AI.Harness/HarnessAgentOptions.cs`。
-- pinned 包 DLL：`Microsoft.Agents.AI` 1.24.0 `lib/net10.0/Microsoft.Agents.AI.dll`
+- pinned 包 DLL：`Microsoft.Agents.AI` 1.26.0 `lib/net10.0/Microsoft.Agents.AI.dll`
   （§4 版本证据）。
 - 产品源码：`src/OneCode.App/Tools/AgentTool.cs`、`Tools/ParallelAgentsTool.cs`、
   `Services/Agent/ForkedAgentRunner.cs`、`Services/Agent/AgentTaskWorkflow.cs`、

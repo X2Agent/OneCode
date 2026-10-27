@@ -12,6 +12,8 @@
   <ItemGroup>
     <!-- Markdown 渲染：与 TUI 共用同一解析库，不经 CDN、不依赖外网。 -->
     <PackageReference Include="Markdig" />
+    <!-- 原始 HTML 消毒：Markdig 放开 HTML 后，输出必须经白名单过滤才能进 MarkupString。 -->
+    <PackageReference Include="HtmlSanitizer" />
   </ItemGroup>
 
 </Project>

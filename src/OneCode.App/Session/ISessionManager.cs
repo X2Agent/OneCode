@@ -4,10 +4,10 @@ using Microsoft.Extensions.AI;
 namespace OneCode.App.Session;
 
 /// <summary>
-/// Abstraction for session/conversation management — creation, resume, persistence, and listing.
-/// Aggregates the narrow read interfaces for consumers that need the full surface.
-/// New consumers should prefer <see cref="ISessionConversationAccess"/> or
-/// <see cref="ISessionWorkingDirectory"/> when those suffice.
+/// 会话管理抽象：创建、恢复、持久化与列表查询。
+/// 聚合了若干窄读接口，供需要完整能力的消费方使用。
+/// 只需读取能力时，应优先依赖 <see cref="ISessionConversationAccess"/> 或
+/// <see cref="ISessionWorkingDirectory"/>。
 /// </summary>
 public interface ISessionManager : ISessionConversationAccess, ISessionChatHistoryReader, ISessionWorkingDirectory, IAsyncDisposable
 {
@@ -37,7 +37,6 @@ public interface ISessionManager : ISessionConversationAccess, ISessionChatHisto
 
     Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default);
     Task<Conversation> ContinueAsync(string conversationId, string userMessage, CancellationToken ct = default);
-    Task<IReadOnlyList<Message>> ReplayAsync(string conversationId, CancellationToken ct = default);
     Task SuspendForegroundToBackgroundAsync(CancellationToken ct = default);
 
     BackgroundSession? FindBackgroundSession(SessionId conversationId);

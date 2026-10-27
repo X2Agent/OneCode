@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.Infrastructure.Persistence;
 using OneCode.Core.Session;
 
@@ -40,7 +41,9 @@ public sealed class SessionEventProjectionTests
         try
         {
             var store = new OneCode.App.Session.EventSourcedSessionStore(
-                new FileSessionEventStore(root));
+                new FileSessionEventStore(root),
+                new FileSessionSummaryIndex(root, NullLogger<FileSessionSummaryIndex>.Instance),
+                NullLogger<OneCode.App.Session.EventSourcedSessionStore>.Instance);
             var conversation = new Conversation
             {
                 Id = SessionId.NewId(),

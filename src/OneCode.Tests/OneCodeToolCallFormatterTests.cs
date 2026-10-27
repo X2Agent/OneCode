@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // MAF 实验性 API（压缩消息组）：升级 MAF 时按升级复查清单回归
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using OneCode.Infrastructure.Agent;

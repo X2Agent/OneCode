@@ -1,11 +1,14 @@
 <aside class="activity">
-    <div class="activity-header">活动</div>
-    @if (Activities.Count == 0)
+    <div class="activity-header">上下文</div>
+
+    @if (Files.Count == 0 && Links.Count == 0 && Activities.Count == 0)
     {
-        <div class="empty">暂无进行中的活动</div>
+        <div class="empty">本轮尚无文件读写或链接访问</div>
     }
-    else
+
+    @if (Activities.Count > 0)
     {
+        <div class="context-group">运行</div>
         @foreach (var item in Activities)
         {
             <div class="activity-item">
@@ -14,12 +17,45 @@
             </div>
         }
     }
-    @if (!string.IsNullOrEmpty(Thinking))
+
+    @if (Files.Count > 0)
     {
-        <details class="thinking">
-            <summary>思考过程</summary>
-            <pre>@Thinking</pre>
-        </details>
+        <div class="context-group">文件 · @Files.Count</div>
+        @foreach (var item in Files)
+        {
+            <div class="context-item" title="@item.Target">
+                <div class="target">@ShortPath(item.Target)</div>
+                <div class="stats nums">
+                    @if (item.AddedLines > 0 || item.RemovedLines > 0)
+                    {
+                        <span class="added">+@item.AddedLines</span>
+                        <span class="removed">-@item.RemovedLines</span>
+                    }
+                    @if (item.WriteCount > 0)
+                    {
+                        <span>写 @item.WriteCount</span>
+                    }
+                    @if (item.ReadCount > 0)
+                    {
+                        <span>读 @item.ReadCount</span>
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    @if (Links.Count > 0)
+    {
+        <div class="context-group">链接 · @Links.Count</div>
+        @foreach (var item in Links)
+        {
+            <div class="context-item" title="@item.Target">
+                <div class="target">@item.Target</div>
+                <div class="stats nums">
+                    <span>访问 @item.ReadCount</span>
+                </div>
+            </div>
+        }
     }
 </aside>
 
@@ -28,5 +64,16 @@
     public IReadOnlyList<WebActivity> Activities { get; set; } = [];
 
     [Parameter]
-    public string Thinking { get; set; } = string.Empty;
+    public IReadOnlyList<WebContextItem> ContextItems { get; set; } = [];
+
+    private IReadOnlyList<WebContextItem> Files => [.. ContextItems.Where(item => item.Kind == WebContextKind.File)];
+
+    private IReadOnlyList<WebContextItem> Links => [.. ContextItems.Where(item => item.Kind == WebContextKind.Link)];
+
+    /// <summary>只保留末两级目录，完整路径留在 title 里，避免长路径挤满抽屉。</summary>
+    private static string ShortPath(string path)
+    {
+        var parts = path.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length <= 2 ? path : string.Join('/', parts[^2..]);
+    }
 }

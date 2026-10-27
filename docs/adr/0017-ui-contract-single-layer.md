@@ -57,8 +57,7 @@ UI 与引擎之间曾有两层事件：`QueryEvent`（引擎产出）→ `TuiEve
    官方只给协议类型与客户端/服务端适配，没有「引擎 → transport」的现成桥；两者都不改引擎与两个前端。
    需要真正的 HTTP 端点时用 `AGUI.Server` 自建（`AddAGUI()` + `MapAGUI(pattern)`，`RunAgentInput` 进、AG-UI 事件出），
    但它托管 `IChatClient`，须先为引擎写 `IChatClient` 适配器；或改用 MAF 的
-   `Microsoft.Agents.AI.Hosting.AGUI.AspNetCore`（`1.25.0-preview`，托管 `AIAgent`，需把 MAF 从 `1.24.0`
-   升到 `1.25.0` 以上）。
+   `Microsoft.Agents.AI.Hosting.AGUI.AspNetCore`（`1.25.0-preview`，托管 `AIAgent`，要求 MAF `1.25.0` 以上——当前 pinned `1.26.0` 已满足）。
 
 ## 边界与禁令
 

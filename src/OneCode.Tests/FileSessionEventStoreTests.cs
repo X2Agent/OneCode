@@ -16,14 +16,18 @@ public sealed class FileSessionEventStoreTests : IDisposable
         var sessionId = SessionId.NewId();
         var now = DateTimeOffset.UtcNow;
 
-        var sequences = await store.AppendAsync([
+        var stamp = await store.AppendAsync([
             new UserMessageEvent(sessionId, 99, now, new UserMessage("u", "hello", now)),
             new SessionMarkerEvent(sessionId, 1, now, SessionEventType.TurnEnded, "done"),
         ]);
 
         var events = await store.ReadAsync(sessionId);
 
-        sequences.Should().Equal(1, 2);
+        stamp.Should().NotBeNull("写入必须回传日志戳供摘要索引回填");
+        var written = stamp.GetValueOrDefault();
+        written.SessionId.Should().Be(sessionId);
+        written.Length.Should().BePositive();
+        events.Select(item => item.Sequence).Should().Equal(1, 2);
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<UserMessageEvent>();
         events[1].Should().BeOfType<SessionMarkerEvent>();

@@ -144,7 +144,7 @@ agent 对上一轮产出**零记忆**，不回显就会重复已完成的动作�
 
 ## 源码取证索引
 
-> 版本说明：当前 pinned 包为 `1.24.0`（见 `src/Directory.Packages.props`）；本地 checkout 在 `Harness/Loop/**` 上无差异，可直接按路径查；引用 `ToolApproval/**` 的结论见
+> 版本说明：当前 pinned 包为 `1.26.0`（见 `src/Directory.Packages.props`）；本地 checkout 在 `Harness/Loop/**` 上无差异，可直接按路径查；引用 `ToolApproval/**` 的结论见
 > [子代理派工边界](./0011-background-agents-delegation-boundary.md) 证据 2 与 [MAF 集成边界](./0007-maf-integration-boundaries.md)。
 
 | 主题 | 位置 |

@@ -20,7 +20,8 @@
       Phase-4 计划: 移除 CA2007 (确保所有 await 使用 ConfigureAwait(false) 后可启用)。
       Final: 移除 CA2254, CS1591, CA1848, CA1852 并启用 TreatWarningsAsErrors=true。
     -->
-    <NoWarn>$(NoWarn);CA1848;CA2007;CA1852;CA2254;CA1707;CA1861;CA1862;CA1725;CA1513;CA1860;CS1591;MAAI001</NoWarn>
+    <!-- MAAI001（MAF 实验性 API）有意不进 NoWarn：保持编译期可见，升级 MAF 时新增的实验 API 依赖直接暴露为警告。 -->
+    <NoWarn>$(NoWarn);CA1848;CA2007;CA1852;CA2254;CA1707;CA1861;CA1862;CA1725;CA1513;CA1860;CS1591</NoWarn>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NeutralLanguage>en-US</NeutralLanguage>
 

@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // MAF 实验性 API（摘要压缩策略守卫测试）：升级 MAF 时按升级复查清单回归
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;

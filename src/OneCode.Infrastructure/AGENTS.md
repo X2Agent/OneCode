@@ -69,7 +69,7 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `System.Security.Cryptography.ProtectedData` | Windows DPAPI（`HookSecretExpander` 解密 `dpapi:` 前缀敏感字段） |
 | `Anthropic` | Anthropic API SDK（`ChatClientFactory` 内部使用，App 层不直接引用） |
 | `Microsoft.Extensions.AI.OpenAI` | OpenAI 兼容客户端 SDK（`ChatClientFactory` 内部使用） |
-| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Harness` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架 1.24.0（实验性 API 的诊断 ID `MAAI001` 由 `src/Directory.Build.props` 的全局 `NoWarn` 统一抑制；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension；Harness 提供 `HarnessAgent` 装配） |
+| `Microsoft.Agents.AI` + `Microsoft.Agents.AI.Workflows` + `Microsoft.Agents.AI.Harness` + `Microsoft.Agents.AI.Mcp` + `Microsoft.Agents.AI.Tools.Shell` | MAF Agent 框架 1.26.0（实验性 API 诊断 ID `MAAI001` 保持编译期可见，未全局 `NoWarn`；Mcp 提供 MCP 工具 AIFunction 桥接 + Tasks extension；Harness 提供 `HarnessAgent` 装配） |
 | `Microsoft.Agents.AI.Hyperlight` + `Hyperlight.HyperlightSandbox.Api` | Hyperlight 沙箱（`HyperlightCodeActService` 内部使用） |
 | `OllamaSharp` | Ollama 本地模型客户端（`ChatClientFactory` / `ProviderAwareDecorator` 内部使用） |
 | `AngleSharp` | HTML DOM 解析（HTML→Markdown 转换，替代正则解析） |

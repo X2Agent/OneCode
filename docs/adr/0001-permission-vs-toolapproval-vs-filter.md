@@ -10,7 +10,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 
 1. **Permission Middleware** — `AgentPipelineBuilder` 中通过 `.Use()` 注册的委托式中间件（`CheckPermissionAndExecuteAsync`）
 2. **ToolApproval** — MAF 内置的 `UseToolApproval` 中间件，处理 `ToolApprovalRequestContent` 协议
-3. **FunctionInvocationFilter** — 曾考虑用类型化 Filter 接口通过 DI 注册；**该接口在 MAF 1.24 / Microsoft.Extensions.AI 10.10.0 中不存在**，此路不通（详见「决策」后的说明）
+3. **FunctionInvocationFilter** — 曾考虑用类型化 Filter 接口通过 DI 注册；**该接口在 MAF 1.26 / Microsoft.Extensions.AI 10.10.1 中不存在**（1.26.0 升级复查仍在），此路不通（详见「决策」后的说明）
 
 历史上出现过 ApprovalHandler 垫片与 Permission Middleware 决策重叠的问题（PERM-1.5 已清理），需要在 ADR 层面固化三者边界，避免回归。
 
@@ -24,7 +24,7 @@ OneCode 的 MAF (Microsoft.Agents.AI) 管道中存在三种函数调用拦截机
 | ToolApproval | MAF 协议层审批 | **有**（Ask → AutoRule/用户审批） | 管道中游，Permission 之后 | 处理 `ToolApprovalRequestContent`、AutoApprovalRules 匹配、`ApprovalBroker` 事件桥交互 |
 | 观测性中间件（.Use()） | 预算/用量观测 | **无工具调用决策权** | Agent Run 级最外层（包裹 function calling 管道），非工具管道末段 | 日志、指标采集、token 预算短路等 |
 
-> **`IFunctionInvocationFilter` 不可用**：该接口在 OneCode pinned 的 MAF 1.24 / Microsoft.Extensions.AI 10.10.0 中不存在。观测性拦截因此用 `.Use()` 委托式中间件实现，语义一致（无工具调用决策权，只观测 run 级行为）。
+> **`IFunctionInvocationFilter` 不可用**：该接口在 OneCode pinned 的 MAF 1.26 / Microsoft.Extensions.AI 10.10.1 中不存在。观测性拦截因此用 `.Use()` 委托式中间件实现，语义一致（无工具调用决策权，只观测 run 级行为）。
 
 ### 数据流
 

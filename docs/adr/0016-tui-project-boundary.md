@@ -3,7 +3,6 @@
 **状态**: Accepted
 **日期**: 2026-10-22
 **关联**: [UI 形态战略](./0013-ui-surface-strategy.md)（TUI 为默认前端、浏览器客户端立项）、
-[TUI 极致化路线图](../plan/tui-roadmap.md)（P0 引擎解耦）、
 [后台代理派工边界](./0011-background-agents-delegation-boundary.md)（daemon 复用同一组合根）
 
 ## 语境
@@ -66,7 +65,7 @@ ADR 0013 定稿 TUI 为主交互前端后，代码形态与命名出现三处错
 | 方案 | 否决原因 |
 |---|---|
 | 将 `OneCode.App/Tui/` 整体搬入 `OneCode.Tui` | 18 个引擎文件消费 `TuiEvent` 等契约 → `Tui → App → Tui` 项目循环引用，无法编译 |
-| 契约整体先下沉 `OneCode.Core` | `TuiEvent` 依赖 `OneCode.App.Query.SubagentProgressPhase`；审批/提问事件内嵌 `TaskCompletionSource` 回传，属交互端口而非领域契约。下沉需先完成流式管道 QueryEvent 化（见路线图 §3.2） |
+| 契约整体先下沉 `OneCode.Core` | `TuiEvent` 依赖 `OneCode.App.Query.SubagentProgressPhase`；审批/提问事件内嵌 `TaskCompletionSource` 回传，属交互端口而非领域契约。下沉需先完成流式管道 QueryEvent 化（见 [UI 契约单层化](./0017-ui-contract-single-layer.md)） |
 | 保留旧入口项目名，仅把 TUI 实现移入 | 入口项目与 TUI 实现仍分居两个项目，命名与实体继续错配；且 `OneCode.Tui` 项目名将无处安放 |
 | 用 `InternalsVisibleTo("OneCode.Tui")` 让 App 的 internal 类型跨程序集可见 | 用程序集可见性换编译便利，破坏边界语义。实际只需将跨程序集消费的常量类（`GoalLoopDefaults`）改 `public` |
 

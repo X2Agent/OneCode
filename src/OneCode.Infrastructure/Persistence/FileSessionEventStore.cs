@@ -30,14 +30,14 @@ public sealed class FileSessionEventStore : ISessionEventStore
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<long>> AppendAsync(
+    public async Task<SessionEventLogStamp?> AppendAsync(
         IReadOnlyList<SessionEvent> events,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(events);
         if (events.Count == 0)
-            return [];
+            return null;
 
         var sessionId = events[0].SessionId;
         if (events.Any(sessionEvent => sessionEvent.SessionId != sessionId))
@@ -51,7 +51,6 @@ public sealed class FileSessionEventStore : ISessionEventStore
             var firstSequence = existing.Count == 0
                 ? 1L
                 : existing.Max(sessionEvent => sessionEvent.Sequence) + 1L;
-            var sequences = new long[events.Count];
             var file = GetEventFile(sessionId);
             var temporaryFile = $"{file}.tmp-{Guid.NewGuid():N}";
 
@@ -82,14 +81,17 @@ public sealed class FileSessionEventStore : ISessionEventStore
                         var sequence = firstSequence + index;
                         await stream.WriteAsync(
                             Serialize(events[index].WithSequence(sequence)), ct).ConfigureAwait(false);
-                        sequences[index] = sequence;
                     }
 
                     await stream.FlushAsync(ct).ConfigureAwait(false);
                 }
 
                 File.Move(temporaryFile, file, overwrite: true);
-                return sequences;
+                var written = new FileInfo(file);
+                return new SessionEventLogStamp(
+                    sessionId,
+                    written.Length,
+                    new DateTimeOffset(written.LastWriteTimeUtc, TimeSpan.Zero));
             }
             finally
             {
@@ -122,15 +124,21 @@ public sealed class FileSessionEventStore : ISessionEventStore
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<SessionId>> ListSessionsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var ids = Directory.EnumerateFiles(_eventsDirectory, $"*.{CoreConstants.Session.EventsFileExtension}")
-            .Select(file => SessionId.TryParse(Path.GetFileNameWithoutExtension(file)))
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
-            .ToArray();
-        return Task.FromResult<IReadOnlyList<SessionId>>(ids);
+        List<SessionEventLogStamp> stamps = [];
+        foreach (var file in new DirectoryInfo(_eventsDirectory)
+            .EnumerateFiles($"*.{CoreConstants.Session.EventsFileExtension}"))
+        {
+            if (SessionId.TryParse(Path.GetFileNameWithoutExtension(file.Name)) is not { } sessionId)
+                continue;
+
+            var lastWrite = new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero);
+            stamps.Add(new SessionEventLogStamp(sessionId, file.Length, lastWrite));
+        }
+
+        return Task.FromResult<IReadOnlyList<SessionEventLogStamp>>(stamps);
     }
 
     /// <inheritdoc />

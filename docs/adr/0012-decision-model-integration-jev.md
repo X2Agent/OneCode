@@ -73,13 +73,13 @@ PR #8563 作者已表态认同抽象应由 MEAI 持有，会等 #7764 受理后�
 ### 4. 版本证据（OneCode pinned 包）
 
 按 [MAF 集成边界](./0007-maf-integration-boundaries.md)「不得用本地 checkout 为已发布包行为作证」的要求，
-对 OneCode 锁定版本逐符号计数（`D:\NuGet\Packages`，pinned 见 `src/Directory.Packages.props`：MEAI `10.10.0`、MAF `1.24.0`）：
+对 OneCode 锁定版本逐符号计数（pinned 见 `src/Directory.Packages.props`：MEAI `10.10.1`、MAF `1.26.0`）：
 
 | 程序集 | `IDecisionClient` | `DecisionQuestion` | `DecisionResponse` | `DecisionAnswer` | `TypeSafe` | `SystemOne` |
 |---|---|---|---|---|---|---|
-| `Microsoft.Extensions.AI.Abstractions` 10.10.0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `Microsoft.Agents.AI` 1.24.0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `Microsoft.Agents.AI.Abstractions` 1.24.0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `Microsoft.Extensions.AI.Abstractions` 10.10.1 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `Microsoft.Agents.AI` 1.26.0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `Microsoft.Agents.AI.Abstractions` 1.26.0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 本地 `agent-framework/` checkout（`dotnet-1.22.0-6-g669c8b95e`）的 `dotnet/` 下检索同组符号亦无命中。
 
@@ -221,7 +221,7 @@ OneCode 只认「决策客户端」一种形态。
 
 - 上游：`dotnet/extensions#7764`、`microsoft/agent-framework#8545`、`#8562`/`#8563`、`#8592`
 - TypeSafe 文档：`/concepts/system-one`、`/introduction/coding-agents`、`/api.md`、`/models.md`
-- 版本证据：`D:\NuGet\Packages` 下 MEAI `10.10.0` 与 MAF `1.24.0` 三个程序集的逐符号计数（§4 表）
+- 版本证据：MEAI `10.10.1` 与 MAF `1.26.0` 程序集的逐符号计数（§4 表）
 - 产品现状：`src/OneCode.App/Query/SessionToolSet.cs`、`src/OneCode.App/Services/Agent/GoalSubGoalJudge.cs`、
   `src/OneCode.App/Services/Agent/GoalSubGoalLoop.cs`、`src/OneCode.App/Services/Loop/IterativeLoopService.cs`、
   `src/OneCode.Core/Permissions/PermissionChecker.cs`、`src/OneCode.Core/Permissions/Yolo/YoloClassifier.cs`、

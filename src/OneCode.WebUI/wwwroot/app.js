@@ -58,39 +58,90 @@
 
     /* ---------- 流式自动滚动跟随：贴底跟随，上滚即停，回底恢复 ---------- */
 
-    function initAutoScroll() {
+    // 预渲染 DOM 会被交互式渲染接管时整体替换，因此监听挂在 body / document 上，
+    // 每轮变更重新定位 .transcript，不持有跨渲染周期的节点引用。
+    var STICKY = 48;
+    var follow = true;
+    var transcript = null;
+
+    function syncTranscript() {
         var el = document.querySelector('.transcript');
         if (!el) return;
-        var follow = true;
-        var sticky = 48;
-        el.addEventListener('scroll', function () {
-            follow = el.scrollHeight - el.scrollTop - el.clientHeight < sticky;
-        }, { passive: true });
-        new MutationObserver(function () {
-            if (follow) el.scrollTop = el.scrollHeight;
-            enhanceCodeBlocks();
-        }).observe(el, { childList: true, subtree: true, characterData: true });
+
+        // 元素被替换（预渲染接管、组件重建）：回到贴底跟随。
+        if (el !== transcript) {
+            transcript = el;
+            follow = true;
+        }
+
+        // 内容不足以滚动说明刚被清空重放（切换会话）：同样恢复跟随。
+        if (el.scrollHeight <= el.clientHeight) follow = true;
+
+        if (follow) el.scrollTop = el.scrollHeight;
+    }
+
+    /* ---------- 会话列表：触底加载，且未撑满视口时自动补屏 ---------- */
+
+    var sessionDotnet = null;
+    var sessionLoading = false;
+
+    function requestMoreSessions() {
+        if (!sessionDotnet || sessionLoading) return;
+        sessionLoading = true;
+        sessionDotnet.invokeMethodAsync('LoadMore')
+            .then(function () {
+                sessionLoading = false;
+                // 渲染完成后复检：一屏仍没把列表撑出滚动条时继续补。
+                setTimeout(fillSessionList, 120);
+            })
+            .catch(function () { sessionLoading = false; });
+    }
+
+    // 高视口下 10 条不足以产生滚动条，触底回调永远等不到——先补到能滚为止。
+    function fillSessionList() {
+        var list = document.querySelector('.session-list');
+        if (!list || !sessionDotnet) return;
+        if (!list.querySelector('.session-sentinel')) return;      // 已全部展开
+        if (list.scrollHeight > list.clientHeight + 1) return;     // 已可滚动，交给触底回调
+        requestMoreSessions();
     }
 
     /* ---------- 输入框自适应增高 ---------- */
 
-    var composer = null;
-
     function fitComposer() {
-        if (!composer) composer = document.querySelector('.composer textarea');
-        if (!composer) return;
-        composer.style.height = 'auto';
-        composer.style.height = Math.min(composer.scrollHeight, 200) + 'px';
-    }
-
-    function initComposer() {
-        if (!composer) composer = document.querySelector('.composer textarea');
-        if (composer) composer.addEventListener('input', fitComposer);
+        var el = document.querySelector('.composer textarea');
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 200) + 'px';
     }
 
     function init() {
-        initAutoScroll();
-        initComposer();
+        new MutationObserver(function () {
+            syncTranscript();
+            fillSessionList();
+            enhanceCodeBlocks();
+        }).observe(document.body, { childList: true, subtree: true, characterData: true });
+
+        // 滚动事件不冒泡，用捕获阶段接管：上滚即停，回底恢复；会话列表触底翻下一屏。
+        document.addEventListener('scroll', function (e) {
+            var el = e.target;
+            if (!(el instanceof Element)) return;
+            if (el.classList.contains('transcript')) {
+                follow = el.scrollHeight - el.clientHeight - el.scrollTop <= STICKY;
+            } else if (el.classList.contains('session-list') &&
+                el.scrollHeight - el.clientHeight - el.scrollTop <= STICKY) {
+                requestMoreSessions();
+            }
+        }, true);
+
+        // 视口变高后列表可能重新变成不可滚动，需要补屏。
+        window.addEventListener('resize', function () { fillSessionList(); });
+
+        // 输入事件同样走委托，不依赖节点引用。
+        document.addEventListener('input', function (e) {
+            if (e.target instanceof HTMLElement && e.target.closest('.composer')) fitComposer();
+        });
+
         enhanceCodeBlocks();
     }
 
@@ -102,6 +153,8 @@
 
     window.app = {
         copyText: copyText,
-        fitComposer: fitComposer
+        fitComposer: fitComposer,
+        bindSessionScroll: function (dotnet) { sessionDotnet = dotnet; fillSessionList(); },
+        unbindSessionScroll: function () { sessionDotnet = null; }
     };
 })();

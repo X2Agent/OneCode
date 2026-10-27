@@ -1,4 +1,3 @@
-// MAAI001 suppressed: HyperlightCodeActProvider integration uses experimental Hyperlight APIs
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Hyperlight;
 

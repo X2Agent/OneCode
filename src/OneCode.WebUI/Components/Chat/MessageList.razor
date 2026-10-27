@@ -2,35 +2,69 @@
 @inject IJSRuntime Js
 
 <div class="messages">
-    @for (var index = 0; index < Messages.Count; index++)
+    @if (HiddenCount > 0)
+    {
+        <button type="button" class="load-earlier" @onclick="LoadEarlier">
+            加载更早的 @Math.Min(PageSize, HiddenCount) 条（还有 @HiddenCount 条）
+        </button>
+    }
+    @for (var index = StartIndex; index < Messages.Count; index++)
     {
         var message = Messages[index];
-        <article class="message @RoleClass(message.Role) @(message.IsStreaming ? "streaming" : "")">
-            @if (message.Role == WebRole.System)
-            {
-                <div class="system-line">@message.Content</div>
-            }
-            else if (string.IsNullOrEmpty(message.Content))
-            {
-                <div class="streaming-caret"></div>
-            }
-            else if (message.IsStreaming)
-            {
-                var (head, tail) = SplitStreamingTail(message.Content);
-                if (!string.IsNullOrEmpty(head))
+        <div class="message-block @RoleClass(message.Role) @(message.IsStreaming ? "streaming" : "")">
+            <article class="message @RoleClass(message.Role) @(message.IsStreaming ? "streaming" : "")">
+                @if (message.Role == WebRole.System)
                 {
-                    <div class="markdown">@((MarkupString)Renderer.ToHtml(head))</div>
+                    <div class="system-line">@message.Content</div>
                 }
-                if (tail is not null)
+                else if (message.Role == WebRole.User)
                 {
-                    <div class="stream-tail" @key="head.Length">@((MarkupString)Renderer.ToHtml(tail))</div>
+                    @* 用户原文按纯文本呈现：走 Markdown 会把 HTML 源里的换行当成可见空白，还会改写用户输入。 *@
+                    <div class="user-text">@message.Content</div>
                 }
-                <span class="streaming-caret inline"></span>
-            }
-            else
-            {
-                <div class="markdown">@((MarkupString)Renderer.ToHtml(message.Content))</div>
-            }
+                else
+                {
+                    @if (!string.IsNullOrWhiteSpace(message.Thinking))
+                    {
+                        <details class="thinking">
+                            <summary>思考过程</summary>
+                            <pre>@message.Thinking</pre>
+                        </details>
+                    }
+                    @if (string.IsNullOrEmpty(message.Content))
+                    {
+                        <div class="streaming-caret"></div>
+                    }
+                    else if (message.IsStreaming)
+                    {
+                        var (head, tail) = SplitStreamingTail(message.Content);
+                        if (!string.IsNullOrEmpty(head))
+                        {
+                            <div class="markdown">@((MarkupString)Renderer.ToHtml(head))</div>
+                        }
+                        if (tail is not null)
+                        {
+                            <div class="stream-tail" @key="head.Length">@((MarkupString)Renderer.ToHtml(tail))</div>
+                        }
+                        <span class="streaming-caret inline"></span>
+                    }
+                    else
+                    {
+                        foreach (var part in Render(message).Parts)
+                        {
+                            if (part.Artifact is { } artifact)
+                            {
+                                <HtmlArtifactCard Source="@artifact" />
+                            }
+                            else if (part.Html is { } html)
+                            {
+                                <div class="markdown">@((MarkupString)html)</div>
+                            }
+                        }
+                    }
+                }
+            </article>
+            @* 操作按钮在气泡之外：气泡高度只由内容决定，不被悬停操作撑高。 *@
             @if (message.Role != WebRole.System && !string.IsNullOrEmpty(message.Content))
             {
                 <div class="msg-actions">
@@ -48,16 +82,53 @@
                     </button>
                 </div>
             }
-        </article>
+        </div>
     }
 </div>
 
 @code {
+    private const int PageSize = 20;
+
     [Parameter, EditorRequired]
     public IReadOnlyList<WebMessage> Messages { get; set; } = [];
 
+    /// <summary>会话边界：变化即视为切换会话，分页窗口回到首屏。</summary>
+    [Parameter]
+    public string? SessionKey { get; set; }
+
     private int? _copiedIndex;
     private int _copyGeneration;
+    private string? _sessionKey;
+    private int _visible = PageSize;
+    private int _lastCount;
+
+    // 已完结消息的渲染结果：内容不变就复用，避免流式期间反复解析 + 消毒整条历史。
+    private readonly Dictionary<WebMessage, RenderedMessage> _rendered = [];
+
+    /// <summary>窗口起点：只渲染最近 <see cref="_visible"/> 条，更早的按页加载。</summary>
+    private int StartIndex => Math.Max(0, Messages.Count - _visible);
+
+    private int HiddenCount => StartIndex;
+
+    private void LoadEarlier() => _visible += PageSize;
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(_sessionKey, SessionKey, StringComparison.Ordinal))
+        {
+            _sessionKey = SessionKey;
+            _visible = PageSize;
+            _copiedIndex = null;
+            _rendered.Clear();
+        }
+        else if (Messages.Count > _lastCount)
+        {
+            // 新消息到达时同步放大窗口，避免把已在屏上的旧消息挤出渲染窗口。
+            _visible += Messages.Count - _lastCount;
+        }
+
+        _lastCount = Messages.Count;
+    }
 
     private static string RoleClass(WebRole role) => role switch
     {
@@ -65,6 +136,33 @@
         WebRole.Assistant => "assistant",
         _ => "system",
     };
+
+    /// <summary>
+    /// 已完结助手的渲染：整页 HTML 产物抽成预览卡，其余按 Markdown 渲染（输出已消毒）。
+    /// 结果按消息实例缓存，内容未变时直接复用。
+    /// </summary>
+    private RenderedMessage Render(WebMessage message)
+    {
+        if (_rendered.TryGetValue(message, out var cached) && cached.Content == message.Content)
+            return cached;
+
+        var parts = new List<RenderedPart>();
+        foreach (var segment in HtmlArtifactSplitter.Split(message.Content))
+        {
+            if (segment.ArtifactHtml is { } artifact)
+                parts.Add(new RenderedPart(Html: null, Artifact: artifact));
+            else
+                parts.Add(new RenderedPart(Html: Renderer.ToHtml(segment.Markdown), Artifact: null));
+        }
+
+        var rendered = new RenderedMessage(message.Content, parts);
+        _rendered[message] = rendered;
+        return rendered;
+    }
+
+    private sealed record RenderedMessage(string Content, IReadOnlyList<RenderedPart> Parts);
+
+    private sealed record RenderedPart(string? Html, string? Artifact);
 
     /// <summary>
     /// 流式渲染拆分：已完结块走稳定渲染，最后一个未完成块独立成尾段，

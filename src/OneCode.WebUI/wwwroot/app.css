@@ -17,6 +17,8 @@
     --bg-raised: #191919;
     --bg-overlay: #1F1F1F;
     --bg-hover: #202020;
+    /* 内嵌 HTML 产物预览的画布底色：产物页默认白底，透明 iframe 会透出暗色 */
+    --bg-canvas: #FFFFFF;
 
     /* 文字三级（亮色中性灰在暗底上转译为文字层次） */
     --text-primary: #F5F7FA;
@@ -66,6 +68,8 @@
 html, body {
     height: 100%;
     margin: 0;
+    /* 滚动责任交给三栏内部的滚动容器：文档层永不滚动 */
+    overflow: hidden;
     background: var(--bg-base);
     color: var(--text-primary);
     font-family: var(--font-sans);
@@ -102,10 +106,16 @@ html, body {
 
 /* ---------------- 布局骨架：三栏 ---------------- */
 
+/* 单行网格 + minmax(0, 1fr)：把视口高度钉成确定值，
+   否则隐式 auto 行会被内容撑高，三栏的 overflow 全部失效（全页共用一条滚动条）。 */
 .shell {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr) 320px;
+    /* 侧栏随视口微调：窄屏保底 280px 让标题可读，宽屏最多 330px 不抢主区 */
+    grid-template-columns: clamp(280px, 20vw, 330px) minmax(0, 1fr) clamp(288px, 21vw, 340px);
+    grid-template-rows: minmax(0, 1fr);
     height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
 }
 
 /* ---------------- 左侧会话栏 ---------------- */
@@ -115,7 +125,21 @@ html, body {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    /* 自身不滚：只有中间会话条目区滚动，标题/分页器/页脚固定 */
+    overflow: hidden;
+}
+
+.session-list {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    /* 纵向滚动容器若声明 visible 会被计算成 auto：长标题曾把列表撑出横向滚动条 */
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--space-2);
 }
 
 .sessions-header {
@@ -130,11 +154,19 @@ html, body {
     position: relative;
     display: flex;
     gap: 10px;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-3);
     cursor: pointer;
     border-radius: var(--radius-sm);
     margin: 0 var(--space-2);
+    /* flex 子项默认 min-width:auto：不置零时长标题会把行撑宽 */
+    min-width: 0;
     transition: background var(--dur-fast) var(--ease-out);
+}
+
+/* 标题列必须能收缩，省略号才会生效 */
+.session-body {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .session:hover {
@@ -166,6 +198,7 @@ html, body {
 }
 
 .session-title {
+    display: block;
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -173,9 +206,13 @@ html, body {
 }
 
 .session-meta {
+    display: block;
     font-size: 12px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .new-session {
@@ -197,12 +234,35 @@ html, body {
     color: var(--text-muted);
     font-size: 12px;
     flex: none;
+    align-self: center;
+    /* 常驻按钮会挤掉标题宽度：悬停或聚焦时才出现 */
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.session:hover .session-action,
+.session:focus-within .session-action {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .session-action {
+        opacity: 1;
+    }
 }
 
 .session-action:hover {
     background: var(--bg-overlay);
     color: var(--text-secondary);
     box-shadow: none;
+}
+
+/* 滚动到底部的加载提示：仅作提示，实际加载由 .session-list 触底回调触发 */
+.session-sentinel {
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
 }
 
 .sessions-footer {
@@ -224,6 +284,9 @@ html, body {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    /* flex 项默认 min-height:auto 会被内容撑高，必须清零才能让转录区收缩出滚动条 */
+    min-height: 0;
+    overflow: hidden;
 }
 
 .context {
@@ -257,6 +320,11 @@ html, body {
     font-variant-numeric: tabular-nums;
 }
 
+.context .meta .mode {
+    color: var(--text-secondary);
+    letter-spacing: .06em;
+}
+
 .context .running {
     color: var(--accent-text);
 }
@@ -281,9 +349,46 @@ html, body {
 /* ---------------- 转录区 ---------------- */
 
 .transcript {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-6) var(--space-5) var(--space-2);
+}
+
+/* 切换会话期间：旧内容半透明保留，底部提示条固定可见 */
+.transcript.busy .messages {
+    opacity: .45;
+    transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.transcript-loading {
+    position: sticky;
+    bottom: 0;
+    width: fit-content;
+    margin: var(--space-3) auto 0;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-overlay);
+    border-radius: var(--radius-full);
+    box-shadow: var(--shadow-2);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.session.busy {
+    cursor: progress;
+}
+
+.session.busy .session-action:disabled {
+    cursor: progress;
+}
+
+.load-earlier {
+    align-self: center;
+    padding: var(--space-1) var(--space-3);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
 }
 
 .messages {
@@ -294,14 +399,36 @@ html, body {
     gap: var(--space-4);
 }
 
+/* 一条消息 = 气泡 + 气泡外的操作条：操作条不参与气泡高度 */
+.message-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.message-block.user {
+    align-items: flex-end;
+}
+
+.message-block.assistant,
+.message-block.system {
+    align-items: stretch;
+}
+
 .message.user {
     align-self: flex-end;
     max-width: 70%;
     background: var(--bg-raised);
     border-radius: var(--radius-lg);
     padding: 10px 14px;
-    white-space: pre-wrap;
     box-shadow: var(--shadow-1);
+}
+
+/* 用户消息是纯文本容器：换行只在文本节点内保留，不作用于消息内的其他结构 */
+.user-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .message.assistant {
@@ -348,6 +475,39 @@ html, body {
     padding: 0;
 }
 
+/* GFM 表格（UsePipeTables）：宽表自身横向滚动，不撑破消息列 */
+.markdown table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: var(--space-3) 0;
+    font-size: 13px;
+    border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+    padding: 6px 12px;
+    text-align: start;
+    vertical-align: top;
+    /* 无描边：行分隔用底色分层 */
+    box-shadow: inset 0 -1px 0 var(--bg-hover);
+}
+
+.markdown th {
+    background: var(--bg-raised);
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* 外链图片：直连 https；离线裂图时由 alt 文本兜底 */
+.markdown img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+}
+
 /* 代码块复制按钮（app.js 注入） */
 
 .code-copy {
@@ -391,21 +551,20 @@ html, body {
 
 .msg-actions {
     display: flex;
-    margin-top: 6px;
     opacity: 0;
     transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.message:hover .msg-actions,
+.message-block:hover .msg-actions,
 .msg-actions:focus-within {
     opacity: 1;
 }
 
-.message.user .msg-actions {
+.message-block.user .msg-actions {
     justify-content: flex-end;
 }
 
-.message.streaming .msg-actions {
+.message-block.streaming .msg-actions {
     display: none;
 }
 
@@ -564,6 +723,60 @@ html, body {
 
 .tool-block.result {
     color: var(--text-primary);
+}
+
+/* ---------------- HTML 产物卡（sandbox iframe 预览） ---------------- */
+
+.artifact {
+    margin-top: var(--space-3);
+    background: var(--bg-panel);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.artifact-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+}
+
+.artifact-kind {
+    font-size: 12px;
+    letter-spacing: .04em;
+    color: var(--text-muted);
+}
+
+.artifact-btn {
+    padding: var(--space-1) var(--space-2);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.artifact-frame {
+    display: block;
+    width: 100%;
+    height: 320px;
+    border: 0;
+    background: var(--bg-canvas);
+    transition: height var(--dur-base) var(--ease-out);
+}
+
+.artifact-frame.expanded {
+    height: 70vh;
+}
+
+.artifact-source {
+    padding: 0 var(--space-3) var(--space-3);
+}
+
+.artifact-source > summary {
+    cursor: pointer;
+    padding: var(--space-1) 0;
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
 /* ---------------- 中断卡片（审批/提问/预算） ---------------- */
@@ -772,7 +985,9 @@ input[type="checkbox"] {
     background: var(--bg-panel);
     padding: var(--space-4);
     overflow-y: auto;
+    overscroll-behavior: contain;
     min-width: 0;
+    min-height: 0;
 }
 
 .activity-header {
@@ -805,24 +1020,69 @@ input[type="checkbox"] {
     word-break: break-word;
 }
 
+/* 上下文清单：文件与链接分组，条目带读写次数与增删行数 */
+.context-group {
+    margin: var(--space-3) 0 var(--space-1);
+    font-size: 11px;
+    letter-spacing: .06em;
+    color: var(--text-muted);
+}
+
+.context-item {
+    padding: 6px 0 6px 10px;
+    margin-bottom: var(--space-1);
+    box-shadow: inset 2px 0 0 var(--bg-hover);
+}
+
+.context-item .target {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: break-all;
+}
+
+.context-item .stats {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.context-item .stats .added {
+    color: var(--success);
+}
+
+.context-item .stats .removed {
+    color: var(--danger);
+}
+
+/* 助手消息内的思考过程：随该轮回复内联展示，默认折叠 */
 .thinking {
-    margin-top: var(--space-4);
-    padding-top: var(--space-3);
-    box-shadow: inset 0 2px 0 -1px var(--bg-hover);
+    margin: 0 0 var(--space-2);
     font-size: 12px;
     color: var(--text-secondary);
 }
 
 .thinking summary {
     cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
 .thinking pre {
+    margin: var(--space-2) 0 0;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-panel);
+    border-radius: var(--radius-sm);
     font-family: var(--font-mono);
     font-size: 11.5px;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     color: var(--text-muted);
-    max-height: 240px;
+    max-height: 320px;
     overflow: auto;
 }
 

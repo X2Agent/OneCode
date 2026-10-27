@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // MAF 实验性 API（HarnessAgentOptions 实验成员断言）：升级 MAF 时按升级复查清单回归
 using Microsoft.Agents.AI;
 using OneCode.Infrastructure.Agent;
 

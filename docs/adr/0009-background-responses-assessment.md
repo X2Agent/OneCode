@@ -61,10 +61,10 @@ RunStreamingAsync：每个 update 携带 token（终止事件为 null）；
 
 | 包 | `AllowBackgroundResponses` | `ContinuationToken` | 备注 |
 |---|---|---|---|
-| `Microsoft.Agents.AI` 1.24.0 | ✅ | ✅ | API 面在 pinned 版本就绪 |
+| `Microsoft.Agents.AI` 1.26.0 | ✅ | ✅ | API 面在 pinned 版本就绪（1.26.0 升级复查仍在） |
 | `Microsoft.Extensions.AI.OpenAI` 10.10.1 | ✅ | ✅ | MEAI 侧映射就绪 |
 | `Microsoft.Extensions.AI.Abstractions` 10.10.1 | — | ✅ | 实验 ID MEAI001 |
-| `Microsoft.Agents.AI.Harness` 1.24.0（同上） | — | — | 含 `RequirePerServiceCallChatHistoryPersistence`（1.21.0 亦含该成员；Harness 侧确认，触发上述降级路径） |
+| `Microsoft.Agents.AI.Harness` 1.26.0（同上） | — | — | 含 `RequirePerServiceCallChatHistoryPersistence`（1.21.0 亦含该成员；Harness 侧确认，触发上述降级路径） |
 
 即：**升级 MAF/MEAI 主版本时须重新核对**上述契约（尤其 Experimental 面的形状变化）。
 

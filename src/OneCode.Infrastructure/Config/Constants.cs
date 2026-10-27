@@ -47,6 +47,11 @@ public static partial class Constants
         /// 必须共用本常量，避免目录名漂移导致读不到会话。
         /// </summary>
         public const string Events = "events";
+
+        /// <summary>
+        /// 会话摘要索引目录（<c>~/.onecode/events/summaries/</c>）：冷启动读它而不是解析事件日志。
+        /// </summary>
+        public const string SessionSummaries = "summaries";
     }
 
     public static class Timeouts

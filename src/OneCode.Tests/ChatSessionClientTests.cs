@@ -30,7 +30,7 @@ public sealed class ChatSessionClientTests
     private readonly IModelManager _modelManager = Substitute.For<IModelManager>();
     private readonly CommandRegistry _registry = new([]);
 
-    private ChatSessionClient CreateClient()
+    private ChatSessionClient CreateClient(Func<CancellationToken, Task<string>>? buildSystemPrompt = null)
     {
         _appStateAccessor.Current.Returns(new AppState { MainLoopModel = "model-x" });
         _modelManager.GetMainModel("model-x")
@@ -41,7 +41,7 @@ public sealed class ChatSessionClientTests
             SessionManager: _sessionManager,
             ModeController: new OneCode.App.Modes.WorkingModeController(),
             CommandRegistry: _registry,
-            BuildSystemPrompt: _ => Task.FromResult("system-prompt"),
+            BuildSystemPrompt: buildSystemPrompt ?? (_ => Task.FromResult("system-prompt")),
             LoadHarness: _ => Task.FromResult("harness-prompt"),
             ModelManager: _modelManager,
             AppState: _appStateAccessor,
@@ -144,30 +144,103 @@ public sealed class ChatSessionClientTests
     }
 
     [Fact]
-    public async Task SwitchSessionAsync_ReplaysForegroundHistoryIntoTranscript()
+    public async Task SwitchSessionAsync_RebuildsContextFromHistoryToolUses()
+    {
+        var client = CreateClient();
+        await client.InitializeAsync();
+        var id = new SessionId("aaaaaaaa-0000-0000-0000-000000000005");
+        var switched = new Conversation { Id = id, WorkingDirectory = "/tmp" };
+        switched.Messages.Add(new AssistantMessage(
+            "a1",
+            [
+                new TextBlock("读完了"),
+                new ToolUseBlock("t1", "Read", """{"filePath":"src/a.cs"}"""),
+                new ToolUseBlock("t2", "WebFetch", """{"url":"https://example.com/post"}"""),
+            ],
+            DateTimeOffset.Now));
+        _sessionManager.SwitchToSessionAsync(id.ToString(), Arg.Any<CancellationToken>()).Returns(switched);
+        _sessionManager.ForegroundConversation.Returns(new Conversation { Id = id });
+        _sessionManager.ListAsync(Arg.Any<CancellationToken>()).Returns([]);
+
+        await client.SwitchSessionAsync(id.ToString());
+
+        client.ContextItems.Should().Contain(item =>
+            item.Kind == WebContextKind.File && item.Target == "src/a.cs");
+        client.ContextItems.Should().Contain(item =>
+            item.Kind == WebContextKind.Link && item.Target == "https://example.com/post");
+    }
+
+    [Fact]
+    public async Task SendAsync_WaitsForBackgroundWarmUpInsteadOfBlockingFirstScreen()
+    {
+        var gate = new TaskCompletionSource<string>();
+        _sessionManager.ListAsync(Arg.Any<CancellationToken>()).Returns([]);
+        _streams.StreamQueryAsync(
+                Arg.Any<InteractiveSession>(), "hello", Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(StreamOf(new DoneEvent(null, null, 0, RunTerminalReason.Completed)));
+        var client = CreateClient(_ => gate.Task);
+
+        await client.InitializeAsync();
+
+        client.IsInitializing.Should().BeFalse("首屏初始化不得等待提示词构建");
+
+        var send = client.SendAsync("hello");
+        send.IsCompleted.Should().BeFalse("提示词未就绪时发送必须等待后台预热任务，而不是丢弃消息");
+
+        gate.SetResult("system-prompt");
+        await send;
+
+        client.Messages.Should().Contain(m => m.Role == WebRole.User && m.Content == "hello");
+    }
+
+    [Fact]
+    public async Task SwitchSessionAsync_ProjectsReturnedConversationIntoTranscript()
     {
         var client = CreateClient();
         await client.InitializeAsync();
         var id = new SessionId("aaaaaaaa-0000-0000-0000-000000000002");
-        _sessionManager.SwitchToSessionAsync(id.ToString(), Arg.Any<CancellationToken>())
-            .Returns(new Conversation { Id = id, WorkingDirectory = "/tmp" });
+        // 切换返回的 Conversation 即投影源：客户端不得再发起第二次会话读取。
+        var switched = new Conversation { Id = id, WorkingDirectory = "/tmp" };
+        switched.Messages.Add(new UserMessage("u1", "上一条用户消息", DateTimeOffset.Now));
+        switched.Messages.Add(new AssistantMessage("a1", [new TextBlock("上一条助手回复")], DateTimeOffset.Now));
+        _sessionManager.SwitchToSessionAsync(id.ToString(), Arg.Any<CancellationToken>()).Returns(switched);
         // 切换完成后 SessionManager 的前台会话指向新会话：刷新列表时据此标记前台。
         _sessionManager.ForegroundConversation.Returns(new Conversation { Id = id });
         _sessionManager.ListAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new ConversationSummary(
                 id, "switched", "model-x", 2, DateTimeOffset.Now, DateTimeOffset.Now, new TokenUsage(0, 0)) });
-        _sessionManager.ReplayAsync(id.ToString(), Arg.Any<CancellationToken>())
-            .Returns(new Message[]
-            {
-                new UserMessage("u1", "上一条用户消息", DateTimeOffset.Now),
-                new AssistantMessage("a1", [new TextBlock("上一条助手回复")], DateTimeOffset.Now),
-            });
+
+        var busyStates = new List<bool>();
+        client.Changed += () => busyStates.Add(client.IsSwitchingSession);
 
         await client.SwitchSessionAsync(id.ToString());
 
         client.Messages.Should().Contain(m => m.Role == WebRole.User && m.Content == "上一条用户消息");
         client.Messages.Should().Contain(m => m.Role == WebRole.Assistant && m.Content == "上一条助手回复");
         client.Sessions.Should().Contain(s => s.IsForeground, "切换后侧栏必须标出新的前台会话");
+        busyStates.Should().Contain(true, "切换开始必须先通知 UI 进入加载态");
+        client.IsSwitchingSession.Should().BeFalse("切换结束后必须退出加载态");
+    }
+
+    [Fact]
+    public async Task SwitchSessionAsync_WhileSwitching_IgnoresSecondRequest()
+    {
+        var client = CreateClient();
+        await client.InitializeAsync();
+        var id = new SessionId("aaaaaaaa-0000-0000-0000-000000000004");
+        var gate = new TaskCompletionSource<Conversation?>();
+        _sessionManager.SwitchToSessionAsync(id.ToString(), Arg.Any<CancellationToken>())
+            .Returns(gate.Task);
+        _sessionManager.ListAsync(Arg.Any<CancellationToken>()).Returns([]);
+
+        var first = client.SwitchSessionAsync(id.ToString());
+        client.IsSwitchingSession.Should().BeTrue("等待会话读取期间必须标记忙碌");
+
+        await client.SwitchSessionAsync(id.ToString());
+        gate.SetResult(new Conversation { Id = id });
+        await first;
+
+        await _sessionManager.Received(1).SwitchToSessionAsync(id.ToString(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

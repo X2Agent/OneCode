@@ -1,4 +1,3 @@
-// MAAI001 suppressed: AIContextProvider uses experimental MAF APIs
 using OneCode.Infrastructure.Lsp;
 using System.Text;
 using Microsoft.Agents.AI;

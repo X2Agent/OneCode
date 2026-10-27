@@ -45,7 +45,7 @@ src/
 - **MAF 接入**：装配顺序、扩展点与现状对照见 [docs/maf/integration-guide.md](docs/maf/integration-guide.md)；集成边界与禁令见 [docs/adr/0007-maf-integration-boundaries.md](docs/adr/0007-maf-integration-boundaries.md)；结构化输出采用策略（结构化请求 + 文本降级）见 [docs/adr/0008-structured-output-text-fallback.md](docs/adr/0008-structured-output-text-fallback.md)。
 - **子代理派工**：派工入口、profile 能力矩阵、TaskService 生命周期与 DAG 语义见 [docs/sub-agents.md](docs/sub-agents.md)；「不起子代理的决定权归属」边界（为何不用 MAF BackgroundAgents 作底层）见 [docs/adr/0011-background-agents-delegation-boundary.md](docs/adr/0011-background-agents-delegation-boundary.md)。
 - **决策模型接入**：抽象归属、接入点白名单与禁令见 [docs/adr/0012-decision-model-integration-jev.md](docs/adr/0012-decision-model-integration-jev.md)——决策模型（如 TypeSafe Jev）只能收窄已授权候选集或把 Allow 升级为 Ask/Deny，**绝不能产生 Allow**；上游未定型期间实验类型不进依赖面。
-- **UI 形态**：TUI 与 Blazor Server 浏览器客户端（OneCode.WebUI）同为 `OneCode.App` 的进程内消费端，共享 `QueryEvent` 契约与交互端口；对外网络端点不做。边界与禁令见 [docs/adr/0017-ui-contract-single-layer.md](docs/adr/0017-ui-contract-single-layer.md)，路线见 [docs/plan/tui-roadmap.md](docs/plan/tui-roadmap.md)。
+- **UI 形态**：TUI 与 Blazor Server 浏览器客户端（OneCode.WebUI）同为 `OneCode.App` 的进程内消费端，共享 `QueryEvent` 契约与交互端口；对外网络端点不做。边界与禁令见 [docs/adr/0017-ui-contract-single-layer.md](docs/adr/0017-ui-contract-single-layer.md)；实施计划见 [P1 daemon 验收](docs/plan/p1-daemon-acceptance.md)、[P2a 引擎侧多会话](docs/plan/p2a-engine-multi-session.md)、[P2b sessions/attach](docs/plan/p2b-sessions-attach.md)、[P3 产物卡](docs/plan/p3-artifact-cards.md)、[P4 远程工作流](docs/plan/p4-remote-workflow.md)。
 
 ## Agent Guidelines
 

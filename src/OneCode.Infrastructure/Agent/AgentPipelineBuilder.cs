@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // MAF 实验性 API（压缩策略 / FileMemoryStore）：升级 MAF 时按升级复查清单回归
 using OneCode.Infrastructure.Middleware;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Ai;

@@ -1,5 +1,6 @@
 using OneCode.Infrastructure;
 using OneCode.Core.Config;
+using OneCode.Infrastructure.Agent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OneCode.App.Commands;
@@ -60,6 +61,7 @@ public sealed class OneCodeApp(
         services
             .AddSkillServices(workingDir)
             .AddChatClientServices()
+            .AddAgentTelemetryLogForwarding()
             .AddSessionServices(workingDir)
             .AddTaskServices()
             .AddPlanModeServices()
@@ -117,6 +119,10 @@ public sealed class OneCodeApp(
 
         var host = builder.Build();
         startupTimer.Mark("host-built");
+
+        // 遥测监听须在 agent 首次运行前挂上：立即解析一次转发器，订阅 MAF ActivitySource（singleton 构造即注册监听）。
+        _ = host.Services.GetRequiredService<AgentTelemetryLogForwarder>();
+        startupTimer.Mark("agent-telemetry-listener-attached");
 
         _ = host.Services.GetRequiredService<IModelCatalogCache>();
         startupTimer.Mark("model-catalog-loaded");

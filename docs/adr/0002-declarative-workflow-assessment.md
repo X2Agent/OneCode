@@ -27,7 +27,7 @@ Team 移除后，并行派工由 `Agent` / `ParallelAgents` 工具承接，无�
 
 1. **API 阻抗失配**：`ResponseAgentProvider` 是 Response API 抽象，与本地 `IChatClient` 的 messages API 模型不一致，适配器需转换消息格式并可能模拟状态语义
 2. **API 形状未知**：包未还原到本地（截至 2026-07-09 评估时），无法预先检视 `ResponseAgentProvider` 抽象成员，POC 需先做信息收集阶段
-3. **实验性 API 漂移**：项目大量 MAF API 带 `[Experimental]`，编译期由 `src/Directory.Build.props` 的全局 `NoWarn` 抑制 `MAAI001`（见 `src/OneCode.Infrastructure/AGENTS.md`），Declarative 子包稳定性更不可控
+3. **实验性 API 漂移**：项目大量 MAF API 带 `[Experimental]`，编译期由 `MAAI001` 警告（有意未全局屏蔽，见 `src/OneCode.Infrastructure/AGENTS.md`），Declarative 子包稳定性更不可控
 4. **双轨风险**：引入 MAF Declarative YAML spec 后与现有代码式编排可能并存，需明确替换策略
 
 ## 决策

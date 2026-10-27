@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <title>OneCode</title>
-    <link rel="stylesheet" href="app.css" />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    @* 关闭预渲染：首页初始化包含会话扫描与提示词构建，预渲染会让它跑两遍并阻塞 HTML 首包。 *@
+    <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 </head>
 <body>
-    <Routes @rendermode="InteractiveServer" />
-    <script src="app.js" defer></script>
-    <script src="_framework/blazor.web.js"></script>
+    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    @* app.js 必须先于 blazor.web.js 执行：电路建立后立刻会调用 window.app.* 互操作。 *@
+    <script src="@Assets["app.js"]"></script>
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 </html>

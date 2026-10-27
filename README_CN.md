@@ -1,6 +1,6 @@
 # OneCode .NET — 生产级 TUI AI 编程助手
 
-> **导读**：OneCode .NET 是一个生产级 TUI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.24.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
+> **导读**：OneCode .NET 是一个生产级 TUI AI 编程助手。项目采用 .NET 10 + MAF (Microsoft Agent Framework) 1.26.0 构建，基于 Terminal.Gui v2 全屏 TUI，并引入了 Hyperlight 沙箱、LSP 集成、代码索引、DAG 并行调度等增强功能。
 
 > **免责声明**: 本仓库内容仅用于技术研究和科研爱好者交流学习参考，**严禁任何个人、机构及组织将其用于商业用途、盈利性活动、非法用途及其他未经授权的场景。** 若内容涉及侵犯您的合法权益、知识产权或存在其他侵权问题，请及时联系我们，我们将第一时间核实并予以删除处理。
 
@@ -37,7 +37,7 @@
 | 异步模型 | Task + async/await |
 | 包管理 | NuGet（Central Package Management，版本统一由 `src/Directory.Packages.props` 固定） |
 | 测试框架 | xUnit v3 + NSubstitute + FluentAssertions |
-| Agent 框架 | MAF 1.24.0 (HarnessAgent + 中间件管道) |
+| Agent 框架 | MAF 1.26.0 (HarnessAgent + 中间件管道) |
 | 发布方式 | .NET 自包含单文件 |
 
 > **已知限制**：

@@ -28,7 +28,10 @@ public sealed class SessionFeatureE2ETests : IDisposable
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionE2E_{Guid.NewGuid():N}");
         _sessionsDir = Path.Combine(_tempDir, "events");
-        _store = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
+        _store = new EventSourcedSessionStore(
+            new FileSessionEventStore(_tempDir),
+            new FileSessionSummaryIndex(_tempDir, NullLogger<FileSessionSummaryIndex>.Instance),
+            NullLogger<EventSourcedSessionStore>.Instance);
         _shellManager = new ConversationShellExecutorManager(NullLogger<ConversationShellExecutorManager>.Instance);
         _sessionManager = new SessionManager(
             _store,
@@ -54,7 +57,10 @@ public sealed class SessionFeatureE2ETests : IDisposable
         _sessionManager.ForegroundConversation!.Id.Should().Be(conv.Id);
 
         // Simulate new process: reload from disk
-        var store2 = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
+        var store2 = new EventSourcedSessionStore(
+            new FileSessionEventStore(_tempDir),
+            new FileSessionSummaryIndex(_tempDir, NullLogger<FileSessionSummaryIndex>.Instance),
+            NullLogger<EventSourcedSessionStore>.Instance);
         var manager2 = new SessionManager(store2, NullLogger<SessionManager>.Instance, _tempDir,
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),

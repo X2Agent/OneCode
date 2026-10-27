@@ -1,0 +1,26 @@
+<div class="artifact">
+    <div class="artifact-head">
+        <span class="artifact-kind">HTML 预览</span>
+        <button type="button" class="artifact-btn" @onclick="Toggle">@(_expanded ? "收起" : "展开")</button>
+    </div>
+    @* sandbox 不给 allow-same-origin：产物脚本运行在不透明来源，拿不到宿主页面的 DOM / 存储 / 工具能力。 *@
+    <iframe class="artifact-frame @(_expanded ? "expanded" : "")"
+            title="HTML 产物预览"
+            sandbox="allow-scripts allow-popups allow-forms"
+            srcdoc="@Source"></iframe>
+    <details class="artifact-source">
+        <summary>查看源码</summary>
+        <div class="markdown">
+            <pre><code>@Source</code></pre>
+        </div>
+    </details>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Source { get; set; } = string.Empty;
+
+    private bool _expanded;
+
+    private void Toggle() => _expanded = !_expanded;
+}

@@ -19,7 +19,10 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionMgrTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _store = new EventSourcedSessionStore(new FileSessionEventStore(_tempDir));
+        _store = new EventSourcedSessionStore(
+            new FileSessionEventStore(_tempDir),
+            new FileSessionSummaryIndex(_tempDir, NullLogger<FileSessionSummaryIndex>.Instance),
+            NullLogger<EventSourcedSessionStore>.Instance);
         _manager = new SessionManager(_store, NullLogger<SessionManager>.Instance, _tempDir,
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),
             tokenUsageTracker: Substitute.For<ITokenUsageTracker>(),
@@ -186,6 +189,25 @@ public sealed class SessionManagerMultiSessionTests : IDisposable
         restored.Should().NotBeNull();
         restored!.Id.Should().Be(first.Id);
         _manager.BackgroundSessionCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SwitchToSessionAsync_FromDisk_RestoresWithoutRewritingEventLog()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var conversation = await _manager.EnsureActiveSessionAsync(new ConversationOptions(_tempDir), ct);
+        await _manager.AppendUserMessageAsync("persisted", ct);
+        var events = new FileSessionEventStore(_tempDir);
+        var before = await events.ReadAsync(conversation.Id, ct);
+
+        // 新实例模拟重启：内存无该会话，必须从事件日志恢复。
+        var restarted = CreateManager();
+        var switched = await restarted.SwitchToSessionAsync(conversation.Id.Value, ct);
+
+        switched.Should().NotBeNull();
+        switched!.Messages.OfType<UserMessage>().Should().ContainSingle(m => m.Content == "persisted");
+        var after = await events.ReadAsync(conversation.Id, ct);
+        after.Should().HaveCount(before.Count, "切换会话只改内存状态，不得重写事件日志");
     }
 
     private SessionManager CreateManager() => new(

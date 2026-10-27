@@ -8,6 +8,7 @@ using OneCode.App.Session;
 using OneCode.Core.Commands;
 using OneCode.Core.Domain;
 using OneCode.Core.Models;
+using OneCode.Core.Session;
 using OneCode.App.Services.Interaction;
 using OneCode.WebUI.Components;
 using OneCode.WebUI.Services;
@@ -54,8 +55,26 @@ OneCodeApp.AddOneCodeCore(
 
 var app = builder.Build();
 
-app.UseStaticFiles();
+// 静态资源带构建期内容指纹（@Assets[...] 生成哈希 URL）：改 wwwroot 后浏览器不会复用旧缓存。
+app.MapStaticAssets();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
+// 会话摘要索引预热：与进程启动、浏览器打开并行，首个电路打开时侧栏直接命中内存缓存。
+_ = WarmUpSessionIndexAsync(app);
+
 app.Run();
+
+static async Task WarmUpSessionIndexAsync(WebApplication app)
+{
+    try
+    {
+        var store = app.Services.GetRequiredService<ISessionStore>();
+        await store.ListAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        // 预热只是把冷启动解析挪到后台：失败不影响功能，首个电路打开时会再试一次。
+        app.Logger.LogWarning(ex, "会话摘要索引预热失败");
+    }
+}

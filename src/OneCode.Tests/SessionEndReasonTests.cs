@@ -22,7 +22,10 @@ public sealed class SessionEndReasonTests : IDisposable
         _tempDir = Path.Combine(Path.GetTempPath(), $"SessionEndReasonTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
         _manager = new SessionManager(
-            new EventSourcedSessionStore(new FileSessionEventStore(_tempDir)),
+            new EventSourcedSessionStore(
+                new FileSessionEventStore(_tempDir),
+                new FileSessionSummaryIndex(_tempDir, NullLogger<FileSessionSummaryIndex>.Instance),
+                NullLogger<EventSourcedSessionStore>.Instance),
             NullLogger<SessionManager>.Instance,
             _tempDir,
             shellExecutorCleanup: Substitute.For<IShellExecutorCleanup>(),

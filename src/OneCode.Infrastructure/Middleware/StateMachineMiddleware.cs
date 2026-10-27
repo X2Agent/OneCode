@@ -17,8 +17,8 @@ namespace OneCode.Infrastructure.Middleware;
 /// - 状态转移由 <see cref="StateMachine.Transition"/> 纯函数推进；
 ///   Blocked 后非干预类工具被闸门拦截，等待用户介入（见 <see cref="ShouldBlockTool(AgentState, string?)"/>）。
 /// - Plan 模式的只读约束由权限层（PlanModePermissionStrategy）负责，不在此重复。
-/// - 工具调用时序观测不在此重复实现：框架侧有 span 埋点，但产品未注册 OpenTelemetry
-///   订阅者（`src/` 内无 `AddSource` / `TracerProvider`），当前 span 全部为 `null`、不可观测。
+/// - 工具调用时序观测不在此重复实现：框架侧有 span 埋点，宿主经
+///   <see cref="OneCode.Infrastructure.Agent.AgentTelemetryLogForwarder"/>（ActivityListener）把 span 停止事件转发进本地日志。
 /// </summary>
 public static class StateMachineMiddleware
 {

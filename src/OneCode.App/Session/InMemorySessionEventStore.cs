@@ -7,16 +7,17 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
 {
     private readonly Lock _gate = new();
     private readonly Dictionary<SessionId, List<SessionEvent>> _events = [];
+    private readonly Dictionary<SessionId, SessionEventLogStamp> _stamps = [];
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<long>> AppendAsync(
+    public Task<SessionEventLogStamp?> AppendAsync(
         IReadOnlyList<SessionEvent> events,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(events);
         if (events.Count == 0)
-            return Task.FromResult<IReadOnlyList<long>>([]);
+            return Task.FromResult<SessionEventLogStamp?>(null);
 
         var sessionId = events[0].SessionId;
         if (events.Any(sessionEvent => sessionEvent.SessionId != sessionId))
@@ -31,15 +32,13 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
             }
 
             var firstSequence = sessionEvents.Count + 1L;
-            var sequences = new long[events.Count];
             for (var index = 0; index < events.Count; index++)
-            {
-                var sequence = firstSequence + index;
-                sessionEvents.Add(events[index].WithSequence(sequence));
-                sequences[index] = sequence;
-            }
+                sessionEvents.Add(events[index].WithSequence(firstSequence + index));
 
-            return Task.FromResult<IReadOnlyList<long>>(sequences);
+            // 内存实现没有文件长度：以事件条数充当 Length，追加即让日志戳变化。
+            var stamp = new SessionEventLogStamp(sessionId, sessionEvents.Count, DateTimeOffset.UtcNow);
+            _stamps[sessionId] = stamp;
+            return Task.FromResult<SessionEventLogStamp?>(stamp);
         }
     }
 
@@ -60,11 +59,11 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<SessionId>> ListSessionsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         lock (_gate)
-            return Task.FromResult<IReadOnlyList<SessionId>>(_events.Keys.ToArray());
+            return Task.FromResult<IReadOnlyList<SessionEventLogStamp>>(_stamps.Values.ToArray());
     }
 
     /// <inheritdoc />
@@ -72,7 +71,10 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
     {
         ct.ThrowIfCancellationRequested();
         lock (_gate)
+        {
             _events.Remove(sessionId);
+            _stamps.Remove(sessionId);
+        }
         return Task.CompletedTask;
     }
 }

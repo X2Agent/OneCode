@@ -1,43 +1,130 @@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
 <aside class="sessions">
     <div class="sessions-header">会话</div>
     <button class="new-session" @onclick="OnNew">
         <span class="new-plus">+</span><span class="new-label">新建会话</span>
     </button>
-    @foreach (var session in Sessions)
-    {
-        <div class="session @(session.IsForeground ? "active" : "")"
-             @onclick="() => OnSwitch.InvokeAsync(session.Id)">
-            <span class="dot @(session.IsForeground && Running ? "live" : "")"></span>
-            <div class="session-body">
-                <div class="session-title" title="@session.Id">@session.Title</div>
-                <div class="session-meta">@session.Mode · @session.MessageCount 条 · @session.LastActivityAt.ToString("MM-dd HH:mm")</div>
+    <div class="session-list">
+        @foreach (var session in VisibleSessions)
+        {
+            <div class="session @(session.IsForeground ? "active" : "") @(Busy ? "busy" : "")"
+                 @onclick="() => SwitchAsync(session.Id)">
+                <span class="dot @(session.IsForeground && Running ? "live" : "")"></span>
+                <div class="session-body">
+                    <div class="session-title" title="@session.Title">@session.Title</div>
+                    <div class="session-meta">@session.Mode · @session.MessageCount 条 · @session.LastActivityAt.ToString("MM-dd HH:mm")</div>
+                </div>
+                @if (session.IsForeground)
+                {
+                    <button class="session-action" @onclick="OnClose" @onclick:stopPropagation="true" title="关闭当前会话">关闭</button>
+                }
             </div>
-            @if (session.IsForeground)
-            {
-                <button class="session-action" @onclick="OnClose" @onclick:stopPropagation="true" title="关闭当前会话">关闭</button>
-            }
-            else
-            {
-                <button class="session-action" @onclick="() => OnSwitch.InvokeAsync(session.Id)" @onclick:stopPropagation="true" title="切换到该会话">切换</button>
-            }
-        </div>
-    }
-    @if (Sessions.Count == 0)
-    {
-        <div class="session-meta">（暂无会话）</div>
-    }
+        }
+        @if (Sessions.Count == 0)
+        {
+            <div class="session-meta">@(Loading ? "正在加载会话…" : "（暂无会话）")</div>
+        }
+        else if (HasMore)
+        {
+            <div class="session-sentinel">向下滚动加载更多</div>
+        }
+    </div>
     <div class="sessions-footer">
         <div class="path" title="@WorkingDirectory">@WorkingDirectory</div>
     </div>
+
 </aside>
 
 @code {
-    [Parameter] public string Mode { get; set; } = "BUILD";
-    [Parameter] public string ModelName { get; set; } = "";
+    private const int PageSize = 10;
+
     [Parameter] public string WorkingDirectory { get; set; } = "";
     [Parameter] public bool Running { get; set; }
+
+    /// <summary>会话切换或首屏初始化进行中：禁用切换入口，避免重复触发读取。</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>首屏会话列表尚未就绪：空态显示加载文案而不是「暂无会话」。</summary>
+    [Parameter] public bool Loading { get; set; }
+
     [Parameter] public IReadOnlyList<WebSessionItem> Sessions { get; set; } = [];
     [Parameter] public EventCallback<string> OnSwitch { get; set; }
     [Parameter] public EventCallback OnNew { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+
+    private int _visible = PageSize;
+    private string? _foregroundId;
+    private DotNetObjectReference<SessionList>? _self;
+
+    private bool HasMore => _visible < Sessions.Count;
+
+    private IReadOnlyList<WebSessionItem> VisibleSessions => [.. Sessions.Take(_visible)];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        _self = DotNetObjectReference.Create(this);
+        await Js.InvokeVoidAsync("app.bindSessionScroll", _self);
+    }
+
+    /// <summary>整行即切换入口；忙碌期直接忽略，与宿主侧的拦截保持一致。</summary>
+    private Task SwitchAsync(string sessionId) =>
+        Busy ? Task.CompletedTask : OnSwitch.InvokeAsync(sessionId);
+
+    /// <summary>滚动到底部时由前端回调：展开下一屏会话。</summary>
+    [JSInvokable]
+    public Task LoadMore()
+    {
+        if (!HasMore)
+            return Task.CompletedTask;
+
+        _visible = Math.Min(Sessions.Count, _visible + PageSize);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnParametersSet()
+    {
+        // 前台会话切换/新建时确保它在已展开范围内，避免切到看不见的条目。
+        var foregroundId = Sessions.FirstOrDefault(s => s.IsForeground)?.Id;
+        if (!string.Equals(foregroundId, _foregroundId, StringComparison.Ordinal))
+        {
+            _foregroundId = foregroundId;
+            _visible = Math.Max(_visible, ForegroundIndex() + 1);
+        }
+
+        _visible = Math.Clamp(_visible, PageSize, Math.Max(PageSize, Sessions.Count));
+    }
+
+    private int ForegroundIndex()
+    {
+        for (var index = 0; index < Sessions.Count; index++)
+        {
+            if (Sessions[index].IsForeground)
+                return index;
+        }
+
+        return 0;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_self is null)
+            return;
+
+        try
+        {
+            await Js.InvokeVoidAsync("app.unbindSessionScroll");
+        }
+        catch (JSDisconnectedException)
+        {
+            // 电路已断开：无需再解除绑定。
+        }
+
+        _self.Dispose();
+        _self = null;
+    }
 }

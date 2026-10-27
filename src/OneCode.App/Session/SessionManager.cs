@@ -7,7 +7,7 @@ using OneCode.App.Tools;
 namespace OneCode.App.Session;
 
 /// <summary>
-/// Manages conversations — creation, resume, persistence, and listing.
+/// 会话管理器：负责会话创建、恢复、持久化与列表查询。
 /// </summary>
 public sealed class SessionManager : ISessionManager
 {
@@ -23,7 +23,7 @@ public sealed class SessionManager : ISessionManager
     private readonly List<BackgroundSession> _backgroundSessions = [];
 
     /// <summary>
-    /// Foreground conversation shown in the TUI.
+    /// 前台会话（界面当前展示的会话）。
     /// </summary>
     public Conversation? ForegroundConversation { get; private set; }
 
@@ -40,11 +40,11 @@ public sealed class SessionManager : ISessionManager
             ?.Conversation;
     }
 
-    /// <summary>Background sessions kept alive while the user works in another conversation.</summary>
+    /// <summary>用户在其他会话中工作时保持存活的后台会话。</summary>
     public IReadOnlyList<BackgroundSession> BackgroundSessions => _backgroundSessions;
 
     /// <summary>
-    /// The working directory for this session. Updated via <see cref="ChangeWorkingDirectoryAsync"/>.
+    /// 当前会话的工作目录，经 <see cref="ChangeWorkingDirectoryAsync"/> 更新。
     /// </summary>
     public string WorkingDirectory => _workingDirectory;
 
@@ -68,7 +68,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Change the session's working directory and persist the foreground conversation.
+    /// 切换会话工作目录并持久化前台会话。
     /// </summary>
     public async Task ChangeWorkingDirectoryAsync(string newCwd, CancellationToken ct = default)
     {
@@ -85,9 +85,8 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Create a new conversation. Persistence is deferred: nothing is written to
-    /// disk until the first message lands (see <see cref="PersistAsync"/>), so
-    /// abandoned sessions leave no empty files behind.
+    /// 新建会话。持久化延后：磁盘写入推迟到首条消息落盘时（见 <see cref="PersistAsync"/>），
+    /// 避免被放弃的空会话留下空文件。
     /// </summary>
     public async Task<Conversation> CreateAsync(
         ConversationOptions options,
@@ -118,8 +117,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Stamp the foreground conversation's working mode (build/plan/goal).
-    /// In-memory only — the value persists with the next transcript save.
+    /// 标记前台会话的工作模式（build/plan/goal）。仅改内存，随下一次转录落盘写入磁盘。
     /// </summary>
     public void SetForegroundMode(string mode)
     {
@@ -128,8 +126,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Persist a conversation unless it is still empty — header-only session
-    /// files are never written proactively.
+    /// 持久化会话，但空会话不落盘——只有头部信息的会话文件永不被主动创建。
     /// </summary>
     private Task PersistAsync(Conversation conversation, CancellationToken ct) =>
         conversation.Messages.Count == 0
@@ -137,7 +134,7 @@ public sealed class SessionManager : ISessionManager
             : _store.SaveAsync(conversation, ct);
 
     /// <summary>
-    /// Returns the foreground conversation, creating one when missing.
+    /// 返回前台会话，不存在时新建一个。
     /// </summary>
     public async Task<Conversation> EnsureActiveSessionAsync(
         ConversationOptions options,
@@ -155,7 +152,7 @@ public sealed class SessionManager : ISessionManager
         return await CreateAsync(options, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Append a user turn to the foreground conversation and persist.</summary>
+    /// <summary>向前台会话追加一轮用户消息并持久化。</summary>
     public async Task AppendUserMessageAsync(string content, CancellationToken ct = default)
     {
         if (ForegroundConversation is null)
@@ -183,7 +180,7 @@ public sealed class SessionManager : ISessionManager
         await PersistAsync(conversation, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Append an assistant turn to the foreground conversation and persist.</summary>
+    /// <summary>向前台会话追加一轮助手消息并持久化。</summary>
     public async Task AppendAssistantMessageAsync(
         string content,
         TokenUsage? usage = null,
@@ -246,8 +243,8 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Atomically appends sealed call/result batches and saves the conversation once.
-    /// Incomplete batches are rejected instead of producing provider-invalid history.
+    /// 原子追加已闭合的工具调用/结果批次，并只保存一次会话。
+    /// 未闭合的批次直接拒绝，避免写出 provider 不接受的非法历史。
     /// </summary>
     public Task AppendCompletedToolBatchesAsync(
         SessionId conversationId,
@@ -255,7 +252,7 @@ public sealed class SessionManager : ISessionManager
         CancellationToken ct = default)
         => _toolBatchAppender.AppendAsync(conversationId, batches, ct);
 
-    /// <summary>Build chat history for the foreground conversation (excluding system prompt).</summary>
+    /// <summary>构建前台会话的聊天历史（不含系统提示词）。</summary>
     public IReadOnlyList<ChatMessage> GetForegroundChatHistory()
     {
         if (ForegroundConversation is null)
@@ -273,7 +270,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Resume an existing conversation by ID.
+    /// 按 ID 恢复已有会话。
     /// </summary>
     public async Task<Conversation?> ResumeAsync(
         string conversationId,
@@ -301,8 +298,8 @@ public sealed class SessionManager : ISessionManager
 
         _tokenUsageTracker.Reset();
 
-        await PersistAsync(conversation, ct);
-
+        // 切换只改内存状态：下一次真实追加时的 SaveAsync 会因快照不一致把新状态落盘，
+        // 避免为了改 Status / LastActivityAt 重写整份事件日志。
         _logger.LogInformation(
             "Resumed conversation {Id} with {Count} messages",
             conversation.Id, conversation.Messages.Count);
@@ -311,7 +308,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// List all available conversations, sorted by last activity.
+    /// 列出全部会话，按最后活动时间倒序。
     /// </summary>
     public async Task<IReadOnlyList<ConversationSummary>> ListAsync(CancellationToken ct = default)
     {
@@ -322,8 +319,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Save the current conversation state. No-op while the conversation is
-    /// still empty (deferred persistence).
+    /// 保存当前会话状态；会话仍为空时不落盘（持久化延后）。
     /// </summary>
     public async Task SaveAsync(CancellationToken ct = default)
     {
@@ -335,8 +331,8 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Close the current conversation (async — clears session cache).
-    /// Also invoked by <see cref="DisposeAsync"/> at shutdown (idempotent: no-op when no foreground conversation).
+    /// 关闭当前会话（异步，清理会话缓存）。
+    /// 进程退出时也由 <see cref="DisposeAsync"/> 调用（幂等：无前台会话时为空操作）。
     /// </summary>
     public Task CloseAsync(CancellationToken ct = default) => CloseAsync(SessionEndReason.Close, ct);
 
@@ -377,7 +373,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Continue an existing conversation — appends new messages to the existing session.
+    /// 继续已有会话——新消息追加到原有会话。
     /// </summary>
     public async Task<Conversation> ContinueAsync(
         string conversationId,
@@ -400,35 +396,16 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Replay a conversation transcript without re-executing side effects.
+    /// 把前台会话转入后台，不打断正在进行的查询。
     /// </summary>
-    public async Task<IReadOnlyList<Message>> ReplayAsync(
-        string conversationId,
-        CancellationToken ct = default)
-    {
-        var id = SessionId.TryParse(conversationId)
-            ?? throw new ArgumentException($"Invalid conversation ID: {conversationId}");
-
-        var conversation = await _store.LoadAsync(id, ct);
-        if (conversation is null)
-            throw new InvalidOperationException($"Conversation not found: {conversationId}");
-
-        _logger.LogInformation(
-            "Replay conversation {Id} with {Count} messages (read-only, no side effects)",
-            conversation.Id, conversation.Messages.Count);
-
-        return conversation.Messages.ToList();
-    }
-
-    /// <summary>
-    /// Move the foreground conversation to the background without cancelling an active query.
-    /// </summary>
-    public async Task SuspendForegroundToBackgroundAsync(CancellationToken ct = default)
+    /// <remarks>
+    /// 转入后台只改内存归属：消息在每次追加时已落盘，切换本身不产生新内容，
+    /// 不需要重写整份事件日志。
+    /// </remarks>
+    public Task SuspendForegroundToBackgroundAsync(CancellationToken ct = default)
     {
         if (ForegroundConversation is null)
-            return;
-
-        await SaveAsync(ct).ConfigureAwait(false);
+            return Task.CompletedTask;
 
         var existing = _backgroundSessions.FirstOrDefault(b => b.Conversation.Id == ForegroundConversation.Id);
         if (existing is null)
@@ -436,10 +413,11 @@ public sealed class SessionManager : ISessionManager
 
         ForegroundConversation = null;
         _sessionIdHolder.SetCurrent(null);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Switch foreground to an existing conversation (from disk or background list).
+    /// 把前台切换为已有会话（来自磁盘或后台列表）。
     /// </summary>
     public async Task<Conversation?> SwitchToSessionAsync(string conversationId, CancellationToken ct = default)
     {
@@ -465,7 +443,6 @@ public sealed class SessionManager : ISessionManager
             ForegroundConversation.Status = ConversationStatus.Active;
             ForegroundConversation.LastActivityAt = DateTimeOffset.UtcNow;
             _tokenUsageTracker.Reset();
-            await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false);
             return ForegroundConversation;
         }
 
@@ -473,7 +450,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Background the current conversation and create a new foreground session.
+    /// 把当前会话转入后台并新建前台会话。
     /// </summary>
     public async Task<Conversation> BackgroundCurrentAndCreateNewAsync(
         ConversationOptions options,
@@ -486,7 +463,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Close a background session and cancel any running query.
+    /// 关闭后台会话并取消其正在运行的查询。
     /// </summary>
     public async Task<bool> CloseBackgroundSessionAsync(string conversationId, CancellationToken ct = default)
     {
@@ -524,7 +501,7 @@ public sealed class SessionManager : ISessionManager
     }
 
     /// <summary>
-    /// Save current session state and write transcript to persistent storage.
+    /// 保存当前会话状态并把转录写入持久化存储。
     /// </summary>
     public async Task PersistTranscriptAsync(CancellationToken ct = default)
     {

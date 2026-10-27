@@ -25,9 +25,15 @@ public static class SessionServiceCollectionExtensions
 
         services.AddSingleton<ISessionEventStore>(sp =>
             new FileSessionEventStore(PathsHelper.UserHome));
+        services.AddSingleton<ISessionSummaryIndex>(sp =>
+            new FileSessionSummaryIndex(
+                PathsHelper.UserHome,
+                sp.GetRequiredService<ILogger<FileSessionSummaryIndex>>()));
         services.AddSingleton<ISessionStore>(sp =>
             new EventSourcedSessionStore(
-                sp.GetRequiredService<ISessionEventStore>()));
+                sp.GetRequiredService<ISessionEventStore>(),
+                sp.GetRequiredService<ISessionSummaryIndex>(),
+                sp.GetRequiredService<ILogger<EventSourcedSessionStore>>()));
         services.AddSingleton<SessionIdHolder>();
         services.AddSingleton<ISessionIdProvider>(sp => sp.GetRequiredService<SessionIdHolder>());
         services.AddSingleton<IWorkingDirectoryAccessor, SessionWorkingDirectoryAccessor>();
