@@ -37,6 +37,31 @@ public static class DurableFile
         }
     }
 
+    /// <summary>为同步存储提供与 <see cref="AcquireLockAsync"/> 相同的跨进程排他锁。</summary>
+    public static FileStream AcquireLock(
+        string lockPath,
+        int maxAttempts = 50,
+        int retryDelayMs = 20)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(
+                    lockPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 1,
+                    FileOptions.DeleteOnClose);
+            }
+            catch (IOException) when (attempt < maxAttempts - 1)
+            {
+                Thread.Sleep(retryDelayMs);
+            }
+        }
+    }
+
     /// <summary>
     /// 同步原子替换写入：payload 写入临时文件并 flush-to-disk（<paramref name="validateTemp"/>
     /// 在替换前复核临时文件，失败则中止且不动主文件）→ 主文件复制为 .bak

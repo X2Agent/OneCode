@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Tools.Shell;
+using OneCode.Core.IO;
 using OneCode.Infrastructure.Middleware.Invariants;
 
 namespace OneCode.App.Tools;
@@ -36,12 +37,18 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
             ? lazy.Value.Executor
             : null;
 
+    /// <summary>
+    /// cwd 围栏探测命令的超时预算：探测在真实命令完成后运行，失败只记日志不影响命令结果。
+    /// </summary>
+    private static readonly TimeSpan CwdProbeTimeout = TimeSpan.FromSeconds(10);
+
     public async Task<ShellResult> ExecuteAsync(
         SessionId conversationId,
         string workingDirectory,
         string command,
         TimeSpan timeout,
-        CancellationToken ct)
+        IReadOnlyList<string>? additionalDirectories = null,
+        CancellationToken ct = default)
     {
         while (true)
         {
@@ -60,19 +67,144 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
                 timeoutCts.CancelAfter(timeout);
                 if (!PathsEqual(session.WorkingDirectory, workingDirectory) && Directory.Exists(workingDirectory))
                 {
-                    var cdCommand = OperatingSystem.IsWindows()
-                        ? $"Set-Location -LiteralPath '{workingDirectory.Replace("'", "''", StringComparison.Ordinal)}'"
-                        : $"cd '{workingDirectory.Replace("'", "'\\''", StringComparison.Ordinal)}'";
-                    await session.Executor.RunAsync(cdCommand, timeoutCts.Token).ConfigureAwait(false);
+                    await session.Executor.RunAsync(BuildCdCommand(workingDirectory), timeoutCts.Token).ConfigureAwait(false);
                     session.WorkingDirectory = workingDirectory;
                 }
-                return await session.Executor.RunAsync(command, timeoutCts.Token).ConfigureAwait(false);
+                var result = await session.Executor.RunAsync(command, timeoutCts.Token).ConfigureAwait(false);
+                result = await RestoreEscapedWorkingDirectoryAsync(
+                    conversationId, session, workingDirectory, additionalDirectories, result, ct).ConfigureAwait(false);
+                return result;
             }
             finally
             {
                 session.Gate.Release();
             }
         }
+    }
+
+    /// <summary>
+    /// cwd 围栏（防御纵深）：命令执行后探测真实 cwd，越界时恢复到工作目录根。
+    /// 探测或恢复失败必须关闭持久 Shell 并返回错误，不能把不可信的 cwd 带给后续命令。
+    /// </summary>
+    private async Task<ShellResult> RestoreEscapedWorkingDirectoryAsync(
+        SessionId conversationId,
+        SessionShell session,
+        string workingDirectory,
+        IReadOnlyList<string>? additionalDirectories,
+        ShellResult result,
+        CancellationToken ct)
+    {
+        string? escapedCwd;
+        try
+        {
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            probeCts.CancelAfter(CwdProbeTimeout);
+            var probe = await session.Executor.RunAsync(
+                OperatingSystem.IsWindows() ? "(Get-Location).Path" : "pwd",
+                probeCts.Token).ConfigureAwait(false);
+            escapedCwd = probe.Stdout.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0);
+        }
+        catch (Exception ex)
+        {
+            return await InvalidateShellAsync(
+                conversationId, session, result, "the shell working directory could not be verified", ex).ConfigureAwait(false);
+        }
+
+        if (escapedCwd is null)
+        {
+            return await InvalidateShellAsync(
+                conversationId, session, result, "the shell working directory could not be verified", error: null).ConfigureAwait(false);
+        }
+
+        if (IsAllowedWorkingDirectory(escapedCwd, workingDirectory, additionalDirectories))
+            return result;
+
+        if (!Directory.Exists(workingDirectory))
+        {
+            return await InvalidateShellAsync(
+                conversationId, session, result, "the workspace root no longer exists", error: null).ConfigureAwait(false);
+        }
+
+        try
+        {
+            using var restoreCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            restoreCts.CancelAfter(CwdProbeTimeout);
+            await session.Executor.RunAsync(BuildCdCommand(workingDirectory), restoreCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return await InvalidateShellAsync(
+                conversationId, session, result, $"the shell escaped to '{escapedCwd}' and could not be restored", ex).ConfigureAwait(false);
+        }
+
+        _logger.LogWarning(
+            "Shell cwd escaped the workspace boundary ({EscapedCwd}); restored to {WorkingDirectory}",
+            escapedCwd, workingDirectory);
+        return new ShellResult(
+            result.Stdout + $"\n[warning] Shell working directory escaped the workspace boundary ({escapedCwd}); " +
+                            $"restored to {workingDirectory}. Subsequent commands run from the workspace root.",
+            result.Stderr,
+            result.ExitCode,
+            result.Duration,
+            result.Truncated,
+            result.TimedOut);
+    }
+
+    internal async Task<ShellResult> InvalidateShellAsync(
+        SessionId conversationId,
+        SessionShell session,
+        ShellResult result,
+        string reason,
+        Exception? error)
+    {
+        session.Released = true;
+        _sessions.TryRemove(conversationId, out _);
+        _logger.LogWarning(error, "Closing persistent shell for conversation {ConversationId}: {Reason}", conversationId, reason);
+        try
+        {
+            await session.Executor.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to dispose invalidated shell for conversation {ConversationId}", conversationId);
+        }
+
+        var errorText = $"[error] Persistent shell was closed because {reason}. " +
+                        "The command result is not trusted; the next command will use a new shell at the workspace root.";
+        return new ShellResult(
+            result.Stdout,
+            string.IsNullOrEmpty(result.Stderr) ? errorText : result.Stderr + "\n" + errorText,
+            -1,
+            result.Duration,
+            result.Truncated,
+            result.TimedOut);
+    }
+
+    private static bool IsAllowedWorkingDirectory(
+        string candidate,
+        string workingDirectory,
+        IReadOnlyList<string>? additionalDirectories)
+    {
+        if (PathBoundary.IsWithinDirectory(candidate, workingDirectory))
+            return true;
+
+        if (additionalDirectories is null)
+            return false;
+
+        foreach (var additional in additionalDirectories)
+        {
+            if (Directory.Exists(additional) && PathBoundary.IsWithinDirectory(candidate, additional))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string BuildCdCommand(string workingDirectory)
+    {
+        return OperatingSystem.IsWindows()
+            ? $"Set-Location -LiteralPath '{workingDirectory.Replace("'", "''", StringComparison.Ordinal)}'"
+            : $"cd '{workingDirectory.Replace("'", "'\\''", StringComparison.Ordinal)}'";
     }
 
     public async Task ReleaseAsync(SessionId conversationId)
@@ -169,7 +301,7 @@ public sealed class ConversationShellExecutorManager : IShellExecutorCleanup, IA
     }
 
     /// <summary>单个会话的 shell 进程，以及串行化其使用的闸门。</summary>
-    private sealed class SessionShell(LocalShellExecutor executor, string workingDirectory)
+    internal sealed class SessionShell(LocalShellExecutor executor, string workingDirectory)
     {
         public LocalShellExecutor Executor { get; } = executor;
 

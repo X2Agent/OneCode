@@ -15,6 +15,7 @@ namespace OneCode.Infrastructure.Agent;
 /// 所有 profile 的 RulesBySource/AdditionalWorkingDirectories
 /// 必须从同一 PipelineSecurityContext 获取，确保 Worker 与 Main 安全字段等价。
 /// </summary>
+/// <remarks>WorkingDirectoryProvider 非空时每次工具调用解析活动目录，null 表示固定目录。</remarks>
 public sealed record PipelineSecurityContext(
     string WorkingDirectory,
     PermissionMode PermissionMode,
@@ -34,7 +35,8 @@ public sealed record PipelineSecurityContext(
     SessionId? ConversationId = null,
     long BudgetBaselineTokens = 0,
     Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? OnBudgetExceeded = null,
-    Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning = null);
+    Action<GoalBudgetWarningLevel, long, long>? OnBudgetWarning = null,
+    Func<string>? WorkingDirectoryProvider = null);
 
 /// <summary>
 /// 角色级覆盖 — 仅裁剪工具集与配额，不裁剪安全层。
@@ -99,6 +101,7 @@ public static class AgentPipelineOptionsFactory
         return new AgentPipelineOptions
         {
             WorkingDirectory = ctx.WorkingDirectory,
+            WorkingDirectoryProvider = ctx.WorkingDirectoryProvider,
             EditTransaction = ctx.EditTransaction,
             FileChangeCallback = ctx.FileChangeCallback,
             PermissionChecker = ctx.PermissionChecker,

@@ -27,8 +27,6 @@ public static partial class ChatBlockRenderers
                 => (TuiGlyphs.InProgress, "正在运行验证…", TuiPalette.Accent),
             BuildRunState.Accepting
                 => (TuiGlyphs.InProgress, "验证通过，正在完成提交…", TuiPalette.Accent),
-            BuildRunState.Recovering
-                => (TuiGlyphs.InProgress, "正在恢复任务…", TuiPalette.Warning),
             BuildRunState.Completed
                 => (TuiGlyphs.Complete, BuildCompletionMessage(state), TuiPalette.Success),
             BuildRunState.Cancelled

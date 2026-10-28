@@ -19,6 +19,7 @@ public static partial class PowerShellCommandClassifier
         ["dir"] = "get-childitem",
         ["pwd"] = "get-location",
         ["cd"] = "set-location",
+        ["pushd"] = "set-location",
         ["gc"] = "get-content",
         ["cat"] = "get-content",
         ["gi"] = "get-item",
@@ -333,6 +334,16 @@ public static partial class PowerShellCommandClassifier
     {
         List<string> candidates = [];
         var filtered = args.Where(IsPathOperand).ToList();
+
+        // Set-Location 无任何参数会切到 $HOME：返回 "~" 作 fail-closed 标记，
+        // SafeResolve 展开主目录后因越界被拒。变量/表达式保留为候选，
+        // 由统一路径校验在执行前拒绝。
+        if (string.Equals(executable, "set-location", StringComparison.OrdinalIgnoreCase) && args.Count == 0)
+        {
+            candidates.Add("~");
+            return candidates;
+        }
+
         if (filtered.Count == 0)
             return candidates;
 
@@ -453,9 +464,7 @@ public static partial class PowerShellCommandClassifier
         if (token is ">" or ">>" or "1>" or "2>" or "*>" or "1>>" or "2>>" or "|" or ";")
             return false;
 
-        return !token.StartsWith("$", StringComparison.Ordinal)
-            && !token.StartsWith("@", StringComparison.Ordinal)
-            && !token.StartsWith("{", StringComparison.Ordinal);
+        return true;
     }
 
     private static bool LooksLikeParameter(string token) =>

@@ -1,5 +1,6 @@
 using OneCode.App.Query;
 using OneCode.Core.Domain;
+using OneCode.Core.Workflows;
 
 namespace OneCode.WebUI.Services;
 
@@ -136,6 +137,16 @@ public sealed class WebTranscript
             case DoneEvent done:
                 InputTokens = done.Usage?.InputTokens ?? 0;
                 OutputTokens = done.Usage?.OutputTokens ?? 0;
+                // 与 TUI 的终因渲染对齐：验证失败必须明示文件处置（已回滚 / 保留待人工复核），
+                // 否则 WebUI 用户会误以为 run 正常结束、产物已通过验证。
+                if (done.TerminalReason == RunTerminalReason.ValidationFailed)
+                {
+                    AddSystem(done.TransactionRolledBack
+                        ? "（验证失败——文件改动已回滚）"
+                        : "（验证失败——文件改动已保留：请用 git status / git diff 人工复核后再决定修复或撤销）");
+                    if (!string.IsNullOrEmpty(done.ValidationFailureSummary))
+                        AddSystem(done.ValidationFailureSummary);
+                }
                 break;
 
             case WorkingDirectoryChangedEvent cwd:

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using OneCode.Infrastructure.Lsp;
 using OneCode.Core.Goals;
+using OneCode.Core.Tokens;
 
 namespace OneCode.App.Services.Agent;
 
@@ -40,6 +41,19 @@ public sealed record GoalRunOptions
     /// 100% 消耗时强制终止 + 保存 Checkpoint；70%/90% 触发 TUI 警告。
     /// </summary>
     public GoalBudget? Budget { get; init; }
+
+    /// <summary>
+    /// 目标会话 ID：子目标运行的用量记账（UsageSessionId）与 Judge 调用入账的归属。
+    /// 由编排层（OrchestrationStreamService）从 GoalRun.SessionId 注入。
+    /// </summary>
+    public SessionId? SessionId { get; init; }
+
+    /// <summary>
+    /// 子目标 agent run 的全局预算上限（可计费口径；null/0 = 不设限）。
+    /// GoalBudget 仍是 GOAL 级别的总量闸；此值让每个子目标 run 与 BUILD/PLAN
+    /// 共用同一道 BudgetGuard 预算熔断（无人值守超限硬停）。
+    /// </summary>
+    public long? MaxBudgetTokens { get; init; }
 
     /// <summary>
     /// Optional image file paths for multimodal input. When non-empty, images are
@@ -139,10 +153,13 @@ public sealed record GoalToolExecutionEvidence(
 /// <summary>
 /// GOAL 子目标执行链的确定性验证依赖束（硬门禁消费）。DI 单例，
 /// 由 <see cref="GoalSubGoalExecutor"/> 与 <see cref="GoalSubTaskDagRunner"/> 共享。
+/// <paramref name="TokenLedger"/> 供 Judge 旁路调用入账（直连 chatClient 不经
+/// UsageTrackingRunMiddleware，不在此入账会从预算熔断与 /status stats 漏计）。
 /// </summary>
 public sealed record GoalSubGoalGateDependencies(
     IVerificationProvider? VerificationProvider,
-    LspDiagnosticRegistry? DiagnosticRegistry);
+    LspDiagnosticRegistry? DiagnosticRegistry,
+    ITokenLedger? TokenLedger = null);
 
 /// <summary>确定性验证步骤的可审计证据。</summary>
 public sealed record GoalValidationEvidence(

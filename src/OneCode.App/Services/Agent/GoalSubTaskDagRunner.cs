@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
+using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
 
@@ -44,16 +45,19 @@ internal sealed class GoalSubTaskDagRunner(
                     $"Sub-task count {subTasks.Count} outside the allowed range 1..{MaxSubTasks}.");
             }
 
+            var filteredTools = GoalSubGoalExecutor.FilterToolsForSubGoal(options.Tools, goal.RequiredTools);
             var workflowTasks = subTasks
                 .Select(task => new AgentWorkflowTask(
                     task.Id,
-                    task.Prompt,
+                    $"{GoalSubGoalExecutor.BuildWorkspaceScopeInstruction(goal, options.WorkingDirectory)}\n\n{task.Prompt}",
                     "general-purpose",
                     task.Description,
                     task.DependsOn,
                     InjectUpstreamResults: true,
                     task.ReadOnly ? AgentTaskExecutionAccess.ReadOnly : AgentTaskExecutionAccess.Write,
-                    WorkingDirectory: options.WorkingDirectory))
+                    AllowedTools: ResolveAllowedTools(task.ReadOnly, filteredTools),
+                    WorkingDirectory: options.WorkingDirectory,
+                    UsageSessionId: options.SessionId))
                 .ToList();
 
             try
@@ -70,8 +74,11 @@ internal sealed class GoalSubTaskDagRunner(
                 $"子目标 #{goal.Id} · {subTasks.Count} 个并行子任务开始执行"));
 
             var parentCapabilities = ToolCapabilitySet.CreateUnrestricted(
-                options.Tools.OfType<AIFunction>().Select(tool => tool.Name));
-            var workflow = compiler.Compile(workflowTasks, BuildCacheSafeParams(options), parentCapabilities);
+                filteredTools.OfType<AIFunction>().Select(tool => tool.Name));
+            var workflow = compiler.Compile(
+                workflowTasks,
+                BuildCacheSafeParams(options, filteredTools),
+                parentCapabilities);
             var result = await host.RunAsync(workflow, workflowTasks, ct).ConfigureAwait(false);
 
             var succeeded = result.TaskOutcomes.Where(outcome => outcome.Success).ToList();
@@ -133,15 +140,28 @@ internal sealed class GoalSubTaskDagRunner(
         }
     }
 
-    internal static CacheSafeParams BuildCacheSafeParams(GoalRunOptions options)
-        => new()
+    private static string[] ResolveAllowedTools(bool readOnly, IList<AITool> filteredTools)
+    {
+        var names = filteredTools.OfType<AIFunction>().Select(tool => tool.Name);
+        return readOnly
+            ? names.Where(PipelineProfileBehavior.ReadOnlyAgentTools.Contains).ToArray()
+            : names.ToArray();
+    }
+
+    internal static CacheSafeParams BuildCacheSafeParams(
+        GoalRunOptions options,
+        IList<AITool>? filteredTools = null)
+    {
+        var tools = filteredTools ?? options.Tools;
+        return new()
         {
             SystemPrompt = options.SystemPrompt,
             ModelId = options.ModelId,
-            Tools = options.Tools.ToList(),
+            Tools = tools.ToList(),
             ToolCapabilities = ToolCapabilitySet.CreateUnrestricted(
-                options.Tools.OfType<AIFunction>().Select(tool => tool.Name)),
+                tools.OfType<AIFunction>().Select(tool => tool.Name)),
         };
+    }
 
     private static SubGoalExecution Failed(int goalId, string evaluation)
         => new(

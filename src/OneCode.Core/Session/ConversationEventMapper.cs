@@ -23,7 +23,6 @@ public static class ConversationEventMapper
                 conversation.TotalUsage,
                 conversation.CreatedAt,
                 conversation.LastActivityAt,
-                conversation.Branch,
                 conversation.Metadata),
         };
 

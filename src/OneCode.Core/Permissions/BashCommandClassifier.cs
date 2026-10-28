@@ -221,6 +221,11 @@ public static partial class BashCommandClassifier
 
             var executable = statement[commandIndex];
             var args = statement.Skip(commandIndex + 1).ToList();
+
+            // 重定向写入目标（如 echo x > file）对任何可执行文件都可能出现，
+            // 须在语句级统一提取并做工作区边界校验，堵住「命令本身只读、重定向越界写」的绕过。
+            paths.AddRange(ExtractWriteRedirectTargets(statement));
+
             switch (executable.ToLowerInvariant())
             {
                 case "rm":
@@ -242,10 +247,57 @@ public static partial class BashCommandClassifier
                 case "sed":
                     paths.AddRange(ExtractSedTargetPaths(args));
                     break;
+
+                case "cd":
+                case "pushd":
+                    paths.AddRange(ExtractCdTargets(args));
+                    break;
             }
         }
 
         return paths;
+    }
+
+    /// <summary>
+    /// 提取写入重定向的文件目标。跳过标准流丢弃/复制目标（/dev/null、2&gt;&amp;1 等）
+    /// 与文件描述符号（如 <c>&gt;&amp;2</c> 的 <c>2</c>）。
+    /// </summary>
+    private static IEnumerable<string> ExtractWriteRedirectTargets(IReadOnlyList<string> statement)
+    {
+        for (var i = 0; i < statement.Count - 1; i++)
+        {
+            if (!Tokenizer.WriteRedirectionTokens.Contains(statement[i]))
+                continue;
+
+            var target = statement[i + 1];
+            if (ShellTokenizer.IsNullOrStreamRedirectionTarget(target)
+                || (target.Length == 1 && char.IsAsciiDigit(target[0]))
+                || !IsPathOperand(target))
+                continue;
+
+            yield return target;
+        }
+    }
+
+    /// <summary>
+    /// 提取 cd/pushd 的工作目录切换目标。切换目标决定持久 shell 的后续 cwd，
+    /// 必须与文件工具同等工作区边界校验：
+    /// - 无操作数（bash 切到 $HOME）与 <c>cd -</c>（上一目录，无法静态解析）→ 返回 <c>"~"</c>
+    ///   作 fail-closed 标记，SafeResolve 展开为用户主目录后因越界被拒；
+    /// - 变量或命令替换目标保留为候选，由统一路径校验在执行前拒绝。
+    /// </summary>
+    private static IEnumerable<string> ExtractCdTargets(IReadOnlyList<string> args)
+    {
+        var index = 0;
+        while (index < args.Count && args[index].StartsWith('-') && args[index] != "-")
+            index++;
+
+        if (index >= args.Count)
+            yield return "~";
+        else if (args[index] == "-")
+            yield return "~";
+        else if (IsPathOperand(args[index]))
+            yield return args[index];
     }
 
     private static bool HasSedInPlaceEdit(IReadOnlyList<string> statement, int commandIndex)
@@ -310,7 +362,7 @@ public static partial class BashCommandClassifier
         if (token is ">" or ">>" or "1>" or "2>" or "&>" or "<" or "<<")
             return false;
 
-        return !token.StartsWith('$') && !token.StartsWith("`", StringComparison.Ordinal);
+        return true;
     }
 
     private static int SkipWrappers(IReadOnlyList<string> statement)

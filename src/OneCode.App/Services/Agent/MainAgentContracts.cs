@@ -92,6 +92,14 @@ public sealed record MainAgentRunOptions
     public SessionId? ConversationId { get; init; }
 
     /// <summary>
+    /// 用量记账与会话桶归属（可选）。非空时 Usage/BudgetGuard 以此会话计量，而
+    /// <see cref="ConversationId"/> 只负责 MAF 会话与转录播种——GOAL 子目标
+    /// 传 UsageSessionId + ConversationId=null：记账进会话桶但不从转录播种历史。
+    /// 为 null 时沿用 <see cref="ConversationId"/>（同会话记账 + 播种）。
+    /// </summary>
+    public SessionId? UsageSessionId { get; init; }
+
+    /// <summary>
     /// Approved-plan 执行世代的历史播种边界（受控 Build run 专用）。
     /// null = 全量转录播种（交互路径）；非 null 时历史 provider 保留 Plan 阶段的只读检索结果，
     /// 仅剥离边界之前的 <c>SubmitPlan</c> 工具调用对。

@@ -129,6 +129,7 @@ public partial class MainAgentRunner(
         // Declared outside the try so the finally block can release the per-run providers on every
         // exit path, including a failure before the stream starts.
         AgentPipelineHandle? pipeline = null;
+        using var cwdScope = OneCodeAgentRunContext.UseWorkingDirectory(cwd);
 
         try
         {
@@ -355,6 +356,15 @@ public partial class MainAgentRunner(
                             !options.DeferTransactionCommit);
 
                         validationFailureSummary = finalCheck.FormatForLlm();
+                        // 受控 Build 产物保留路径：把「未回滚、需人工复核」写进摘要——
+                        // BuildRun.FailureSummary 与两个前端的 DoneEvent 渲染都取它，
+                        // 用户不看 UI 也能从持久化记录得知处置指引（transcript 与磁盘可能不一致）。
+                        if (options.DeferTransactionCommit)
+                        {
+                            validationFailureSummary +=
+                                "\n[Artifacts were preserved on disk (not rolled back): review with `git status` / `git diff`, then fix forward or revert manually.]";
+                        }
+
                         terminalReason = RunTerminalReason.ValidationFailed;
                         // 受控 Build attempt（延迟提交）把文件处置权交给其 runtime：
                         // 验证失败保留产物供人工复核，不在此宣告回滚。

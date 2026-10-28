@@ -12,10 +12,12 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public static class SafetyInvariantMiddleware
 {
-    /// <summary>创建默认的 Layer 0 安全不变量集合。</summary>
-    public static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(string workingDirectory) =>
+    /// <summary>创建默认的 Layer 0 安全不变量集合（<paramref name="resolveWorkingDirectory"/> 非空时按每次调用解析活动目录）。</summary>
+    public static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(
+        string workingDirectory,
+        Func<string>? resolveWorkingDirectory = null) =>
     [
-        new FileSystemInvariant(workingDirectory),
+        new FileSystemInvariant(workingDirectory, resolveWorkingDirectory),
         new BashCommandInvariant(),
         new ResourceInvariant(),
     ];

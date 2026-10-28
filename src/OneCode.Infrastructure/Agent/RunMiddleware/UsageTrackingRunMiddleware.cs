@@ -201,10 +201,13 @@ public static class UsageTrackingRunMiddleware
     /// <summary>
     /// 将 <see cref="UsageDetails"/> 写入 <see cref="ITokenLedger"/>。
     /// 提取 token 维度：Input, Output, CacheRead, CacheWrite。
+    /// 公开复用入口：旁路直连 chatClient 的调用点（显式 /compact、AutoDream 整合、
+    /// GOAL Judge）不经本中间件管道，须用同一映射入账，避免各处手抄导致口径漂移。
+    /// <paramref name="tokenLedger"/> 为 null（未装配账本）时静默跳过。
     /// </summary>
-    internal static void RecordUsage(UsageDetails? details, ITokenLedger tokenLedger, string? modelId, ILogger? logger, SessionId? sessionId = null)
+    public static void RecordUsage(UsageDetails? details, ITokenLedger? tokenLedger, string? modelId, ILogger? logger, SessionId? sessionId = null)
     {
-        if (details is null) return;
+        if (details is null || tokenLedger is null) return;
         if (!HasValidTokens(details)) return;
 
         var record = BuildUsageRecord(details, modelId);

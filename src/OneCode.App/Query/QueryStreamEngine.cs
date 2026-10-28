@@ -379,7 +379,26 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 yield return e;
             if (session.CompleteTurnIfStarted() is { } turnCompleted)
                 yield return turnCompleted;
-            var (runException, runResult) = await AwaitRunAsync(runTask).ConfigureAwait(false);
+            // 内层 try 专责取消尾文本落盘（async iterator 禁止 yield 出现在带 catch 的 try 内）：
+            // run 被取消时已产出的半截回答以 None 令牌 flush，重开会话不再消失。
+            Exception? runException;
+            MainAgentRunResult? runResult;
+            try
+            {
+                (runException, runResult) = await AwaitRunAsync(runTask).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _ = await _transcriptPersistence.PersistAsync(
+                    request,
+                    session,
+                    session.FinalText,
+                    session.FinalUsage,
+                    CancellationToken.None,
+                    alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
+                throw;
+            }
+
             if (runException is not null)
             {
                 await CloseOutOnceAsync(PlanRunEnd.Finished, ct).ConfigureAwait(false);
@@ -409,8 +428,11 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                     null, session.FinalUsage, session.TurnCount, RunTerminalReason.Blocked, request.ConversationId);
                 yield break;
             }
-            await _transcriptPersistence.PersistAsync(
+            var transcriptPersisted = await _transcriptPersistence.PersistAsync(
                 request, session, session.FinalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
+            if (!transcriptPersisted)
+                yield return new NoticeEvent(
+                    "Session transcript failed to persist; the latest turn may be missing after restart.");
             await foreach (var e in FinalizeAsync(
                 request,
                 session,

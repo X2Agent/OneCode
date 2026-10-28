@@ -168,9 +168,9 @@ public sealed class InsightsCommandTests : IDisposable
 
     private static SessionEvent Started(SessionId id, string model, TokenUsage usage, DateTimeOffset now) =>
         new SessionStartedEvent(id, 0, now, "session", @"E:\proj", model,
-            ConversationStatus.Active, usage, now, now, Branch: null);
+            ConversationStatus.Active, usage, now, now);
 
     private static SessionEvent Snapshot(SessionId id, string model, TokenUsage usage, DateTimeOffset now) =>
         new SessionSnapshotEvent(id, 0, now, "session", @"E:\proj", model,
-            ConversationStatus.Active, usage, now, now, Branch: null);
+            ConversationStatus.Active, usage, now, now);
 }

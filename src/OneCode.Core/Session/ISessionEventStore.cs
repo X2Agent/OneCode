@@ -30,4 +30,15 @@ public interface ISessionEventStore
 
     /// <summary>删除指定会话的事件日志。</summary>
     Task DeleteAsync(SessionId sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 以给定事件整体重写会话日志（快照压缩用）：临时文件原子替换，序列号重排为 1..N。
+    /// 仅在当前日志戳仍等于 <paramref name="expectedStamp"/> 时替换；已有并发追加时返回
+    /// <c>null</c>，调用方必须保留新事件并放弃本轮压缩。
+    /// </summary>
+    Task<SessionEventLogStamp?> RewriteAsync(
+        SessionId sessionId,
+        IReadOnlyList<SessionEvent> events,
+        SessionEventLogStamp expectedStamp,
+        CancellationToken ct = default);
 }

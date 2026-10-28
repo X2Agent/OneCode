@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using OneCode.Infrastructure.Agent.RunMiddleware;
 
 namespace OneCode.App.Services.Agent;
 
@@ -54,7 +55,7 @@ internal sealed class MainAgentRunEvidenceCollector(string agentRunId)
                 TurnCount++;
                 _turnStarted = true;
             }
-            if (update.Text.Contains("[Budget Exceeded]", StringComparison.OrdinalIgnoreCase))
+            if (update.Text.Contains(BudgetGuardRunMiddleware.BudgetExceededMarker, StringComparison.OrdinalIgnoreCase))
                 BudgetExceeded = true;
         }
     }

@@ -13,6 +13,15 @@ public sealed class EventSourcedSessionStore(
     // 侧栏摘要缓存：日志戳未变即复用，避免每次列表都全量解析所有会话的事件日志。
     private readonly ConcurrentDictionary<SessionId, CachedSummary> _summaries = new();
 
+    /// <summary>事件日志快照压缩阈值（字节）：超过后在保存收尾时折叠为快照 + 全量消息替换。</summary>
+    private const long CompactionThresholdBytes = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// 各会话上次压缩后的日志体积。下次压缩门槛抬到「该体积 + 50%」：消息体本身超过
+    /// 阈值的会话压缩后仍会超阈值，若无此闸则每轮 SaveAsync 都要整文件重写一次。
+    /// </summary>
+    private readonly ConcurrentDictionary<SessionId, long> _compactedBytes = new();
+
     /// <inheritdoc />
     public async Task<Conversation?> LoadAsync(
         SessionId conversationId,
@@ -54,7 +63,6 @@ public sealed class EventSourcedSessionStore(
                     conversation.TotalUsage,
                     conversation.CreatedAt,
                     conversation.LastActivityAt,
-                    conversation.Branch,
                     conversation.Metadata));
             }
 
@@ -86,6 +94,50 @@ public sealed class EventSourcedSessionStore(
             var summary = CreateSummary(conversation);
             _summaries[conversation.Id] = new CachedSummary(written, summary);
             await summaryIndex.WriteAsync(written, summary, ct).ConfigureAwait(false);
+
+            // 快照压缩：事件日志超阈值时折叠为「快照 + 全量消息替换 + 标记事件」。
+            // 只丢弃消息增量事件（体积主体），marker（epoch/turn）语义完整保留；
+            // 低频 O(n) 重写，摊还后追加路径仍维持 O(Δ)。
+            // 门槛随上次压缩结果抬高 50%：压缩后仍超阈值的会话不会每轮都被重写。
+            var compactionFloor = _compactedBytes.TryGetValue(conversation.Id, out var lastCompactedBytes)
+                ? Math.Max(CompactionThresholdBytes, lastCompactedBytes + (lastCompactedBytes / 2))
+                : CompactionThresholdBytes;
+            if (written.Length > compactionFloor)
+            {
+                var compacted = new List<SessionEvent>
+                {
+                    new SessionSnapshotEvent(
+                        conversation.Id,
+                        0,
+                        conversation.LastActivityAt,
+                        conversation.Name,
+                        conversation.WorkingDirectory,
+                        conversation.Model,
+                        conversation.Status,
+                        conversation.TotalUsage,
+                        conversation.CreatedAt,
+                        conversation.LastActivityAt,
+                        conversation.Metadata),
+                    new MessagesReplacedEvent(
+                        conversation.Id,
+                        0,
+                        conversation.LastActivityAt,
+                        conversation.Messages.ToArray(),
+                        "snapshot-compaction"),
+                };
+                compacted.AddRange(existing.OfType<SessionMarkerEvent>());
+
+                if (await eventStore.RewriteAsync(conversation.Id, compacted, written, ct).ConfigureAwait(false)
+                    is { } compactStamp)
+                {
+                    logger.LogInformation(
+                        "Compacted session {SessionId} event log: {OldBytes:N0} -> {NewBytes:N0} bytes ({Events} events -> {CompactEvents})",
+                        conversation.Id, written.Length, compactStamp.Length, existing.Count, compacted.Count);
+                    _summaries[conversation.Id] = new CachedSummary(compactStamp, summary);
+                    _compactedBytes[conversation.Id] = compactStamp.Length;
+                    await summaryIndex.WriteAsync(compactStamp, summary, ct).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {
@@ -141,6 +193,12 @@ public sealed class EventSourcedSessionStore(
                 _summaries.TryRemove(sessionId, out _);
         }
 
+        foreach (var sessionId in _compactedBytes.Keys)
+        {
+            if (!liveSessions.Contains(sessionId))
+                _compactedBytes.TryRemove(sessionId, out _);
+        }
+
         logger.LogInformation(
             "会话列表加载 {Count} 个：索引命中 {Hits}，解析日志 {Parsed}，耗时 {Elapsed}ms",
             summaries.Count, cacheHits, parsedLogs, watch.ElapsedMilliseconds);
@@ -152,6 +210,7 @@ public sealed class EventSourcedSessionStore(
     public async Task DeleteAsync(SessionId sessionId, CancellationToken ct = default)
     {
         _summaries.TryRemove(sessionId, out _);
+        _compactedBytes.TryRemove(sessionId, out _);
         // 先删索引再删日志：中途失败最多留下孤儿索引（不会被读取），不会留下指向已删日志的摘要。
         await summaryIndex.RemoveAsync(sessionId, ct).ConfigureAwait(false);
         await eventStore.DeleteAsync(sessionId, ct).ConfigureAwait(false);
@@ -173,7 +232,6 @@ public sealed class EventSourcedSessionStore(
             TotalUsage = snapshot.TotalUsage,
             CreatedAt = snapshot.CreatedAt,
             LastActivityAt = snapshot.LastActivityAt,
-            Branch = snapshot.Branch,
         };
         if (snapshot.Metadata is not null)
         {
@@ -268,8 +326,7 @@ public sealed class EventSourcedSessionStore(
             || !string.Equals(snapshot.WorkingDirectory, conversation.WorkingDirectory, StringComparison.Ordinal)
             || !string.Equals(snapshot.Model, conversation.Model, StringComparison.Ordinal)
             || snapshot.Status != conversation.Status
-            || !snapshot.TotalUsage.Equals(conversation.TotalUsage)
-            || snapshot.Branch != conversation.Branch)
+            || !snapshot.TotalUsage.Equals(conversation.TotalUsage))
             return false;
 
         var metadata = snapshot.Metadata;

@@ -14,7 +14,6 @@ public sealed class Conversation
     public TokenUsage TotalUsage { get; set; } = new(0, 0);
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset LastActivityAt { get; set; }
-    public string? Branch { get; set; }
     public Dictionary<string, object> Metadata { get; } = new();
 
     /// <summary>

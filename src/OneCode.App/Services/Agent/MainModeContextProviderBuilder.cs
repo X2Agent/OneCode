@@ -37,7 +37,9 @@ public sealed class MainModeContextProviderBuilder(
                 break;
 
             case WorkingMode.Goal:
-                contextProviders.Add(new GoalContextProvider(modeProvider, goalContextState));
+                // 门控依据是工作模式本身：依赖 PermissionMode.GoalAuto 时，命令行高级档
+                //（Bypass/Auto/DontAsk 下进入 GOAL）会让本 provider 静默失效。
+                contextProviders.Add(new GoalContextProvider(workingMode, goalContextState));
                 break;
 
             case WorkingMode.Build:

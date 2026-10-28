@@ -19,7 +19,7 @@ public static class EditGuardMiddleware
         Create(
             bool enforceEditTargetExists,
             IVerificationProvider? verificationProvider,
-            string workingDirectory,
+            Func<string> resolveWorkingDirectory,
             VerificationOptions? verificationOptions,
             ILogger logger)
     {
@@ -52,7 +52,7 @@ public static class EditGuardMiddleware
                         string fullPath;
                         try
                         {
-                            fullPath = Path.GetFullPath(editPath, workingDirectory);
+                            fullPath = Path.GetFullPath(editPath, resolveWorkingDirectory());
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
@@ -96,7 +96,7 @@ public static class EditGuardMiddleware
                 return result;
 
             var checkResult = await verificationProvider.VerifyAsync(
-                workingDirectory,
+                resolveWorkingDirectory(),
                 stateBag.GetOrInitializeModifiedFiles().ToList(),
                 ct).ConfigureAwait(false);
 

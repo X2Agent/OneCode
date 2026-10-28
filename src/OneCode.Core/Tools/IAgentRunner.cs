@@ -26,7 +26,9 @@ public sealed record AgentRunRequest(
     // 上限，只降不升）分离：runner 取 min(请求值, 上限链)，上限链 = 本值 > settings > profile 默认。
     int? MaxTurnsCeiling = null,
     // 工作目录覆盖（如 GOAL 隔离 worktree）。null 时 fork 使用会话工作目录访问器。
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null,
+    // 用量归属会话；非空时覆盖当前前台会话，供 GOAL DAG 等非前台执行路径使用。
+    SessionId? UsageSessionId = null);
 
 /// <summary>
 /// 子 Agent 执行结果。<see cref="Error"/> 非 null 表示执行失败（异常已捕获并转换为

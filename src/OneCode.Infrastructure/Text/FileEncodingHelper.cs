@@ -6,6 +6,8 @@ namespace OneCode.Infrastructure.Text;
 /// </summary>
 public static class FileEncodingHelper
 {
+    private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(1);
+
     public enum LineEndingStyle
     {
         Preserve,
@@ -79,7 +81,9 @@ public static class FileEncodingHelper
     }
 
     /// <summary>
-    /// 以原始编码和 BOM 写回文件。
+    /// 以原始编码和 BOM 原子写回文件：临时文件 + flush-to-disk + Move 覆盖，
+    /// 崩溃不留半文件，也不在源码旁产生 .bak 副本（DurableFile.WriteAtomic 会强制
+    /// 复制 .bak，会污染工作区与 git status，故此处自备无备份变体）。
     /// </summary>
     public static async Task WriteWithEncodingAsync(
         string path, string content, Encoding encoding, CancellationToken ct = default)
@@ -89,6 +93,53 @@ public static class FileEncodingHelper
         var combined = new byte[preamble.Length + bytes.Length];
         preamble.CopyTo(combined, 0);
         bytes.CopyTo(combined, preamble.Length);
-        await File.WriteAllBytesAsync(path, combined, ct).ConfigureAwait(false);
+
+        var originalAttributes = File.Exists(path) ? File.GetAttributes(path) : (FileAttributes?)null;
+        var originalCreationTimeUtc = originalAttributes is not null ? File.GetCreationTimeUtc(path) : default(DateTime);
+        if (originalAttributes?.HasFlag(FileAttributes.ReadOnly) == true)
+            throw new UnauthorizedAccessException($"Cannot replace read-only file '{path}'.");
+
+        SweepTemporaryResidue(path);
+        var temporaryPath = $"{path}.tmp-{Guid.NewGuid():N}";
+        try
+        {
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                options: FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await stream.WriteAsync(combined, ct).ConfigureAwait(false);
+                await stream.FlushAsync(ct).ConfigureAwait(false);
+            }
+
+            File.Move(temporaryPath, path, overwrite: true);
+            if (originalAttributes is not null)
+            {
+                File.SetCreationTimeUtc(path, originalCreationTimeUtc);
+                File.SetAttributes(path, originalAttributes.Value);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    private static void SweepTemporaryResidue(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            return;
+
+        var cutoff = DateTime.UtcNow - StaleTemporaryFileAge;
+        foreach (var candidate in Directory.EnumerateFiles(directory, $"{Path.GetFileName(path)}.tmp-*"))
+        {
+            if (File.GetLastWriteTimeUtc(candidate) < cutoff)
+                File.Delete(candidate);
+        }
     }
 }

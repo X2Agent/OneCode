@@ -24,12 +24,12 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public sealed class EditTransactionMiddleware(
     EditTransaction transaction,
-    string workingDirectory,
+    Func<string> resolveWorkingDirectory,
     Action<FileChange>? onFileChange = null,
     ILogger? logger = null)
 {
     private readonly EditTransaction _transaction = transaction;
-    private readonly string _workingDirectory = workingDirectory;
+    private readonly Func<string> _resolveWorkingDirectory = resolveWorkingDirectory;
     private readonly Action<FileChange>? _onFileChange = onFileChange;
     private readonly ILogger? _logger = logger;
 
@@ -50,7 +50,9 @@ public sealed class EditTransactionMiddleware(
                 var path = ToolArgumentExtractor.ExtractFilePath(ctx.Arguments);
                 if (path is not null)
                 {
-                    editedPath = Path.GetFullPath(path, _workingDirectory);
+                    // 每次调用解析活动目录：同 run 内 EnterWorktree 切目录后，
+                    // 快照/回滚目标与工具实际写入保持同一棵目录树。
+                    editedPath = Path.GetFullPath(path, _resolveWorkingDirectory());
                     _transaction.Snapshot(editedPath);
 
                     // 仅在需要发射增量 Diff 通知时读取编辑前文本，避免无回调路径上的冗余文件读取。

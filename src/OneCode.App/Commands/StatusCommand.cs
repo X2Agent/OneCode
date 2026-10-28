@@ -63,8 +63,6 @@ public sealed class StatusCommand(
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Background:  {sessionManager.BackgroundSessionCount}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Created:     {conv.CreatedAt:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Activity:    {conv.LastActivityAt:yyyy-MM-dd HH:mm:ss}");
-            if (conv.Branch is not null)
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  Conv branch: {conv.Branch}");
         }
 
         // 当前会话的 Goal run 隔离 worktree——持久查询出口，避免启动 notice 滚屏后不可追溯。
@@ -132,6 +130,9 @@ public sealed class StatusCommand(
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache read:      {cacheReadTokens:N0}  ({cacheHitRate:P1} hit rate)");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache write:     {cacheWriteTokens:N0}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Total tokens:    {inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens:N0}");
+            // 口径标注：stats 读 ledger 会话桶（API usage 原始口径、水合跨重启累计），
+            // 与 window 子命令（原始 Input+Output）、预算熔断（billable 折算）三套口径互不相同。
+            sb.AppendLine("  Caliber:         raw API usage (ledger session bucket, persists across restarts)");
 
             // 分场景 token 估算（来自 TokenBreakdownEstimator）
             if (breakdown is not null)
@@ -195,6 +196,7 @@ public sealed class StatusCommand(
               Used:      {usedTokens:N0} / {maxTokens:N0} tokens ({pct:P0})
               [{bar}]
               Messages:  {conv?.Messages.Count ?? 0}
+              Caliber:   raw input+output of the current conversation (not billable-discounted)
             """);
     }
 }

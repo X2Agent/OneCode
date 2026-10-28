@@ -35,7 +35,10 @@ internal enum DestructiveShellPolicy
 /// <summary>How unknown (non-shell, non-write) tools are handled after AutoAllowFileWriteAndShell.</summary>
 internal enum UnknownToolPolicy
 {
+    /// <summary>Fall through to user rules (AcceptEdits：有交互审批通道，无规则时 Ask)。</summary>
     EvaluateRules,
+
+    /// <summary>路径校验后放行（GoalAuto：无审批通道，Ask 等价于 Deny）。</summary>
     AllowWithPathValidation,
 }
 
@@ -149,10 +152,32 @@ public static class PermissionProfiles
         {
             UnknownToolPolicy.AllowWithPathValidation =>
                 AllowWithPathValidation(toolName, toolInput, context),
-            UnknownToolPolicy.EvaluateRules =>
-                PermissionCheckHelpers.EvaluateRules(toolName, toolInput, context),
             _ => PermissionCheckHelpers.EvaluateRules(toolName, toolInput, context),
         };
+    }
+
+    /// <summary>
+    /// 用户规则优先，无规则时路径校验后放行：<see cref="PermissionCheckHelpers.EvaluateRules"/>
+    /// 给出 Deny/Allow 即采纳（AlwaysDeny 必须生效）；只有无人表态（Ask）时才回落到
+    /// <see cref="PermissionCheckHelpers.ValidatePath"/>——越界路径 Deny，其余 Allow。
+    /// 注意 ValidatePath 对「既非文件读写、也非 Shell」的工具直接返回 Allow，因此本分支
+    /// 对真正未知的工具等价于放行——GOAL 的实际授权面由工具面白名单
+    /// （<c>ToolCapabilities.AllowedToolNames</c>）与 Layer 0 安全不变量承担，勿把这里当安全闸。
+    /// 采用本策略的原因是 GoalAuto 无审批 broker：<c>Ask</c> 在
+    /// <c>PermissionAndLimitMiddleware</c> 里会被 fail-safe 拒绝，直接 EvaluateRules
+    /// 会把运行时登记的工具（MCP <c>mcp__*</c>、扩展工具）全部打死。
+    /// </summary>
+    private static PermissionCheckResult AllowWithPathValidation(
+        string toolName,
+        JsonElement toolInput,
+        ToolPermissionContext context)
+    {
+        var ruleResult = PermissionCheckHelpers.EvaluateRules(toolName, toolInput, context);
+        if (ruleResult.Decision != PermissionDecision.Ask)
+            return ruleResult;
+
+        var pathResult = PermissionCheckHelpers.ValidatePath(toolName, toolInput, context);
+        return pathResult.Decision == PermissionDecision.Deny ? pathResult : PermissionCheckResult.Allow;
     }
 
     private static PermissionCheckResult CheckPlanWhitelistFlow(
@@ -172,15 +197,6 @@ public static class PermissionProfiles
 
         return PermissionCheckResult.Deny(
             $"Tool '{toolName}' is not permitted in plan mode. Only read-only tools, SubmitPlan, task management, sub-agent tools (Agent/ParallelAgents), and AskUserQuestion are allowed.");
-    }
-
-    private static PermissionCheckResult AllowWithPathValidation(
-        string toolName,
-        JsonElement toolInput,
-        ToolPermissionContext context)
-    {
-        var pathResult = PermissionCheckHelpers.ValidatePath(toolName, toolInput, context);
-        return pathResult.Decision == PermissionDecision.Deny ? pathResult : PermissionCheckResult.Allow;
     }
 
     private static IReadOnlyDictionary<PermissionMode, PermissionModeConfig> BuildDefinitions()
@@ -233,6 +249,9 @@ public static class PermissionProfiles
                 Profile = withVerification,
                 Flow = PermissionCheckFlow.AutoAllowFileWriteAndShell,
                 DestructiveShell = DestructiveShellPolicy.Deny,
+                // 无人值守模式无审批通道（GoalAuto 子目标 EnableToolApproval=false，Ask 会被
+                // fail-safe 拒绝），因此未知工具走「路径校验后放行」：越界路径 Deny 不变，
+                // 运行时登记的 MCP/扩展工具保持可用。授权面由工具面白名单 + Layer 0 不变量承担。
                 UnknownTools = UnknownToolPolicy.AllowWithPathValidation,
             },
         };

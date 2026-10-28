@@ -60,13 +60,24 @@ app.MapStaticAssets();
 app.UseAntiforgery();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
-// 会话摘要索引预热：与进程启动、浏览器打开并行，首个电路打开时侧栏直接命中内存缓存。
-_ = WarmUpSessionIndexAsync(app);
+// 与 TUI/daemon 共用 AppStartupService 完成工具目录和启动增强，并行预热会话摘要索引。
+_ = WarmUpAsync(app);
 
 app.Run();
 
-static async Task WarmUpSessionIndexAsync(WebApplication app)
+static async Task WarmUpAsync(WebApplication app)
 {
+    try
+    {
+        await app.Services.GetRequiredService<AppStartupService>()
+            .WarmUpAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        // 启动增强失败不阻止 WebUI 提供基础会话功能，错误通过日志显式保留。
+        app.Logger.LogWarning(ex, "启动预热失败");
+    }
+
     try
     {
         var store = app.Services.GetRequiredService<ISessionStore>();
@@ -74,7 +85,6 @@ static async Task WarmUpSessionIndexAsync(WebApplication app)
     }
     catch (Exception ex)
     {
-        // 预热只是把冷启动解析挪到后台：失败不影响功能，首个电路打开时会再试一次。
         app.Logger.LogWarning(ex, "会话摘要索引预热失败");
     }
 }

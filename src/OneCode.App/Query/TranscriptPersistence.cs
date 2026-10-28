@@ -8,7 +8,7 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
     private readonly ISessionManager _sessionManager = sessionManager;
     private readonly ILogger _logger = logger;
 
-    public async Task PersistAsync(
+    public async Task<bool> PersistAsync(
         QueryStreamRequest request,
         StreamingSession session,
         string finalText,
@@ -48,10 +48,20 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
                         ct)
                     .ConfigureAwait(false);
             }
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // 取消不被吞：调用方决定语义——正常收尾传业务 ct（取消即中断），
+            // 取消路径的尾文本 flush 必须传 CancellationToken.None 才能落盘。
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to persist assistant transcript for session {SessionId}", request.SessionId);
+            // 失败不再静默：返回 false 让调用方在事件流上可见（ERROR 日志 + 前端提示）。
+            _logger.LogError(ex, "Failed to persist assistant transcript for session {SessionId}", request.SessionId);
+            return false;
         }
     }
 

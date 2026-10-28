@@ -16,7 +16,6 @@ public enum GoalRunState
     Validating,
     Publishing,
     Paused,
-    Blocked,
     Completed,
     Failed,
     Cancelled,
@@ -132,6 +131,8 @@ public sealed record GoalRun : IWorkflowRun
     public IReadOnlyList<GoalStepExecutionEvidence> Executions { get; init; } = [];
     public bool HasReplanned { get; init; }
     public GoalBudgetSnapshot Budget { get; init; } = new(0, 0, 0, DateTimeOffset.UtcNow);
+    /// <summary>用户批准追加后的执行预算上限（null = 尚未发生过追加，resume 按配置默认重建）。</summary>
+    public GoalBudgetLimits? BudgetLimits { get; init; }
     public IReadOnlyList<GoalGateEvidence> FinalValidation { get; init; } = [];
     public GoalWorkspaceSnapshot? Workspace { get; init; }
     public GoalPublishReceipt? PublishReceipt { get; init; }
@@ -144,8 +145,7 @@ public sealed record GoalRun : IWorkflowRun
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; init; }
 
-    public bool IsTerminal => State is GoalRunState.Blocked
-        or GoalRunState.Completed
+    public bool IsTerminal => State is GoalRunState.Completed
         or GoalRunState.Failed
         or GoalRunState.Cancelled;
 }

@@ -52,7 +52,6 @@ public static class RunTerminalReasonMap
         OneCode.Core.Goals.GoalRunState.Completed => RunTerminalReason.Completed,
         OneCode.Core.Goals.GoalRunState.Paused => RunTerminalReason.BudgetExceeded,
         OneCode.Core.Goals.GoalRunState.Cancelled => RunTerminalReason.Cancelled,
-        OneCode.Core.Goals.GoalRunState.Blocked => RunTerminalReason.Blocked,
         OneCode.Core.Goals.GoalRunState.Failed => RunTerminalReason.ValidationFailed,
         _ => RunTerminalReason.AgentException,
     };

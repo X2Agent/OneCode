@@ -468,7 +468,7 @@ services.AddHttpClient("anthropic")
 | Glob 匹配 | `Microsoft.Extensions.FileSystemGlobbing` | 官方内置，零依赖 | 自写 glob |
 | Markdown 渲染 | `Markdig` | 最完整的 .NET Markdown 实现 | 手写 MD 解析 |
 | 日志 | `Microsoft.Extensions.Logging`（console + 自定义 file provider） | 官方抽象，接口与实现解耦；客户端单机场景不引入 Serilog 等第三方日志框架 | `Console.WriteLine` 日志、`Serilog`（已移除，客户端无需结构化日志后端） |
-| Token 计算 | `Microsoft.ML.Tokenizers` | 微软官方，支持 OpenAI/Claude tokenizer | 手写 BPE |
+| Token 估算 | 字符加权启发式（`TokenEstimator`） | 零数据包依赖、模型无关；按 ASCII/CJK/其他 Unicode 字符类别加权 | `Microsoft.ML.Tokenizers`（tokenizer 数据包体积大且模型绑定，当前不引入）；手写 BPE |
 | 内存缓存 | `Microsoft.Extensions.Caching.Memory` | 官方内置，支持过期策略 | 自定义字典缓存 |
 | DI 容器 | `Microsoft.Extensions.DependencyInjection` | 官方标准，与 .NET 生态完全集成 | Autofac/Castle/自建 |
 | LSP 客户端 | 自实现 JSON-RPC（LspClient） | 轻量化实现，无需额外依赖 | -- |
@@ -483,7 +483,7 @@ services.AddHttpClient("anthropic")
 
 ```
 OneCode.Core          ← 仅 BCL + MS.Ext.Abstractions + MS.Extensions.AI.Abstractions
-OneCode.Infrastructure← 依赖 Core + Microsoft.ML.Tokenizers + YamlDotNet
+OneCode.Infrastructure← 依赖 Core + YamlDotNet（Token 估算为字符加权启发式，无 tokenizer 数据包依赖）
 OneCode.Automation    ← 依赖 Core + Infrastructure（后台调度服务：Cron / ModelCatalog 刷新 / YOLO 规则加载）
 OneCode.App           ← 依赖 Core + Infrastructure + Automation（主业务逻辑 + UI 事件契约 + 交互端口默认实现）
 OneCode.Tui           ← 依赖 App（进程入口 + Terminal.Gui 前端）
@@ -929,5 +929,4 @@ public PermissionCheckResult Check(...)
 - **ModelContextProtocol SDK：** https://github.com/modelcontextprotocol/csharp-sdk
 - **Terminal.Gui v2 文档：** https://gui-cs.github.io/Terminal.Gui/
 - **Microsoft .NET 10 文档：** https://learn.microsoft.com/en-us/dotnet/
-- **Microsoft.ML.Tokenizers：** https://github.com/dotnet/machinelearning
 - **Microsoft.Agents.AI (MAF)：** https://learn.microsoft.com/en-us/semantic-kernel/frameworks/agent-framework/

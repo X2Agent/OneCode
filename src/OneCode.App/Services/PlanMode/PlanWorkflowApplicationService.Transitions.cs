@@ -61,7 +61,9 @@ public sealed partial class PlanWorkflowApplicationService
                         workflow.Id,
                         workflow.SubmittedRevision!.Value,
                         workflow.Version,
-                        "请根据用户反馈修订计划。",
+                        // 审计标记：计划卡 Edit 只记录「用户要求修订」这一事实；真实的修订意见
+                        // 由 TUI 引导至聊天输入、经转录进入下一次 Planning run（不在此处收集）。
+                        "[Plan card edit requested — user revision feedback follows as the next chat message]",
                         []),
                     ct).ConfigureAwait(false)).Workflow),
             _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown plan card decision."),

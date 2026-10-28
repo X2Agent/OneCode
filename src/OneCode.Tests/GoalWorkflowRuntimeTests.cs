@@ -5,7 +5,9 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Query;
 using OneCode.Core.Goals;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Api;
 using OneCode.Infrastructure.Goals;
 
 namespace OneCode.Tests;
@@ -56,6 +58,32 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         persisted.Budget.TotalInputTokens.Should().Be(13, "planning and step usage must both be retained");
         persisted.Budget.TotalOutputTokens.Should().Be(7);
         persisted.WorkflowFencingToken.Should().Be(7);
+    }
+
+    // 分解/Replan 直连模型调用不经 UsageTrackingRunMiddleware——runtime 必须把 decomposer
+    // 回传的 usage 记入 ITokenLedger，否则这部分消耗从预算熔断与 /status stats 中漏计
+    [Fact]
+    public async Task PlanAsync_RecordsDecompositionUsageIntoTokenLedger()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "ledger-runs"));
+        var run = await CreateClaimedRunAsync(store);
+        var ledger = new TokenLedger();
+        var runtime = CreateRuntime(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1)),
+            new FakeWorkspaceService(),
+            ledger);
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+
+        await runtime.PlanAsync(
+            new GoalWorkflowInput(run.Id, run.Goal, "model", "tools"),
+            TestContext.Current.CancellationToken);
+
+        var usage = ledger.GetSessionUsage(run.SessionId);
+        usage.Should().NotBeNull("分解 usage 必须记入会话桶");
+        usage!.TotalInputTokens.Should().Be(3, "FakePlanningService 回传的输入用量必须原样入账");
+        usage.TotalOutputTokens.Should().Be(2, "FakePlanningService 回传的输出用量必须原样入账");
     }
 
     [Fact]
@@ -402,7 +430,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         IGoalRunStore store,
         IGoalPlanningService planning,
         IGoalStepExecutionService steps,
-        IGoalWorkspaceService workspace)
+        IGoalWorkspaceService workspace,
+        ITokenLedger? ledger = null)
     {
         return new GoalWorkflowRuntime(
             planning,
@@ -419,7 +448,8 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
                     Tools = new List<AITool>(),
                 },
                 Channel.CreateUnbounded<QueryEvent>().Writer,
-                static () => new EditTransaction()),
+                static () => new EditTransaction(),
+                TokenLedger: ledger),
             Substitute.For<IBudgetDecisionService>());
     }
 

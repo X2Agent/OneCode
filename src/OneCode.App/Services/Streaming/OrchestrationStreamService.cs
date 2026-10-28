@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Query;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
 using OneCode.Core.Coordinator;
@@ -21,11 +22,26 @@ namespace OneCode.App.Services.Streaming;
 public sealed class OrchestrationStreamService(
     IConfigManager configManager,
     IToolCatalog toolCatalog,
+    IToolCapabilityResolver toolCapabilityResolver,
     IWorkingDirectoryAccessor wd,
     IGoalRunApplicationService goalRunApplicationService,
     GoalWorkflowHost goalWorkflowHost,
-    IGoalWorkflowRuntimeFactory goalRuntimeFactory)
+    IGoalWorkflowRuntimeFactory goalRuntimeFactory,
+    ITokenLedger tokenLedger)
 {
+    /// <summary>
+    /// GOAL 工具面经能力门解析（<see cref="IToolCapabilityResolver"/>）：
+    /// 全量可见工具 − PlanExclusive（SubmitPlan），与 BUILD/PLAN 共用同一真相源——
+    /// 每种模式只能看到本模式的工具，Plan 专属工具不进 GOAL 子代理 schema。
+    /// </summary>
+    private List<AITool> ResolveGoalTools()
+    {
+        var capability = toolCapabilityResolver.Resolve(WorkingMode.Goal);
+        return toolCatalog.Tools
+            .Where(tool => capability.AllowedToolNames.Contains(tool.Name))
+            .ToList<AITool>();
+    }
+
     /// <summary>
     /// GOAL mode streaming: runs through the durable MAF pipeline
     /// (<see cref="GoalMode.GoalWorkflowHost"/> + GoalRun aggregate), bridges
@@ -42,7 +58,7 @@ public sealed class OrchestrationStreamService(
         var conversationId = session.SessionManager.ForegroundConversation?.Id
             ?? throw new InvalidOperationException("Goal mode requires an active conversation.");
         var budget = ModeBudgetSettings.FromSettings(configManager.Current.Effective);
-        var tools = toolCatalog.Tools.ToList<AITool>();
+        var tools = ResolveGoalTools();
         // Goal definition hash is computed from the body only: the harness fragment is deliberately
         // excluded so existing checkpoints stay valid, and the same source (session.SystemPrompt)
         // feeds both BeginAsync here and the resume path below — the two must never diverge.
@@ -63,6 +79,10 @@ public sealed class OrchestrationStreamService(
             ct).ConfigureAwait(false);
 
         var effectiveWorktreeDir = GoalWorkspacePathResolver.ResolveEffectiveWorkingDirectory(goalRun);
+
+        // GOAL 落转录①：目标诉求与 mode 元数据随会话持久化，供列表、恢复和后续上下文使用。
+        session.SessionManager.SetForegroundMode("goal");
+        await session.SessionManager.AppendUserMessageAsync(goalRun.SessionId, text, ct).ConfigureAwait(false);
 
         // 展示 Goal 隔离 worktree 位置，便于用户定位新建目录。
         if (goalRun.Workspace is { } workspace)
@@ -108,7 +128,7 @@ public sealed class OrchestrationStreamService(
         if (goalRun.IsTerminal)
             throw new InvalidOperationException($"GoalRun '{goalRun.Id}' is already terminal.");
         var budget = ModeBudgetSettings.FromSettings(configManager.Current.Effective);
-        var tools = toolCatalog.Tools.ToList<AITool>();
+        var tools = ResolveGoalTools();
         var systemPromptHash = GoalWorkflowCompiler.ComputeTextHash(systemPrompt);
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
         // 与 StreamGoalAsync 同源：hash 契约含「显式 JsonSerializerOptions」签名成分，
@@ -167,12 +187,23 @@ public sealed class OrchestrationStreamService(
         var switchWorkingDir = session is not null
             && !string.Equals(effectiveWorktreeDir, originalWorkingDirectory, StringComparison.OrdinalIgnoreCase);
 
+        // 用量基线（会话桶四字段快照）：终态 DoneEvent 的用量口径 = 本次执行世代内
+        // 子目标 + Judge + 分解调用的真实四项增量（含缓存），对齐 BUILD/PLAN 的全口径；
+        // 账本缺失时回退 GoalBudget 的 input+output 原始口径。
+        var usageBaseline = tokenLedger.GetSessionUsage(goalRun.SessionId)?.Snapshot();
+
+        // 执行任务声明于 try 外：取消路径从读取循环直达 finally，
+        // 「await 执行任务后才恢复工作目录」必须覆盖取消场景。
+        Task runTask = Task.CompletedTask;
+
         if (switchWorkingDir)
         {
             await session!.SessionManager.ChangeWorkingDirectoryAsync(effectiveWorktreeDir, ct).ConfigureAwait(false);
             yield return new WorkingDirectoryChangedEvent(effectiveWorktreeDir);
         }
 
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runCt = runCts.Token;
         try
         {
             var mergedChannel = Channel.CreateUnbounded<QueryEvent>(new UnboundedChannelOptions
@@ -188,22 +219,21 @@ public sealed class OrchestrationStreamService(
                 Tools = tools,
                 MaxTurnsPerSubGoal = budget.MaxTurnsPerSubGoal,
                 Budget = budget.ToGoalBudget(),
-                OrchestrationEventSink = orchEvt =>
-                {
-                    if (MapOrchestrationEvent(orchEvt) is { } mapped
-                        && mapped is not TextDeltaEvent)
-                    {
-                        mergedChannel.Writer.TryWrite(mapped);
-                    }
-                },
+                // 子目标记账归属目标会话；全局预算上限与 BUILD/PLAN 同源归一化（0/负值=不设限）。
+                SessionId = goalRun.SessionId,
+                MaxBudgetTokens = configManager.Current.Effective.MaxBudgetTokens > 0
+                    ? configManager.Current.Effective.MaxBudgetTokens
+                    : null,
+                OrchestrationEventSink = orchEvt => ForwardOrchestrationEvent(orchEvt, mergedChannel.Writer),
                 ImagePaths = imagePaths,
             };
             var runtime = goalRuntimeFactory.Create(new GoalWorkflowRuntimeContext(
                 options,
                 mergedChannel.Writer,
                 static () => new EditTransaction(),
-                PromptOnBudgetExhausted: true));
-            var runTask = Task.Run(async () =>
+                PromptOnBudgetExhausted: true,
+                TokenLedger: tokenLedger));
+            runTask = Task.Run(async () =>
             {
                 try
                 {
@@ -215,15 +245,28 @@ public sealed class OrchestrationStreamService(
                         toolCapabilityHash,
                         runtime,
                         serializerOptions,
-                        ct: ct).ConfigureAwait(false);
-                    var final = await goalRunApplicationService.GetAsync(goalRun.Id, ct).ConfigureAwait(false)
+                        ct: runCt).ConfigureAwait(false);
+                    var final = await goalRunApplicationService.GetAsync(goalRun.Id, runCt).ConfigureAwait(false)
                         ?? throw new InvalidOperationException($"GoalRun '{goalRun.Id}' disappeared after execution.");
+                    // 先落转录再发终态：转录失败只能产生 Error，不能形成 Done → Error。
+                    if (session?.SessionManager is { } transcriptManager)
+                    {
+                        await transcriptManager.AppendAssistantMessageAsync(
+                            goalRun.SessionId,
+                            BuildGoalTranscriptSummary(final),
+                            new TokenUsage(
+                                checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
+                                checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens))),
+                            CancellationToken.None).ConfigureAwait(false);
+                    }
+
                     mergedChannel.Writer.TryWrite(ToGoalResult(final));
                     mergedChannel.Writer.TryWrite(new DoneEvent(
                         FullText: null,
-                        Usage: new TokenUsage(
-                            checked((int)Math.Min(int.MaxValue, final.Budget.TotalInputTokens)),
-                            checked((int)Math.Min(int.MaxValue, final.Budget.TotalOutputTokens))),
+                        Usage: BuildDoneUsage(
+                            final,
+                            usageBaseline,
+                            tokenLedger.GetSessionUsage(final.SessionId)?.Snapshot()),
                         TurnsCompleted: final.Executions.Sum(execution => execution.Attempts),
                         TerminalReason: final.TerminalReason ?? RunTerminalReasonMap.FromGoalState(final.State),
                         SessionId: final.SessionId,
@@ -232,7 +275,34 @@ public sealed class OrchestrationStreamService(
                 }
                 catch (OperationCanceledException)
                 {
-                    // 取消即正常收尾，不再向下游写入错误。
+                    try
+                    {
+                        var cancelledRun = await goalRunApplicationService.GetAsync(
+                            goalRun.Id, CancellationToken.None).ConfigureAwait(false);
+                        if (session?.SessionManager is { } cancelTranscriptManager)
+                        {
+                            await cancelTranscriptManager.AppendAssistantMessageAsync(
+                                goalRun.SessionId,
+                                BuildGoalTranscriptSummary(cancelledRun, cancelled: true),
+                                new TokenUsage(0, 0),
+                                CancellationToken.None).ConfigureAwait(false);
+                        }
+
+                        mergedChannel.Writer.TryWrite(new DoneEvent(
+                            FullText: null,
+                            Usage: cancelledRun is { } run
+                                ? BuildDoneUsage(run, usageBaseline, tokenLedger.GetSessionUsage(run.SessionId)?.Snapshot())
+                                : new TokenUsage(0, 0),
+                            TurnsCompleted: cancelledRun?.Executions.Sum(execution => execution.Attempts) ?? 0,
+                            TerminalReason: RunTerminalReason.Cancelled,
+                            SessionId: goalRun.SessionId,
+                            TransactionRolledBack: false,
+                            ValidationFailureSummary: cancelledRun?.FailureSummary));
+                    }
+                    catch (Exception ex)
+                    {
+                        mergedChannel.Writer.TryWrite(new ErrorEvent(ex.Message));
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -242,14 +312,25 @@ public sealed class OrchestrationStreamService(
                 {
                     mergedChannel.Writer.TryComplete();
                 }
-            }, ct);
+            }, runCt);
 
-            await foreach (var evt in mergedChannel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var evt in mergedChannel.Reader.ReadAllAsync(runCt).ConfigureAwait(false))
+            {
                 yield return evt;
-            await runTask.ConfigureAwait(false);
+                runCt.ThrowIfCancellationRequested();
+            }
         }
         finally
         {
+            // 消费方提前退出也先取消执行任务，再有界等待收尾，最后恢复会话目录。
+            runCts.Cancel();
+            if (!runTask.IsCompleted)
+            {
+                _ = await Task.WhenAny(
+                    runTask,
+                    Task.Delay(TimeSpan.FromSeconds(30), CancellationToken.None)).ConfigureAwait(false);
+            }
+
             if (switchWorkingDir)
             {
                 await session!.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
@@ -262,10 +343,13 @@ public sealed class OrchestrationStreamService(
         }
     }
 
-    /// <summary>
-    /// 编排事件 → 流内事件投影。文本增量由执行器自行写入通道，此处排除以免重复；
-    /// Harness 注入的工具不进入对话流。
-    /// </summary>
+    /// <summary>把编排事件投影到 UI 流；所有正文增量只经此入口转发，Harness 内部工具不进入对话流。</summary>
+    internal static void ForwardOrchestrationEvent(OrchestrationEvent orchEvt, ChannelWriter<QueryEvent> writer)
+    {
+        if (MapOrchestrationEvent(orchEvt) is { } mapped)
+            writer.TryWrite(mapped);
+    }
+
     private static QueryEvent? MapOrchestrationEvent(OrchestrationEvent orchEvt) => orchEvt switch
     {
         OrchestrationEvent.AgentMessage am
@@ -282,6 +366,50 @@ public sealed class OrchestrationStreamService(
             => new ErrorEvent(err.Message),
         _ => null,
     };
+
+    /// <summary>
+    /// 终态用量口径：优先取会话桶四项增量（本次执行世代内子目标 + Judge + 分解的真实消耗，
+    /// 含缓存读/写，对齐 BUILD/PLAN）；账本或基线缺失时回退 GoalBudget 的 input+output。
+    /// </summary>
+    internal static TokenUsage BuildDoneUsage(
+        GoalRun run,
+        SessionTokenUsage? baseline,
+        SessionTokenUsage? current)
+    {
+        if (current is null || baseline is null)
+            return new TokenUsage(
+                checked((int)Math.Min(int.MaxValue, run.Budget.TotalInputTokens)),
+                checked((int)Math.Min(int.MaxValue, run.Budget.TotalOutputTokens)));
+
+        return new TokenUsage(
+            checked((int)Math.Min(int.MaxValue, Math.Max(0, current.TotalInputTokens - baseline.TotalInputTokens))),
+            checked((int)Math.Min(int.MaxValue, Math.Max(0, current.TotalOutputTokens - baseline.TotalOutputTokens))),
+            checked((int)Math.Min(int.MaxValue, Math.Max(0, current.TotalCacheReadTokens - baseline.TotalCacheReadTokens))),
+            checked((int)Math.Min(int.MaxValue, Math.Max(0, current.TotalCacheWriteTokens - baseline.TotalCacheWriteTokens))));
+    }
+
+    /// <summary>GOAL 终态摘要（落转录的 assistant 消息正文）。</summary>
+    private static string BuildGoalTranscriptSummary(GoalRun? run, bool cancelled = false)
+    {
+        if (run is null)
+            return "[GOAL] Execution was cancelled before any state was recorded.";
+
+        var completed = run.Plan.Count(step => step.State == GoalStepState.Completed);
+        var failed = run.Plan.Count(step => step.State == GoalStepState.Failed);
+        var skipped = run.Plan.Count(step => step.State == GoalStepState.Skipped);
+        var header = cancelled
+            ? $"[GOAL] Cancelled — {completed}/{run.Plan.Count} sub-goals completed before cancellation."
+            : $"[GOAL] {run.State} — {completed}/{run.Plan.Count} completed, {failed} failed, {skipped} skipped.";
+        var steps = string.Join("\n", run.Plan
+            .Where(step => step.State is GoalStepState.Completed or GoalStepState.Failed)
+            .Select(step => $"  {(step.State == GoalStepState.Completed ? "✓" : "✗")} #{step.Id}: {step.Description}"));
+        var conclusion = run.Executions
+            .LastOrDefault(execution => execution.State == GoalStepState.Completed && !string.IsNullOrWhiteSpace(execution.AgentOutput))
+            ?.AgentOutput;
+        return string.IsNullOrWhiteSpace(conclusion)
+            ? $"{header}\n{steps}"
+            : $"{header}\n{steps}\nFinal output:\n{conclusion}";
+    }
 
     /// <summary>构建 GOAL 结果投影（完成/失败/跳过计数、验证门摘要与产物文件列表）。</summary>
     private static GoalResultEvent ToGoalResult(GoalRun run)

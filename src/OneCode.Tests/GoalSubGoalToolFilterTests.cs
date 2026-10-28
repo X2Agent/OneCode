@@ -12,7 +12,7 @@ public sealed class GoalSubGoalToolFilterTests
     private static IList<AITool> Tools(params string[] names)
         => names.Select(name => (AITool)AIFunctionFactory.Create(() => { }, name: name)).ToList();
 
-    private static readonly string[] AllToolNames = ["Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash", "WebSearch", "Agent", "ParallelAgents"];
+    private static readonly string[] AllToolNames = ["Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash", "WebSearch", "Agent", "ParallelAgents", "SubmitPlan"];
 
     [Theory]
     [InlineData(0)] // null
@@ -29,9 +29,31 @@ public sealed class GoalSubGoalToolFilterTests
 
         var filtered = GoalSubGoalExecutor.FilterToolsForSubGoal(Tools([.. AllToolNames]), requiredTools);
 
-        // 派工工具（Agent/ParallelAgents）摘除，其余保留
+        // 派工工具（Agent/ParallelAgents）与 Plan 专属工具（SubmitPlan）摘除，其余保留
         filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo(
             "Read", "Glob", "Grep", "LS", "Edit", "Write", "Bash", "WebSearch");
+    }
+
+    [Fact]
+    public void PlanExclusiveOnlyRequiredTools_FailsClosed()
+    {
+        // 反证：分解器把 SubmitPlan 写进 RequiredTools——防御纵深闸摘除后空集必须抛错，
+        // 不得让 Plan 专属工具经白名单显式点名混进子目标。
+        var act = () => GoalSubGoalExecutor.FilterToolsForSubGoal(
+            Tools([.. AllToolNames]), ["SubmitPlan"]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*plan-exclusive tools*");
+    }
+
+    [Fact]
+    public void PlanExclusiveMixedWithValidTools_OnlyValidAndBaselineRemain()
+    {
+        var filtered = GoalSubGoalExecutor.FilterToolsForSubGoal(
+            Tools([.. AllToolNames]), ["SubmitPlan", "WebSearch"]);
+
+        filtered.Select(t => ((AIFunction)t).Name).Should().BeEquivalentTo(
+            "Read", "Glob", "Grep", "LS", "Edit", "Write", "WebSearch");
     }
 
     [Fact]

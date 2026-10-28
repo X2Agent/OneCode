@@ -43,6 +43,9 @@ public static class SessionServiceCollectionExtensions
         services.AddSingleton<SessionToolSetManager>();
         services.AddSingleton<ISessionToolSetManager>(sp => sp.GetRequiredService<SessionToolSetManager>());
 
+        // /session delete 级联清理门面（事件 + 摘要索引 + 用量桶 + 三模式 run 聚合）。
+        services.AddSingleton<ISessionDataCleaner, SessionDataCleaner>();
+
         services.AddSingleton<SessionManager>(sp =>
         {
             var store = sp.GetRequiredService<ISessionStore>();

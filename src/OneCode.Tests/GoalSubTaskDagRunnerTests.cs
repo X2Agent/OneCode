@@ -110,6 +110,29 @@ public sealed class GoalSubTaskDagRunnerTests
         captured.Should().BeEmpty("fail-closed：非法任务数不得执行任何任务");
     }
 
+    [Fact]
+    public async Task RunAsync_RequiredToolsScopeAndUsageSession_AppliedToEveryTask()
+    {
+        var captured = new List<AgentRunRequest>();
+        var sut = CreateRunner(StubRunner(captured, _ => "ok"));
+        var goal = CreateGoal() with { RequiredTools = ["Write"], AllowedPaths = ["docs/**"] };
+        var sessionId = SessionId.NewId();
+        var options = CreateOptions() with { SessionId = sessionId };
+
+        await sut.RunAsync(goal, options, CreateChannel(), TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeEmpty();
+        captured.Should().OnlyContain(request => request.UsageSessionId == sessionId);
+        captured.Should().OnlyContain(request => request.Prompt.Contains("docs/**", StringComparison.Ordinal));
+        captured.Should().OnlyContain(request => request.Prompt.Contains("/worktree", StringComparison.Ordinal));
+        captured.Should().OnlyContain(request => request.AllowedToolNames!.Contains("Read"));
+        captured.Should().OnlyContain(request => !request.AllowedToolNames!.Contains("Bash"));
+        captured.Single(request => request.Description == "write files").AllowedToolNames!
+            .Should().Contain("Write");
+        captured.Single(request => request.Description == "read stuff").AllowedToolNames!
+            .Should().NotContain("Write");
+    }
+
     private static ChannelWriter<QueryEvent> CreateChannel()
         => Channel.CreateUnbounded<QueryEvent>().Writer;
 

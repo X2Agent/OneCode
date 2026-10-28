@@ -2,6 +2,8 @@ using Microsoft.Extensions.AI;
 using OneCode.App.Session;
 using OneCode.Core;
 using OneCode.Core.Models;
+using OneCode.Core.Tokens;
+using OneCode.Infrastructure.Agent.RunMiddleware;
 
 namespace OneCode.App.Services.Compact;
 
@@ -36,6 +38,7 @@ public sealed class CompactService(
     private ISessionManager sessionManager => session.SessionManager;
     private IModelManager modelManager => session.ModelManager;
     private ITokenEstimator tokenEstimator => session.TokenEstimator;
+    private ITokenLedger? tokenLedger => session.TokenLedger;
     /// <summary>
     /// 获取会话的 token 预算状态。注入 ModelManager 以读取用户配置的 ContextWindow。
     /// </summary>
@@ -112,6 +115,11 @@ public sealed class CompactService(
             logger.LogError(ex, "Compact API call failed");
             throw;
         }
+
+        // 显式压缩直连 chatClient（不经 UsageTrackingRunMiddleware）——摘要消耗经统一映射
+        // 入会话桶，避免预算熔断与 /status stats 漏计，也避免各处手抄提取口径。
+        UsageTrackingRunMiddleware.RecordUsage(
+            response.Usage, tokenLedger, session.Model, logger, session.Id);
 
         var rawSummary = response.Text;
 

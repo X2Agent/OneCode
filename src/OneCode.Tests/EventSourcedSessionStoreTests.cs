@@ -87,6 +87,64 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_ExceedsCompactionThreshold_FoldsMessageEventsAndKeepsConversationEquivalent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var events = new FileSessionEventStore(_root);
+        var store = CreateStore(events);
+        var conversation = CreateConversation();
+        conversation.Metadata["mode"] = "build";
+        conversation.Messages.Add(new UserMessage("first", "small", DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+
+        // 压缩只折叠消息增量事件（体积主体），marker（epoch/turn）必须原样保留。
+        await events.AppendAsync(
+            [new SessionMarkerEvent(conversation.Id, 0, DateTimeOffset.UtcNow, SessionEventType.TurnStarted, "1")],
+            ct);
+
+        conversation.Messages.Add(new UserMessage("big", new string('a', 2 * 1024 * 1024), DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+
+        var stored = await events.ReadAsync(conversation.Id, ct);
+        stored.OfType<UserMessageEvent>().Should().BeEmpty("超过阈值后消息增量事件必须被折叠");
+        stored.OfType<MessagesReplacedEvent>().Should().ContainSingle()
+            .Which.Reason.Should().Be("snapshot-compaction");
+        stored.OfType<SessionMarkerEvent>().Should().ContainSingle("marker（epoch/turn）语义必须保留");
+        stored.OfType<SessionSnapshotEvent>().Should().ContainSingle();
+
+        var loaded = await store.LoadAsync(conversation.Id, ct);
+        loaded.Should().NotBeNull();
+        loaded!.Messages.Select(message => message.Id).Should().Equal("first", "big");
+        loaded.Messages[1].Should().BeOfType<UserMessage>()
+            .Which.Content.Length.Should().Be(2 * 1024 * 1024);
+        loaded.Metadata["mode"].ToString().Should().Be("build", "压缩不得丢失会话元数据");
+        loaded.Name.Should().Be(conversation.Name);
+        loaded.Model.Should().Be(conversation.Model);
+    }
+
+    [Fact]
+    public async Task SaveAsync_AfterCompaction_DoesNotRewriteUntilLogGrowsFiftyPercent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var events = new CountingSessionEventStore(new FileSessionEventStore(_root));
+        var store = CreateStore(events);
+        var conversation = CreateConversation();
+        conversation.Messages.Add(new UserMessage("big", new string('a', 2 * 1024 * 1024), DateTimeOffset.UtcNow));
+
+        await store.SaveAsync(conversation, ct);
+        events.RewriteCount.Should().Be(1, "首次超过阈值必须压缩");
+
+        conversation.Messages.Add(new UserMessage("tick", "one more turn", DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+        events.RewriteCount.Should().Be(1,
+            "压缩后的日志未显著增长时不得每轮整文件重写（消息本身超阈值场景）");
+
+        conversation.Messages.Add(new UserMessage("huge", new string('b', 2 * 1024 * 1024), DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+        events.RewriteCount.Should().Be(2, "体积再次超过「上次压缩后体积 + 50%」必须重新压缩");
+    }
+
+    [Fact]
     public async Task ListAsync_Title_PrefersNameElseFirstUserMessage()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -244,6 +302,9 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
     {
         public int ReadCount { get; private set; }
 
+        /// <summary>整文件重写次数：压缩节流的反证锚点（无节流时每轮保存都自增）。</summary>
+        public int RewriteCount { get; private set; }
+
         public void ResetReadCount() => ReadCount = 0;
 
         public Task<SessionEventLogStamp?> AppendAsync(
@@ -261,5 +322,15 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
 
         public Task DeleteAsync(SessionId sessionId, CancellationToken ct = default) =>
             inner.DeleteAsync(sessionId, ct);
+
+        public Task<SessionEventLogStamp?> RewriteAsync(
+            SessionId sessionId,
+            IReadOnlyList<SessionEvent> events,
+            SessionEventLogStamp expectedStamp,
+            CancellationToken ct = default)
+        {
+            RewriteCount++;
+            return inner.RewriteAsync(sessionId, events, expectedStamp, ct);
+        }
     }
 }

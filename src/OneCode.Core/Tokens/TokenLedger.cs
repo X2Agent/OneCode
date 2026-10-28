@@ -44,6 +44,17 @@ public sealed class SessionTokenUsage
         Interlocked.Add(ref _cacheReadTokens, usage.CacheReadTokens);
         Interlocked.Add(ref _cacheWriteTokens, usage.CacheWriteTokens);
     }
+
+    /// <summary>复制当前计数值，供运行基线与持久化使用，避免后续记账改变已捕获的快照。</summary>
+    public SessionTokenUsage Snapshot()
+    {
+        var snapshot = new SessionTokenUsage();
+        snapshot._inputTokens = Interlocked.Read(ref _inputTokens);
+        snapshot._outputTokens = Interlocked.Read(ref _outputTokens);
+        snapshot._cacheReadTokens = Interlocked.Read(ref _cacheReadTokens);
+        snapshot._cacheWriteTokens = Interlocked.Read(ref _cacheWriteTokens);
+        return snapshot;
+    }
 }
 
 /// <summary>

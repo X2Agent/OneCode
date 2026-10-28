@@ -68,6 +68,29 @@ public sealed class ToolCapabilitySetTests
         effective.AllowedToolNames.Should().NotContain(["SubmitPlan"]);
     }
 
+    // GOAL 工具面同一真相源：GOAL 入口经 resolver 解析（全量 − PlanExclusive），
+    // SubmitPlan 不得进入 GOAL 子代理 schema——此前的全量直取是本守卫针对的回归场景
+    [Fact]
+    public void Resolver_GoalMode_ExcludesPlanExclusiveTools()
+    {
+        var metadata = new ToolMetadataRegistry();
+        var tools = new[]
+        {
+            Tool("Read", ToolRisk.ReadOnly, metadata),
+            Tool("Write", ToolRisk.Destructive, metadata),
+            Tool("mcp__server__tool", ToolRisk.Dynamic, metadata),
+            Tool("SubmitPlan", ToolRisk.Safe, metadata, ToolCategory.PlanAllowed | ToolCategory.PlanExclusive),
+        };
+        var catalog = Substitute.For<IToolCatalog>();
+        catalog.Tools.Returns(tools);
+        catalog.Metadata.Returns(metadata);
+
+        var effective = new ToolCapabilityResolver(catalog).Resolve(WorkingMode.Goal);
+
+        effective.AllowedToolNames.Should().Contain(["Read", "Write", "mcp__server__tool"]);
+        effective.AllowedToolNames.Should().NotContain(["SubmitPlan"]);
+    }
+
     [Fact]
     public void SessionActivation_RejectsToolOutsideCurrentCapabilities()
     {

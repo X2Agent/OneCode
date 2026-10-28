@@ -79,7 +79,6 @@ Core 是整个系统的契约层，其依赖纯洁性决定了架构的健康度
 | `Microsoft.Extensions.Http` | 具体实现 | Infrastructure |
 | `Terminal.Gui` | UI 框架 | App |
 | `ModelContextProtocol` | 协议实现 | Infrastructure |
-| `Microsoft.ML.Tokenizers` | 计算实现 | Infrastructure |
 | 任何 `OneCode.*` 项目 | 反向依赖 | -- |
 | BCL 副作用 I/O（`File.` / `Directory.` / `Process.` 的创建/删除/探测、`Environment.GetFolderPath`、`Console.*`） | Core 必须无环境副作用（无副作用的内存解析不受限，如 `ModelCatalog.LoadFromStream` 吃 Stream 入参） | 外移接口实现（Infrastructure）或由 App 调用方执行 |
 

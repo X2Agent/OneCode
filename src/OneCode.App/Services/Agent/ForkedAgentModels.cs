@@ -60,6 +60,9 @@ public sealed class ForkedAgentParams
     /// <summary>Parent conversation ID for per-session cost tracking.</summary>
     public SessionId? ConversationId { get; init; }
 
+    /// <summary>用量归属会话；与 fork 的上下文会话隔离。</summary>
+    public SessionId? UsageSessionId { get; init; }
+
     /// <summary>Pipeline profile controlling middleware trimming and tool filtering.</summary>
     public PipelineProfile Profile { get; init; } = PipelineProfile.Worker;
 }

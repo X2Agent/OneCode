@@ -446,6 +446,63 @@ public sealed class BudgetGuardRunMiddlewareTests
         var second = await runFunc([], null, null, capturingAgent, TestContext.Current.CancellationToken);
         second.Text.Should().Contain("Budget Exceeded");
     }
+
+    // 预算计量域（会话桶）：PLAN/GOAL 的「会话级累计」只累计本会话消耗
+
+    [Fact]
+    public async Task RunAsync_SessionScope_IgnoresOtherSessionsLifetimeUsage()
+    {
+        // 进程级累计 5M（全部来自其他会话），本会话桶为 0。
+        // 若实现误用进程级终身累计，5M >= 1M 会在启动 run 的瞬间短路——
+        // 这正是「PLAN/GOAL 预算被打穿」缺陷的反证锚点。
+        var tracker = new TokenLedger();
+        tracker.RecordUsage(new UsageRecord("model", (int)Math.Min(5_000_000, int.MaxValue), 0));
+
+        var sessionId = SessionId.NewId();
+        var stubAgent = new StubAgent(CreateResponse("result"));
+        var (runFunc, _) = BudgetGuardRunMiddleware.Create(
+            tracker, maxBudgetTokens: 1_000_000, null, sessionId: sessionId);
+
+        var response = await runFunc([], null, null, stubAgent, TestContext.Current.CancellationToken);
+
+        response.Text.Should().Be("result", "会话桶消耗 0，跨会话的历史消耗不得计入本会话预算");
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionScope_ShortCircuitsAfterSessionBucketExceedsLimit()
+    {
+        var tracker = new TokenLedger();
+        var sessionId = SessionId.NewId();
+
+        // 本会话先消耗 1.2M（经 UsageTracking 按 sessionId 入账）
+        var (usageRunFunc, _) = UsageTrackingRunMiddleware.Create(tracker, "model", null, sessionId);
+        var usageRun = new StubAgent(new AgentResponse
+        {
+            Usage = new UsageDetails { InputTokenCount = 1_200_000 },
+            Messages = [new ChatMessage(ChatRole.Assistant, "consume")],
+        });
+        await usageRunFunc([], null, null, usageRun, TestContext.Current.CancellationToken);
+
+        var (runFunc, _) = BudgetGuardRunMiddleware.Create(
+            tracker, maxBudgetTokens: 1_000_000, null, sessionId: sessionId);
+        var response = await runFunc([], null, null, new StubAgent(CreateResponse("result")), TestContext.Current.CancellationToken);
+
+        response.Text.Should().Contain(BudgetGuardRunMiddleware.BudgetExceededMarker);
+        response.Text.Should().Contain("1,200,000", "超支消息报告会话桶累计，不是进程级累计");
+    }
+
+    [Fact]
+    public async Task RunAsync_NoSession_FallsBackToProcessLevelScope()
+    {
+        // headless（无会话）路径保持进程级累计口径
+        var tracker = CreateTracker(initialTokens: 5_000_000);
+        var (runFunc, _) = BudgetGuardRunMiddleware.Create(
+            tracker, maxBudgetTokens: 1_000_000, null);
+
+        var response = await runFunc([], null, null, new StubAgent(CreateResponse("result")), TestContext.Current.CancellationToken);
+
+        response.Text.Should().Contain(BudgetGuardRunMiddleware.BudgetExceededMarker);
+    }
 }
 
 /// <summary>捕获收到的消息列表的桩 Agent（验证收尾 turn 的注入内容）。</summary>

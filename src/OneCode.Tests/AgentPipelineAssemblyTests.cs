@@ -73,6 +73,45 @@ public sealed class AgentPipelineAssemblyTests
     }
 
     [Fact]
+    public void BuildMainOptions_MountsLiveWorkingDirectoryProvider_FromSessionAccessor()
+    {
+        // 反证锚点：不挂活动目录提供者时，同 run 内 EnterWorktree 切换会话目录后，
+        // 权限边界/EditTransaction/FileSystemInvariant 仍按 run 起始目录判定（失配缺陷）。
+        var accessor = Substitute.For<IWorkingDirectoryAccessor>();
+        var liveDir = Path.Combine(Path.GetTempPath(), "repo");
+        accessor.WorkingDirectory.Returns(liveDir);
+        var assembly = new AgentPipelineAssembly(
+            workingDirectoryAccessor: accessor,
+            hookExecutionService: Substitute.For<IHookExecutionService>(),
+            verificationProvider: Substitute.For<IVerificationProvider>(),
+            modeProvider: Substitute.For<IPermissionModeProvider>(),
+            permissionChecker: Substitute.For<IPermissionChecker>(),
+            tokenLedger: new TokenLedger());
+        using var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
+
+        var built = assembly.BuildMainOptions(
+            new MainAgentRunOptions { ModelId = "m", WorkingMode = WorkingMode.Build },
+            transaction,
+            @"C:\repo",
+            "m",
+            providerId: null);
+
+        built.WorkingDirectoryProvider.Should().NotBeNull("主路径必须挂活动目录提供者");
+        built.ResolveWorkingDirectory().Should().Be(liveDir,
+            "中间件每次调用解析到的必须是会话当前目录，而非 run 起始快照");
+    }
+
+    [Fact]
+    public void AgentPipelineOptions_NoProvider_FallsBackToFixedWorkingDirectory()
+    {
+        // fork/子代理路径不挂提供者：回退固定值语义保持不变。
+        var options = new AgentPipelineOptions { WorkingDirectory = @"C:\fixed" };
+
+        options.WorkingDirectoryProvider.Should().BeNull();
+        options.ResolveWorkingDirectory().Should().Be(@"C:\fixed");
+    }
+
+    [Fact]
     public void BuildMainOptions_GoalAutoWithoutBroker_DisablesToolApprovalToPreventLoopTermination()
     {
         var modeProvider = Substitute.For<IPermissionModeProvider>();

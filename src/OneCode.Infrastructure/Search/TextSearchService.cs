@@ -1,6 +1,7 @@
 using Microsoft.Extensions.FileSystemGlobbing;
 using OneCode.Infrastructure.Tools;
 using OneCode.Core.IO;
+using OneCode.Infrastructure.Middleware.Invariants;
 
 namespace OneCode.Infrastructure.Search;
 
@@ -50,6 +51,13 @@ public sealed class TextSearchService(
         var ignore = ignoreProvider is null
             ? new WorkspaceIgnoreSnapshot(null, [], [])
             : await ignoreProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+        // 敏感读保护（与 FileSystemInvariant 同一份清单）：rg --hidden --no-ignore 会读进
+        // .env / id_rsa 等文件，单文件直查在此短路；目录检索由引擎 glob 与 native 谓词同清单过滤。
+        if (SensitiveReadPathPolicy.IsSensitive(request.SearchPath))
+        {
+            logger.LogWarning("TextSearchService: blocked sensitive search target {Path}", request.SearchPath);
+            return [];
+        }
         return await processRunner.CommandExistsAsync("rg").ConfigureAwait(false)
             ? await SearchRipgrepAsync(request, ignore, contextBefore, contextAfter, ct).ConfigureAwait(false)
             : await SearchNativeAsync(request, ignore, contextBefore, contextAfter, ct).ConfigureAwait(false);
@@ -129,6 +137,10 @@ public sealed class TextSearchService(
             foreach (var eg in request.ExcludeGlob.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             { args.Add("--glob"); args.Add($"!{eg}"); }
         }
+
+        // 敏感排除必须最后添加：rg 的后置 glob 优先，用户显式 include 也不得重新纳入敏感文件。
+        foreach (var exclusion in SensitiveReadPathPolicy.BuildGlobExclusions())
+        { args.Add("--glob"); args.Add(exclusion); }
 
         // 当搜索目标位于工作区外的附加目录（如 ~/.onecode/events）时，以该目录为 rg 工作目录并传相对路径，
         // 避免绝对路径中的祖先目录名（如 ~/.onecode）误触发 `--glob !**/.onecode/**`。
@@ -269,6 +281,9 @@ public sealed class TextSearchService(
                 return !excludePatterns.Any(ep => IsGlobMatch(rel, ep));
             }).ToList();
         }
+
+        // 敏感读保护（与 rg 路径的 glob 排除同一份清单）：C# 回退引擎逐文件谓词过滤。
+        files = files.Where(f => !SensitiveReadPathPolicy.IsSensitive(f)).ToList();
 
         var baseDirForRelPath = isSingleFile
             ? (Path.GetDirectoryName(request.SearchPath) ?? request.SearchPath)

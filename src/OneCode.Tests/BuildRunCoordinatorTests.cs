@@ -435,6 +435,12 @@ public sealed partial class BuildRunCoordinatorTests : IDisposable
 
         public Task<BuildRun?> LoadByIdAsync(BuildRunId id, CancellationToken ct = default) =>
             Task.FromResult(_runs.Values.SingleOrDefault(run => run.Id == id));
+
+        public Task RemoveSessionAsync(SessionId conversationId, CancellationToken ct = default)
+        {
+            _runs.Remove(conversationId);
+            return Task.CompletedTask;
+        }
     }
 
     public void Dispose()

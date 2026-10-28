@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using OneCode.App.Services.Agent;
+using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Middleware;
 
 namespace OneCode.App.Query;
@@ -37,7 +38,7 @@ internal static class QueryStreamHelpers
 
         // Detect budget exceeded from final text (BudgetGuard middleware short-circuits with a text marker).
         if (outcome.Reason == RunTerminalReason.Completed
-            && finalText.Contains("[Budget Exceeded]", StringComparison.OrdinalIgnoreCase))
+            && finalText.Contains(BudgetGuardRunMiddleware.BudgetExceededMarker, StringComparison.OrdinalIgnoreCase))
         {
             outcome.Reason = RunTerminalReason.BudgetExceeded;
         }

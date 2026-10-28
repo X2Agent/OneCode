@@ -136,7 +136,7 @@ public sealed partial class OneCodeToplevel
                     case RunTerminalReason.ValidationFailed:
                         _shell.Transcript.AddSystem(rolledBack
                             ? "(validation failed — file changes rolled back)"
-                            : "(validation failed — file changes kept for your review)");
+                            : "(validation failed — file changes kept: review with git status / git diff, then fix forward or revert manually)");
                         if (!string.IsNullOrEmpty(validationSummary))
                             _shell.Transcript.AddSystem(validationSummary!);
                         break;

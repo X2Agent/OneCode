@@ -98,6 +98,10 @@ public sealed class GoalWorkflowCompiler
     public static string ComputeTextHash(string value)
         => WorkflowDefinitionHash.ComputeText(value);
 
+    /// <summary>
+    /// 工具能力 hash 覆盖 MCP 工具。连接变化导致授权面变化时必须显式拒绝 resume，
+    /// 不能让 checkpoint 在不同或新增 MCP 能力下静默继续。
+    /// </summary>
     public static string ComputeToolCapabilityHash(IEnumerable<string> toolNames)
         => ComputeTextHash(JsonSerializer.Serialize(toolNames
             .Where(name => !string.IsNullOrWhiteSpace(name))

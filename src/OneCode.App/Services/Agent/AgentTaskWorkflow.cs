@@ -18,7 +18,9 @@ public sealed record AgentWorkflowTask(
     string? Instructions = null,
     IReadOnlyList<string>? AllowedTools = null,
     // 工作目录覆盖（GOAL 隔离 worktree 场景）。null 时 fork 使用会话工作目录访问器。
-    string? WorkingDirectory = null)
+    string? WorkingDirectory = null,
+    // 用量归属会话；GOAL DAG 显式传递目标会话，避免回退到当前前台会话。
+    SessionId? UsageSessionId = null)
 {
     /// <summary>Returns the normalized dependency list supplied by the approved graph.</summary>
     public IReadOnlyList<string> Dependencies { get; } = DependsOn ?? [];
@@ -293,7 +295,8 @@ internal sealed class AgentTaskExecutor(
                     ParentCapabilities: parentCapabilities,
                     Instructions: task.Instructions,
                     AllowedToolNames: task.AllowedTools,
-                    WorkingDirectory: task.WorkingDirectory),
+                    WorkingDirectory: task.WorkingDirectory,
+                    UsageSessionId: task.UsageSessionId),
                 cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
 

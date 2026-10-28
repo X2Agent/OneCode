@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using OneCode.App.Services.Agent;
 using OneCode.App.Session;
 
 namespace OneCode.App.Tools;
@@ -68,7 +69,10 @@ public sealed class ExitWorktreeTool
         File.Delete(statePath);
 
         if (_sessionManager is not null && !string.IsNullOrEmpty(originalCwd))
+        {
             await _sessionManager.ChangeWorkingDirectoryAsync(originalCwd, ct).ConfigureAwait(false);
+            OneCodeAgentRunContext.WorkingDirectoryOverride = originalCwd;
+        }
 
         return ToolResult.JsonSuccess(new
         {

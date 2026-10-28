@@ -26,6 +26,15 @@ public sealed class GoalWorkflowTests : IAsyncLifetime
     }
 
     [Fact]
+    public void ToolCapabilityHash_McpCapabilityChange_InvalidatesCheckpointContract()
+    {
+        var withMcp = GoalWorkflowCompiler.ComputeToolCapabilityHash(["Read", "mcp__server__tool"]);
+        var withoutMcp = GoalWorkflowCompiler.ComputeToolCapabilityHash(["Read"]);
+
+        withMcp.Should().NotBe(withoutMcp, "resume 不得在 MCP 授权面变化后静默继续");
+    }
+
+    [Fact]
     public async Task DynamicLoop_UsesStableExecutorsAndProcessesInsertedStep()
     {
         var runtime = new DynamicRuntime();

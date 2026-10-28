@@ -117,7 +117,7 @@ public static class PermissionAndLimitMiddleware
         var permContext = new ToolPermissionContext
         {
             Mode = options.PermissionMode,
-            WorkingDirectory = options.WorkingDirectory,
+            WorkingDirectory = options.ResolveWorkingDirectory(),
             RulesBySource = rulesBySource,
             AdditionalWorkingDirectories = additionalWorkingDirectories,
         };

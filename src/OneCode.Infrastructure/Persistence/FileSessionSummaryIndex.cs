@@ -82,6 +82,10 @@ public sealed class FileSessionSummaryIndex : ISessionSummaryIndex
         var temporary = $"{path}.tmp-{Guid.NewGuid():N}";
         try
         {
+            await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
+            if (SessionDeletionGuard.IsDeleted(_indexDirectory, stamp.SessionId))
+                return;
+
             var entry = new SummaryIndexEntry(
                 summary.Id.Value,
                 summary.Title,
@@ -143,21 +147,14 @@ public sealed class FileSessionSummaryIndex : ISessionSummaryIndex
     }
 
     /// <inheritdoc />
-    public Task RemoveAsync(SessionId sessionId, CancellationToken ct = default)
+    public async Task RemoveAsync(SessionId sessionId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        try
-        {
-            var path = GetIndexFile(sessionId);
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogDebug(ex, "会话摘要索引删除失败：{SessionId}", sessionId);
-        }
-
-        return Task.CompletedTask;
+        SessionDeletionGuard.MarkDeleted(_indexDirectory, sessionId);
+        var path = GetIndexFile(sessionId);
+        await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
+        if (File.Exists(path))
+            File.Delete(path);
     }
 
     private string GetIndexFile(SessionId sessionId) =>

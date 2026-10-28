@@ -35,7 +35,7 @@ public static class HookMiddleware
         return async (_, ctx, next, ct) =>
         {
             var sessionId = options.ConversationId?.ToString();
-            var cwd = options.WorkingDirectory;
+            var cwd = options.ResolveWorkingDirectory();
             var toolUseId = ctx.CallContent?.CallId;
 
             if (options.HookExecutionService is not null && ctx.Function is not null)

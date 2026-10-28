@@ -353,11 +353,33 @@ public sealed class PermissionCheckerBoundaryTests
             result.Message.Should().Contain(expectedMessageFragment);
     }
 
-    // 未知工具各模式策略（AllowWithPathValidation / EvaluateRules）
+    [Fact]
+    public async Task CheckAsync_WindowsDefaultShell_PowerShellWrite_IsDestructive()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = new ToolPermissionContext
+        {
+            Mode = PermissionMode.GoalAuto,
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        var input = ParseJson(@"{""command"":""Set-Content -Path ./a.txt -Value data""}");
+
+        var result = await _sut.CheckAsync("Bash", input, ctx, ct);
+
+        result.Decision.Should().Be(PermissionDecision.Deny,
+            "Windows 默认持久 Shell 实际执行 pwsh，不能按 Bash 方言自动放行写命令");
+    }
+
+    // 未知工具各模式策略：Default 无规则回落 Ask；GoalAuto 无审批通道（Ask 会被
+    // PermissionAndLimit fail-safe 拒绝），因此按路径校验后放行——否则运行时登记的
+    // MCP（mcp__*）与扩展工具在 GOAL 里一律不可用。
 
     [Theory]
     [InlineData(PermissionMode.Default, "MysteryTool", PermissionDecision.Ask)]
     [InlineData(PermissionMode.GoalAuto, "MysteryTool", PermissionDecision.Allow)]
+    [InlineData(PermissionMode.GoalAuto, "mcp__playwright__browser_click", PermissionDecision.Allow)]
     public async Task CheckAsync_UnknownTool_PerModePolicy(
         PermissionMode mode, string toolName, PermissionDecision expected)
     {
@@ -373,6 +395,29 @@ public sealed class PermissionCheckerBoundaryTests
 
         result.Decision.Should().Be(expected,
             $"{mode} mode should {expected} unknown tool");
+    }
+
+    [Fact]
+    public async Task CheckAsync_GoalAutoUnknownTool_AlwaysDenyRuleStillWins()
+    {
+        // 反证锚点：GoalAuto 的默认放行不得覆盖用户规则——把 Default 的约定搬回
+        // GoalAuto 之外，或让 AllowWithPathValidation 跳过 EvaluateRules，本用例即红。
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = new ToolPermissionContext
+        {
+            Mode = PermissionMode.GoalAuto,
+            WorkingDirectory = Path.GetTempPath(),
+            RulesBySource = new Dictionary<string, PermissionRuleGroup>
+            {
+                ["test"] = new PermissionRuleGroup(
+                    AlwaysDeny: [new PermissionRule("mcp__playwright__browser_click")])
+            },
+        };
+
+        var result = await _sut.CheckAsync("mcp__playwright__browser_click", ParseJson("{}"), ctx, ct);
+
+        result.Decision.Should().Be(PermissionDecision.Deny,
+            "用户 AlwaysDeny 规则优先于 GoalAuto 的未知工具默认放行");
     }
 
     [Theory]

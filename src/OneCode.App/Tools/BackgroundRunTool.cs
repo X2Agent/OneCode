@@ -44,8 +44,9 @@ public sealed class BackgroundRunTool
         if (pathValidationError is not null)
             return ToolResult.Error(pathValidationError);
 
-        // 通过 PathsHelper.SafeResolve 校验 cwd
-        var cwdResult = PathsHelper.SafeResolve(cwd, _wd.WorkingDirectory);
+        // 通过 PathsHelper.SafeResolve 校验 cwd（含 /add-dir 附加目录——
+        // 漏传会把合法的 add-dir 工作目录误判为越界拒绝）
+        var cwdResult = PathsHelper.SafeResolve(cwd, _wd.WorkingDirectory, _wd.AdditionalDirectories);
         if (!cwdResult.IsSuccess)
             return ToolResult.Error($"Error: working directory '{cwd}' is outside the allowed workspace");
         // IsSuccess 已保证 Value 非空

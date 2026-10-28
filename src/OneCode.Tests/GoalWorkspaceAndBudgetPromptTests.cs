@@ -155,6 +155,49 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ExecuteNextAsync_BudgetExhausted_ContinueWithExtraBudget_PersistsExtensionForResume()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "runs-extend-persist"));
+        var step1 = CreateStep(1);
+        var step2 = CreateStep(2);
+        var run = await CreateClaimedRunAsync(store, [step1, step2], totalAttempts: 5);
+        var extendDecisions = new StubBudgetDecisionService(GoalBudgetDecision.ContinueWithExtraBudget);
+        var runtime = CreateRuntimeWithPrompt(
+            store, Channel.CreateUnbounded<QueryEvent>().Writer, maxAttempts: 5, extendDecisions);
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, [step1, step2], [], run.Budget, 0, false, GoalRunState.Executing);
+
+        var next = await runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+        next.Plan[0].State.Should().Be(GoalStepState.Completed);
+
+        // 追加决定必须随 run 落盘：只改内存会让 /resume 重建默认上限、立刻再度触顶。
+        // attempts 扩展量 = max(5+10, 5+3) = 15（ExtraAttemptsPerExtension=10，见 GoalWorkflowRuntime）。
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.BudgetLimits.Should().NotBeNull("预算追加必须落盘才能跨进程存活");
+        persisted.BudgetLimits!.MaxSubGoalAttempts.Should().Be(15);
+
+        // 模拟重启 + /resume：全新 runtime 绑定落盘 run，预算端口改返回 Pause——
+        // 扩展若未持久化（只改内存），重绑后预算回退到 5 会再次触发预算询问并把 step2 置为 Paused。
+        var resumeDecisions = new StubBudgetDecisionService(GoalBudgetDecision.Pause);
+        var resumeChannel = Channel.CreateUnbounded<QueryEvent>();
+        var resumeRuntime = CreateRuntimeWithPrompt(
+            store, resumeChannel.Writer, maxAttempts: 5, resumeDecisions);
+        await resumeRuntime.BindAsync(persisted, 7, TestContext.Current.CancellationToken);
+        var resumeState = new GoalWorkflowState(
+            persisted.Id, persisted.Plan, persisted.Executions, persisted.Budget, 1, false, GoalRunState.Executing);
+
+        var resumed = await resumeRuntime.ExecuteNextAsync(resumeState, TestContext.Current.CancellationToken);
+
+        resumeDecisions.LastContext.Should().BeNull("持久化的扩展预算随世代绑定恢复，resume 不得再次触发预算询问");
+        resumed.Plan[1].State.Should().Be(GoalStepState.Completed);
+        var progressEvents = new List<QueryEvent>();
+        while (resumeChannel.Reader.TryRead(out var progressEvent))
+            progressEvents.Add(progressEvent);
+        progressEvents.OfType<GoalPlanUpdatedEvent>().Last().Budget!.MaxSubGoalAttempts
+            .Should().Be(15, "进度与预警必须使用恢复后的预算，而不是启动配置的旧上限");
+    }
+
+    [Fact]
     public async Task ExecuteNextAsync_BudgetExhausted_SkipCurrentStep_MarksStepSkippedAndAdvancesCursor()
     {
         var store = new JsonGoalRunStore(Path.Combine(_root, "runs-skip"));
@@ -410,6 +453,37 @@ public sealed class GoalWorkspaceAndBudgetPromptTests : IAsyncLifetime
         runOptions.SystemPrompt.Should().Be(options.SystemPrompt);
         runOptions.HarnessInstructions.Should().Be("Harness instructions");
         cacheSafe.SystemPrompt.Should().Be(options.SystemPrompt);
+    }
+
+    [Fact]
+    public async Task BuildSubGoalRunOptions_CarriesUsageSessionAndBudgetGuardLimit()
+    {
+        // 反证锚点：这两个字段缺失时，GOAL 子目标 run 既不挂 BudgetGuard（无中途熔断）、
+        // 用量也只进进程级累计（会话桶与 /status stats 全空）。
+        var promptManager = Substitute.For<OneCode.Core.Prompt.IPromptManager>();
+        promptManager.GetPromptAsync(PromptComposer.HarnessPromptName, Arg.Any<CancellationToken>())
+            .Returns("Harness instructions");
+        var goal = new GoalItem { Id = 1, Description = "D", SuccessCriteria = "C" };
+        var sessionId = SessionId.NewId();
+        var options = new GoalRunOptions
+        {
+            Goal = "G",
+            WorkingDirectory = _root,
+            ModelId = "m",
+            Tools = [AIFunctionFactory.Create(() => "ok", "Read")],
+            SessionId = sessionId,
+            MaxBudgetTokens = 500_000,
+        };
+        using var tx = new EditTransaction();
+
+        var runOptions = await GoalSubGoalExecutor.BuildSubGoalRunOptionsAsync(
+            promptManager, goal, options, tx, "p", static _ => { },
+            TestContext.Current.CancellationToken);
+
+        runOptions.UsageSessionId.Should().Be(sessionId, "子目标用量必须归属目标会话桶");
+        runOptions.MaxBudgetTokens.Should().Be(500_000, "子目标 run 必须挂 BudgetGuard 熔断");
+        runOptions.ConversationId.Should().BeNull("子目标不从转录播种历史（UsageSessionId 专门承担记账）");
+        runOptions.SuppressToolApproval.Should().BeTrue("GOAL 子目标保持无人值守语义");
     }
 
     private static GoalStepSnapshot CreateStep(int id) => new(

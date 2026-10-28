@@ -1,3 +1,4 @@
+using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Core.Workflows;
 using OneCode.Infrastructure.Persistence;
@@ -43,6 +44,27 @@ public sealed class JsonGoalRunStore : IGoalRunStore
                 return Task.FromResult<GoalRun?>(archived);
         }
         return Task.FromResult<GoalRun?>(null);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveSessionAsync(SessionId sessionId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        SessionDeletionGuard.MarkDeleted(_baseDirectory, sessionId);
+        var gate = _gates.GetOrAdd(sessionId.Value, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sessionLockPath = Path.Combine(_baseDirectory, sessionId.Value) + ".lock";
+            await using var fileLock = await DurableFile.AcquireLockAsync(sessionLockPath, ct: ct).ConfigureAwait(false);
+            var directory = Path.Combine(_baseDirectory, sessionId.Value);
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public Task SaveAsync(GoalRun run, long expectedVersion, CancellationToken ct = default)
@@ -101,8 +123,10 @@ public sealed class JsonGoalRunStore : IGoalRunStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            var sessionLockPath = Path.Combine(_baseDirectory, run.SessionId.Value) + ".lock";
+            await using var fileLock = await DurableFile.AcquireLockAsync(sessionLockPath, ct: ct).ConfigureAwait(false);
+            SessionDeletionGuard.ThrowIfDeleted(_baseDirectory, run.SessionId);
             var path = GetRunFilePath(run.SessionId);
-            await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
             var current = LoadCurrent(path);
             if (current is not null && current.IsTerminal && expectedVersion == 0 && current.Id != run.Id)
             {

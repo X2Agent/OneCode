@@ -16,10 +16,15 @@ public sealed class SessionCommandTests
     private static readonly string FullIdC = "1a2b3c4d5e6f7a889900112233445566";
 
     private readonly ISessionManager _manager = Substitute.For<ISessionManager>();
-    private readonly ISessionEventStore _eventStore = Substitute.For<ISessionEventStore>();
+    private readonly ISessionDataCleaner _dataCleaner = Substitute.For<ISessionDataCleaner>();
+
+    public SessionCommandTests() =>
+        // 默认全部成功；失败步骤/残留 worktree 由各自用例覆盖返回值。
+        _dataCleaner.RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>())
+            .Returns(SessionDataRemovalResult.Empty);
 
     private SessionCommand CreateCommand() =>
-        new(_manager, _eventStore, new NewCommand(_manager));
+        new(_manager, _dataCleaner, new NewCommand(_manager));
 
     private static ConversationSummary Summary(string fullId, string title, string mode = "plan") =>
         new(new SessionId(fullId), title, "gpt-5", 7, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, new TokenUsage(0, 0), mode);
@@ -100,11 +105,11 @@ public sealed class SessionCommandTests
 
         result.Should().BeOfType<CommandResult.TextResult>()
             .Which.Value.Should().Contain("要删的会话").And.Contain("--force");
-        await _eventStore.DidNotReceive().DeleteAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
+        await _dataCleaner.DidNotReceive().RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task DeleteSession_WithForce_DeletesEventLog()
+    public async Task DeleteSession_WithForce_CascadesAllSessionData()
     {
         var ct = TestContext.Current.CancellationToken;
         SetupSessions(Summary(FullIdA, "要删的会话"));
@@ -113,8 +118,39 @@ public sealed class SessionCommandTests
 
         result.Should().BeOfType<CommandResult.TextResult>()
             .Which.Value.Should().Contain("Deleted session");
-        await _eventStore.Received(1).DeleteAsync(
+        // 级联断言：此前只删事件日志，摘要索引/用量桶/三模式 run 聚合全成孤儿。
+        await _dataCleaner.Received(1).RemoveAsync(
             Arg.Is<SessionId>(id => id.Value == FullIdA), ct);
+    }
+
+    [Fact]
+    public async Task DeleteSession_CleanupStepFailed_ReportsFailedStepsInsteadOfSilentHalfDelete()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SetupSessions(Summary(FullIdA, "半删除会话"));
+        _dataCleaner.RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>())
+            .Returns(new SessionDataRemovalResult(["build runs"], []));
+
+        var result = await CreateCommand().ExecuteAsync(["delete", "4f8a", "--force"], ct);
+
+        result.Should().BeOfType<CommandResult.TextResult>()
+            .Which.Value.Should().Contain("cleanup steps failed").And.Contain("build runs");
+    }
+
+    [Fact]
+    public async Task DeleteSession_GoalWorktreeLeftover_PrintsManualRemovalCommand()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SetupSessions(Summary(FullIdA, "带 worktree 的会话"));
+        const string worktree = @"E:\repo.worktree\goal-4f8a";
+        _dataCleaner.RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>())
+            .Returns(new SessionDataRemovalResult([], [worktree]));
+
+        var result = await CreateCommand().ExecuteAsync(["delete", "4f8a", "--force"], ct);
+
+        result.Should().BeOfType<CommandResult.TextResult>()
+            .Which.Value.Should().Contain(worktree)
+            .And.Contain("git worktree remove");
     }
 
     [Fact]
@@ -128,7 +164,7 @@ public sealed class SessionCommandTests
 
         result.Should().BeOfType<CommandResult.ErrorResult>()
             .Which.Message.Should().Contain("foreground");
-        await _eventStore.DidNotReceive().DeleteAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
+        await _dataCleaner.DidNotReceive().RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -143,7 +179,7 @@ public sealed class SessionCommandTests
 
         result.Should().BeOfType<CommandResult.ErrorResult>()
             .Which.Message.Should().Contain("background");
-        await _eventStore.DidNotReceive().DeleteAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
+        await _dataCleaner.DidNotReceive().RemoveAsync(Arg.Any<SessionId>(), Arg.Any<CancellationToken>());
     }
 
     // ── list ──

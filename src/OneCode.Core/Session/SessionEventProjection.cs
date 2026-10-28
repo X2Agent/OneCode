@@ -55,7 +55,6 @@ public static class SessionEventProjection
                     latestSnapshot.TotalUsage,
                     latestSnapshot.CreatedAt,
                     latestSnapshot.LastActivityAt,
-                    latestSnapshot.Branch,
                     latestSnapshot.Metadata)
             : latestStarted;
     }

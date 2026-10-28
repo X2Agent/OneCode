@@ -123,6 +123,10 @@ AgentTool.RunAgentAsync
 Goal 模式的子目标执行不经 `ForkedAgentRunner`：子目标经 `GoalSubGoalExecutor` 构造 `MainAgentRunOptions`——
 `system/harness` 底座 + `ModeInstructionProvider` 注入的 `system/goal` 提示词、按 `RequiredTools` 白名单裁剪工具（**fail-closed**：无匹配即抛错，
 不回退全量）、共享事务、`MaxTurnsPerSubGoal`；进度经 `GoalContextProvider` 注入后续子目标上下文。
+GOAL 的工具面与 BUILD/PLAN 同一真相源：入口经 `ToolCapabilityResolver` 解析（全量 − `PlanExclusive`），
+子目标侧再经防御纵深闸无条件摘除派工工具与 `PlanExclusive` 工具（`RequiredTools` 为 `*` 或显式点名也带不进子目标）。
+步内 DAG 与单子目标共用同一过滤结果、`AllowedPaths` 提示和目标会话用量归属；只读子任务再与只读工具集取交集。
+MCP 工具同样纳入 checkpoint 能力 hash，连接变化导致授权面变化时必须显式处理，不能静默 resume。
 
 ---
 

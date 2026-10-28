@@ -55,7 +55,7 @@ public sealed class ControlledBuildAttemptWorkflowCompiler
     {
         ArgumentNullException.ThrowIfNull(buildRun);
         ArgumentNullException.ThrowIfNull(runtime);
-        if (buildRun.State is not (BuildRunState.Implementing or BuildRunState.Verifying or BuildRunState.Recovering))
+        if (buildRun.State is not (BuildRunState.Implementing or BuildRunState.Verifying))
             throw new InvalidOperationException($"BuildRun '{buildRun.Id}' is not ready for an execution attempt.");
         if (attempt <= 0)
             throw new ArgumentOutOfRangeException(nameof(attempt));
@@ -280,7 +280,7 @@ public sealed class ControlledBuildAttemptHost(
             {
                 var current = await buildRunStore.LoadByIdAsync(buildRun.Id, callbackCt).ConfigureAwait(false)
                     ?? throw new InvalidOperationException($"BuildRun '{buildRun.Id}' was not found.");
-                if (current.State is not (BuildRunState.Implementing or BuildRunState.Verifying or BuildRunState.Recovering))
+                if (current.State is not (BuildRunState.Implementing or BuildRunState.Verifying))
                 {
                     throw new InvalidOperationException(
                         $"BuildRun '{buildRun.Id}' cannot start an attempt from state '{current.State}'.");

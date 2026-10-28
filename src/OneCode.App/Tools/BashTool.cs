@@ -86,18 +86,25 @@ public sealed class BashTool
         if (!Directory.Exists(workingDirectory))
             return ToolResult.Error($"Error: working directory not found: {workingDirectory}");
 
+        // Windows 上持久会话 shell 实际执行 pwsh（PowerShell 语法），与请求方言无关；
+        // 路径提取与破坏性告警必须按「实际执行的语法」选择分类器，否则 pwsh 命令
+        // （如 Set-Location）会走 bash 分类器漏掉路径校验。
+        var isPowerShellSyntax = ShellExecutionDialect.UsesPowerShell(shell);
+
         var pathValidationError = ShellExecutionHelper.ValidateReferencedPaths(
             command, workingDirectory,
-            isPowerShell ? PowerShellCommandClassifier.ExtractReferencedPaths : BashCommandClassifier.ExtractReferencedPaths,
+            isPowerShellSyntax ? PowerShellCommandClassifier.ExtractReferencedPaths : BashCommandClassifier.ExtractReferencedPaths,
             _wd.AdditionalDirectories);
         if (pathValidationError is not null)
             return ToolResult.Error(pathValidationError);
 
+        // sed 模式检查按请求方言（isPowerShell）而非实际执行器：bash 方言在 Windows 上
+        // 也可能经 Git Bash 等装有 sed，危险模式同样成立，维持原有 fail-closed。
         var sedError = isPowerShell ? null : ValidateSedCommand(command);
         if (sedError is not null)
             return ToolResult.Error(sedError);
 
-        var warning = isPowerShell
+        var warning = isPowerShellSyntax
             ? PowerShellCommandClassifier.GetDestructiveCommandWarning(command)
             : BashCommandClassifier.GetDestructiveCommandWarning(command);
 
@@ -109,7 +116,8 @@ public sealed class BashTool
                     workingDirectory,
                     isPowerShell ? "powershell" : "bash",
                     timeout,
-                    _sessionManager.ForegroundConversation?.Id),
+                    _sessionManager.ForegroundConversation?.Id,
+                    _wd.AdditionalDirectories?.ToList()),
                 ct).ConfigureAwait(false);
             return ShellExecutionHelper.ToToolResult(shellResult, command, warning);
         }

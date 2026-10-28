@@ -75,4 +75,48 @@ public sealed class BashCommandClassifierTests
         var paths = BashCommandClassifier.ExtractReferencedPaths("");
         paths.Should().BeEmpty();
     }
+
+    [Theory]
+    [InlineData("cd /tmp", new[] { "/tmp" })]
+    [InlineData("cd ..", new[] { ".." })]
+    [InlineData("cd ../..", new[] { "../.." })]
+    [InlineData("cd -L src", new[] { "src" })]
+    [InlineData("pushd /var/log", new[] { "/var/log" })]
+    // 无操作数（切到 $HOME）与 cd -（上一目录）无法静态解析 → "~" fail-closed 标记，
+    // SafeResolve 展开主目录后因越界被拒
+    [InlineData("cd", new[] { "~" })]
+    [InlineData("cd -", new[] { "~" })]
+    public void ExtractReferencedPaths_CdCommand_ExtractsTarget(string command, string[] expected)
+    {
+        BashCommandClassifier.ExtractReferencedPaths(command).Should().Equal(expected);
+    }
+
+    [Fact]
+    public void ExtractReferencedPaths_CdWithVariableTarget_ReturnsOperandForFailClosedValidation()
+    {
+        BashCommandClassifier.ExtractReferencedPaths("cd $OUTSIDE").Should().Equal("$OUTSIDE");
+    }
+
+    [Theory]
+    [InlineData("echo hi > out.txt", "out.txt")]
+    [InlineData("cmd --flag >> logs/out.log", "logs/out.log")]
+    [InlineData("build 1> build.log 2> err.log", "build.log")]
+    [InlineData("cat src.cs > dst.cs", "dst.cs")]
+    public void ExtractReferencedPaths_WriteRedirection_ExtractsFileTarget(string command, string expectedTarget)
+    {
+        BashCommandClassifier.ExtractReferencedPaths(command).Should().Contain(expectedTarget);
+    }
+
+    [Theory]
+    [InlineData("python --version 2>/dev/null")]
+    [InlineData("dotnet build 2>&1")]
+    [InlineData("ls -la 2>nul")]
+    [InlineData("echo ok >&2")]
+    public void ExtractReferencedPaths_StreamDiscardTargets_AreNotExtracted(string command)
+    {
+        // 只允许真实文件目标进入校验：/dev/null、&1、&2、nul、fd 数字都不是越界信号
+        var paths = BashCommandClassifier.ExtractReferencedPaths(command);
+        paths.Should().NotContain("/dev/null").And.NotContain("nul")
+             .And.NotContain("&1").And.NotContain("&2").And.NotContain("2");
+    }
 }

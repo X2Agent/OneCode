@@ -7,7 +7,9 @@ using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Query;
 using OneCode.Core.Prompt;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Api;
 
 namespace OneCode.Tests;
 
@@ -82,6 +84,27 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         result.Attempts.Should().Be(1);
         result.Evaluation.Should().Be("Hard validation and semantic acceptance passed");
         inner.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RunAsync_JudgeUsage_RecordsToLedgerSessionBucket()
+    {
+        // Judge 直连 chatClient 不经 UsageTrackingRunMiddleware——不入账会从预算熔断
+        // 与 /status stats 的会话桶漏计。反证锚点：删除 loop 内的 RecordUsage 调用即红。
+        var judgeUsage = new UsageDetails { InputTokenCount = 900, OutputTokenCount = 120 };
+        var judge = CreateJudgeClient(judgeUsage, "VERDICT: DONE");
+        var ledger = new TokenLedger();
+        var sessionId = SessionId.NewId();
+        var inner = new ScriptedStreamingAgent("All success criteria met.");
+        var loop = CreateLoop(judge, ledger);
+
+        var result = await RunAsync(loop, inner, CreateGoal(), sessionId: sessionId);
+
+        result.Status.Should().Be(GoalStatus.Completed);
+        var bucket = ledger.GetSessionUsage(sessionId);
+        bucket.Should().NotBeNull("Judge 消耗必须归属目标会话桶");
+        bucket!.TotalInputTokens.Should().Be(900);
+        bucket.TotalOutputTokens.Should().Be(120);
     }
 
     [Fact]
@@ -330,11 +353,12 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         result.Evidence!.Validations.Should().Contain(v => v.Gate == "change-scope" && v.Passed);
     }
 
-    private static GoalSubGoalLoop CreateLoop(IChatClient judgeClient)
+    private static GoalSubGoalLoop CreateLoop(IChatClient judgeClient, ITokenLedger? tokenLedger = null)
         => new(
             new GoalSubGoalHardGate(),
             new GoalSubGoalJudge(judgeClient, Substitute.For<IPromptManager>()),
-            NullLoggerFactory.Instance);
+            NullLoggerFactory.Instance,
+            tokenLedger: tokenLedger);
 
     private static GoalItem CreateGoal() => new()
     {
@@ -374,7 +398,8 @@ public sealed class GoalSubGoalLoopTests : IDisposable
         AIAgent inner,
         GoalItem goal,
         IReadOnlyList<GoalToolExecutionEvidence>? toolExecutions = null,
-        IReadOnlyList<string>? modifiedFiles = null)
+        IReadOnlyList<string>? modifiedFiles = null,
+        SessionId? sessionId = null)
     {
         var channel = Channel.CreateUnbounded<QueryEvent>();
         var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
@@ -396,6 +421,7 @@ public sealed class GoalSubGoalLoopTests : IDisposable
                     Goal = goal.Description,
                     WorkingDirectory = _workingDirectory,
                     Tools = [],
+                    SessionId = sessionId,
                 },
                 transaction,
                 channel.Writer,

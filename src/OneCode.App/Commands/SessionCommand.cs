@@ -1,7 +1,5 @@
-using OneCode.Core.Session;
 using OneCode.App.Session;
 using System.Text;
-
 namespace OneCode.App.Commands;
 
 /// <summary>
@@ -13,7 +11,7 @@ namespace OneCode.App.Commands;
 /// </summary>
 public sealed class SessionCommand(
     ISessionManager sessionManager,
-    ISessionEventStore eventStore,
+    ISessionDataCleaner dataCleaner,
     NewCommand newCommand) : Command
 {
     public override string Name => "session";
@@ -125,7 +123,27 @@ public sealed class SessionCommand(
                 $"Run /session delete {idInput} --force to confirm.");
         }
 
-        await eventStore.DeleteAsync(target, ct).ConfigureAwait(false);
-        return CommandResult.Text($"Deleted session {SessionIdResolver.ShortId(target)} ({summary?.Title ?? "未命名"}).");
+        var removal = await dataCleaner.RemoveAsync(target, ct).ConfigureAwait(false);
+        var result = new StringBuilder(
+            $"Deleted session {SessionIdResolver.ShortId(target)} ({summary?.Title ?? "未命名"}) — " +
+            "events, summary index, token bucket, plans, build runs and goal runs removed.");
+
+        // 半删除必须可见：失败步骤不阻断其余清理，但用户要知道哪些数据可能残留。
+        if (removal.FailedSteps.Count > 0)
+        {
+            result.AppendLine();
+            result.Append(CultureInfo.InvariantCulture,
+                $"Warning: cleanup steps failed and may leave data behind: {string.Join(", ", removal.FailedSteps)}.");
+        }
+
+        foreach (var leftover in removal.LeftoverPaths)
+        {
+            result.AppendLine();
+            result.AppendLine(CultureInfo.InvariantCulture, $"Goal worktree kept for manual review: {leftover}");
+            result.Append(CultureInfo.InvariantCulture,
+                $"After confirming nothing needs to be merged, remove it with: git worktree remove \"{leftover}\"");
+        }
+
+        return CommandResult.Text(result.ToString());
     }
 }

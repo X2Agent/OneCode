@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using OneCode.Core.Domain;
 using OneCode.Core.Goals;
 using OneCode.Core.Tokens;
 using System.Runtime.CompilerServices;
@@ -23,6 +24,13 @@ public static class BudgetGuardRunMiddleware
     internal const double LateWarningRatio = 0.9;
 
     /// <summary>
+    /// 预算超支短路文本的稳定前缀。生产者（本类）与消费者（MainAgentRunEvidenceCollector /
+    /// QueryStreamHelpers.ResolveTerminalOutcome）必须引用同一常量，禁止各自内联字面量——
+    /// 文案漂移会让终态识别静默失效。
+    /// </summary>
+    public const string BudgetExceededMarker = "[Budget Exceeded]";
+
+    /// <summary>
     /// 收尾总结注入指令（AllowAlways 决策）：预算耗尽后给模型的最后一个 turn，
     /// 总结已完成部分与剩余工作，不再继续展开新工作（Claude Code task budget 的优雅收尾模式）。
     /// </summary>
@@ -38,10 +46,14 @@ public static class BudgetGuardRunMiddleware
     /// <param name="tokenLedger">ITokenLedger 实例（null 时不执行预算检查）。</param>
     /// <param name="maxBudgetTokens">token 预算上限（可计费口径）。null 时不执行预算检查。</param>
     /// <param name="logger">日志器（可选）。</param>
+    /// <param name="sessionId">
+    /// 预算计量域：非空时按 <b>会话桶</b>可计费口径计量（<c>GetSessionUsage(sid).TotalBillableTokens</c>），
+    /// 使 PLAN/GOAL 的「会话级累计」只累计本会话消耗，不再误用进程级终身累计；
+    /// 为 null（无会话的 headless 路径）时退回进程级累计。
+    /// </param>
     /// <param name="budgetBaselineTokens">
-    /// 预算基线（run 启动时对 ledger 的快照）。检查条件为 <c>GetTotalTokens() - baseline >= limit</c>，
-    /// 即预算只衡量本次 run 的增量消耗。默认 0（会话级累计口径，PLAN/GOAL 使用）；
-    /// BUILD 模式传 run 启动快照，使 Plan 阶段调研消耗不占用计划执行的预算。
+    /// 预算基线（run 启动时对同一计量域的快照）。检查条件为 <c>当前量 - baseline >= limit</c>。
+    /// BUILD 模式传 run 启动快照（单次 run 预算）；PLAN/GOAL 传 0（会话级累计）。
     /// </param>
     /// <param name="onBudgetExceeded">
     /// 预算 100% 消耗时的用户询问回调（交互模式），经 <see cref="IBudgetDecisionService"/> 端口
@@ -61,7 +73,8 @@ public static class BudgetGuardRunMiddleware
             ILogger? logger,
             long budgetBaselineTokens = 0,
             Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? onBudgetExceeded = null,
-            Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null)
+            Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null,
+            SessionId? sessionId = null)
     {
         // 无 ITokenLedger 或无预算上限 → 不执行预算检查（测试/无预算场景）
         if (tokenLedger is null || maxBudgetTokens is null)
@@ -80,8 +93,12 @@ public static class BudgetGuardRunMiddleware
         }
 
         var budgetLimit = maxBudgetTokens.Value;
+        // 计量域：有会话 → 会话桶可计费口径；无会话（headless）→ 进程级累计。
+        long CurrentTokens() => sessionId is { } sid
+            ? tokenLedger.GetSessionUsage(sid)?.TotalBillableTokens ?? 0
+            : tokenLedger.GetTotalTokens();
         // 基线检查：只对超出基线的增量计预算。防御 baseline > current 的极端情况（外部重置账本）。
-        var baseline = Math.Min(budgetBaselineTokens, tokenLedger.GetTotalTokens());
+        var baseline = Math.Min(budgetBaselineTokens, CurrentTokens());
 
         // run 级可变状态：交互决策（加倍放行/收尾）只影响当前 pipeline 实例（即本次 run）
         var effectiveLimit = budgetLimit;
@@ -94,7 +111,7 @@ public static class BudgetGuardRunMiddleware
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, CancellationToken ct)
         {
-            var currentTokens = tokenLedger.GetTotalTokens();
+            var currentTokens = CurrentTokens();
             var delta = currentTokens - baseline;
 
             // 收尾总结之后：后续 run 一律硬停（不再询问、不再调用 agent）
@@ -143,7 +160,7 @@ public static class BudgetGuardRunMiddleware
             IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options,
             AIAgent agent, [EnumeratorCancellation] CancellationToken ct)
         {
-            var currentTokens = tokenLedger.GetTotalTokens();
+            var currentTokens = CurrentTokens();
             var delta = currentTokens - baseline;
 
             // 收尾总结之后：后续 run 一律硬停（不再询问、不再调用 agent）
@@ -231,7 +248,7 @@ public static class BudgetGuardRunMiddleware
     /// 构造预算超支提示消息。
     /// </summary>
     internal static string FormatBudgetExceededMessage(long currentTokens, long budgetLimit)
-        => $"[Budget Exceeded] Billable token usage {currentTokens:N0} (non-cached input + output + cache write + 10% cache read) has reached the budget limit {budgetLimit:N0}. Agent run was not executed to prevent runaway usage. Increase --max-budget-tokens or reset the session to continue.";
+        => $"{BudgetExceededMarker} Billable token usage {currentTokens:N0} (non-cached input + output + cache write + 10% cache read) has reached the budget limit {budgetLimit:N0}. Agent run was not executed to prevent runaway usage. Increase --max-budget-tokens or reset the session to continue.";
 
     /// <summary>
     /// 创建预算超支的短路 <see cref="AgentResponse"/>。

@@ -77,7 +77,6 @@ public enum BuildRunState
     Planned,
     Implementing,
     Verifying,
-    Recovering,
     Accepting,
     Completed,
     Failed,

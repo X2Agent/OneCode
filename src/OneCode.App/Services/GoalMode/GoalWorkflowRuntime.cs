@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using OneCode.App.Services.Agent;
 using OneCode.App.Query;
 using OneCode.Core.Goals;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
 using static OneCode.App.Services.GoalMode.GoalWorkflowStateMapper;
@@ -13,7 +14,8 @@ public sealed record GoalWorkflowRuntimeContext(
     GoalRunOptions Options,
     ChannelWriter<QueryEvent> EventWriter,
     Func<EditTransaction> TransactionFactory,
-    bool PromptOnBudgetExhausted = false);
+    bool PromptOnBudgetExhausted = false,
+    ITokenLedger? TokenLedger = null);
 
 public interface IGoalWorkflowRuntimeFactory
 {
@@ -64,6 +66,27 @@ internal sealed class GoalWorkflowRuntime(
     private GoalRun? _run;
     private long _fencingToken;
 
+    /// <summary>
+    /// 分解/Replan 直连模型调用的 token 入账。这些调用不走 AgentPipelineBuilder
+    ///（UsageTrackingRunMiddleware 挂载点），不在此入账就会从 ITokenLedger
+    ///（预算熔断 + /status stats 的唯一事实源）漏计；已知残留：结构化请求被网关
+    /// 硬拒后重试的首请求 usage 无法从异常中提取（与 Run 中间件非流式异常路径同款限制）。
+    /// </summary>
+    private void RecordPlanningUsage(string? modelId, long inputTokens, long outputTokens)
+    {
+        if (context.TokenLedger is null || _run is null)
+            return;
+        if (inputTokens <= 0 && outputTokens <= 0)
+            return;
+
+        context.TokenLedger.RecordUsage(
+            _run.SessionId,
+            new UsageRecord(
+                modelId ?? string.Empty,
+                checked((int)Math.Min(int.MaxValue, inputTokens)),
+                checked((int)Math.Min(int.MaxValue, outputTokens))));
+    }
+
     public async Task BindAsync(GoalRun run, long fencingToken, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -72,13 +95,21 @@ internal sealed class GoalWorkflowRuntime(
         // B4：每次世代绑定把活动时间锚定为 now——Paused/进程离线区间不计入墙钟
         // （否则 resume 后第一次 RollForwardWallClock 会把整段离线时间一次性计入，
         // 立即再次触发 ShouldForceTerminate，形成「resume 即暂停」空转）。
-        if (run.Budget.LastActivityAt is not null)
-        {
-            run = run with { Budget = run.Budget with { LastActivityAt = DateTimeOffset.UtcNow } };
-            await goalRunStore.SaveFencedAsync(run, run.Version, fencingToken, ct).ConfigureAwait(false);
-        }
+        // 锚点保存必须经 SaveAsync（落盘后重载 _run）：SaveFencedAsync 是 CAS（文件版本 +1），
+        // 直写不重载会让 _run 停在旧版本，本世代第一次 fenced save 必然版本冲突。
         _run = run;
         _fencingToken = fencingToken;
+        if (run.Budget.LastActivityAt is not null)
+        {
+            await SaveAsync(
+                run with { Budget = run.Budget with { LastActivityAt = DateTimeOffset.UtcNow } },
+                ct).ConfigureAwait(false);
+        }
+        // 用户批准过的预算追加已随 run 落盘：世代绑定按持久化上限重建执行预算，
+        // 避免「扩展只改内存、进程重启后 /resume 再度触顶」。
+        if (run.BudgetLimits is { } limits)
+            _budget = limits.ToGoalBudget();
+        _progress.UpdateBudget(_budget);
     }
 
     public async Task<GoalWorkflowState> PlanAsync(GoalWorkflowInput input, CancellationToken ct)
@@ -104,6 +135,7 @@ internal sealed class GoalWorkflowRuntime(
             input.Goal,
             input.ModelId,
             ct).ConfigureAwait(false);
+        RecordPlanningUsage(input.ModelId, result.InputTokens, result.OutputTokens);
         var plan = result.Plan.Goals.Select(ToSnapshot).ToArray();
         var budget = run.Budget with
         {
@@ -164,7 +196,7 @@ internal sealed class GoalWorkflowRuntime(
             var decision = await PromptBudgetDecisionAsync(reason, usage, step.Description, ct).ConfigureAwait(false);
             if (decision == GoalBudgetDecision.ContinueWithExtraBudget)
             {
-                ExtendBudget(usage);
+                await ExtendBudgetAsync(usage, ct).ConfigureAwait(false);
                 _progress.Progress("已追加预算额度，继续执行");
                 continue;
             }
@@ -247,6 +279,8 @@ internal sealed class GoalWorkflowRuntime(
                     nextId,
                     context.Options.ModelId,
                     ct).ConfigureAwait(false);
+                if (decomposition is { })
+                    RecordPlanningUsage(context.Options.ModelId, decomposition.Value.InputTokens, decomposition.Value.OutputTokens);
                 if (decomposition is { SubGoals.Count: > 0 })
                 {
                     var expanded = state.Plan.ToList();
@@ -356,6 +390,8 @@ internal sealed class GoalWorkflowRuntime(
                     applied.Executions.Select(ToSubGoalExecution).ToArray(),
                     context.Options.ModelId,
                     ct).ConfigureAwait(false);
+                if (replan is { })
+                    RecordPlanningUsage(context.Options.ModelId, replan.Value.InputTokens, replan.Value.OutputTokens);
                 if (replan is { RemainingGoals.Count: > 0 })
                 {
                     // 失败步保留在 plan 中（聚合不变式：回执引用的步骤必须存在于 plan），
@@ -423,7 +459,7 @@ internal sealed class GoalWorkflowRuntime(
             ct).ConfigureAwait(false);
     }
 
-    private void ExtendBudget(GoalBudgetUsage usage)
+    private async Task ExtendBudgetAsync(GoalBudgetUsage usage, CancellationToken ct)
     {
         var minRequiredAttempts = usage.TotalAttempts + GoalLoopDefaults.MaxAttemptsPerSubGoal;
         var nextAttempts = Math.Max(_budget.MaxSubGoalAttempts + ExtraAttemptsPerExtension, minRequiredAttempts);
@@ -443,6 +479,15 @@ internal sealed class GoalWorkflowRuntime(
             MaxWallClock = nextWallClock,
         };
         _progress.UpdateBudget(_budget);
+
+        // 追加决定随 run 落盘：进程重启 + /resume 时 BindAsync 按持久化上限重建，不再丢失。
+        if (_run is { } extended)
+        {
+            await SaveAsync(extended with
+            {
+                BudgetLimits = GoalBudgetLimits.FromGoalBudget(_budget),
+            }, ct).ConfigureAwait(false);
+        }
     }
 
     public async Task<GoalWorkflowOutput> CompleteAsync(GoalWorkflowState state, CancellationToken ct)

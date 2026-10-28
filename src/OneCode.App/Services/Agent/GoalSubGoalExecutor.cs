@@ -57,7 +57,7 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             gateDependencies.VerificationProvider,
             gateDependencies.DiagnosticRegistry);
         var judge = new GoalSubGoalJudge(chatClient, promptManager);
-        _loop = new GoalSubGoalLoop(hardGate, judge, loggerFactory, todoProjection);
+        _loop = new GoalSubGoalLoop(hardGate, judge, loggerFactory, todoProjection, gateDependencies.TokenLedger);
     }
 
     public async Task<SubGoalExecution> ExecuteSubGoalWithLoopStreamingAsync(
@@ -178,6 +178,10 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             Tools = filteredTools,
             WorkingMode = WorkingMode.Goal,
             SharedTransaction = sharedTransaction,
+            // 记账进目标会话桶（ConversationId 保持 null：子目标不从转录播种历史）；
+            // 预算上限与 BUILD/PLAN 同源，子目标 run 也有 BudgetGuard 熔断兜底。
+            UsageSessionId = options.SessionId,
+            MaxBudgetTokens = options.MaxBudgetTokens,
             // 同一事件同时进入 UI 和确定性验证证据收集器。
             OrchestrationEventSink = evt =>
             {
@@ -208,19 +212,22 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     /// - RequiredTools 包含 "*" → 返回全量工具集（显式通配）
     /// - 否则 → 验证声明的工具名至少命中一个非派工工具，随后并入 <see cref="BaselineWorkspaceTools"/> 保底工作区基础工具
     /// - 声明的工具名无一命中 → 抛出异常（fail-closed），不回退到全量工具集
-    /// 所有路径无条件摘除派工工具（<see cref="ToolCapabilitySet.SubAgentDispatchTools"/>）：
-    /// 子目标不可再派工，与「嵌套派工深度上限 1」的 fork 路径语义一致
-    ///（docs/sub-agents.md「所有子代理的工具面无条件摘除」）。
+    /// 所有路径无条件摘除子目标不可用工具（<see cref="ToolCapabilitySet.SubAgentDispatchTools"/>
+    /// 与 PlanExclusive 类别工具）：
+    /// - 派工工具（Agent / ParallelAgents）——子目标不可再派工，与「嵌套派工深度上限 1」的
+    ///   fork 路径语义一致（docs/sub-agents.md「所有子代理的工具面无条件摘除」）
+    /// - Plan 专属工具（如 SubmitPlan）——防御纵深：上游 GOAL 工具面已按模式裁剪，
+    ///   此处兜底 RequiredTools 显式点名或 "*" 通配也带不进子目标
     /// </summary>
     internal static IList<AITool> FilterToolsForSubGoal(
         IList<AITool> allTools,
         IReadOnlyList<string>? requiredTools)
     {
         if (requiredTools is null || requiredTools.Count == 0)
-            return WithoutSubAgentDispatchTools(allTools);
+            return WithoutSubGoalUnavailableTools(allTools);
 
         if (requiredTools.Contains("*"))
-            return WithoutSubAgentDispatchTools(allTools);
+            return WithoutSubGoalUnavailableTools(allTools);
 
         var requestedSet = new HashSet<string>(requiredTools, StringComparer.Ordinal);
         var requestedMatches = allTools
@@ -238,15 +245,16 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 "Fix the plan or use '*' to explicitly allow all tools.");
         }
 
-        var requestedWithoutDispatch = WithoutSubAgentDispatchTools(requestedMatches);
-        if (requestedWithoutDispatch.Count == 0)
+        var requestedAvailable = WithoutSubGoalUnavailableTools(requestedMatches);
+        if (requestedAvailable.Count == 0)
         {
-            // fail-closed：分解器把派工工具写进了 RequiredTools——子目标工具面摘除后为空集，
-            // 不得静默零工具运行。
+            // fail-closed：分解器把派工工具 / Plan 专属工具写进了 RequiredTools——
+            // 子目标工具面摘除后为空集，不得静默零工具运行。
             throw new InvalidOperationException(
-                $"requiredTools [{string.Join(", ", requiredTools)}] only matched sub-agent dispatch tools, " +
-                "which are never available to sub-goals (nested dispatch depth limit 1). " +
-                "Fix the plan: dispatch is a main-agent capability.");
+                $"requiredTools [{string.Join(", ", requiredTools)}] only matched sub-agent dispatch tools " +
+                "or plan-exclusive tools, which are never available to sub-goals " +
+                "(nested dispatch depth limit 1; plan submission is a main-agent capability). " +
+                "Fix the plan: dispatch and plan submission are main-agent capabilities.");
         }
 
         var allowedWithBaseline = new HashSet<string>(requestedSet, StringComparer.Ordinal);
@@ -256,14 +264,30 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
             .Where(t => t is AIFunction af && allowedWithBaseline.Contains(af.Name))
             .ToList();
 
-        return WithoutSubAgentDispatchTools(filtered);
+        return WithoutSubGoalUnavailableTools(filtered);
     }
 
-    /// <summary>摘除派工工具（Agent / ParallelAgents）——子目标不可再派工。</summary>
-    private static IList<AITool> WithoutSubAgentDispatchTools(IList<AITool> tools)
+    /// <summary>
+    /// 摘除子目标不可用工具：派工工具（Agent / ParallelAgents，嵌套派工深度上限 1）
+    /// 与 Plan 专属工具（ToolCategory.PlanExclusive，如 SubmitPlan）。
+    /// </summary>
+    private static IList<AITool> WithoutSubGoalUnavailableTools(IList<AITool> tools)
         => tools
-            .Where(t => t is not AIFunction af || !ToolCapabilitySet.SubAgentDispatchTools.Contains(af.Name))
+            .Where(t => t is not AIFunction af || !IsSubGoalUnavailableTool(af.Name))
             .ToList();
+
+    private static bool IsSubGoalUnavailableTool(string name) =>
+        ToolCapabilitySet.SubAgentDispatchTools.Contains(name)
+        || ToolNames.IsInCategory(name, ToolCategory.PlanExclusive);
+
+    /// <summary>生成所有子目标执行路径共享的工作区与修改范围提示。</summary>
+    internal static string BuildWorkspaceScopeInstruction(GoalItem goal, string workingDirectory)
+    {
+        var scopeInstruction = goal.AllowedPaths is { Count: > 0 }
+            ? $"Allowed modification scope (workspace-relative): {string.Join(", ", goal.AllowedPaths)} (do not modify or leave files outside this scope)."
+            : $"Allowed modification scope: within working directory ({workingDirectory}).";
+        return $"Working directory: {workingDirectory}\n{scopeInstruction}";
+    }
 
     /// <summary>
     /// 生成子目标的初始 user prompt，显式告知工作目录与允许修改的路径范围（AllowedPaths），
@@ -271,17 +295,12 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
     /// </summary>
     private Task<string> BuildSubGoalPromptAsync(GoalItem goal, string workingDirectory, CancellationToken ct)
     {
-        var scopeInstruction = goal.AllowedPaths is { Count: > 0 }
-            ? $"Allowed modification scope (workspace-relative): {string.Join(", ", goal.AllowedPaths)} (do not modify or leave files outside this scope)."
-            : $"Allowed modification scope: within working directory ({workingDirectory}).";
-
         var prompt =
             $"""
             ## Sub-goal {goal.Id}: {goal.Description}
 
             Success criteria: {goal.SuccessCriteria}
-            Working directory: {workingDirectory}
-            {scopeInstruction}
+            {BuildWorkspaceScopeInstruction(goal, workingDirectory)}
 
             Execute this sub-goal. When done, clearly state whether the success criteria
             were met, and provide specific evidence (e.g., test results, file changes,

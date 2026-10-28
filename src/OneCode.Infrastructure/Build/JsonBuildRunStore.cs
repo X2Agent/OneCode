@@ -40,6 +40,27 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         return Task.FromResult(LoadCurrent(GetRunFilePath(id), expectedConversationId: id));
     }
 
+    /// <inheritdoc />
+    public async Task RemoveSessionAsync(SessionId conversationId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        SessionDeletionGuard.MarkDeleted(_baseDirectory, conversationId);
+        var gate = _gates.GetOrAdd(conversationId.Value, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var sessionLockPath = Path.Combine(_baseDirectory, conversationId.Value) + ".lock";
+            await using var fileLock = await DurableFile.AcquireLockAsync(sessionLockPath, ct: ct).ConfigureAwait(false);
+            var directory = Path.Combine(_baseDirectory, conversationId.Value);
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public Task SaveAsync(BuildRun run, long expectedVersion, CancellationToken ct = default)
         => SaveCoreAsync(run, expectedVersion, requiredFencingToken: null, isClaim: false, ct);
 
@@ -92,8 +113,10 @@ public sealed class JsonBuildRunStore : IBuildRunStore, IBuildRunEventStore
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            var sessionLockPath = Path.Combine(_baseDirectory, conversationId.Value) + ".lock";
+            await using var fileLock = await DurableFile.AcquireLockAsync(sessionLockPath, ct: ct).ConfigureAwait(false);
+            SessionDeletionGuard.ThrowIfDeleted(_baseDirectory, conversationId);
             var path = GetRunFilePath(conversationId);
-            await using var fileLock = await DurableFile.AcquireLockAsync(path + ".lock", ct: ct).ConfigureAwait(false);
             var existing = LoadCurrent(path, expectedConversationId: conversationId);
             var actualVersion = existing?.Version ?? 0;
             if (actualVersion != expectedVersion)

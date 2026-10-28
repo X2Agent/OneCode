@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using OneCode.Core.PlanMode;
 using OneCode.Infrastructure;
+using OneCode.Infrastructure.Persistence;
 
 namespace OneCode.App.Services.PlanMode;
 
@@ -48,6 +49,12 @@ public interface IPlanAggregateStore
     /// by <see cref="SaveAsync"/>. Used to surface the document location to users.
     /// </summary>
     string GetRevisionMarkdownPath(SessionId sessionId, PlanWorkflowId planId, int revision);
+
+    /// <summary>
+    /// 删除该会话的全部计划聚合落盘数据（aggregate.json + 各 revision 投影），供 /session delete 级联清理。
+    /// 实现为目录级删除；目录不存在时幂等返回。
+    /// </summary>
+    Task RemoveSessionAsync(SessionId sessionId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -235,9 +242,10 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
     {
         ValidateAggregate(aggregate);
         var path = GetAggregatePath(aggregate.Workflow.SessionId, aggregate.Workflow.Id);
+        var sessionLockPath = GetSessionDirectory(aggregate.Workflow.SessionId) + ".lock";
+        await using var lease = await AcquireLeaseAsync(sessionLockPath, ct).ConfigureAwait(false);
+        SessionDeletionGuard.ThrowIfDeleted(_plansRoot, aggregate.Workflow.SessionId);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        await using var lease = await AcquireLeaseAsync(path + ".lock", ct).ConfigureAwait(false);
         PlanAggregate? current = null;
         if (File.Exists(path))
             current = await ReadAndValidateAsync(path, ct).ConfigureAwait(false);
@@ -427,6 +435,17 @@ public sealed class PlanAggregateStore : IPlanAggregateStore
 
     private string GetSessionDirectory(SessionId sessionId)
         => Path.Combine(_plansRoot, sessionId.ToString());
+
+    /// <inheritdoc />
+    public async Task RemoveSessionAsync(SessionId sessionId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        SessionDeletionGuard.MarkDeleted(_plansRoot, sessionId);
+        var directory = GetSessionDirectory(sessionId);
+        await using var lease = await AcquireLeaseAsync(directory + ".lock", ct).ConfigureAwait(false);
+        if (Directory.Exists(directory))
+            Directory.Delete(directory, recursive: true);
+    }
 
     private string GetAggregatePath(SessionId sessionId, PlanWorkflowId planId)
         => Path.Combine(GetSessionDirectory(sessionId), planId.ToString(), "aggregate.json");

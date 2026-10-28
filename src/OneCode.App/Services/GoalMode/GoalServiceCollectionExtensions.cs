@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Goals;
 using OneCode.Core.Prompt;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Goals;
 
 namespace OneCode.App.Services.GoalMode;
@@ -27,7 +28,8 @@ public static class GoalServiceCollectionExtensions
         services.AddSingleton<IGoalPlanningService>(sp => sp.GetRequiredService<GoalDecomposer>());
         services.AddSingleton(sp => new GoalSubGoalGateDependencies(
             sp.GetService<IVerificationProvider>(),
-            sp.GetService<LspDiagnosticRegistry>()));
+            sp.GetService<LspDiagnosticRegistry>(),
+            sp.GetService<ITokenLedger>()));
         services.AddSingleton<GoalSubTaskDagRunner>();
         services.AddSingleton(sp => new GoalSubGoalExecutor(
             sp.GetRequiredService<IMainAgentRunner>(),

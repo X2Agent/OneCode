@@ -148,6 +148,29 @@ public sealed class PowerShellCommandClassifierTests
         paths.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("Set-Location D:\\outside", "D:\\outside")]
+    [InlineData("cd C:\\src", "C:\\src")]
+    [InlineData("pushd C:\\logs", "C:\\logs")]
+    public void ExtractReferencedPaths_SetLocationWithTarget_ExtractsTarget(string command, string expected)
+    {
+        PowerShellCommandClassifier.ExtractReferencedPaths(command).Should().Contain(expected);
+    }
+
+    [Fact]
+    public void ExtractReferencedPaths_BareSetLocation_FailClosedHomeMarker()
+    {
+        // 无参数的 Set-Location / cd 切到 $HOME——返回 "~" 标记，SafeResolve 展开后越界被拒
+        PowerShellCommandClassifier.ExtractReferencedPaths("cd").Should().Equal("~");
+        PowerShellCommandClassifier.ExtractReferencedPaths("Set-Location").Should().Equal("~");
+    }
+
+    [Fact]
+    public void ExtractReferencedPaths_SetLocationWithVariableTarget_ReturnsOperandForFailClosedValidation()
+    {
+        PowerShellCommandClassifier.ExtractReferencedPaths("Set-Location $env:OUTSIDE").Should().Equal("$env:OUTSIDE");
+    }
+
     [Fact]
     public void IsDestructive_Redirection_ReturnsTrue()
     {

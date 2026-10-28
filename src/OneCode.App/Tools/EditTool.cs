@@ -55,7 +55,13 @@ public sealed class EditTool(
                        "Combining replaceAll with insert_after/insert_before is ambiguous and not supported.");
 
             if (_ssh is { IsConnected: true } ssh)
+            {
+                // 已知限制：远程编辑分支不经过 ToolPathGuard / SafeResolve 的本地工作区边界
+                // 校验——SSH 会话的工作区根在远端，本地路径守卫无法对其求值。
+                // 远程边界语义（remote root 派生 + 越界拒绝）定型前，本分支按连接级信任放行；
+                // 需要远程隔离时应通过独立 SSH 主机账号而非路径校验承担。
                 return await EditRemoteAsync(ssh, filePath, oldString, newString, mode, replaceAll, dryRun, ct).ConfigureAwait(false);
+            }
 
             if (ToolPathGuard.Resolve(filePath, _wd, out var fullPath) is { } resolveError)
                 return resolveError;

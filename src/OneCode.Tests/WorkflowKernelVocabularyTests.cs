@@ -16,7 +16,6 @@ public sealed class WorkflowKernelVocabularyTests
     [InlineData(GoalRunState.Completed, RunTerminalReason.Completed)]
     [InlineData(GoalRunState.Paused, RunTerminalReason.BudgetExceeded)]
     [InlineData(GoalRunState.Cancelled, RunTerminalReason.Cancelled)]
-    [InlineData(GoalRunState.Blocked, RunTerminalReason.Blocked)]
     [InlineData(GoalRunState.Failed, RunTerminalReason.ValidationFailed)]
     public void RunTerminalReasonMap_FromGoalStateMapsTerminalStates(GoalRunState state, RunTerminalReason expected)
         => RunTerminalReasonMap.FromGoalState(state).Should().Be(expected);

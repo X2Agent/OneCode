@@ -81,6 +81,8 @@ public sealed class AgentPipelineAssembly(
         string? providerId,
         long? budgetBaselineTokens = null)
     {
+        // 记账会话：UsageSessionId 优先（GOAL 子目标只记账不播种历史），否则与转录会话同源。
+        var usageSessionId = options.UsageSessionId ?? options.ConversationId;
         return PipelineSecurityContextBuilder.Create(
             workingDirectory: cwd,
             permissionMode: modeProvider.CurrentMode,
@@ -96,18 +98,28 @@ public sealed class AgentPipelineAssembly(
             modelId: modelId,
             providerId: providerId,
             editTransaction: transaction,
-            conversationId: options.ConversationId,
+            conversationId: usageSessionId,
             maxBudgetTokens: options.MaxBudgetTokens,
-            // BUILD 模式按 run 独立计量：run 启动时对 ledger 快照作为预算基线，
-            // Plan 阶段的调研消耗不占用计划执行的额度（maxBudgetTokens 语义：BUILD=单次
-            // 计划执行的预算）。PLAN/GOAL 维持会话级累计（基线 0）。
+            // 预算基线与计量域保持同一会话口径：
+            // - BUILD 按 run 独立计量：run 启动时对会话桶快照，Plan 阶段调研消耗不占用计划执行额度；
+            // - PLAN/GOAL 基线 0 = 只累计当前会话桶，不混入其他会话的消耗；
+            // - 无会话的 headless 路径退回进程级快照。
             budgetBaselineTokens: budgetBaselineTokens
                 ?? (options.WorkingMode == WorkingMode.Build
-                    ? tokenLedger.GetTotalTokens()
+                    ? CurrentScopeBillableTokens(usageSessionId)
                     : 0),
             onBudgetExceeded: options.OnBudgetExceeded,
-            onBudgetWarning: options.OnBudgetWarning);
+            onBudgetWarning: options.OnBudgetWarning,
+            // 主代理路径的活动目录：同一 run 内 EnterWorktree 切换会话目录后，
+            // 权限边界/事务快照/不变量按每次调用取当前值，不再使用 run 起始的过期目录。
+            workingDirectoryProvider: () => workingDirectoryAccessor.WorkingDirectory);
     }
+
+    /// <summary>计量域当前累计可计费 token：有会话 → 会话桶；无会话（headless）→ 进程级。</summary>
+    private long CurrentScopeBillableTokens(SessionId? sessionId)
+        => sessionId is { } sid
+            ? tokenLedger.GetSessionUsage(sid)?.TotalBillableTokens ?? 0
+            : tokenLedger.GetTotalTokens();
 
     /// <summary>
     /// Builds role-level overrides for the Main agent path.

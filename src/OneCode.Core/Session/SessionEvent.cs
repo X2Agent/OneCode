@@ -78,7 +78,6 @@ public sealed record SessionStartedEvent(
     TokenUsage TotalUsage,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivityAt,
-    string? Branch,
     IReadOnlyDictionary<string, object>? Metadata = null)
     : SessionEvent(SessionId, Sequence, OccurredAt, SessionEventType.SessionStarted)
 {
@@ -97,7 +96,6 @@ public sealed record SessionSnapshotEvent(
     TokenUsage TotalUsage,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivityAt,
-    string? Branch,
     IReadOnlyDictionary<string, object>? Metadata = null)
     : SessionEvent(SessionId, Sequence, OccurredAt, SessionEventType.SessionSnapshot)
 {

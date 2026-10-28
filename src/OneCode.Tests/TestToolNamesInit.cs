@@ -43,7 +43,7 @@ internal static class TestToolNamesInit
         });
 
         // Plan-allowed tools (beyond read-only)
-        foreach (var name in new[] { "SubmitPlan", "Task", "Agent", "ParallelAgents" })
+        foreach (var name in new[] { "Task", "Agent", "ParallelAgents" })
         {
             registry.Register(new ToolMetadata
             {
@@ -52,6 +52,14 @@ internal static class TestToolNamesInit
                 Category = ToolCategory.PlanAllowed,
             });
         }
+        // SubmitPlan 与生产注册一致（PlanAllowed | PlanExclusive）：
+        // Plan 专属类别供子目标工具门按 ToolNames.IsInCategory 摘除。
+        registry.Register(new ToolMetadata
+        {
+            Name = "SubmitPlan",
+            Risk = ToolRisk.Safe,
+            Category = ToolCategory.PlanAllowed | ToolCategory.PlanExclusive,
+        });
         // User-question tool is both ReadOnly and PlanAllowed.
         foreach (var name in new[] { "AskUserQuestion" })
         {

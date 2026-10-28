@@ -16,8 +16,15 @@ namespace OneCode.Infrastructure.Middleware.Invariants;
 /// 4. File.GetAttributes 异常保护 — TOCTOU（Exists 后被删）或权限不足时 fail-closed。
 /// 5. 工具名大小写统一用 OrdialIgnoreCase 比较，避免 "edit"/"read" 小写绕过。
 /// </summary>
-public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvariant
+public sealed class FileSystemInvariant(
+    string workingDirectory,
+    Func<string>? resolveWorkingDirectory = null) : ISafetyInvariant
 {
+    /// <summary>
+    /// 每次检查解析活动工作目录：同 run 内 EnterWorktree 切换会话目录后，
+    /// 敏感路径与写保护区按当前目录树判定；null（fork 等路径）回退构造时的固定值。
+    /// </summary>
+    private string CurrentWorkingDirectory => resolveWorkingDirectory?.Invoke() ?? workingDirectory;
     /// <summary>绝对禁止写入的路径段（路径中任意一级匹配即拒绝）。</summary>
     private static readonly string[] ProtectedWriteSegments =
     [
@@ -36,35 +43,11 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
     /// 防止 AI 读取 ~/.ssh/id_rsa、~/.aws/credentials、.env 等敏感文件
     /// 并把内容写入对话上下文造成泄露。
     /// </summary>
-    /// <remarks>
-    /// 路径段序列（连续匹配），避免子串误报。如 ".aws/credentials" 要求路径中
-    /// 连续出现 ".aws" 和 "credentials" 两段。
-    /// </remarks>
-    private static readonly string[][] SensitiveReadPathSequences =
-    [
-        // SSH 私钥与配置
-        ["id_rsa"],
-        ["id_ecdsa"],
-        ["id_ed25519"],
-        ["id_dsa"],
-        // 云厂商凭证
-        [".aws", "credentials"],
-        [".aws", "config"],
-        // 环境变量文件（含 API Key、数据库密码等）
-        [".env"],
-        // GCP / Azure 凭证
-        [".config", "gcloud"],
-        ["gcloud", "application_default_credentials.json"],
-        [".azure"],
-        ["service_principal.json"],
-        // Kubernetes secrets
-        [".kube", "config"],
-        // PGP 私钥
-        ["private-keys-v1.d"],
-        ["secring.gpg"],
-    ];
-
-    /// <summary>读取类工具集合（OrdinalIgnoreCase 匹配）。</summary>
+    /// <summary>
+    /// 敏感文件读取黑名单已抽取至 <see cref="SensitiveReadPathPolicy"/>（单一事实源），
+    /// 与 <c>TextSearchService</c> 的检索结果过滤共用同一份清单。
+    /// 读取类工具集合含内容检索类工具：它们的 <c>path</c> 参数同样直连文件系统。
+    /// </summary>
     private static readonly HashSet<string> ReadTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "Read",
@@ -72,6 +55,9 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
         "Cat",
         "Head",
         "Tail",
+        "Grep",
+        "Glob",
+        "LS",
     };
 
     public ValueTask<InvariantCheckResult> CheckAsync(
@@ -80,7 +66,7 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
         CancellationToken ct)
     {
         // 写入类工具：拦截所有 ProtectedWriteSegments + .git
-        // 读取类工具：仅拦截 SensitiveReadPathSequences（防止凭证泄露）
+        // 读取类工具：仅拦截敏感读取序列（防止凭证泄露）
         // Write/Edit/Delete 统一引用 ToolNames 类别查询（元数据驱动）
         var isWriteTool = ToolNames.IsFileEditTool(toolName) || ToolNames.IsInCategory(toolName, ToolCategory.FileDelete);
         var isReadTool = ReadTools.Contains(toolName);
@@ -98,7 +84,7 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
         string fullPath;
         try
         {
-            fullPath = Path.GetFullPath(path, workingDirectory);
+            fullPath = Path.GetFullPath(path, CurrentWorkingDirectory);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -204,23 +190,13 @@ public sealed class FileSystemInvariant(string workingDirectory) : ISafetyInvari
     }
 
     /// <summary>
-    /// 检查路径段中是否连续匹配任何敏感读取序列。
+    /// 检查路径段中是否连续匹配任何敏感读取序列（清单与匹配逻辑见
+    /// <see cref="SensitiveReadPathPolicy"/>）。
     /// </summary>
     private static bool MatchesSensitiveReadSequence(string[] segments, out string? matchedTarget)
-    {
-        matchedTarget = null;
-        foreach (var sequence in SensitiveReadPathSequences)
-        {
-            if (ContainsSubsequence(segments, sequence))
-            {
-                matchedTarget = string.Join('/', sequence);
-                return true;
-            }
-        }
-        return false;
-    }
+        => SensitiveReadPathPolicy.MatchesSensitiveReadSequence(segments, out matchedTarget);
 
-    /// <summary>检查 <paramref name="segments"/> 是否连续包含 <paramref name="targetSegments"/> 子序列。</summary>
+    /// <summary>检查 <paramref name="segments"/> 是否连续包含 <paramref name="targetSegments"/> 子序列（写入段匹配用）。</summary>
     private static bool ContainsSubsequence(string[] segments, string[] targetSegments)
     {
         if (targetSegments.Length == 0) return false;

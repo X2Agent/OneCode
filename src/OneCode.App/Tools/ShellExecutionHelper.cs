@@ -19,8 +19,20 @@ public static class ShellExecutionHelper
             && !path.Contains('?')
             && !path.Contains('$')
             && !path.Contains("$(", StringComparison.Ordinal)
-            && !path.Contains('`');
+            && !path.Contains('`')
+            && !path.StartsWith("@(", StringComparison.Ordinal)
+            && !path.StartsWith('{');
     }
+
+    /// <summary>
+    /// 展开风险判定：token 内含 <c>$</c> 或反引号（变量/命令替换），静态校验无法约束其
+    /// 解析目标——任何模式（含 GoalAuto）下都拒绝执行，要求改写为显式字面路径或人工确认。
+    /// </summary>
+    private static bool HasExpansionRisk(string path)
+        => path.Contains('$')
+            || path.Contains('`')
+            || path.StartsWith("@(", StringComparison.Ordinal)
+            || path.StartsWith('{');
 
     public static string? ValidateReferencedPaths(
         string command,
@@ -31,7 +43,26 @@ public static class ShellExecutionHelper
         foreach (var path in extractPaths(command))
         {
             if (!CanValidatePath(path))
+            {
+                // 展开风险操作数无法证明解析目标仍在授权目录内，必须在执行前拒绝。
+                if (HasExpansionRisk(path))
+                {
+                    return $"Error: command operand '{path}' uses variable or command expansion, so its target cannot be verified against the workspace boundary. " +
+                           "Rewrite the command with explicit literal paths (or ask the user to run it manually).";
+                }
+
+                // 纯通配操作数：校验首个通配符之前的静态前缀（如 src/*.cs → src），
+                // 保留工作区内 glob 的正常用法，仍能拦截 ../*/etc 形式的越界。
+                var wildcardIndex = path.IndexOfAny(['*', '?']);
+                var staticPrefix = wildcardIndex > 0 ? path[..wildcardIndex] : string.Empty;
+                if (wildcardIndex <= 0 || string.IsNullOrWhiteSpace(staticPrefix))
+                    continue;
+
+                var prefixResolved = PathsHelper.SafeResolve(staticPrefix, workingDirectory, additionalDirs);
+                if (!prefixResolved.IsSuccess)
+                    return $"Error: command references path outside the working directory: {path}. Use /add-dir <path> to grant access.";
                 continue;
+            }
 
             var resolved = PathsHelper.SafeResolve(path, workingDirectory, additionalDirs);
             if (!resolved.IsSuccess)

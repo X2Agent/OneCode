@@ -126,6 +126,61 @@ public sealed class GrepToolTests : IDisposable
         result.Content.Should().Contain("Path does not exist");
     }
 
+    // 敏感读保护：--hidden --no-ignore 语义下 .env 会被读进内容检索，
+    // 结果侧必须按 Read 工具同一份敏感清单过滤。
+
+    [Fact]
+    public async Task SearchAsync_SensitiveFileContent_ExcludedFromResults()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        WriteFile(".env", "API_KEY=super-secret-token");
+        WriteFile("src/config.cs", "var apiKey = Lookup(\"super-secret-token\");");
+        var tool = CreateNativeTool();
+
+        var result = await tool.SearchAsync("super-secret-token", output_mode: "content", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("config.cs");
+        result.Content.Should().NotContain(".env",
+            ".env 内容经检索工具进入对话上下文即等于绕过 Read 工具的敏感读保护");
+    }
+
+    [Fact]
+    public async Task SearchAsync_RipgrepExplicitSensitiveIncludeGlob_StillExcludesContent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var runner = new ProcessRunner();
+        if (!await runner.CommandExistsAsync("rg"))
+            return;
+        WriteFile(".env", "API_KEY=super-secret-token");
+        var textSearch = new TextSearchService(
+            runner,
+            new LocalAgentFileStore(CreateWd()),
+            NullLogger<TextSearchService>.Instance);
+        var tool = new GrepTool(textSearch, CreateWd());
+
+        var result = await tool.SearchAsync(
+            "super-secret-token", glob: ".env", output_mode: "content", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().NotContain("super-secret-token");
+        result.Content.Should().NotContain("API_KEY=");
+    }
+
+    [Fact]
+    public async Task SearchAsync_DirectSensitiveFileTarget_ReturnsNoResults()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var envPath = WriteFile(".env", "API_KEY=super-secret-token");
+        var tool = CreateNativeTool();
+
+        var result = await tool.SearchAsync("API_KEY", path: envPath, output_mode: "content", ct: ct);
+
+        result.IsError.Should().BeFalse();
+        result.Content.Should().NotContain("super-secret-token");
+        result.Content.Should().NotContain("API_KEY=");
+    }
+
     // Output modes
 
     [Fact]

@@ -60,6 +60,7 @@ public sealed class OneCodeShellExecutor(
                 request.WorkingDirectory,
                 request.Command,
                 TimeSpan.FromMilliseconds(ShellExecutionHelper.ClampTimeoutMs(request.TimeoutSeconds)),
+                request.AdditionalDirectories,
                 ct).ConfigureAwait(false);
             return FromMafResult(result);
         }

@@ -57,7 +57,6 @@ Infrastructure 层是系统的**外部系统适配层**，封装所有 I/O、外
 | `Microsoft.Extensions.*` | DI、日志、HTTP、缓存、配置、文件 Glob |
 | `YamlDotNet` | YAML 解析（MCP 配置、主题文件） |
 | `ModelContextProtocol` | MCP 官方 SDK |
-| `Microsoft.ML.Tokenizers` + Tokenizer 数据包 | Token 估算（Cl100kBase / O200kBase） |
 | `System.Text.Json` | JSON 序列化 |
 | `CliWrap` | 子进程调用（Git、Hook 执行） |
 | `SSH.NET` | SSH 远程执行（SshRemoteService） |

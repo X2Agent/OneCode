@@ -111,7 +111,7 @@ public sealed class GoalWorkflowHost(
             GoalRunState.Paused => null,
             GoalRunState.Completed => WorkflowRunState.Completed,
             GoalRunState.Cancelled => WorkflowRunState.Cancelled,
-            GoalRunState.Blocked or GoalRunState.Failed => WorkflowRunState.Failed,
+            GoalRunState.Failed => WorkflowRunState.Failed,
             GoalRunState.Validating or GoalRunState.Publishing or GoalRunState.Executing or GoalRunState.Planning
                 => WorkflowRunState.Failed,
             null => WorkflowRunState.Failed,

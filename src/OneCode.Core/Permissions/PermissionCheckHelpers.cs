@@ -20,6 +20,10 @@ public static class PermissionCheckHelpers
         string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase)
         && string.Equals(ExtractField(toolInput, "shell"), "powershell", StringComparison.OrdinalIgnoreCase);
 
+    private static bool UsesPowerShellSyntax(string toolName, JsonElement toolInput) =>
+        string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase)
+        && ShellExecutionDialect.UsesPowerShell(ExtractField(toolInput, "shell"));
+
     private static bool IsShellTool(string toolName, JsonElement toolInput) =>
         string.Equals(toolName, BashTool, StringComparison.OrdinalIgnoreCase) || IsPowerShellDialect(toolName, toolInput);
 
@@ -45,11 +49,9 @@ public static class PermissionCheckHelpers
             return false;
 
         var command = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
-        if (IsPowerShellDialect(toolName, toolInput))
-            return PowerShellCommandClassifier.IsReadOnly(command);
-
-        return BashCommandClassifier.IsReadOnly(command)
-            || (OperatingSystem.IsWindows() && PowerShellCommandClassifier.IsReadOnly(command));
+        return UsesPowerShellSyntax(toolName, toolInput)
+            ? PowerShellCommandClassifier.IsReadOnly(command)
+            : BashCommandClassifier.IsReadOnly(command);
     }
 
     /// <summary>
@@ -62,7 +64,7 @@ public static class PermissionCheckHelpers
             return false;
 
         var command = ToolArgumentExtractor.ExtractInputString(toolName, toolInput);
-        return IsPowerShellDialect(toolName, toolInput)
+        return UsesPowerShellSyntax(toolName, toolInput)
             ? PowerShellCommandClassifier.IsDestructive(command)
             : BashCommandClassifier.IsDestructive(command);
     }
@@ -267,7 +269,7 @@ public static class PermissionCheckHelpers
         string[] pathValues;
         if (IsShellTool(toolName, toolInput))
         {
-            pathValues = (IsPowerShellDialect(toolName, toolInput)
+            pathValues = (UsesPowerShellSyntax(toolName, toolInput)
                     ? PowerShellCommandClassifier.ExtractReferencedPaths(ToolArgumentExtractor.ExtractInputString(toolName, toolInput))
                     : BashCommandClassifier.ExtractReferencedPaths(ToolArgumentExtractor.ExtractInputString(toolName, toolInput)))
                 .ToArray();

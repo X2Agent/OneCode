@@ -163,7 +163,7 @@ public sealed class ForkedAgentRunner(
                 // usage 归属当前会话（UsageTrackingRunMiddleware 据此写会话桶，/status 才能看到
                 // 子代理消耗）；上下文提供器仍取 parameters.ConversationId（fork 本地，
                 // 派工路径均为 null），子代理不得读/写主会话的转录与设计上下文。
-                ConversationId = _sessionIds.CurrentSessionId,
+                ConversationId = parameters.UsageSessionId ?? _sessionIds.CurrentSessionId,
                 AllowedTools = parameters.AllowedTools,
                 // sink 常挂（progressWriter 为 null 时只计数不上报）。
                 // 同一轮的并行工具调用可能并发触发事件，计数必须原子。
@@ -445,6 +445,7 @@ public sealed class ForkedAgentRunner(
                 : null,
             Capabilities = capabilities,
             ParentWorkingDirectory = request.WorkingDirectory,
+            UsageSessionId = request.UsageSessionId,
         };
 
         var result = await RunForkedAgentAsync(parameters, ct).ConfigureAwait(false);

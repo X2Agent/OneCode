@@ -77,6 +77,29 @@ public sealed record GoalBudget
 }
 
 /// <summary>
+/// GOAL 执行预算上限的持久化形态：用户在预算 100% 时选择「追加预算继续」后，
+/// 运行时把扩展后的实际上限写回 <c>GoalRun</c>，进程重启 + /resume 时按此重建
+/// <see cref="GoalBudget"/>，不丢失追加决定。
+/// </summary>
+public sealed record GoalBudgetLimits(
+    int? MaxSubGoalAttempts,
+    long? MaxTotalTokens,
+    long? MaxWallClockTicks)
+{
+    public static GoalBudgetLimits FromGoalBudget(GoalBudget budget) => new(
+        budget.MaxSubGoalAttempts,
+        budget.MaxTotalTokens,
+        budget.MaxWallClock is { } clock ? clock.Ticks : null);
+
+    public GoalBudget ToGoalBudget() => new()
+    {
+        MaxSubGoalAttempts = MaxSubGoalAttempts ?? CoreConstants.Session.GoalMaxSubGoalAttemptsDefault,
+        MaxTotalTokens = MaxTotalTokens,
+        MaxWallClock = MaxWallClockTicks is { } ticks ? TimeSpan.FromTicks(ticks) : null,
+    };
+}
+
+/// <summary>
 /// GOAL 模式预算消耗快照（用于实时计算消耗比例）。
 /// </summary>
 public sealed record GoalBudgetUsage(

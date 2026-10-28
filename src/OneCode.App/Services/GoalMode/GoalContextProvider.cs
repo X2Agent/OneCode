@@ -16,13 +16,17 @@ namespace OneCode.App.Services.GoalMode;
 /// - 已完成子目标的简短摘要（截断 lastOutput 避免上下文爆炸）
 /// - 已失败子目标的原因（gapAnalysis）
 /// </summary>
-public sealed class GoalContextProvider(IPermissionModeProvider modeProvider, GoalContextState state)
+public sealed class GoalContextProvider(WorkingMode workingMode, GoalContextState state)
     : ReadOnlyAIContextProviderBase
 {
-    private readonly IPermissionModeProvider _modeProvider = modeProvider;
     private readonly GoalContextState _state = state;
 
-    private bool IsInGoalMode => _modeProvider.CurrentMode == PermissionMode.GoalAuto;
+    /// <summary>
+    /// 门控依据是工作模式本身（构造时由装配方按当前 WorkingMode 传入）：
+    /// 此前依赖 <c>PermissionMode.GoalAuto</c>，命令行高级档（Bypass/Auto/DontAsk）
+    /// 下 WorkingModeBridge 不同步权限档，会让本 provider 在 GOAL 模式中静默失效。
+    /// </summary>
+    private bool IsInGoalMode => workingMode == WorkingMode.Goal;
 
     protected override ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context, CancellationToken ct)

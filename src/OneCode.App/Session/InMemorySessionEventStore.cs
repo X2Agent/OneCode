@@ -77,4 +77,28 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
         }
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public Task<SessionEventLogStamp?> RewriteAsync(
+        SessionId sessionId,
+        IReadOnlyList<SessionEvent> events,
+        SessionEventLogStamp expectedStamp,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (!_stamps.TryGetValue(sessionId, out var currentStamp) || currentStamp != expectedStamp)
+                return Task.FromResult<SessionEventLogStamp?>(null);
+
+            var rewritten = new List<SessionEvent>(events.Count);
+            for (var index = 0; index < events.Count; index++)
+                rewritten.Add(events[index].WithSequence(index + 1L));
+
+            _events[sessionId] = rewritten;
+            var stamp = new SessionEventLogStamp(sessionId, rewritten.Count, DateTimeOffset.UtcNow);
+            _stamps[sessionId] = stamp;
+            return Task.FromResult<SessionEventLogStamp?>(stamp);
+        }
+    }
 }

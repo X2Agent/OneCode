@@ -106,7 +106,6 @@ public sealed class BuildResumePolicyTests
     [InlineData(BuildRunState.Planned, BuildResumeAction.ParkAtGate)]
     [InlineData(BuildRunState.Implementing, BuildResumeAction.ParkAtGate)]
     [InlineData(BuildRunState.Verifying, BuildResumeAction.ParkAtGate)]
-    [InlineData(BuildRunState.Recovering, BuildResumeAction.ParkAtGate)]
     // BuildResumeAction 是 App 内部类型（InternalsVisibleTo），测试方法随之声明为 internal
     internal void Evaluate_StateMapping_MatchesOriginalIfChain(BuildRunState state, BuildResumeAction expected)
     {

@@ -7,8 +7,10 @@ using OneCode.App.Session;
 using OneCode.Core.Config;
 using OneCode.Core.Memory;
 using OneCode.Core.Models;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Memory;
 
 namespace OneCode.App.Services.AutoDream;
@@ -41,6 +43,7 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
     private readonly IWorkingDirectoryAccessor _wdAccessor;
     private readonly IMemoryService? _memoryService;
     private readonly ISessionManager? _sessionManager;
+    private readonly ITokenLedger? _tokenLedger;
 
     /// <summary>外部触发信号通道：NotifyTaskCompleted() / Trigger() 写入，ExecuteAsync 读取。</summary>
     private readonly Channel<bool> _triggerChannel =
@@ -75,6 +78,7 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
         _configManager = storage.ConfigManager;
         _wdAccessor = storage.WorkingDirectory;
         _sessionManager = storage.SessionManager;
+        _tokenLedger = storage.TokenLedger;
         _globalConfigDir = globalConfigDirOverride ?? PathsHelper.GetUserConfigDir();
         _workingMemoryScanner = new AutoDreamWorkingMemoryScanner(loggerFactory.CreateLogger<AutoDreamWorkingMemoryScanner>());
         _stateStore = new AutoDreamStateStore(logger, GetProjectStateDir);
@@ -280,6 +284,11 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
 
         var inputTokens = (long)(response.Usage?.InputTokenCount ?? 0);
         var outputTokens = (long)(response.Usage?.OutputTokenCount ?? 0);
+
+        // 整合 agent 直连 chatClient，不经 UsageTrackingRunMiddleware——经统一映射入账
+        // （无会话归属，计入进程级累计），否则后台整合消耗从预算口径中漏计。
+        UsageTrackingRunMiddleware.RecordUsage(
+            response.Usage, _tokenLedger, modelId, _logger);
 
         var outputText = response.Messages
             .OfType<ChatMessage>()

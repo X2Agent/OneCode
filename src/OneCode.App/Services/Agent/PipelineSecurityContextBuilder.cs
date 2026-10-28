@@ -30,7 +30,8 @@ internal static class PipelineSecurityContextBuilder
         long? maxBudgetTokens = null,
         long budgetBaselineTokens = 0,
         Func<long, long, CancellationToken, Task<GoalBudgetDecision>>? onBudgetExceeded = null,
-        Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null)
+        Action<GoalBudgetWarningLevel, long, long>? onBudgetWarning = null,
+        Func<string>? workingDirectoryProvider = null)
         => new(
             WorkingDirectory: workingDirectory,
             PermissionMode: permissionMode,
@@ -50,5 +51,6 @@ internal static class PipelineSecurityContextBuilder
             MaxBudgetTokens: maxBudgetTokens,
             BudgetBaselineTokens: budgetBaselineTokens,
             OnBudgetExceeded: onBudgetExceeded,
-            OnBudgetWarning: onBudgetWarning);
+            OnBudgetWarning: onBudgetWarning,
+            WorkingDirectoryProvider: workingDirectoryProvider);
 }

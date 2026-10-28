@@ -105,7 +105,7 @@ public sealed partial class BuildRunCoordinator(
 
                 case BuildResumeAction.ParkAtGate:
                 default:
-                    // Planned 审批门与 Implementing/Verifying/Recovering 等执行中态：
+                    // Planned 审批门与 Implementing/Verifying 等执行中态：
                     // 计划/运行停靠在当前状态，等待 ApprovePlan / 工作流恢复驱动。
                     durableStateObserver?.Invoke(existing);
                     return existing;
@@ -158,7 +158,7 @@ public sealed partial class BuildRunCoordinator(
         }
         if (current.State == BuildRunState.Implementing)
             return current;
-        if (current.State is not (BuildRunState.Verifying or BuildRunState.Recovering))
+        if (current.State is not BuildRunState.Verifying)
         {
             throw new InvalidOperationException(
                 $"BuildRun '{runId}' cannot prepare an attempt from state '{current.State}'.");

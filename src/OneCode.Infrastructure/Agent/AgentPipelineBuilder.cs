@@ -91,6 +91,19 @@ public sealed record ChatClientAgentBuildOptions
 public sealed record AgentPipelineOptions
 {
     public required string WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// 活动工作目录提供者：非空时，安全中间件（权限路径校验 / EditGuard / EditTransaction /
+    /// FileSystemInvariant / Hook）按<b>每次工具调用</b>解析工作目录——同 run 内
+    /// EnterWorktree 等会话目录切换后，边界与事务快照不再落在过期目录上。
+    /// null（fork/子代理路径）时回退到 <see cref="WorkingDirectory"/> 固定值。
+    /// </summary>
+    public Func<string>? WorkingDirectoryProvider { get; init; }
+
+    /// <summary>解析当前工具调用应使用的工作目录（活动提供者优先，回退固定值）。</summary>
+    public string ResolveWorkingDirectory()
+        => WorkingDirectoryProvider?.Invoke() ?? WorkingDirectory;
+
     public EditTransaction? EditTransaction { get; init; }
     public Action<FileChange>? FileChangeCallback { get; init; }
     public IPermissionChecker? PermissionChecker { get; init; }
@@ -347,7 +360,7 @@ public static class AgentPipelineBuilder
             options.LoggerFactory,
             options.ServiceProvider);
 
-        return Build(agent, options.PipelineOptions, metrics, options.LoggerFactory, options.ServiceProvider);
+        return Build(agent, options.PipelineOptions, metrics, options.LoggerFactory, options.ServiceProvider, options.ToolMetadata);
     }
 
     /// <summary>
@@ -380,14 +393,15 @@ public static class AgentPipelineBuilder
         AgentPipelineOptions options,
         AgentPipelineMetrics metrics,
         ILoggerFactory loggerFactory,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ToolMetadataRegistry? toolMetadata = null)
     {
         var builder = agent.AsBuilder();
 
         // Agent Run 级中间件（最外层）：BudgetGuard 预算守卫
-        // pre-execution 检查：若 ITokenLedger 累计 token 已达 MaxBudgetTokens，短路返回错误响应，
-        // 不发起 LLM 调用，防止失控后继续消耗。位于 UsageTracking 外层，确保在任何
-        // LLM 调用前拦截；短路时不产生 Usage，UsageTracking 内层不会被调用。
+        // pre-execution 检查：若计量域（会话桶 / 无会话时进程级）累计可计费 token 已达
+        // MaxBudgetTokens，短路返回错误响应，不发起 LLM 调用，防止失控后继续消耗。
+        // 位于 UsageTracking 外层，确保在任何 LLM 调用前拦截；短路时不产生 Usage。
         if (options.TokenLedger is not null && options.MaxBudgetTokens is not null)
         {
             var (guardRun, guardStream) = BudgetGuardRunMiddleware.Create(
@@ -396,7 +410,8 @@ public static class AgentPipelineBuilder
                 loggerFactory.CreateLogger("BudgetGuardRunMiddleware"),
                 options.BudgetBaselineTokens,
                 options.OnBudgetExceeded,
-                options.OnBudgetWarning);
+                options.OnBudgetWarning,
+                options.ConversationId);
             builder = builder.Use(guardRun, guardStream);
         }
 
@@ -430,6 +445,7 @@ public static class AgentPipelineBuilder
         //   6. PermissionAndLimit（Layer 1：封条、白名单、权限检查与调用配额上限）
         //   7. StateMachine（Layer 2：指向性故障限流与编译验证恢复闸）
         //   8. EditGuard（Edit 目标存在性前置检查 + 编辑后编译验证写 IsVerificationFailure）
+        //   8.5 UnsafeToolSerialGate（IsConcurrencySafe=false 工具的运行时串行闸：快照+写+Diff 原子序）
         //   9. EditTransaction（编辑前文件快照 + 编辑后增量 Diff 通知）
         //  10. ToolExecutionBudget（单次工具输出字符上限截断）
         //  11. ToolResultUnwrap [内层核心]（捕获编组/执行异常；将 AIFunction.InvokeAsync 返回的 JsonElement/ToolResult 解包并写 IsError）
@@ -453,10 +469,15 @@ public static class AgentPipelineBuilder
             builder = builder.Use(
                 new EditTransactionMiddleware(
                     options.EditTransaction,
-                    options.WorkingDirectory,
+                    options.ResolveWorkingDirectory,
                     options.FileChangeCallback,
                     loggerFactory.CreateLogger<EditTransactionMiddleware>()).CreateDelegate());
         }
+
+        // 8.5 非并发安全工具串行闸：快照+写+Diff 在闸内保持原子序——两个并行 Edit
+        // 各自持闸完成整段操作，杜绝交错写同一文件。MEAI 默认串行下零争用。
+        builder = builder.Use(
+            new UnsafeToolSerialGateMiddleware(toolMetadata).CreateDelegate());
 
         // 8. 编辑前置检查 + 编辑后编译/静态验证（验证失败时写 IsVerificationFailure 供外层状态机读取）
         var editVerification = options.EnableVerification ? options.VerificationProvider : null;
@@ -466,7 +487,7 @@ public static class AgentPipelineBuilder
                 EditGuardMiddleware.Create(
                     options.EnableEditPreChecks,
                     editVerification,
-                    options.WorkingDirectory,
+                    options.ResolveWorkingDirectory,
                     Middleware.VerificationOptions.Default,
                     loggerFactory.CreateLogger("EditGuardMiddleware")));
         }
@@ -493,7 +514,9 @@ public static class AgentPipelineBuilder
         // 4. Layer 0 安全不变量（无论何种角色与权限模式均强制执行）
         builder = builder.Use(
             SafetyInvariantMiddleware.Create(
-                SafetyInvariantMiddleware.CreateDefaultSafetyInvariants(options.WorkingDirectory),
+                SafetyInvariantMiddleware.CreateDefaultSafetyInvariants(
+                    options.WorkingDirectory,
+                    options.WorkingDirectoryProvider),
                 loggerFactory.CreateLogger("SafetyInvariantMiddleware")));
 
         // 3. 参数名/别名/数组形状归一化（位于安全不变量与权限检查外层，确保检查与执行看到同一份规范参数）

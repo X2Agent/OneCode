@@ -104,7 +104,7 @@ public sealed partial class BuildRunCoordinatorTests
         await store.SaveAsync(
             first with
             {
-                State = BuildRunState.Recovering,
+                State = BuildRunState.Verifying,
                 SequenceNumber = 8,
             },
             first.Version,
@@ -117,10 +117,10 @@ public sealed partial class BuildRunCoordinatorTests
         events.Select(item => item.EventId).Should().OnlyHaveUniqueItems();
         events.Select(item => item.Version).Should().ContainInOrder(1, 2);
         events[1].FromState.Should().Be(BuildRunState.Implementing);
-        events[1].ToState.Should().Be(BuildRunState.Recovering);
+        events[1].ToState.Should().Be(BuildRunState.Verifying);
         replayed.Should().NotBeNull();
         replayed!.Version.Should().Be(2);
-        replayed.State.Should().Be(BuildRunState.Recovering);
+        replayed.State.Should().Be(BuildRunState.Verifying);
         replayed.SequenceNumber.Should().Be(8);
     }
 

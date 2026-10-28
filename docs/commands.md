@@ -793,9 +793,13 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 | `list` / `ls` | 列出会话（8 位短 id），最多显示 20 条；更多时只提示剩余数量 |
 | `new [name]` | 创建新会话（当前会话转入后台） |
 | `switch <id-prefix>` | 切换会话（id 前缀唯一命中即生效，歧义时列出候选） |
-| `delete <id-prefix> [--force]` | 从磁盘删除会话事件日志（两步确认：无 `--force` 时显示会话信息并要求带 `--force` 重输；前台/后台活跃会话须先 `/close` 再删） |
+| `delete <id-prefix> [--force]` | 删除会话的全部业务落盘数据（事件日志、摘要索引、token 用量桶、plan 聚合、build-runs、goal-runs；两步确认：无 `--force` 时显示会话信息并要求带 `--force` 重输；前台/后台活跃会话须先 `/close` 再删） |
 
 > `switch`/`delete` 接受任意长度的 id 前缀；关闭会话用独立命令 `/close`。
+> `delete` 的级联清理分步容错：某一步失败只在输出中列出失败项，其余步骤照常执行。
+> 各存储同时保留轻量删除标记，拒绝其他进程或迟到任务重新写入已删会话；这些标记不包含会话内容。
+> GOAL 隔离 worktree 目录**不自动删除**（可能含未合并改动），删除输出会给出残留路径与
+> `git worktree remove` 手动命令。
 > 元数据：`Immediate = true`。
 
 ---

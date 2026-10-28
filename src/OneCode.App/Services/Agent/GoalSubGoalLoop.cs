@@ -4,7 +4,9 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
+using OneCode.Infrastructure.Agent.RunMiddleware;
 
 namespace OneCode.App.Services.Agent;
 
@@ -17,7 +19,8 @@ internal sealed class GoalSubGoalLoop(
     GoalSubGoalHardGate hardGate,
     GoalSubGoalJudge judge,
     ILoggerFactory loggerFactory,
-    TodoProjectionService? todoProjection = null)
+    TodoProjectionService? todoProjection = null,
+    ITokenLedger? tokenLedger = null)
 {
     /// <summary>per-run 状态登记在 <see cref="LoopContext.AdditionalProperties"/> 上的键。</summary>
     internal const string RunStateKey = "OneCode.GoalSubGoalLoop.RunState";
@@ -108,6 +111,15 @@ internal sealed class GoalSubGoalLoop(
                     state.FinalEvidence!, goal, evalCt, options.WorkingDirectory).ConfigureAwait(false);
                 state.InputTokens += judgeInTokens;
                 state.OutputTokens += judgeOutTokens;
+                // Judge 直连 chatClient（不经 UsageTrackingRunMiddleware），经统一映射补记账，
+                // 使预算熔断与 /status stats 的会话桶不漏计语义验收消耗。
+                UsageTrackingRunMiddleware.RecordUsage(
+                    new UsageDetails
+                    {
+                        InputTokenCount = judgeInTokens,
+                        OutputTokenCount = judgeOutTokens,
+                    },
+                    tokenLedger, options.ModelId, _logger, options.SessionId);
 
                 if (isCompleted)
                 {

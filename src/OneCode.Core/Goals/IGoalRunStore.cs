@@ -15,4 +15,12 @@ public interface IGoalRunStore : IWorkflowRunStore<GoalRun, GoalRunId>, IActiveW
     Task<GoalRun?> LoadByIdAsync(
         GoalRunId runId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除该会话的全部 GoalRun 落盘数据（run 文件 + 归档），供 /session delete 级联清理。
+    /// 实现为目录级删除；目录不存在时幂等返回。
+    /// </summary>
+    Task RemoveSessionAsync(
+        Domain.SessionId sessionId,
+        CancellationToken ct = default);
 }

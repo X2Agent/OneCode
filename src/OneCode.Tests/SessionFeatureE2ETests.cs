@@ -43,6 +43,16 @@ public sealed class SessionFeatureE2ETests : IDisposable
             sessionToolSetManager: Substitute.For<OneCode.App.Query.ISessionToolSetManager>());
     }
 
+    /// <summary>E2E 用真实写入端组装级联清理器（契约测试：写入→删除走同一套存储实现）。</summary>
+    private SessionDataCleaner CreateCleaner() => new(
+        new FileSessionEventStore(_tempDir),
+        new FileSessionSummaryIndex(_tempDir, NullLogger<FileSessionSummaryIndex>.Instance),
+        new OneCode.Infrastructure.Api.TokenLedger(),
+        new OneCode.App.Services.PlanMode.PlanAggregateStore(_tempDir),
+        new OneCode.Infrastructure.Build.JsonBuildRunStore(_tempDir),
+        new OneCode.Infrastructure.Goals.JsonGoalRunStore(Path.Combine(_tempDir, "goal-runs")),
+        NullLogger<SessionDataCleaner>.Instance);
+
     [Fact]
     public async Task E2E_SessionPersistence_RoundTripsThroughStoreAndSessionSwitch()
     {
@@ -67,7 +77,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
             sessionIdHolder: new SessionIdHolder(),
             sessionToolSetManager: Substitute.For<OneCode.App.Query.ISessionToolSetManager>());
 
-        var sessionCmd = new SessionCommand(manager2, new FileSessionEventStore(_tempDir), new NewCommand(manager2));
+        var sessionCmd = new SessionCommand(manager2, CreateCleaner(), new NewCommand(manager2));
         var listResult = await sessionCmd.ExecuteAsync(["list"], ct);
         listResult.Should().BeOfType<CommandResult.TextResult>();
         ((CommandResult.TextResult)listResult).Value.Should().Contain(sessionId[..8]);
@@ -87,7 +97,7 @@ public sealed class SessionFeatureE2ETests : IDisposable
         await _sessionManager.AppendUserMessageAsync("background task", ct);
         var firstId = first.Id.Value;
 
-        var sessionCmd = new SessionCommand(_sessionManager, new FileSessionEventStore(_tempDir), new NewCommand(_sessionManager));
+        var sessionCmd = new SessionCommand(_sessionManager, CreateCleaner(), new NewCommand(_sessionManager));
         // /session new backgrounds the current one and creates a new foreground session
         var newResult = await sessionCmd.ExecuteAsync(["new"], ct);
         newResult.Should().BeOfType<CommandResult.TextResult>();

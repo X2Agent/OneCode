@@ -13,6 +13,12 @@ public interface IBuildRunStore : IWorkflowRunStore<BuildRun, BuildRunId>
     Task<BuildRun?> LoadAsync(SessionId? conversationId, CancellationToken ct = default);
 
     Task<BuildRun?> LoadByIdAsync(BuildRunId id, CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除该会话的全部 BuildRun 落盘数据（run.json + events.json 等），供 /session delete 级联清理。
+    /// 实现为目录级删除；目录不存在时幂等返回。
+    /// </summary>
+    Task RemoveSessionAsync(SessionId conversationId, CancellationToken ct = default);
 }
 
 /// <summary>

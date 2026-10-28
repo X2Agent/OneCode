@@ -52,6 +52,12 @@ public static partial class Constants
         /// 会话摘要索引目录（<c>~/.onecode/events/summaries/</c>）：冷启动读它而不是解析事件日志。
         /// </summary>
         public const string SessionSummaries = "summaries";
+
+        /// <summary>
+        /// Token 账本水合目录（<c>~/.onecode/usage/</c>）：<c>JsonUsageStateStore</c> 在此持久化
+        /// 进程可计费总量与各会话桶，重启后水合回 TokenLedger。
+        /// </summary>
+        public const string Usage = "usage";
     }
 
     public static class Timeouts
