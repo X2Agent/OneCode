@@ -31,6 +31,13 @@ public static class ToolNames
     public static bool IsFileEditTool(string? toolName)
         => Registry.IsInCategory(toolName, ToolCategory.FileEdit);
 
+    /// <summary>
+    /// 动态工具判断——基于 ToolMetadata.Risk == Dynamic（MCP/第三方运行期注册的工具）。
+    /// 安全层据此把未声明文件分类、但可能触达文件系统的工具纳入保护范围。
+    /// </summary>
+    public static bool IsDynamicTool(string? toolName)
+        => Registry.IsDynamicTool(toolName);
+
     /// <summary>按分类查询工具（通用入口，供安全不变量等基础设施按需扩展类别）。</summary>
     public static bool IsInCategory(string? toolName, ToolCategory category)
         => Registry.IsInCategory(toolName, category);

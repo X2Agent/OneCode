@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Middleware;
+using OneCode.Infrastructure.Middleware.Invariants;
 
 namespace OneCode.Tests;
 
@@ -45,8 +46,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Deny("malicious arguments detected"));
 
@@ -76,8 +76,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Deny("blocked regardless of permission mode"));
 
@@ -99,8 +98,7 @@ public sealed class SafetyInvariantMiddlewareTests
 
         // 验证 invariant 确实被调用（Layer 0 检查执行了，而非被权限模式跳过）
         await invariant.Received(1).CheckAsync(
-            Arg.Any<string>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>>(),
+            Arg.Any<InvariantCheckRequest>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -111,15 +109,13 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant1 = Substitute.For<ISafetyInvariant>();
         invariant1.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Deny("first invariant denied"));
 
         var invariant2 = Substitute.For<ISafetyInvariant>();
         invariant2.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Allow);
 
@@ -139,8 +135,7 @@ public sealed class SafetyInvariantMiddlewareTests
 
         // 短路：第二个 invariant 不应被调用
         await invariant2.DidNotReceive().CheckAsync(
-            Arg.Any<string>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>>(),
+            Arg.Any<InvariantCheckRequest>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -151,8 +146,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Allow);
 
@@ -179,8 +173,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Allow);
 
@@ -210,8 +203,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Allow);
 
@@ -262,8 +254,7 @@ public sealed class SafetyInvariantMiddlewareTests
             .Contain("truncated", "错误必须指出截断这一可能原因")
             .And.Contain("Edit", "错误必须给出分段写入的自愈路径");
         await invariant.DidNotReceive().CheckAsync(
-            Arg.Any<string>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>>(),
+            Arg.Any<InvariantCheckRequest>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -302,8 +293,7 @@ public sealed class SafetyInvariantMiddlewareTests
         var ct = TestContext.Current.CancellationToken;
         var invariant = Substitute.For<ISafetyInvariant>();
         invariant.CheckAsync(
-                Arg.Any<string>(),
-                Arg.Any<IReadOnlyDictionary<string, object?>>(),
+                Arg.Any<InvariantCheckRequest>(),
                 Arg.Any<CancellationToken>())
             .Returns(InvariantCheckResult.Allow);
         var middleware = SafetyInvariantMiddleware.Create(
@@ -324,5 +314,115 @@ public sealed class SafetyInvariantMiddlewareTests
             ct);
 
         result.Should().Be("tool-result", "无必需参数的工具空参调用不应被拦截");
+    }
+
+    // 目标路径解析失败（schema 声明了必填路径但调用没给）：Layer 0 是唯一收口点，
+    // 必须拒绝且消息含工具名与参数名，供模型自愈重试。
+    [Fact]
+    public async Task UnresolvableTargetPath_DeniesWithoutExecuting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        var middleware = SafetyInvariantMiddleware.Create(new[] { invariant }, NullLogger.Instance);
+        var function = AIFunctionFactory.Create((string filePath, string content) => "ok", name: "Write");
+        var ctx = new FunctionInvocationContext
+        {
+            Function = function,
+            Arguments = new AIFunctionArguments { ["content"] = "patch" },
+        };
+        var holder = new FlagHolder();
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => { holder.Value = true; return new ValueTask<object?>("tool-result"); },
+            ct);
+
+        holder.Value.Should().BeFalse("路径解析失败必须 fail-closed");
+        result.Should().BeOfType<ToolResult>().Which.IsError.Should().BeTrue();
+        result.Should().BeOfType<ToolResult>().Which.Content.Should()
+            .Contain("Write").And.Contain("filePath");
+        await invariant.DidNotReceive().CheckAsync(
+            Arg.Any<InvariantCheckRequest>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    // 反证：文件写入类工具在 schema 里没有路径参数（协议工具）时必须放行——
+    // 一刀切拒绝会让 ApplyWorkspaceEdit 这类功能不可用。
+    [Fact]
+    public async Task WriteToolWithoutPathParameter_ExecutesWithNoneTargetPath()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var invariant = Substitute.For<ISafetyInvariant>();
+        invariant.CheckAsync(Arg.Any<InvariantCheckRequest>(), Arg.Any<CancellationToken>())
+            .Returns(InvariantCheckResult.Allow);
+        var middleware = SafetyInvariantMiddleware.Create(new[] { invariant }, NullLogger.Instance);
+        var function = AIFunctionFactory.Create(
+            (string workspaceEditJson) => "ok", name: "ApplyWorkspaceEdit");
+        var ctx = new FunctionInvocationContext
+        {
+            Function = function,
+            Arguments = new AIFunctionArguments { ["workspaceEditJson"] = "{}" },
+        };
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(), ctx,
+            (_, _) => new ValueTask<object?>("tool-result"),
+            ct);
+
+        result.Should().Be("tool-result");
+        await invariant.Received(1).CheckAsync(
+            Arg.Is<InvariantCheckRequest>(request => request.TargetPath.Kind == ToolTargetPathKind.None),
+            Arg.Any<CancellationToken>());
+    }
+
+    // 多规范路径键工具（Lsp：file 是主参数，path 是可选检索范围）走真实的 FileSystemInvariant：
+    // 本次提供的每个路径都必须进入敏感路径保护，不论 schema 里另一个键是否缺省。
+    // 工作区取根目录下不存在的目录，符号链接检查向上遍历父目录时不会撞上临时目录的重解析点。
+    private static async Task<(object? Result, bool Executed)> RunLspShapedCallAsync(string? file, string? path)
+    {
+        var workspace = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath())!, "oc-multikey-" + Guid.NewGuid().ToString("N"));
+        var middleware = SafetyInvariantMiddleware.Create(
+            new ISafetyInvariant[] { new FileSystemInvariant(workspace) }, NullLogger.Instance);
+        var function = AIFunctionFactory.Create(
+            (string action, string file = "", string? path = null) => "ok", name: "Lsp");
+        var arguments = new AIFunctionArguments { ["action"] = "hover" };
+        if (file is not null)
+            arguments["file"] = file;
+        if (path is not null)
+            arguments["path"] = path;
+        var holder = new FlagHolder();
+
+        var result = await middleware(
+            Substitute.For<AIAgent>(),
+            new FunctionInvocationContext { Function = function, Arguments = arguments },
+            (_, _) => { holder.Value = true; return new ValueTask<object?>("tool-result"); },
+            TestContext.Current.CancellationToken);
+
+        return (result, holder.Value);
+    }
+
+    [Theory]
+    [InlineData(".env", null)]
+    [InlineData(null, ".env")]
+    [InlineData("src/a.cs", ".env")]
+    public async Task MultiCanonicalPathTool_SensitivePathInAnyProvidedKey_DeniesWithoutExecuting(
+        string? file, string? path)
+    {
+        var (result, executed) = await RunLspShapedCallAsync(file, path);
+
+        executed.Should().BeFalse("file 与 path 任一命中敏感读清单都必须拦截，不能只检查其中一个键");
+        result.Should().BeOfType<ToolResult>().Which.IsError.Should().BeTrue();
+        result.Should().BeOfType<ToolResult>().Which.Content.Should().Contain(".env");
+    }
+
+    // 反证：多键并存时，全部路径合法的调用必须照常执行，保护不能变成一刀切拒绝。
+    [Fact]
+    public async Task MultiCanonicalPathTool_AllProvidedPathsClean_Executes()
+    {
+        var (result, executed) = await RunLspShapedCallAsync("src/a.cs", "src");
+
+        executed.Should().BeTrue();
+        result.Should().Be("tool-result");
     }
 }

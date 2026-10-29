@@ -5,6 +5,7 @@ using OneCode.App.Services.GoalMode;
 using OneCode.App.Query;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Prompt;
+using OneCode.Core.Session;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -99,6 +100,10 @@ internal sealed class GoalSubGoalExecutor : IGoalStepExecutionService
                 toolExecutions,
                 userPrompt,
                 ct).ConfigureAwait(false);
+        }
+        catch (SessionDeletedException)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {

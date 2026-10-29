@@ -620,4 +620,147 @@ public sealed class PermissionCheckerBoundaryTests
     }
 
     // NonAutoMode（Bypass 模式不下发 YOLO）已并入 CheckAsync_BypassMode_AlwaysAllows
+
+    // ---- 目标路径来自 schema 解析（ToolPermissionContext.TargetPath）----
+
+    private static string CreateWorkspace()
+    {
+        var workspace = Path.Combine(Path.GetTempPath(), "oc-boundary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workspace);
+        return workspace;
+    }
+
+    // 反证锚点：MCP 这类未声明文件分类的 Dynamic 工具，不能因「工具名不在读写白名单」跳过边界校验；
+    // 必须按解析出的目标路径校验，越界路径 Deny。
+    [Fact]
+    public async Task CheckAsync_TargetPath_DynamicToolOutsideWorkspace_IsDenied()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspace = CreateWorkspace();
+        try
+        {
+            var outside = Path.Combine(Path.GetTempPath(), "outside-" + Guid.NewGuid().ToString("N") + ".cs");
+            var ctx = new ToolPermissionContext
+            {
+                Mode = PermissionMode.Default,
+                WorkingDirectory = workspace,
+                TargetPath = ToolTargetPathResult.Resolved([outside]),
+            };
+
+            var result = await _sut.CheckAsync("mcp__filesystem__read_file", ParseJson("{}"), ctx, ct);
+
+            result.Decision.Should().Be(PermissionDecision.Deny);
+            result.Message.Should().Contain("outside the working directory");
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_TargetPath_DynamicToolInsideWorkspace_IsNotDenied()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspace = CreateWorkspace();
+        try
+        {
+            var inside = Path.Combine(workspace, "src", "a.cs");
+            var ctx = new ToolPermissionContext
+            {
+                Mode = PermissionMode.Default,
+                WorkingDirectory = workspace,
+                TargetPath = ToolTargetPathResult.Resolved([inside]),
+            };
+
+            var result = await _sut.CheckAsync("mcp__filesystem__read_file", ParseJson("{}"), ctx, ct);
+
+            result.Decision.Should().NotBe(PermissionDecision.Deny);
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    // 多规范路径键工具（Lsp 的 file 与 path）会解析出多条目标路径：边界校验必须逐条检查，
+    // 只看第一条会让排在后面的越界路径放行。
+    [Fact]
+    public async Task CheckAsync_TargetPath_ReadOnlyToolWithSecondPathOutsideWorkspace_IsDenied()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspace = CreateWorkspace();
+        try
+        {
+            var inside = Path.Combine(workspace, "src");
+            var outside = Path.Combine(Path.GetTempPath(), "outside-" + Guid.NewGuid().ToString("N") + ".cs");
+            var insideOnly = new ToolPermissionContext
+            {
+                Mode = PermissionMode.Default,
+                WorkingDirectory = workspace,
+                TargetPath = ToolTargetPathResult.Resolved([inside, Path.Combine(workspace, "src", "a.cs")]),
+            };
+            var secondOutside = new ToolPermissionContext
+            {
+                Mode = PermissionMode.Default,
+                WorkingDirectory = workspace,
+                TargetPath = ToolTargetPathResult.Resolved([inside, outside]),
+            };
+
+            var allowed = await _sut.CheckAsync("Lsp", ParseJson("{}"), insideOnly, ct);
+            var denied = await _sut.CheckAsync("Lsp", ParseJson("{}"), secondOutside, ct);
+
+            allowed.Decision.Should().Be(PermissionDecision.Allow, "两条路径都在工作区内，只读工具照常放行");
+            denied.Decision.Should().Be(PermissionDecision.Deny);
+            denied.Message.Should().Contain(outside, "拒绝消息必须指向越界的那一条，而不是第一条");
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_TargetPath_Unresolvable_IsDenied()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var ctx = new ToolPermissionContext
+        {
+            Mode = PermissionMode.Default,
+            WorkingDirectory = Path.GetTempPath(),
+            TargetPath = ToolTargetPathResult.Unresolvable("Tool 'Write' requires path parameter 'filePath'"),
+        };
+
+        var result = await _sut.CheckAsync("Write", ParseJson("{}"), ctx, ct);
+
+        result.Decision.Should().Be(PermissionDecision.Deny);
+        result.Message.Should().Contain("filePath");
+    }
+
+    // 反证：拿不到 schema 的调用方（审批层）保持既有语义——非文件类工具不做路径校验，
+    // 由执行期的 Layer 0/1 兜底。
+    [Fact]
+    public async Task CheckAsync_NoTargetPath_NonFileTool_KeepsLegacyBehavior()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspace = CreateWorkspace();
+        try
+        {
+            var ctx = new ToolPermissionContext
+            {
+                Mode = PermissionMode.Default,
+                WorkingDirectory = workspace,
+                TargetPath = null,
+            };
+            var input = ParseJson($@"{{""filePath"":""{Path.Combine(Path.GetTempPath(), "outside.cs").Replace("\\", "\\\\")}""}}");
+
+            var result = await _sut.CheckAsync("todos_add", input, ctx, ct);
+
+            result.Decision.Should().NotBe(PermissionDecision.Deny);
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
 }

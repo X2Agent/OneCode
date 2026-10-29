@@ -47,6 +47,13 @@ public sealed record ToolPermissionContext
         = new Dictionary<string, AdditionalWorkingDirectory>();
     public IReadOnlyDictionary<string, PermissionRuleGroup> RulesBySource { get; init; }
         = new Dictionary<string, PermissionRuleGroup>();
+
+    /// <summary>
+    /// 本次调用的目标路径（由 <see cref="OneCode.Core.Tools.ToolTargetPathResolver"/> 在管道边界按 schema 解析）。
+    /// null 表示调用方拿不到工具 schema（如审批层的 <c>AutoApprovalRulesFactory</c>），
+    /// 此时 <see cref="PermissionCheckHelpers.ValidatePath"/> 回落到参数名提取。
+    /// </summary>
+    public OneCode.Core.Tools.ToolTargetPathResult? TargetPath { get; init; }
 }
 
 /// <summary>

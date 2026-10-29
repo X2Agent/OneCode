@@ -15,14 +15,13 @@ public sealed partial class ResourceInvariant : ISafetyInvariant
     };
 
     public ValueTask<InvariantCheckResult> CheckAsync(
-        string toolName,
-        IReadOnlyDictionary<string, object?> parameters,
+        InvariantCheckRequest request,
         CancellationToken ct)
     {
-        if (!ShellTools.Contains(toolName))
+        if (!ShellTools.Contains(request.ToolName))
             return new(InvariantCheckResult.Allow);
 
-        var command = ExtractCommand(parameters);
+        var command = ExtractCommand(request.Parameters);
         if (command is null)
             return new(InvariantCheckResult.Allow);
 

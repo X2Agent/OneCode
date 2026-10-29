@@ -303,6 +303,16 @@ public sealed class ToolMetadataRegistry
         }
     }
 
+    /// <summary>判断工具是否为动态工具（Risk == Dynamic：MCP/第三方运行期注册的工具）。</summary>
+    public bool IsDynamicTool(string? toolName)
+    {
+        if (toolName is null) return false;
+        lock (_lock)
+        {
+            return _byName.TryGetValue(toolName, out var meta) && meta.Risk == ToolRisk.Dynamic;
+        }
+    }
+
     /// <summary>获取指定分类的所有工具名称。</summary>
     public IReadOnlySet<string> GetToolNamesByCategory(ToolCategory category)
     {

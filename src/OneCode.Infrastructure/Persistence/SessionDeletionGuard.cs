@@ -1,4 +1,5 @@
 using OneCode.Core.Domain;
+using OneCode.Core.Session;
 
 namespace OneCode.Infrastructure.Persistence;
 
@@ -9,7 +10,7 @@ public static class SessionDeletionGuard
     public static void ThrowIfDeleted(string dataDirectory, SessionId sessionId)
     {
         if (File.Exists(GetMarkerPath(dataDirectory, sessionId)))
-            throw new InvalidOperationException($"Session '{sessionId}' has been deleted and cannot be written again.");
+            throw new SessionDeletedException(sessionId);
     }
 
     /// <summary>判断会话是否已删除，供可丢弃的摘要投影安静跳过。</summary>

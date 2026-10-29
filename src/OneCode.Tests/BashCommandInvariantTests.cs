@@ -1,4 +1,5 @@
 using OneCode.Core.Permissions;
+using OneCode.Core.Tools;
 using OneCode.Infrastructure.Middleware.Invariants;
 
 namespace OneCode.Tests;
@@ -40,7 +41,8 @@ public sealed class BashCommandInvariantTests
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = await sut.CheckAsync("Bash", parameters, TestContext.Current.CancellationToken);
+        var result = await sut.CheckAsync(
+            Request("Bash", parameters), TestContext.Current.CancellationToken);
 
         result.Allowed.Should().BeFalse(
             $"command '{command}' should be blocked by pattern '{expectedPatternName}'");
@@ -59,9 +61,13 @@ public sealed class BashCommandInvariantTests
         var sut = new BashCommandInvariant();
         var parameters = new Dictionary<string, object?> { ["command"] = command };
 
-        var result = await sut.CheckAsync("Bash", parameters, TestContext.Current.CancellationToken);
+        var result = await sut.CheckAsync(
+            Request("Bash", parameters), TestContext.Current.CancellationToken);
 
         result.Allowed.Should().BeTrue(
             $"command '{command}' should not match any Layer0HardDeny pattern");
     }
+
+    private static InvariantCheckRequest Request(string toolName, IReadOnlyDictionary<string, object?> parameters)
+        => new(toolName, parameters, ToolTargetPathResult.None);
 }

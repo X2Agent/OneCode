@@ -12,9 +12,11 @@ namespace OneCode.Infrastructure.Middleware.Invariants;
 ///    Contains("id_rsa") 会误拦截公钥；Contains(".ssh") 会误判 dot.ssh.archive。
 /// 2. 符号链接检测向上遍历各父目录 — 仅检查 fullPath 自身对 /symlink_to_etc/passwd
 ///    越狱场景失效（fullPath 解析后指向 /etc/passwd 普通文件，非 ReparsePoint）。
-/// 3. ExtractPath=null 时 fail-closed — 不放行无法解析路径的工具调用。
-/// 4. File.GetAttributes 异常保护 — TOCTOU（Exists 后被删）或权限不足时 fail-closed。
-/// 5. 工具名大小写统一用 OrdialIgnoreCase 比较，避免 "edit"/"read" 小写绕过。
+/// 3. 路径来源是 <see cref="InvariantCheckRequest.TargetPath"/>（由 schema 解析一次得到）：
+///    「解析不出来」已在 <c>SafetyInvariantMiddleware</c> 拒绝，本类只处理「有路径」与「无路径约束」。
+/// 4. 保护规则由 <see cref="ToolPathScope"/> 元数据分类决定：写保护只给 Write，敏感读给
+///    ReadOnly 与 Dynamic（MCP），三类都做 symlink 检查；None 直接放行。
+/// 5. File.GetAttributes 异常保护 — TOCTOU（Exists 后被删）或权限不足时 fail-closed。
 /// </summary>
 public sealed class FileSystemInvariant(
     string workingDirectory,
@@ -38,49 +40,34 @@ public sealed class FileSystemInvariant(
         ".env",
     ];
 
-    /// <summary>
-    /// 敏感文件读取黑名单（仅 Read 工具受此约束）。
-    /// 防止 AI 读取 ~/.ssh/id_rsa、~/.aws/credentials、.env 等敏感文件
-    /// 并把内容写入对话上下文造成泄露。
-    /// </summary>
-    /// <summary>
-    /// 敏感文件读取黑名单已抽取至 <see cref="SensitiveReadPathPolicy"/>（单一事实源），
-    /// 与 <c>TextSearchService</c> 的检索结果过滤共用同一份清单。
-    /// 读取类工具集合含内容检索类工具：它们的 <c>path</c> 参数同样直连文件系统。
-    /// </summary>
-    private static readonly HashSet<string> ReadTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Read",
-        "ReadFile",
-        "Cat",
-        "Head",
-        "Tail",
-        "Grep",
-        "Glob",
-        "LS",
-    };
-
     public ValueTask<InvariantCheckResult> CheckAsync(
-        string toolName,
-        IReadOnlyDictionary<string, object?> parameters,
+        InvariantCheckRequest request,
         CancellationToken ct)
     {
-        // 写入类工具：拦截所有 ProtectedWriteSegments + .git
-        // 读取类工具：仅拦截敏感读取序列（防止凭证泄露）
-        // Write/Edit/Delete 统一引用 ToolNames 类别查询（元数据驱动）
-        var isWriteTool = ToolNames.IsFileEditTool(toolName) || ToolNames.IsInCategory(toolName, ToolCategory.FileDelete);
-        var isReadTool = ReadTools.Contains(toolName);
-        if (!isWriteTool && !isReadTool)
+        // 触达范围完全由元数据决定：provider 注入的会话状态工具与未注册工具落在 None，不参与路径检查。
+        var scope = ToolPathScope.Classify(request.ToolName);
+        if (!ToolPathScope.TouchesFiles(scope))
             return new(InvariantCheckResult.Allow);
 
-        var path = ExtractPath(parameters);
-        // 路径提取失败 fail-closed — 不放行无法解析路径的工具调用，
-        // 否则未知参数名工具会静默绕过安全检查。
-        if (path is null)
-            return new(InvariantCheckResult.Deny(
-                $"[SAFETY] Cannot extract file path from tool '{toolName}' parameters. " +
-                "Refusing to proceed — path extraction must succeed for safety checks to apply."));
+        // Unresolvable 已在 SafetyInvariantMiddleware 拒绝，此处只剩「没有路径可校验」（None）。
+        if (!request.TargetPath.HasPath)
+            return new(InvariantCheckResult.Allow);
 
+        var checkWrite = ToolPathScope.RequiresWriteCheck(scope);
+        var checkRead = ToolPathScope.RequiresSensitiveReadCheck(scope);
+
+        foreach (var path in request.TargetPath.Paths)
+        {
+            var result = CheckPath(path, checkWrite, checkRead);
+            if (!result.Allowed)
+                return new(result);
+        }
+
+        return new(InvariantCheckResult.Allow);
+    }
+
+    private InvariantCheckResult CheckPath(string path, bool checkWrite, bool checkRead)
+    {
         string fullPath;
         try
         {
@@ -88,8 +75,7 @@ public sealed class FileSystemInvariant(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new(InvariantCheckResult.Deny(
-                $"[SAFETY] Invalid path: '{path}'"));
+            return InvariantCheckResult.Deny($"[SAFETY] Invalid path: '{path}'");
         }
 
         // 符号链接越狱检测 — 必须向上遍历各父目录，不能仅检查 fullPath 自身。
@@ -97,30 +83,31 @@ public sealed class FileSystemInvariant(
         // 解析为 /etc/passwd（普通文件），单点检查会漏过。
         if (ContainsSymlinkInChain(fullPath, out var symlinkPath))
         {
-            return new(InvariantCheckResult.Deny(
+            return InvariantCheckResult.Deny(
                 $"[SAFETY] Symlink detected in path chain: '{symlinkPath}'. " +
-                "Accessing through symlinks is blocked to prevent escape attacks."));
+                "Accessing through symlinks is blocked to prevent escape attacks.");
         }
 
         var segments = SplitPathSegments(fullPath);
 
         // 写入类：拦截 ProtectedWriteSegments（路径段精确匹配）
-        if (isWriteTool && MatchesProtectedWriteSegment(segments, out var writeTarget))
+        if (checkWrite && MatchesProtectedWriteSegment(segments, out var writeTarget))
         {
-            return new(InvariantCheckResult.Deny(
-                $"[SAFETY] Writing to sensitive path is forbidden: '{writeTarget}'"));
+            return InvariantCheckResult.Deny(
+                $"[SAFETY] Writing to sensitive path is forbidden: '{writeTarget}'");
         }
 
-        // 读取类：拦截 SensitiveReadPathSequences（路径段序列连续匹配）
-        if (isReadTool && MatchesSensitiveReadSequence(segments, out var readTarget))
+        // 读取类（含 MCP 这类 Dynamic 工具）：拦截 SensitiveReadPathSequences（路径段序列连续匹配）。
+        // 清单见 <see cref="SensitiveReadPathPolicy"/>（与 TextSearchService 的检索结果过滤共用）。
+        if (checkRead && MatchesSensitiveReadSequence(segments, out var readTarget))
         {
-            return new(InvariantCheckResult.Deny(
+            return InvariantCheckResult.Deny(
                 $"[SAFETY] Reading sensitive file is forbidden: '{readTarget}'. " +
                 "This file may contain credentials (API keys, private keys, tokens). " +
-                "If access is genuinely required, ask the user to grant explicit permission."));
+                "If access is genuinely required, ask the user to grant explicit permission.");
         }
 
-        return new(InvariantCheckResult.Allow);
+        return InvariantCheckResult.Allow;
     }
 
     /// <summary>
@@ -225,14 +212,5 @@ public sealed class FileSystemInvariant(
     {
         var normalized = path.Replace('\\', '/');
         return normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-    }
-
-    /// <summary>
-    /// 路径提取统一委托给 <see cref="ToolArgumentExtractor"/>，
-    /// 覆盖所有 key 名变体（filePath/path/file_path 等）。
-    /// </summary>
-    private static string? ExtractPath(IReadOnlyDictionary<string, object?> parameters)
-    {
-        return ToolArgumentExtractor.ExtractFilePath(parameters);
     }
 }

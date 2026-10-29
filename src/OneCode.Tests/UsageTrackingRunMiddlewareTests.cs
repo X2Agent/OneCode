@@ -1,5 +1,8 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using NSubstitute;
+using OneCode.Core.Session;
+using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent.RunMiddleware;
 using OneCode.Infrastructure.Api;
 
@@ -349,6 +352,20 @@ public sealed class UsageTrackingRunMiddlewareTests
 
         tracker.GetTotalTokens().Should().Be(0,
             "no usage received means nothing to record — usage stays at zero");
+    }
+
+    [Fact]
+    public void RecordUsage_SessionDeleted_PropagatesDedicatedSignal()
+    {
+        var sessionId = SessionId.NewId();
+        var ledger = Substitute.For<ITokenLedger>();
+        ledger.When(x => x.RecordUsage(sessionId, Arg.Any<UsageRecord>()))
+            .Throw(new SessionDeletedException(sessionId));
+
+        var act = () => UsageTrackingRunMiddleware.RecordUsage(
+            CreateUsage(input: 100, output: 20), ledger, "model", null, sessionId);
+
+        act.Should().Throw<SessionDeletedException>("删除是 run 取消控制信号，不能被记账容错吞掉");
     }
 
     /// <summary>产出一个 text update + 一个 usage update，然后抛异常（模拟流中断）。</summary>

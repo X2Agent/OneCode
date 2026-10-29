@@ -74,6 +74,7 @@ public sealed class EnterWorktreeTool
         await File.WriteAllTextAsync(statePath, state, ct).ConfigureAwait(false);
 
         await _sessionManager.ChangeWorkingDirectoryAsync(worktreePath, ct).ConfigureAwait(false);
+        // 当前作用域共享同一目录 holder，后续工具立即按 worktree 边界执行。
         OneCodeAgentRunContext.WorkingDirectoryOverride = worktreePath;
 
         return ToolResult.JsonSuccess(new { worktreePath, worktreeBranch = branchName });

@@ -47,7 +47,11 @@ public sealed class EditTransactionMiddleware(
             // 仅拦截文件编辑类工具
             if (isFileEdit)
             {
-                var path = ToolArgumentExtractor.ExtractFilePath(ctx.Arguments);
+                // 目标路径按工具 schema 解析，与安全层/权限层共用同一结论，不再按参数名猜测。
+                var parameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, ctx.Function!.Name, _logger);
+                var path = parameters is null
+                    ? null
+                    : ToolTargetPathResolver.ResolvePrimaryPath(ctx.Function, parameters);
                 if (path is not null)
                 {
                     // 每次调用解析活动目录：同 run 内 EnterWorktree 切目录后，

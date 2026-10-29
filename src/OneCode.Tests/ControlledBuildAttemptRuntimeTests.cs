@@ -4,6 +4,7 @@ using OneCode.App.Query;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.BuildMode;
 using OneCode.Core.Build;
+using OneCode.Core.Session;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.Tests;
@@ -108,6 +109,33 @@ public sealed class ControlledBuildAttemptRuntimeTests : IDisposable
                 && !result.TransactionRolledBack),
             Arg.Any<CancellationToken>(),
             7);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SessionDeleted_RollsBackWithoutCompletingRun()
+    {
+        var file = CreateFile("deleted.txt", "before");
+        var run = CreateClaimedRun();
+        var runner = CreateRunner(async options =>
+        {
+            options.SharedTransaction!.Snapshot(file);
+            await File.WriteAllTextAsync(file, "after", TestContext.Current.CancellationToken);
+            throw new SessionDeletedException(run.ConversationId!.Value);
+        });
+        var coordinator = Substitute.For<IBuildRunCoordinator>();
+
+        var act = () => CreateRuntime(run, runner, coordinator).ExecuteAsync(
+            CreateInput(run),
+            TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<SessionDeletedException>();
+        (await File.ReadAllTextAsync(file, TestContext.Current.CancellationToken)).Should().Be("before",
+            "删除按取消处理，事务必须回滚且不得写 AgentException 终态");
+        await coordinator.DidNotReceive().CompleteAsync(
+            Arg.Any<BuildRunId>(),
+            Arg.Any<MainAgentRunResult>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<long?>());
     }
 
     [Fact]

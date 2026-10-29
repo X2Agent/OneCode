@@ -47,8 +47,8 @@ public static class ShellExecutionHelper
                 // 展开风险操作数无法证明解析目标仍在授权目录内，必须在执行前拒绝。
                 if (HasExpansionRisk(path))
                 {
-                    return $"Error: command operand '{path}' uses variable or command expansion, so its target cannot be verified against the workspace boundary. " +
-                           "Rewrite the command with explicit literal paths (or ask the user to run it manually).";
+                    return $"Error: command operand '{path}' uses a variable, command expansion, or script expression, so its target cannot be verified against the workspace boundary. " +
+                           "Use a literal path inside the workspace (variables and expanded expressions are not allowed), or ask the user to run it manually.";
                 }
 
                 // 纯通配操作数：校验首个通配符之前的静态前缀（如 src/*.cs → src），

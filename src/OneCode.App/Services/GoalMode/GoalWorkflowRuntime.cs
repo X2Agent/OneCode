@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using OneCode.App.Services.Agent;
 using OneCode.App.Query;
 using OneCode.Core.Goals;
+using OneCode.Core.Session;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
@@ -426,6 +427,11 @@ internal sealed class GoalWorkflowRuntime(
                 }
             }
             return applied;
+        }
+        catch (SessionDeletedException)
+        {
+            transaction.PreserveForManualReconciliation();
+            throw;
         }
         catch (OperationCanceledException)
         {

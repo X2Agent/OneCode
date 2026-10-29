@@ -41,6 +41,13 @@ internal static class TestToolNamesInit
             Risk = ToolRisk.Destructive,
             Category = ToolCategory.FileWrite,
         });
+        // 删除工具与生产注册一致（FileDelete 单独一类，不并入 FileWrite/FileEdit）。
+        registry.Register(new ToolMetadata
+        {
+            Name = "Delete",
+            Risk = ToolRisk.Destructive,
+            Category = ToolCategory.FileDelete,
+        });
 
         // Plan-allowed tools (beyond read-only)
         foreach (var name in new[] { "Task", "Agent", "ParallelAgents" })
@@ -73,6 +80,15 @@ internal static class TestToolNamesInit
 
         // Shell tools
         registry.Register(new ToolMetadata { Name = "Bash", Risk = ToolRisk.Dynamic });
+
+        // MCP 工具（生产经 ToolCatalog.AddMcpTools 注册为 Risk=Dynamic、无文件分类）。
+        registry.Register(new ToolMetadata
+        {
+            Name = "mcp__filesystem__read_file",
+            Risk = ToolRisk.Dynamic,
+            IsConcurrencySafe = false,
+            LoadPolicy = ToolLoadPolicy.Contextual,
+        });
 
         // Harness 注入工具（todos_* / file_memory_*）：只读写 agent 会话状态，Plan 模式放行。
         // 生产路径经 HarnessProviderTools.RegisterMetadata 登记同一类别声明（见 AgentPipelineBuilder）。

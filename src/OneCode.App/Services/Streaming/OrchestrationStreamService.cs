@@ -8,6 +8,7 @@ using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Goals;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
+using OneCode.Core.Session;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -304,6 +305,17 @@ public sealed class OrchestrationStreamService(
                         mergedChannel.Writer.TryWrite(new ErrorEvent(ex.Message));
                     }
                 }
+                catch (SessionDeletedException)
+                {
+                    mergedChannel.Writer.TryWrite(new DoneEvent(
+                        FullText: null,
+                        Usage: new TokenUsage(0, 0),
+                        TurnsCompleted: goalRun.Executions.Sum(execution => execution.Attempts),
+                        TerminalReason: RunTerminalReason.Cancelled,
+                        SessionId: goalRun.SessionId,
+                        TransactionRolledBack: false,
+                        ValidationFailureSummary: null));
+                }
                 catch (Exception ex)
                 {
                     mergedChannel.Writer.TryWrite(new ErrorEvent(ex.Message));
@@ -333,7 +345,14 @@ public sealed class OrchestrationStreamService(
 
             if (switchWorkingDir)
             {
-                await session!.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await session!.SessionManager.ChangeWorkingDirectoryAsync(originalWorkingDirectory, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (SessionDeletedException)
+                {
+                    // 会话已删除，取消终态已发出；不再为目录恢复制造第二个异常终态。
+                }
             }
         }
 

@@ -52,7 +52,7 @@ public sealed class BashTool
                "Prefer the dedicated Write and Edit tools to create or modify files instead of shell redirection or echo. " +
                "Dialect selection: shell=\"bash\" (default) runs in the persistent session shell (pwsh on Windows, bash on Unix) " +
                "preserving cwd and environment across calls; shell=\"powershell\" spawns an isolated fresh PowerShell process per call. " +
-               "Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, Set-ExecutionPolicy, Format-Volume, etc.) are hard-blocked; " +
+               "PowerShell path operands must be literal workspace paths (variables, command expansion, and script expressions are rejected). Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, Set-ExecutionPolicy, Format-Volume, etc.) are hard-blocked; " +
                "destructive commands emit a [warning] prefix; sed -i without backup suffix is rejected (bash path). " +
                "Output is truncated at 100,000 chars using head/tail strategy; timeouts kill the entire process tree.";
     }
@@ -62,7 +62,7 @@ public sealed class BashTool
                  "Prefer the dedicated Write/Edit tools to create or modify files instead of shell redirection. " +
                  "Dialect selection: shell=\"bash\" (default) runs in the persistent session shell (pwsh on Windows, bash on Unix) " +
                  "preserving cwd/env across calls; shell=\"powershell\" spawns an isolated fresh PowerShell process per call. " +
-                 "Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, etc.) are hard-blocked; shell=\"powershell\" " +
+                 "PowerShell path operands must be literal workspace paths (variables, command expansion, and script expressions are rejected). Safety: dangerous patterns (rm -rf /, git push --force, curl|sh, etc.) are hard-blocked; shell=\"powershell\" " +
                  "additionally hard-blocks Set-ExecutionPolicy / Format-Volume / Restart-Computer / elevated Start-Process; " +
                  "destructive commands emit a [warning] prefix; sed -i without backup suffix is rejected (bash path). " +
                  "Output is truncated at 100,000 chars using head/tail strategy; timeouts kill the entire process tree.")]

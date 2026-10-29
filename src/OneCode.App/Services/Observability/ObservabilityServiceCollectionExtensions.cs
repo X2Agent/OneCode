@@ -19,7 +19,9 @@ public static class ObservabilityServiceCollectionExtensions
             PathsHelper.UserHome,
             sp.GetRequiredService<ILogger<JsonUsageStateStore>>()));
         services.AddSingleton<TokenLedger>(sp =>
-            new TokenLedger(sp.GetRequiredService<JsonUsageStateStore>()));
+            new TokenLedger(
+                sp.GetRequiredService<JsonUsageStateStore>(),
+                sp.GetRequiredService<ILogger<TokenLedger>>()));
         services.AddSingleton<ITokenLedger>(sp => sp.GetRequiredService<TokenLedger>());
 
         services.AddSingleton<TokenUsageTracker>();

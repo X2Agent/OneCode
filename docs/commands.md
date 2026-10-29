@@ -798,6 +798,8 @@ OneCode 命令按 `CommandCategory` 分为 5 类：
 > `switch`/`delete` 接受任意长度的 id 前缀；关闭会话用独立命令 `/close`。
 > `delete` 的级联清理分步容错：某一步失败只在输出中列出失败项，其余步骤照常执行。
 > 各存储同时保留轻量删除标记，拒绝其他进程或迟到任务重新写入已删会话；这些标记不包含会话内容。
+> 其他进程删除会话后，在途 run 在下一次控制面持久化发现标记时按 `Cancelled` 收口，不再写转录或
+> run 聚合；后台 usage flush 只丢弃该会话的迟到增量，不改变 run 终态。
 > GOAL 隔离 worktree 目录**不自动删除**（可能含未合并改动），删除输出会给出残留路径与
 > `git worktree remove` 手动命令。
 > 元数据：`Immediate = true`。

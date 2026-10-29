@@ -46,7 +46,8 @@ public static class EditGuardMiddleware
                 // 多数 Write 实现会自动 CreateDirectory，不强制父目录存在）。
                 if (string.Equals(toolName, "Edit", StringComparison.OrdinalIgnoreCase))
                 {
-                    var editPath = ToolArgumentExtractor.ExtractFilePath(parameters);
+                    // 目标路径按 schema 解析（与安全层同一结论）；解析不出来时 Layer 0 已拒绝，此处跳过。
+                    var editPath = ToolTargetPathResolver.ResolvePrimaryPath(ctx.Function, parameters);
                     if (editPath is not null)
                     {
                         string fullPath;
@@ -74,7 +75,10 @@ public static class EditGuardMiddleware
             if (!isFileEdit)
                 return result;
 
-            var editedPath = ToolArgumentExtractor.ExtractFilePath(ctx.Arguments);
+            var verifyParameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, toolName, logger);
+            var editedPath = verifyParameters is null
+                ? null
+                : ToolTargetPathResolver.ResolvePrimaryPath(ctx.Function, verifyParameters);
             if (editedPath is null || !verificationProvider.IsSourceFile(editedPath))
                 return result;
 

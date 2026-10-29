@@ -22,9 +22,9 @@ public static class OneCodeAgentRunContext
     // 外层中间件的上下文，但对同一引用对象的写入两侧都可见。
     private static readonly AsyncLocal<RunSeal?> PlanSubmissionSealSlot = new();
 
-    // 异步作用域级工作目录覆盖（如 Goal 隔离 Worktree、子代理显式目录覆盖）。
-    // SessionWorkingDirectoryAccessor 优先读取此值，消除单例工具与管道中间件之间的目录分裂。
-    private static readonly AsyncLocal<string?> WorkingDirectoryOverrideSlot = new();
+    // 每个作用域持有独立 holder，工具修改的是 holder 内的值：AsyncLocal 引用随
+    // ExecutionContext 流入工具子上下文，写入因此对父作用域的后续工具同样可见。
+    private static readonly AsyncLocal<WorkingDirectoryOverrideState?> WorkingDirectoryOverrideSlot = new();
 
     public static string? CurrentRunId
     {
@@ -61,27 +61,44 @@ public static class OneCodeAgentRunContext
 
     /// <summary>
     /// 当前异步执行上下文的工作目录覆盖；为 null 时回退到会话级工作目录。
+    /// 已有 holder 时只修改其值，使工具子上下文与父作用域看到同一目录。
     /// </summary>
     public static string? WorkingDirectoryOverride
     {
-        get => WorkingDirectoryOverrideSlot.Value;
-        set => WorkingDirectoryOverrideSlot.Value = value;
+        get => WorkingDirectoryOverrideSlot.Value?.Path;
+        set
+        {
+            if (WorkingDirectoryOverrideSlot.Value is { } current)
+                current.Path = value;
+            else
+                WorkingDirectoryOverrideSlot.Value = new WorkingDirectoryOverrideState(value);
+        }
     }
 
     /// <summary>
-    /// 在当前异步作用域内绑定工作目录覆盖，释放时自动恢复原值。
+    /// 在当前异步作用域内绑定工作目录覆盖，释放时恢复原 holder。
+    /// 空目录仍创建独立 holder 并继承当前值，保证嵌套修改不外泄。
     /// </summary>
     public static WorkingDirectoryScope UseWorkingDirectory(string? workingDirectory)
     {
         var previous = WorkingDirectoryOverrideSlot.Value;
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
-            WorkingDirectoryOverrideSlot.Value = workingDirectory;
+        WorkingDirectoryOverrideSlot.Value = new WorkingDirectoryOverrideState(
+            string.IsNullOrWhiteSpace(workingDirectory) ? previous?.Path : workingDirectory);
         return new WorkingDirectoryScope(previous);
     }
 
-    public readonly struct WorkingDirectoryScope(string? previous) : IDisposable
+    public readonly struct WorkingDirectoryScope : IDisposable
     {
-        public void Dispose() => WorkingDirectoryOverrideSlot.Value = previous;
+        private readonly WorkingDirectoryOverrideState? _previous;
+
+        internal WorkingDirectoryScope(WorkingDirectoryOverrideState? previous) => _previous = previous;
+
+        public void Dispose() => WorkingDirectoryOverrideSlot.Value = _previous;
+    }
+
+    internal sealed class WorkingDirectoryOverrideState(string? path)
+    {
+        public string? Path { get; set; } = path;
     }
 }
 

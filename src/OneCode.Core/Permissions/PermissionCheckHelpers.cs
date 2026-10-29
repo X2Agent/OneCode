@@ -262,10 +262,6 @@ public static class PermissionCheckHelpers
     internal static PermissionCheckResult ValidatePath(
         string toolName, JsonElement toolInput, ToolPermissionContext context)
     {
-        if (!ToolNames.FileWriteTools.Contains(toolName) && !ToolNames.ReadOnlyTools.Contains(toolName)
-            && !IsShellTool(toolName, toolInput))
-            return PermissionCheckResult.Allow;
-
         string[] pathValues;
         if (IsShellTool(toolName, toolInput))
         {
@@ -274,8 +270,24 @@ public static class PermissionCheckHelpers
                     : BashCommandClassifier.ExtractReferencedPaths(ToolArgumentExtractor.ExtractInputString(toolName, toolInput)))
                 .ToArray();
         }
+        else if (context.TargetPath is { } target)
+        {
+            // 执行期路径：由 SafetyInvariantMiddleware 按工具 schema 解析后传入。
+            // Unresolvable 在 Layer 0 已被拒绝，这里再判一次是给直调本方法的调用方兜底。
+            if (target.Kind == ToolTargetPathKind.Unresolvable)
+                return PermissionCheckResult.Deny(target.Reason ?? "Tool target path could not be resolved.");
+
+            if (!target.HasPath || ToolPathScope.Classify(toolName) == ToolPathScopeKind.None)
+                return PermissionCheckResult.Allow;
+
+            pathValues = [.. target.Paths];
+        }
         else
         {
+            // 拿不到 schema 的调用方（审批层 AutoApprovalRulesFactory）：回落既有参数名提取。
+            if (!ToolNames.FileWriteTools.Contains(toolName) && !ToolNames.ReadOnlyTools.Contains(toolName))
+                return PermissionCheckResult.Allow;
+
             pathValues = ToolArgumentExtractor.ExtractInputString(toolName, toolInput) is { } singlePath ? [singlePath] : [];
         }
 

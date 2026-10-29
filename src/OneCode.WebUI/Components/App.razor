@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <title>OneCode</title>
+    <script>
+        // 主题引导：必须在样式表加载前执行，否则首帧会先按错误主题渲染再跳变。
+        // 手动选择（localStorage onecode-theme）优先，否则跟随系统偏好。
+        (function () {
+            var theme;
+            try { theme = localStorage.getItem('onecode-theme'); } catch (e) { theme = null; }
+            if (theme !== 'light' && theme !== 'dark')
+                theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
     <link rel="stylesheet" href="@Assets["app.css"]" />
     @* 关闭预渲染：首页初始化包含会话扫描与提示词构建，预渲染会让它跑两遍并阻塞 HTML 首包。 *@
     <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />

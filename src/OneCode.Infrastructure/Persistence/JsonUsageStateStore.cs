@@ -12,7 +12,19 @@ public sealed record PersistedTokenUsageState(
     IReadOnlyDictionary<SessionId, SessionTokenUsage> Sessions);
 
 /// <summary>
-/// TokenLedger 的跨进程持久化：每次记账在文件锁内读取最新状态、追加增量并原子替换
+/// 批量用量增量：四维原始计数用于会话统计，<paramref name="BillableTokens"/> 是逐条记账时
+/// 已按 <see cref="UsageMath.BillableTokens(UsageRecord)"/> 折算的增量，避免聚合后二次截断。
+/// </summary>
+public sealed record UsageBatchItem(
+    SessionId? SessionId,
+    long InputTokens,
+    long OutputTokens,
+    long CacheReadTokens,
+    long CacheWriteTokens,
+    long BillableTokens);
+
+/// <summary>
+/// TokenLedger 的跨进程持久化：每批增量在文件锁内读取最新状态、追加增量并原子替换
 /// <c>{home}/.onecode/usage/usage.json</c>，避免多进程整份快照互相覆盖。
 /// 单个 .bak 保存上一份有效状态；主文件损坏时从备份恢复，均不可用时显式失败而不把预算清零。
 /// </summary>
@@ -56,28 +68,46 @@ public sealed class JsonUsageStateStore
         }
     }
 
-    /// <summary>在跨进程事务中追加一条用量，返回包含其他进程已提交增量的最新状态。</summary>
-    public PersistedTokenUsageState RecordUsage(SessionId? sessionId, UsageRecord record)
-        => Mutate(state =>
+    /// <summary>
+    /// 在一个跨进程事务中合并整批增量：一次锁、一次读取、一次原子写入。
+    /// 已删除会话的迟到增量直接跳过；其他会话与全局可计费总量不受影响。
+    /// </summary>
+    public PersistedTokenUsageState RecordBatch(IReadOnlyList<UsageBatchItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        return Mutate(state =>
         {
-            if (sessionId is { } deletedId)
-                SessionDeletionGuard.ThrowIfDeleted(_usageDirectory, deletedId);
-
             var sessions = CopySessions(state.Sessions);
-            if (sessionId is { } id)
+            var billableDelta = 0L;
+            foreach (var item in items)
             {
-                if (!sessions.TryGetValue(id, out var bucket))
+                if (item.SessionId is { } deletedId
+                    && SessionDeletionGuard.IsDeleted(_usageDirectory, deletedId))
                 {
-                    bucket = new SessionTokenUsage();
-                    sessions[id] = bucket;
+                    continue;
                 }
-                bucket.Record(record);
+
+                if (item.SessionId is { } id)
+                {
+                    if (!sessions.TryGetValue(id, out var bucket))
+                    {
+                        bucket = new SessionTokenUsage();
+                        sessions[id] = bucket;
+                    }
+                    bucket.Add(
+                        item.InputTokens,
+                        item.OutputTokens,
+                        item.CacheReadTokens,
+                        item.CacheWriteTokens);
+                }
+                billableDelta = checked(billableDelta + item.BillableTokens);
             }
 
             return new PersistedTokenUsageState(
-                checked(state.TotalBillableTokens + UsageMath.BillableTokens(record)),
+                checked(state.TotalBillableTokens + billableDelta),
                 sessions);
         });
+    }
 
     /// <summary>在跨进程事务中删除会话桶并写穿，防止重启后恢复已删除数据。</summary>
     public PersistedTokenUsageState RemoveSession(SessionId sessionId)
@@ -185,19 +215,18 @@ public sealed class JsonUsageStateStore
                 throw new InvalidDataException("A token usage session bucket must be an object.");
 
             var bucket = new SessionTokenUsage();
-            bucket.Record(new UsageRecord(
-                string.Empty,
-                ReadInt(property.Value, "input_tokens"),
-                ReadInt(property.Value, "output_tokens"),
-                ReadInt(property.Value, "cache_read_tokens"),
-                ReadInt(property.Value, "cache_write_tokens")));
+            bucket.Add(
+                ReadCount(property.Value, "input_tokens"),
+                ReadCount(property.Value, "output_tokens"),
+                ReadCount(property.Value, "cache_read_tokens"),
+                ReadCount(property.Value, "cache_write_tokens"));
             sessions.Add(sessionId, bucket);
         }
 
         return new PersistedTokenUsageState(total, sessions);
     }
 
-    private static int ReadInt(JsonElement element, string propertyName)
+    private static long ReadCount(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var value)
             || value.ValueKind != JsonValueKind.Number)
@@ -208,7 +237,7 @@ public sealed class JsonUsageStateStore
         var raw = value.GetInt64();
         if (raw < 0)
             throw new InvalidDataException("Token usage bucket values cannot be negative.");
-        return raw > int.MaxValue ? int.MaxValue : (int)raw;
+        return raw;
     }
 
     private static Dictionary<SessionId, SessionTokenUsage> CopySessions(

@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
+using OneCode.Core.Session;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.Agent;
@@ -128,6 +129,10 @@ internal sealed class GoalSubTaskDagRunner(
                     ? "All parallel sub-tasks succeeded and hard validation passed"
                     : $"Parallel sub-tasks incomplete: {failed.Count} failed/blocked — {summary}",
                 Evidence: evidence);
+        }
+        catch (SessionDeletedException)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {

@@ -103,6 +103,10 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
 | `dontAsk` | 不询问，直接拒绝需审批操作 |
 | `goalAuto` | GOAL 模式自动派生：工作区内读写与常规开发命令自动放行，破坏性高危 Shell 直接 Deny |
 
+> Shell 的路径操作数必须能在执行前静态证明位于授权目录内。PowerShell 中的变量、命令展开和
+> 脚本表达式（如 `$PWD`、`$env:OUT`、`$(Resolve-Path .)`）一律 fail-closed；请改写为工作区内的
+> 字面路径。工作区内的字面路径与 glob 静态前缀仍可正常使用。
+
 > `PermissionModeProvider.CurrentMode` 用 `Enum.TryParse(..., ignoreCase: true)` 解析本键，因此上述成员均可手写；
 > 未识别的值会回落为 `default`。`goalAuto` 是 GOAL 工作模式在运行期派生的内部值——
 > 手写在交互启动时会被 `WorkingModeBridge.SyncInitialState` 覆盖为 BUILD 默认档，因此只应作为派生结果出现。
@@ -124,11 +128,13 @@ OneCode 由 `ConfigManager` 统一按以下优先级解析（高 → 低）：
   每轮请求把整个上下文重算一遍而误触熔断；按 10% 折算既贴近真实成本，又保留对失控循环
   （纯缓存命中打转）的检测能力。`/status` 与状态栏展示的仍是原始四维计数，仅熔断判断用可计费口径。
 - **模式语义**：BUILD 模式按 run 独立计量——run 启动时对当前累计做快照，预算只衡量本次计划
-  执行的增量消耗（Plan 阶段的调研不占用 Build 的额度）；PLAN / GOAL 模式维持会话级累计。
-  计量账本（`ITokenLedger`）经 `JsonUsageStateStore` 落盘（`~/.onecode/usage/usage.json`）并在启动时
-  水合——熔断累计跨进程重启持续，不再因重启清零；每次记账在跨进程锁内读取最新状态并追加增量，
-  多进程不会用整份旧快照互相覆盖；单个 `.bak` 用于主文件损坏时恢复有效状态。GOAL 的分解 / Replan
-  直连模型调用也计入账本；AutoDream 后台整合只计入全局后台账本，不归入来源会话桶。
+  执行的增量消耗（Plan 阶段的调研不占用 Build 的额度）；有会话的 PLAN / GOAL 维持会话级累计；
+  无会话路径以当前全局用量为基线，同样只衡量本次 run 的增量。
+  计量账本（`ITokenLedger`）在内存中即时累计，后台把待写增量合并为单批跨进程事务，run 与宿主收尾
+  再执行有界 flush；预算判断因此不受磁盘 I/O 影响，进程崩溃最多丢失最近尚未 flush 的一小段用量。
+  `JsonUsageStateStore` 落盘到 `~/.onecode/usage/usage.json` 并在启动时水合，跨进程锁与原子替换
+  防止多进程用旧快照互相覆盖，单个 `.bak` 用于主文件损坏时恢复有效状态。GOAL 的分解 / Replan、
+  显式 `/compact` 的摘要消耗计入对应会话桶；AutoDream 后台整合只计入全局后台账本。
 - **调整方法**：`settings.json`（项目级 / 用户级）或运行时 `/config`（下一次 run 生效）；
   设为 `0` 关闭预算熔断。
 - **分级行为**：70% / 90% 时在对话流发布黄 / 橙预警横幅；100% 时交互模式弹窗询问

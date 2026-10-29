@@ -4,6 +4,7 @@ using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
 using OneCode.Core.Hooks;
 using OneCode.Core.Permissions;
+using OneCode.Core.Tokens;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Api;
@@ -15,7 +16,10 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class AgentPipelineAssemblyTests
 {
-    private static AgentPipelineOptions Build(MainAgentRunOptions options)
+    private static AgentPipelineOptions Build(
+        MainAgentRunOptions options,
+        TokenLedger? ledger = null,
+        long? budgetBaselineTokens = null)
     {
         var assembly = new AgentPipelineAssembly(
             workingDirectoryAccessor: Substitute.For<IWorkingDirectoryAccessor>(),
@@ -23,9 +27,10 @@ public sealed class AgentPipelineAssemblyTests
             verificationProvider: Substitute.For<IVerificationProvider>(),
             modeProvider: Substitute.For<IPermissionModeProvider>(),
             permissionChecker: Substitute.For<IPermissionChecker>(),
-            tokenLedger: new TokenLedger());
+            tokenLedger: ledger ?? new TokenLedger());
         using var transaction = new EditTransaction(NullLogger<EditTransaction>.Instance);
-        return assembly.BuildMainOptions(options, transaction, @"C:\repo", "m", providerId: null);
+        return assembly.BuildMainOptions(
+            options, transaction, @"C:\repo", "m", providerId: null, budgetBaselineTokens);
     }
 
     [Fact]
@@ -140,5 +145,77 @@ public sealed class AgentPipelineAssemblyTests
 
         built.EnableToolApproval.Should().BeFalse(
             "autonomous Goal sub-goals have no interactive approval broker; wrapping tools in ApprovalRequiredAIFunction would abort LoopAgent on any denied path");
+    }
+
+    [Fact]
+    public void BuildMainOptions_HeadlessPlan_UsesCurrentGlobalUsageAsBaseline()
+    {
+        var ledger = new TokenLedger();
+        ledger.RecordUsage(new UsageRecord("m", 100, 50));
+
+        var built = Build(
+            new MainAgentRunOptions { ModelId = "m", WorkingMode = WorkingMode.Plan },
+            ledger);
+
+        built.ConversationId.Should().BeNull();
+        built.BudgetBaselineTokens.Should().Be(150,
+            "无会话计量域按 run 增量计算，历史全局用量必须进入基线而不是立即触发熔断");
+    }
+
+    [Theory]
+    [InlineData(WorkingMode.Plan)]
+    [InlineData(WorkingMode.Goal)]
+    public void BuildMainOptions_SessionPlanOrGoal_KeepsSessionCumulativeBaseline(WorkingMode mode)
+    {
+        var sessionId = SessionId.NewId();
+        var ledger = new TokenLedger();
+        ledger.RecordUsage(sessionId, new UsageRecord("m", 1000, 200, 500, 50));
+
+        var built = Build(
+            new MainAgentRunOptions
+            {
+                ModelId = "m",
+                WorkingMode = mode,
+                ConversationId = sessionId,
+            },
+            ledger);
+
+        built.ConversationId.Should().Be(sessionId);
+        built.BudgetBaselineTokens.Should().Be(0, "PLAN/GOAL 仍按整个会话桶累计，而不是按 run 增量");
+    }
+
+    [Fact]
+    public void BuildMainOptions_SessionBuild_UsesSessionBucketSnapshotAsBaseline()
+    {
+        var sessionId = SessionId.NewId();
+        var ledger = new TokenLedger();
+        ledger.RecordUsage(sessionId, new UsageRecord("m", 1000, 200, 500, 50));
+        ledger.RecordUsage(SessionId.NewId(), new UsageRecord("m", 5000, 1000));
+
+        var built = Build(
+            new MainAgentRunOptions
+            {
+                ModelId = "m",
+                WorkingMode = WorkingMode.Build,
+                ConversationId = sessionId,
+            },
+            ledger);
+
+        built.BudgetBaselineTokens.Should().Be(800,
+            "BUILD 只按当前会话桶的 run 增量计量，不能混入其他会话的全局用量");
+    }
+
+    [Fact]
+    public void BuildMainOptions_ExplicitBaseline_OverridesEveryScope()
+    {
+        var ledger = new TokenLedger();
+        ledger.RecordUsage(new UsageRecord("m", 100, 50));
+
+        var built = Build(
+            new MainAgentRunOptions { ModelId = "m", WorkingMode = WorkingMode.Plan },
+            ledger,
+            budgetBaselineTokens: 123);
+
+        built.BudgetBaselineTokens.Should().Be(123, "零输出重试等调用方显式传入的基线必须优先");
     }
 }

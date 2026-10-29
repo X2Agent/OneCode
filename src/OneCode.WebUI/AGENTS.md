@@ -12,9 +12,10 @@ Blazor Server 浏览器客户端：`OneCode.App` 的进程内 QueryEvent 消费�
 
 ## 结构约定
 
-- 样式唯一入口 `wwwroot/app.css`：设计 token 全部在 `:root`（单暗色主题，无描框，微对比色阶分层）；新增颜色/间距/圆角/动效一律加 token，禁止散落硬编码。
+- 样式唯一入口 `wwwroot/app.css`：设计 token 分两套作用域——`:root`（浅色基准，画布 `#F5F7FA`）与 `[data-theme="dark"]`（暗色覆盖，画布 `#0D0D0D`，字重整体减一档）；无描框，微对比色阶分层。新增颜色/间距/圆角/动效一律加 token，禁止散落硬编码。设计系统全貌见 [DESIGN.md](DESIGN.md)。
+- 主题解析：`App.razor` head 内联脚本在样式表之前执行（防首帧闪错主题），按「localStorage `onecode-theme` → 系统偏好」写入 `html[data-theme]`；运行时切换走 `app.js` 的 `window.app.setTheme/toggleTheme`，系统主题热变化仅在没有手动选择时跟随。
 - 静态资源引用一律走 `@Assets["..."]` + `app.MapStaticAssets()`（构建期内容指纹）：裸路径没有指纹，改完文件浏览器会继续跑旧缓存。`app.js` 必须排在 `blazor.web.js` 之前加载——电路建立后立即会调用 `window.app.*` 互操作。
-- `wwwroot/app.js` 是唯一 JS 互操作文件，零第三方依赖；Blazor 组件经 `window.app.*` 调用（copyText / fitComposer / bindSessionScroll）；代码块复制按钮由 JS 内部 MutationObserver 注入，不经互操作入口。
-- 对话流渲染：流式消息按「已完结块 + 尾段」拆分（`MessageList.SplitStreamingTail`），尾段承载入场动效；拆分点不得落在未闭合代码围栏内。
+- `wwwroot/app.js` 是唯一 JS 互操作文件，零第三方依赖；Blazor 组件经 `window.app.*` 调用（copyText / fitComposer / bindSessionScroll / setTheme / toggleTheme）；代码块复制按钮由 JS 内部 MutationObserver 注入，不经互操作入口。
+- 对话流渲染：流式消息按「已完结块 + 尾段」拆分（`MessageList.SplitStreamingTail`），尾段承载入场动效；拆分点不得落在未闭合代码围栏内。动效分两级：尾段为纯文本（`StreamingTextTokenizer.IsPlainText`）时走字级错峰（`StreamingTailState` 以绝对字符偏移为 `@key`，相邻字错开 30ms），含 Markdown 触发符一律回落整段渲染。**禁止 JS 向流式节点注入 DOM**——Blazor diff 会与注入结构冲突，复制按钮注入只作用于非流式消息。
 - 滚动归属：`.shell` 是单行 `minmax(0, 1fr)` 网格且 `html/body` 锁 `overflow: hidden`，滚动只发生在三栏内部容器（`.session-list` / `.transcript` / `.activity`）。新增滚动容器必须自备 `min-height: 0`（flex 项默认 `min-height: auto` 会被内容撑高，退回全页共用一条滚动条）。
 - 增量渲染：会话列表首屏只渲染 `SessionList.PageSize` 条，触底由 `app.js` 的滚动委托回调 `LoadMore` 逐屏展开（无翻页控件）；列表未撑出滚动条时（高视口）由 `fillSessionList` 自动补屏，否则触底回调永远等不到。转录只渲染最近 `MessageList.PageSize` 条，更早的由顶部按钮展开。

@@ -38,11 +38,15 @@ public sealed class SessionTokenUsage
         UsageMath.BillableTokens(_inputTokens, _outputTokens, _cacheReadTokens, _cacheWriteTokens);
 
     public void Record(UsageRecord usage)
+        => Add(usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens);
+
+    /// <summary>按原始四维累计，供逐条记账与批量持久化共用，避免长整型计数被截断。</summary>
+    public void Add(long inputTokens, long outputTokens, long cacheReadTokens, long cacheWriteTokens)
     {
-        Interlocked.Add(ref _inputTokens, usage.InputTokens);
-        Interlocked.Add(ref _outputTokens, usage.OutputTokens);
-        Interlocked.Add(ref _cacheReadTokens, usage.CacheReadTokens);
-        Interlocked.Add(ref _cacheWriteTokens, usage.CacheWriteTokens);
+        Interlocked.Add(ref _inputTokens, inputTokens);
+        Interlocked.Add(ref _outputTokens, outputTokens);
+        Interlocked.Add(ref _cacheReadTokens, cacheReadTokens);
+        Interlocked.Add(ref _cacheWriteTokens, cacheWriteTokens);
     }
 
     /// <summary>复制当前计数值，供运行基线与持久化使用，避免后续记账改变已捕获的快照。</summary>

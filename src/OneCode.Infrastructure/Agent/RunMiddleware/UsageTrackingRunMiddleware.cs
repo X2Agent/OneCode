@@ -2,6 +2,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.Core.Tokens;
 using OneCode.Core.Domain;
+using OneCode.Core.Session;
 using System.Runtime.CompilerServices;
 
 namespace OneCode.Infrastructure.Agent.RunMiddleware;
@@ -94,6 +95,7 @@ public static class UsageTrackingRunMiddleware
         {
             var response = await agent.RunAsync(messages, session, options, ct).ConfigureAwait(false);
             RecordUsage(response.Usage, tokenLedger, modelId, logger, sessionId);
+            await FlushAsync(tokenLedger, logger).ConfigureAwait(false);
             return response;
         }
 
@@ -194,6 +196,7 @@ public static class UsageTrackingRunMiddleware
                     };
                     RecordUsage(aggregated, tokenLedger, modelId, logger, sessionId);
                 }
+                await FlushAsync(tokenLedger, logger).ConfigureAwait(false);
             }
         }
     }
@@ -218,9 +221,32 @@ public static class UsageTrackingRunMiddleware
             else
                 tokenLedger.RecordUsage(record);
         }
+        catch (SessionDeletedException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             logger?.LogWarning(ex, "Failed to record usage to ITokenLedger for model {ModelId}", modelId);
+        }
+    }
+
+    /// <summary>
+    /// run/旁路调用收尾的统一 flush 入口：只对有持久化能力的账本生效，
+    /// 超时或失败只记日志，不覆盖本次 run 的产出或原异常。
+    /// </summary>
+    public static async Task FlushAsync(ITokenLedger? tokenLedger, ILogger? logger)
+    {
+        if (tokenLedger is not ITokenLedgerFlush flush)
+            return;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await flush.FlushAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to flush token usage after an agent run");
         }
     }
 

@@ -12,6 +12,10 @@ namespace OneCode.Infrastructure.Middleware;
 /// </summary>
 public static class SafetyInvariantMiddleware
 {
+    /// <summary>已告警过的「文件写入类工具但没有路径参数」，按工具名去重避免每次调用刷屏。</summary>
+    private static readonly ConcurrentDictionary<string, byte> WarnedWriteToolsWithoutPath =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>创建默认的 Layer 0 安全不变量集合（<paramref name="resolveWorkingDirectory"/> 非空时按每次调用解析活动目录）。</summary>
     public static IReadOnlyList<ISafetyInvariant> CreateDefaultSafetyInvariants(
         string workingDirectory,
@@ -54,9 +58,26 @@ public static class SafetyInvariantMiddleware
                     $"[SAFETY] Parameter extraction failed for tool '{ctx.Function.Name}' — blocked to prevent fail-open.");
             }
 
+            // 目标路径在这里解析一次：各不变量与 Layer 1 边界校验共享同一结论，不再各自猜参数名。
+            var targetPath = ToolTargetPathResolver.Resolve(ctx.Function, parameters);
+            if (targetPath.Kind == ToolTargetPathKind.Unresolvable)
+            {
+                // 唯一的 fail-closed 收口点：schema 声明了路径参数却拿不到可用值。
+                logger.LogWarning(
+                    "Tool '{ToolName}' target path could not be resolved: {Reason}",
+                    ctx.Function.Name,
+                    targetPath.Reason);
+                return ToolResult.Error(
+                    $"[SAFETY] {targetPath.Reason} " +
+                    "Use an explicit literal path inside the workspace and retry.");
+            }
+
+            WarnOnceIfWriteToolWithoutPath(ctx.Function.Name, targetPath, logger);
+
+            var request = new InvariantCheckRequest(ctx.Function.Name, parameters, targetPath);
             foreach (var invariant in invariants)
             {
-                var result = await invariant.CheckAsync(ctx.Function.Name, parameters, ct)
+                var result = await invariant.CheckAsync(request, ct)
                     .ConfigureAwait(false);
 
                 if (!result.Allowed)
@@ -82,6 +103,31 @@ public static class SafetyInvariantMiddleware
                     "Check the tool's required parameters and retry with correct arguments.");
             }
         };
+    }
+
+    /// <summary>
+    /// 文件写入类工具的 schema 里完全没有可用路径参数时的一次性告警。
+    /// 这类工具（如 <c>ApplyWorkspaceEdit</c>，路径嵌在 LSP 协议对象内部）由工具自身保证边界，
+    /// 安全层按「无路径约束」放行；告警用于让声明缺陷可见，且按工具名去重，避免每次调用刷屏。
+    /// </summary>
+    private static void WarnOnceIfWriteToolWithoutPath(
+        string toolName,
+        ToolTargetPathResult targetPath,
+        ILogger logger)
+    {
+        if (targetPath.Kind != ToolTargetPathKind.None)
+            return;
+
+        if (ToolPathScope.Classify(toolName) != ToolPathScopeKind.Write)
+            return;
+
+        if (!WarnedWriteToolsWithoutPath.TryAdd(toolName, 0))
+            return;
+
+        logger.LogWarning(
+            "Tool '{ToolName}' is a file-writing tool but its schema declares no usable path parameter; " +
+            "path-based safety checks are skipped for it.",
+            toolName);
     }
 
     /// <summary>判断工具 schema 是否声明了非空的 required 参数列表。</summary>

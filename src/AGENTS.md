@@ -592,6 +592,12 @@ public sealed class PermissionCheckerTests
 
 4. **危险命令二次确认** — `BashCommandClassifier` / `PowerShellCommandClassifier` 标记的命令必须在执行前请求用户确认
 
+5. **工具目标路径只认 schema** — 安全不变量与权限边界不得按参数名白名单猜路径（猜不到即放行，等于新工具默认没有边界保护）。
+   路径统一由 `ToolTargetPathResolver` 读工具 JSON Schema 解析（schema 中出现的全部规范路径键都会被检查），
+   `SafetyInvariantMiddleware` 是 `Unresolvable` 的唯一拒绝点；保护范围由 `ToolPathScope`（Write/ReadOnly/Dynamic/None）决定。
+   新增工具若带路径参数，须使用路径语义键名（`filePath`/`file_path`/`path`/`file` 或以 `path` 结尾），
+   否则该工具落在 `None`、不做路径检查。详见 [docs/adr/0018-tool-target-path-resolution.md](../docs/adr/0018-tool-target-path-resolution.md)。
+
 ---
 
 ## 常见陷阱与最佳实践

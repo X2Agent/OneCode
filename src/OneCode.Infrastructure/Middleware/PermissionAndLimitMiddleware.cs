@@ -114,12 +114,17 @@ public static class PermissionAndLimitMiddleware
             ? JsonSerializer.SerializeToElement(ctx.Arguments)
             : JsonSerializer.SerializeToElement(new { });
 
+        // 目标路径与 Layer 0 用同一解析器（schema 驱动）：边界校验因此自动覆盖 MCP 等动态工具。
+        var parameters = ToolArgumentExtractor.ToParameterDictionary(ctx.Arguments, ctx.Function.Name, logger);
+        var targetPath = ToolTargetPathResolver.Resolve(ctx.Function, parameters);
+
         var permContext = new ToolPermissionContext
         {
             Mode = options.PermissionMode,
             WorkingDirectory = options.ResolveWorkingDirectory(),
             RulesBySource = rulesBySource,
             AdditionalWorkingDirectories = additionalWorkingDirectories,
+            TargetPath = targetPath,
         };
 
         var perm = await options.PermissionChecker.CheckAsync(

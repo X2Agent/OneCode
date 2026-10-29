@@ -8,6 +8,7 @@ using OneCode.App.Services.Observability;
 using OneCode.App.Services.PlanMode;
 using OneCode.App.Session;
 using OneCode.Core.Build;
+using OneCode.Core.Session;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -198,7 +199,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             ToolCapabilities: capabilities,
             SuppressToolApproval: unattended);
 
-        await foreach (var e in StreamCoreAsync(request, ct).ConfigureAwait(false))
+        await foreach (var e in StreamWithSessionDeletedBoundaryAsync(request, ct).ConfigureAwait(false))
         {
             yield return e;
         }
@@ -244,7 +245,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             ToolCapabilities: capabilities,
             HistorySeedBoundary: seedBoundary);
 
-        await foreach (var e in StreamCoreAsync(streamRequest, ct).ConfigureAwait(false))
+        await foreach (var e in StreamWithSessionDeletedBoundaryAsync(streamRequest, ct).ConfigureAwait(false))
         {
             yield return e;
         }
@@ -284,6 +285,56 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 "⚠ 代码执行沙箱（execute_code）在本机不可用（未启用 Windows Hypervisor Platform / KVM），已停用。" +
                 "恢复方式：BIOS 开启 VT-x，并执行 dism /online /enable-feature /featurename:HypervisorPlatform /All。"),
         ];
+    }
+
+    /// <summary>
+    /// 会话删除的统一终态边界：run、逐批转录、最终转录或 Plan 收口都可能在任意时刻
+    /// 首次发现删除标记。手动推进枚举器使 yield 位于 catch 外，删除时最多发一个 Cancelled。
+    /// 受控工作流由 Plan 分发器负责投影，因此保留专用异常而不在此处转换为事件。
+    /// </summary>
+    private async IAsyncEnumerable<QueryEvent> StreamWithSessionDeletedBoundaryAsync(
+        QueryStreamRequest request,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var enumerator = StreamCoreAsync(request, ct).GetAsyncEnumerator(ct);
+        var doneEmitted = false;
+        while (true)
+        {
+            QueryEvent? current = null;
+            var hasNext = false;
+            var deleted = false;
+            try
+            {
+                hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                if (hasNext)
+                    current = enumerator.Current;
+            }
+            catch (SessionDeletedException) when (request.ControlledExecution)
+            {
+                throw;
+            }
+            catch (SessionDeletedException)
+            {
+                deleted = true;
+            }
+
+            if (deleted)
+            {
+                if (!doneEmitted)
+                {
+                    yield return new NoticeEvent(
+                        "Session was deleted in another process; this run was cancelled and no further data will be written.");
+                    yield return new DoneEvent(
+                        null, null, 0, RunTerminalReason.Cancelled, request.ConversationId);
+                }
+                yield break;
+            }
+
+            if (!hasNext)
+                yield break;
+            doneEmitted |= current is DoneEvent;
+            yield return current!;
+        }
     }
 
     private async IAsyncEnumerable<QueryEvent> StreamCoreAsync(
@@ -398,6 +449,9 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                     alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
                 throw;
             }
+
+            if (runException is SessionDeletedException)
+                throw runException;
 
             if (runException is not null)
             {

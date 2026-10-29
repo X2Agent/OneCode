@@ -10,6 +10,7 @@ using OneCode.Core.Build;
 using OneCode.Core.Config;
 using OneCode.Core.Coordinator;
 using OneCode.Core.Goals;
+using OneCode.Core.Session;
 using OneCode.Core.Tokens;
 using OneCode.Core.Tools;
 using System.Threading.Channels;
@@ -166,6 +167,55 @@ public sealed class OrchestrationStreamServiceTests : IDisposable
         events.OfType<GoalResultEvent>().Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Resume_SessionDeleted_EmitsCancelledWithoutTranscriptOrError()
+    {
+        var sessionId = SessionId.NewId();
+        var running = (await BeginRunAsync(sessionId)) with { Workspace = null, State = GoalRunState.Executing };
+        running = running with
+        {
+            DefinitionHash = GoalWorkflowCompiler.ComputeDefinitionHash(
+                running,
+                ModelId,
+                GoalWorkflowCompiler.ComputeTextHash(SystemPrompt),
+                ToolCapabilityHash(),
+                new JsonSerializerOptions()),
+        };
+        var goalStore = Substitute.For<IGoalRunStore>();
+        goalStore.LoadByIdAsync(running.Id, Arg.Any<CancellationToken>()).Returns(running);
+        goalStore.ClaimWorkflowAsync(running.Id, Arg.Any<long>(), running.Version, Arg.Any<CancellationToken>())
+            .Returns(call => running with
+            {
+                WorkflowFencingToken = call.ArgAt<long>(1),
+                Version = running.Version + 1,
+            });
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.WorkingDirectory.Returns(_root);
+        var interactive = new InteractiveSession(null!, SystemPrompt, sessionManager, null!, [], string.Empty);
+        var sut = CreateSut(
+            running,
+            durableHost: new FakeDurableWorkflowHost(
+                running.Id, GoalRunState.Failed, new SessionDeletedException(sessionId)),
+            goalStore: goalStore);
+        var events = new List<QueryEvent>();
+
+        await foreach (var evt in sut.StreamResumeGoalAsync(
+            sessionId, ModelId, SystemPrompt, TestContext.Current.CancellationToken, interactive))
+        {
+            events.Add(evt);
+        }
+
+        events.OfType<DoneEvent>().Should().ContainSingle().Which.TerminalReason
+            .Should().Be(RunTerminalReason.Cancelled);
+        events.OfType<ErrorEvent>().Should().BeEmpty();
+        events.OfType<GoalResultEvent>().Should().BeEmpty();
+        await sessionManager.DidNotReceive().AppendAssistantMessageAsync(
+            Arg.Any<SessionId>(),
+            Arg.Any<string>(),
+            Arg.Any<OneCode.Core.Domain.TokenUsage?>(),
+            Arg.Any<CancellationToken>());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -239,7 +289,10 @@ public sealed class OrchestrationStreamServiceTests : IDisposable
         run.WorkspaceFingerprint,
         DateTimeOffset.UtcNow);
 
-    private sealed class FakeDurableWorkflowHost(GoalRunId runId, GoalRunState finalState) : IDurableWorkflowHost
+    private sealed class FakeDurableWorkflowHost(
+        GoalRunId runId,
+        GoalRunState finalState,
+        Exception? exception = null) : IDurableWorkflowHost
     {
         public async Task<DurableWorkflowRunResult> RunAsync<TInput>(
             WorkflowRunRegistration registration,
@@ -267,6 +320,8 @@ public sealed class OrchestrationStreamServiceTests : IDisposable
                 ExecutionGeneration: executionGeneration ?? 1);
             if (leaseAcquired is not null)
                 await leaseAcquired(record, ct);
+            if (exception is not null)
+                throw exception;
 
             IReadOnlyList<WorkflowRuntimeEvent> events =
             [

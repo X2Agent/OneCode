@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using OneCode.App.Services.Agent;
 using OneCode.Core.Build;
+using OneCode.Core.Session;
 using OneCode.Infrastructure.Agent;
 
 namespace OneCode.App.Services.BuildMode;
@@ -125,6 +126,11 @@ public sealed class ControlledBuildAttemptRuntime(
                 await context.EventWriter.WriteAsync(
                     context.BuildStateEventFactory(cancelled),
                     CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+            catch (SessionDeletedException)
+            {
+                transaction.Rollback();
                 throw;
             }
             catch (Exception ex)

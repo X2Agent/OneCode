@@ -289,6 +289,7 @@ public sealed class AutoDreamService : BackgroundService, IAutoDreamService
         // （无会话归属，计入进程级累计），否则后台整合消耗从预算口径中漏计。
         UsageTrackingRunMiddleware.RecordUsage(
             response.Usage, _tokenLedger, modelId, _logger);
+        await UsageTrackingRunMiddleware.FlushAsync(_tokenLedger, _logger).ConfigureAwait(false);
 
         var outputText = response.Messages
             .OfType<ChatMessage>()

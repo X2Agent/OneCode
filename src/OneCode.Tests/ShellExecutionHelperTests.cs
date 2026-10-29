@@ -56,6 +56,9 @@ public sealed class ShellExecutionHelperTests : IDisposable
     [InlineData("Get-Content $env:OUTSIDE", true)]
     [InlineData("Set-Location $env:OUTSIDE", true)]
     [InlineData("Set-Content -Path $env:OUT -Value data", true)]
+    [InlineData("Set-Location $PWD", true)]
+    [InlineData("Get-Content -Path:$p", true)]
+    [InlineData("Get-Content $(Resolve-Path .)", true)]
     public void ValidateReferencedPaths_LeadingExpansionOperand_IsRejected(string command, bool powerShell)
     {
         var error = ShellExecutionHelper.ValidateReferencedPaths(
@@ -66,6 +69,17 @@ public sealed class ShellExecutionHelperTests : IDisposable
                 : BashCommandClassifier.ExtractReferencedPaths);
 
         error.Should().NotBeNull().And.Contain("expansion");
+    }
+
+    [Fact]
+    public void ValidateReferencedPaths_LiteralPowerShellPathInsideWorkspace_IsAllowed()
+    {
+        var error = ShellExecutionHelper.ValidateReferencedPaths(
+            "Get-Content src/config.json",
+            _workspace,
+            PowerShellCommandClassifier.ExtractReferencedPaths);
+
+        error.Should().BeNull("字面工作区路径可静态证明边界，不应被展开风险策略误伤");
     }
 
     [Fact]

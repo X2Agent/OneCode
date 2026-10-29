@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
+using OneCode.Core.Session;
 
 namespace OneCode.App.Services.Agent;
 
@@ -164,6 +165,10 @@ public sealed class DurableWorkflowHost(
             // Cancellation is an interruption, not a durable business terminal state.
             // Keep the registry Active so a later process can reacquire the run and resume
             // from the last reconciled checkpoint.
+            throw;
+        }
+        catch (SessionDeletedException)
+        {
             throw;
         }
         catch (Exception ex)

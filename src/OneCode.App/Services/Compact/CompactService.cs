@@ -120,6 +120,7 @@ public sealed class CompactService(
         // 入会话桶，避免预算熔断与 /status stats 漏计，也避免各处手抄提取口径。
         UsageTrackingRunMiddleware.RecordUsage(
             response.Usage, tokenLedger, session.Model, logger, session.Id);
+        await UsageTrackingRunMiddleware.FlushAsync(tokenLedger, logger).ConfigureAwait(false);
 
         var rawSummary = response.Text;
 

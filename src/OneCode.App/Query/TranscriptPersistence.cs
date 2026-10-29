@@ -1,4 +1,5 @@
 using OneCode.App.Session;
+using OneCode.Core.Session;
 
 namespace OneCode.App.Query;
 
@@ -51,6 +52,10 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
 
             return true;
         }
+        catch (SessionDeletedException)
+        {
+            throw;
+        }
         catch (OperationCanceledException)
         {
             // 取消不被吞：调用方决定语义——正常收尾传业务 ct（取消即中断），
@@ -91,6 +96,10 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
                     ct)
                 .ConfigureAwait(false);
             return batches.Count;
+        }
+        catch (SessionDeletedException)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {

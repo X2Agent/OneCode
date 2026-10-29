@@ -5,6 +5,7 @@ using OneCode.App.Services.Agent;
 using OneCode.App.Services.GoalMode;
 using OneCode.App.Query;
 using OneCode.Core.Goals;
+using OneCode.Core.Session;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Api;
@@ -135,6 +136,28 @@ public sealed class GoalWorkflowRuntimeTests : IAsyncLifetime
         var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
         persisted!.State.Should().Be(GoalRunState.Failed);
         persisted.TerminalReason.Should().Be(RunTerminalReason.AgentException);
+    }
+
+    [Fact]
+    public async Task StepSessionDeleted_LeavesBusinessRunResumableWithoutFailedWrite()
+    {
+        var store = new JsonGoalRunStore(Path.Combine(_root, "deleted-runs"));
+        var step = Snapshot(1);
+        var run = await CreateClaimedRunAsync(store, [step], GoalRunState.Executing);
+        var runtime = CreateRuntime(
+            store,
+            new FakePlanningService(),
+            new FakeStepExecutionService(CompletedExecution(1), new SessionDeletedException(run.SessionId)),
+            new FakeWorkspaceService());
+        await runtime.BindAsync(run, 7, TestContext.Current.CancellationToken);
+        var state = new GoalWorkflowState(run.Id, [step], [], run.Budget, 0, false, GoalRunState.Executing);
+
+        var act = () => runtime.ExecuteNextAsync(state, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<SessionDeletedException>();
+        var persisted = await store.LoadByIdAsync(run.Id, TestContext.Current.CancellationToken);
+        persisted!.State.Should().Be(GoalRunState.Executing, "删除信号不得经通用 catch 写成 Failed");
+        persisted.TerminalReason.Should().BeNull();
     }
 
     [Fact]

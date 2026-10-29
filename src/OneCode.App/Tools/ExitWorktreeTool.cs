@@ -71,6 +71,7 @@ public sealed class ExitWorktreeTool
         if (_sessionManager is not null && !string.IsNullOrEmpty(originalCwd))
         {
             await _sessionManager.ChangeWorkingDirectoryAsync(originalCwd, ct).ConfigureAwait(false);
+            // 当前作用域共享同一目录 holder，后续工具立即恢复原工作区边界。
             OneCodeAgentRunContext.WorkingDirectoryOverride = originalCwd;
         }
 

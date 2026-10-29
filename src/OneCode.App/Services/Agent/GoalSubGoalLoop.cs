@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
+using OneCode.Core.Session;
 using OneCode.Core.Tokens;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Agent.RunMiddleware;
@@ -120,6 +121,7 @@ internal sealed class GoalSubGoalLoop(
                         OutputTokenCount = judgeOutTokens,
                     },
                     tokenLedger, options.ModelId, _logger, options.SessionId);
+                await UsageTrackingRunMiddleware.FlushAsync(tokenLedger, _logger).ConfigureAwait(false);
 
                 if (isCompleted)
                 {
@@ -215,6 +217,10 @@ internal sealed class GoalSubGoalLoop(
                         ? "Stopped before first evaluation (suspected pending tool approval)"
                         : "Exhausted retry attempts",
                 Evidence: state.FinalEvidence);
+        }
+        catch (SessionDeletedException)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {

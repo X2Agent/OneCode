@@ -105,9 +105,11 @@ public sealed class AgentPipelineAssembly(
             // - PLAN/GOAL 基线 0 = 只累计当前会话桶，不混入其他会话的消耗；
             // - 无会话的 headless 路径退回进程级快照。
             budgetBaselineTokens: budgetBaselineTokens
-                ?? (options.WorkingMode == WorkingMode.Build
-                    ? CurrentScopeBillableTokens(usageSessionId)
-                    : 0),
+                ?? (usageSessionId is not { } usageSession
+                    ? tokenLedger.GetTotalTokens()
+                    : options.WorkingMode == WorkingMode.Build
+                        ? SessionBillableTokens(usageSession)
+                        : 0),
             onBudgetExceeded: options.OnBudgetExceeded,
             onBudgetWarning: options.OnBudgetWarning,
             // 主代理路径的活动目录：同一 run 内 EnterWorktree 切换会话目录后，
@@ -115,11 +117,9 @@ public sealed class AgentPipelineAssembly(
             workingDirectoryProvider: () => workingDirectoryAccessor.WorkingDirectory);
     }
 
-    /// <summary>计量域当前累计可计费 token：有会话 → 会话桶；无会话（headless）→ 进程级。</summary>
-    private long CurrentScopeBillableTokens(SessionId? sessionId)
-        => sessionId is { } sid
-            ? tokenLedger.GetSessionUsage(sid)?.TotalBillableTokens ?? 0
-            : tokenLedger.GetTotalTokens();
+    /// <summary>会话桶当前累计可计费 token；会话尚无记账时为 0。</summary>
+    private long SessionBillableTokens(SessionId sessionId)
+        => tokenLedger.GetSessionUsage(sessionId)?.TotalBillableTokens ?? 0;
 
     /// <summary>
     /// Builds role-level overrides for the Main agent path.

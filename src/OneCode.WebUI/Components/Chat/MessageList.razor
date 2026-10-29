@@ -37,14 +37,28 @@
                     }
                     else if (message.IsStreaming)
                     {
-                        var (head, tail) = SplitStreamingTail(message.Content);
+                        var (head, tail, tailStart) = SplitStreamingTail(message.Content);
                         if (!string.IsNullOrEmpty(head))
                         {
                             <div class="markdown">@((MarkupString)Renderer.ToHtml(head))</div>
                         }
-                        if (tail is not null)
+                        if (tail is not null && StreamingTextTokenizer.IsPlainText(tail))
                         {
+                            // 字级错峰快速路径：纯文本尾段按字/词拆 span，相邻错开 30ms。
+                            // span 由 Razor 输出并自动转义——JS 向流式节点注入 DOM 会与 Blazor diff 冲突，禁止。
+                            // 标签须单行书写： StableText 与首个 span 之间任何空白都会被渲染成多余空格。
+                            var plan = _tail.Plan(message, tailStart, tail);
+                            <div class="stream-tail" @key="head.Length"><p>@plan.StableText@foreach (var span in plan.Spans){<span class="ch" @key="span.Offset" style="--i:@span.Index">@span.Text</span>}</p></div>
+                        }
+                        else if (tail is not null)
+                        {
+                            // 含 Markdown 语法的尾段：整段渲染，由容器重建触发块级「模糊→清晰」入场。
+                            _tail.MarkShown(message, message.Content.Length);
                             <div class="stream-tail" @key="head.Length">@((MarkupString)Renderer.ToHtml(tail))</div>
+                        }
+                        else
+                        {
+                            _tail.MarkShown(message, message.Content.Length);
                         }
                         <span class="streaming-caret inline"></span>
                     }
@@ -105,6 +119,9 @@
     // 已完结消息的渲染结果：内容不变就复用，避免流式期间反复解析 + 消毒整条历史。
     private readonly Dictionary<WebMessage, RenderedMessage> _rendered = [];
 
+    // 流式尾段的字级错峰状态（当前流式消息专属，会话切换时复位）。
+    private readonly StreamingTailState _tail = new();
+
     /// <summary>窗口起点：只渲染最近 <see cref="_visible"/> 条，更早的按页加载。</summary>
     private int StartIndex => Math.Max(0, Messages.Count - _visible);
 
@@ -120,6 +137,7 @@
             _visible = PageSize;
             _copiedIndex = null;
             _rendered.Clear();
+            _tail.Reset();
         }
         else if (Messages.Count > _lastCount)
         {
@@ -169,7 +187,7 @@
     /// 由尾段容器（随块重建）承载「模糊→清晰」入场动效。
     /// 拆分点只取不在未闭合代码围栏内的空行之后，避免把代码块拦腰截断。
     /// </summary>
-    private static (string Head, string? Tail) SplitStreamingTail(string content)
+    private static (string Head, string? Tail, int TailStart) SplitStreamingTail(string content)
     {
         var safeSplit = -1;
         var inFence = false;
@@ -188,10 +206,10 @@
         }
 
         if (safeSplit <= 0)
-            return (string.Empty, content.Length == 0 ? null : content);
+            return (string.Empty, content.Length == 0 ? null : content, 0);
 
         var tail = content[safeSplit..];
-        return string.IsNullOrWhiteSpace(tail) ? (content, null) : (content[..safeSplit], tail);
+        return string.IsNullOrWhiteSpace(tail) ? (content, null, 0) : (content[..safeSplit], tail, safeSplit);
     }
 
     private async Task CopyMessageAsync(WebMessage message, int index)

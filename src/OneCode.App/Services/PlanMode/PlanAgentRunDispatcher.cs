@@ -4,6 +4,7 @@ using OneCode.App.Services.Compact;
 using OneCode.Core.Build;
 using OneCode.Core.Models;
 using OneCode.Core.PlanMode;
+using OneCode.Core.Session;
 
 namespace OneCode.App.Services.PlanMode;
 
@@ -276,6 +277,11 @@ public sealed class PlanAgentRunDispatcher(
 
             if (terminal is not null)
                 publisher.Publish(terminal);
+        }
+        catch (SessionDeletedException)
+        {
+            runEvents.Publish(new DoneEvent(
+                null, null, 0, RunTerminalReason.Cancelled, current.SessionId));
         }
         catch (Exception ex)
         {

@@ -16,6 +16,7 @@ using OneCode.Core.Hooks;
 using OneCode.Core.Models;
 using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
+using OneCode.Core.Session;
 using OneCode.Core.Tools;
 using OneCode.Infrastructure.Api;
 using OneCode.Tests.TestSupport;
@@ -413,6 +414,93 @@ public sealed partial class QueryStreamEngineTests
         capturedOptions.Should().NotBeNull();
         capturedOptions!.HistorySeedBoundary.Should().BeNull(
             "a boundary recorded before a structural history change must not truncate the seed");
+    }
+
+    [Fact]
+    public async Task StreamQueryAsync_RunThrowsSessionDeleted_EmitsSingleCancelledWithoutError()
+    {
+        var sessionId = SessionId.NewId();
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        var runner = Substitute.For<IMainAgentRunner>();
+        runner.RunStreamingAsync(
+                Arg.Any<MainAgentRunOptions>(),
+                Arg.Any<ChannelWriter<object>>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<MainAgentRunResult>>(_ => throw new SessionDeletedException(sessionId));
+        var sut = CreateSutWithDependencies(runner, sessionManager, Substitute.For<IBuildRunCoordinator>());
+
+        var events = await CollectEventsAsync(sut);
+
+        events.OfType<DoneEvent>().Should().ContainSingle().Which.TerminalReason
+            .Should().Be(RunTerminalReason.Cancelled);
+        events.OfType<ErrorEvent>().Should().BeEmpty("会话删除不是普通 agent 执行失败");
+    }
+
+    [Fact]
+    public async Task StreamQueryAsync_FinalTranscriptThrowsSessionDeleted_SkipsNormalFinalize()
+    {
+        var conversation = new Conversation
+        {
+            Id = SessionId.NewId(),
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.ForegroundConversation.Returns(conversation);
+        sessionManager.WorkingDirectory.Returns(conversation.WorkingDirectory);
+        sessionManager.AppendAssistantMessageAsync(
+                Arg.Any<SessionId>(),
+                Arg.Any<string>(),
+                Arg.Any<TokenUsage?>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new SessionDeletedException(conversation.Id));
+        var runner = Substitute.For<IMainAgentRunner>();
+        runner.RunStreamingAsync(
+                Arg.Any<MainAgentRunOptions>(),
+                Arg.Do<ChannelWriter<object>>(writer => writer.Complete()),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new MainAgentRunResult(null, 0, 0, 1)));
+        var sut = CreateSutWithDependencies(runner, sessionManager, Substitute.For<IBuildRunCoordinator>());
+
+        var events = await CollectEventsAsync(sut);
+
+        events.OfType<DoneEvent>().Should().ContainSingle().Which.TerminalReason
+            .Should().Be(RunTerminalReason.Cancelled);
+        events.OfType<ErrorEvent>().Should().BeEmpty();
+        events.OfType<NoticeEvent>().Should().ContainSingle(
+            notice => notice.Message.Contains("deleted", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task StreamWorkflowRunAsync_SessionDeleted_PropagatesToPlanDispatcher()
+    {
+        var sessionId = SessionId.NewId();
+        var sessionManager = Substitute.For<ISessionManager>();
+        sessionManager.WorkingDirectory.Returns(Path.GetTempPath());
+        var runner = Substitute.For<IMainAgentRunner>();
+        runner.RunStreamingAsync(
+                Arg.Any<MainAgentRunOptions>(),
+                Arg.Any<ChannelWriter<object>>(),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<MainAgentRunResult>>(_ => throw new SessionDeletedException(sessionId));
+        var sut = CreateSutWithDependencies(runner, sessionManager, Substitute.For<IBuildRunCoordinator>());
+        var request = new WorkflowRunRequest(
+            "deleted-controlled-run",
+            sessionId,
+            "execute",
+            "system",
+            "model",
+            WorkingMode.Plan,
+            Path.GetTempPath(),
+            PrescribedPlan());
+
+        var act = async () =>
+        {
+            await foreach (var _ in sut.StreamWorkflowRunAsync(request, TestContext.Current.CancellationToken)) { }
+        };
+
+        await act.Should().ThrowAsync<SessionDeletedException>(
+            "受控工作流必须由 Plan 分发器统一发取消终态，不能在引擎内提前吞掉");
     }
 
     private static string CreatePlanBridgeMarkdown() =>

@@ -106,6 +106,39 @@
         requestMoreSessions();
     }
 
+    /* ---------- 主题（浅色/暗色）：手动选择持久化，未选择时跟随系统 ---------- */
+
+    var THEME_KEY = 'onecode-theme';
+    var themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+    function currentTheme() {
+        return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+    }
+
+    function setTheme(theme) {
+        try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* 存储被禁时仅本次会话生效 */ }
+        applyTheme(theme);
+    }
+
+    function toggleTheme() {
+        setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+    }
+
+    // 系统主题变化时跟随，但用户手动选择过的（localStorage 有值）不打扰。
+    function watchSystemTheme() {
+        if (!themeMedia || !themeMedia.addEventListener) return;
+        themeMedia.addEventListener('change', function () {
+            var manual;
+            try { manual = localStorage.getItem(THEME_KEY); } catch (e) { manual = null; }
+            if (manual === 'light' || manual === 'dark') return;
+            applyTheme(themeMedia.matches ? 'dark' : 'light');
+        });
+    }
+
     /* ---------- 输入框自适应增高 ---------- */
 
     function fitComposer() {
@@ -142,6 +175,9 @@
             if (e.target instanceof HTMLElement && e.target.closest('.composer')) fitComposer();
         });
 
+        // 系统主题热切换跟随（仅未手动选择时）。
+        watchSystemTheme();
+
         enhanceCodeBlocks();
     }
 
@@ -155,6 +191,9 @@
         copyText: copyText,
         fitComposer: fitComposer,
         bindSessionScroll: function (dotnet) { sessionDotnet = dotnet; fillSessionList(); },
-        unbindSessionScroll: function () { sessionDotnet = null; }
+        unbindSessionScroll: function () { sessionDotnet = null; },
+        getTheme: currentTheme,
+        setTheme: setTheme,
+        toggleTheme: toggleTheme
     };
 })();

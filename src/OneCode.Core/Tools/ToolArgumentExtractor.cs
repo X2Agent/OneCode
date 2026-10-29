@@ -1,15 +1,20 @@
 namespace OneCode.Core.Tools;
 
 /// <summary>
-/// 工具参数提取的单一事实源。运行时参数名与入参类型都不统一（<c>filePath</c> / <c>path</c> /
-/// <c>file_path</c>；<c>AIFunctionArguments</c> / <see cref="JsonElement"/>），各中间件与权限组件
-/// 必须经由本类提取路径、命令或 URL，不得各自实现。
+/// 工具参数的**展示/规则匹配**提取入口：审批提示、LSP 诊断、YOLO 规则 glob 匹配使用。
+///
+/// <para>
+/// <b>安全判定禁止使用本类。</b>按参数名猜测路径无法覆盖新工具与 MCP 工具（猜不到即静默放行），
+/// 安全不变量与权限边界校验必须改走 <see cref="ToolTargetPathResolver"/>——它读工具 JSON Schema
+/// 推断目标路径并给出三态结果，无法解析时 fail-closed。
+/// </para>
 /// </summary>
 public static class ToolArgumentExtractor
 {
     /// <summary>
-    /// 文件路径参数的候选 key，按优先级排列。
+    /// 文件路径参数的候选 key，按优先级排列（展示与规则匹配用途，<b>不是安全边界</b>）。
     /// filePath 是 OneCode 工具的规范参数名，file_path 是 MCP 工具的 snake_case 约定。
+    /// 安全判定见 <see cref="ToolTargetPathResolver"/>：它按 schema 推断，不依赖这份名单。
     /// </summary>
     private static readonly string[] FilePathKeys =
     [

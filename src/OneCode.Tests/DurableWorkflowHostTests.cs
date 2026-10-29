@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging.Abstractions;
 using OneCode.App.Services.Agent;
+using OneCode.Core.Session;
 using OneCode.Infrastructure.Workflows;
 
 namespace OneCode.Tests;
@@ -83,6 +84,27 @@ public sealed class DurableWorkflowHostTests : IAsyncLifetime
         second.Run.PendingRequest.CommandId.Should().Be(first.Run.PendingRequest.CommandId);
         (await registry.LoadActiveAsync(TestContext.Current.CancellationToken))
             .Should().ContainSingle(record => record.RunId == registration.RunId);
+    }
+
+    [Fact]
+    public async Task SessionDeleted_KeepsWorkflowActiveInsteadOfWritingFailed()
+    {
+        var host = CreateHost(out var registry);
+        var registration = new WorkflowRunRegistration("host-deleted", "test", "host-deleted-v1");
+        var sessionId = SessionId.NewId();
+        var act = () => host.RunAsync(
+            registration,
+            BuildCompletedWorkflow(),
+            new HostInput("seed"),
+            "command-deleted",
+            new JsonSerializerOptions(),
+            eventSink: (_, _) => throw new SessionDeletedException(sessionId),
+            ct: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<SessionDeletedException>();
+        var persisted = await registry.LoadAsync(registration.RunId, TestContext.Current.CancellationToken);
+        persisted!.State.Should().Be(WorkflowRunState.Active,
+            "会话删除是取消控制信号，durable registry 不得被误写为 Failed");
     }
 
     private DurableWorkflowHost CreateHost(out JsonWorkflowRunRegistry registry)

@@ -80,6 +80,7 @@ public sealed class SessionManager : ISessionManager
         {
             ForegroundConversation.WorkingDirectory = newCwd;
             try { await PersistAsync(ForegroundConversation, ct).ConfigureAwait(false); }
+            catch (SessionDeletedException) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "SessionManager.ChangeWorkingDirectoryAsync save failed"); }
         }
     }
