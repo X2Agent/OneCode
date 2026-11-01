@@ -262,6 +262,28 @@ public sealed class RetryOnOverloadChatClientTests
     }
 
     [Fact]
+    public async Task GetStreamingResponseAsync_ManyTextChunks_ReassemblesStreamVerbatim()
+    {
+        // 回放段按分片累积（每片 O(1)），只在封口时拼接一次：
+        // 用数百分片覆盖「跨多个 chunk 的文本」，保证累积优化没有改变输出内容、顺序或分片数。
+        const int chunkCount = 400;
+        var inner = new ManyChunksClient(chunkCount);
+        using var sut = new RetryOnOverloadChatClient(inner, maxRetries: 1);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in sut.GetStreamingResponseAsync(
+            [],
+            cancellationToken: TestContext.Current.CancellationToken))
+        {
+            updates.Add(update);
+        }
+
+        ConcatText(updates).Should().Be(ManyChunksClient.ExpectedText(chunkCount),
+            "分片累积必须逐字还原，且不能重复或丢片");
+        updates.Should().HaveCount(chunkCount);
+    }
+
+    [Fact]
     public async Task GetStreamingResponseAsync_UserCancellationDuringStallPropagatesAsCancelled()
     {
         // 空闲取消与用户取消必须可区分:用户 Esc 中断走原始取消令牌,不得被改写成停滞异常。
@@ -639,6 +661,52 @@ public sealed class RetryOnOverloadChatClientTests
 
         public override ValueTask<BinaryData> BufferContentAsync(CancellationToken cancellationToken = default)
             => ValueTask.FromResult(Content);
+    }
+
+    /// <summary>
+    /// 连续吐出 <paramref name="chunkCount"/> 个文本分片的假客户端：用于验证回放段的
+    /// 分片累积在长文本下依旧逐字还原。
+    /// </summary>
+    private sealed class ManyChunksClient(int chunkCount) : IChatClient
+    {
+        public static string ExpectedText(int chunkCount)
+        {
+            var builder = new System.Text.StringBuilder();
+            for (var i = 0; i < chunkCount; i++)
+                builder.Append(ChunkText(i));
+            return builder.ToString();
+        }
+
+        private static string ChunkText(int index) => $"片{index:D3}-";
+
+        public void Dispose()
+        {
+        }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => StreamAsync(cancellationToken);
+
+        private async IAsyncEnumerable<ChatResponseUpdate> StreamAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            for (var i = 0; i < chunkCount; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                yield return new ChatResponseUpdate(ChatRole.Assistant, ChunkText(i));
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
     }
 
     private sealed class FakePipelineResponseHeaders : PipelineResponseHeaders

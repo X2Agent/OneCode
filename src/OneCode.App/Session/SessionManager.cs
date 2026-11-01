@@ -251,7 +251,15 @@ public sealed class SessionManager : ISessionManager
         SessionId conversationId,
         IReadOnlyList<CompletedToolBatch> batches,
         CancellationToken ct = default)
-        => _toolBatchAppender.AppendAsync(conversationId, batches, ct);
+        => AppendCompletedToolBatchesAsync(conversationId, batches, fromIndex: 0, ct);
+
+    /// <inheritdoc />
+    public Task AppendCompletedToolBatchesAsync(
+        SessionId conversationId,
+        IReadOnlyList<CompletedToolBatch> batches,
+        int fromIndex,
+        CancellationToken ct = default)
+        => _toolBatchAppender.AppendAsync(conversationId, batches, fromIndex, ct);
 
     /// <summary>构建前台会话的聊天历史（不含系统提示词）。</summary>
     public IReadOnlyList<ChatMessage> GetForegroundChatHistory()
@@ -412,10 +420,26 @@ public sealed class SessionManager : ISessionManager
         if (existing is null)
             _backgroundSessions.Add(new BackgroundSession(ForegroundConversation));
 
+        // 后台会话各自持有完整消息列表：无上限时切换过的每个会话都整体常驻内存。
+        // 只保留最近若干个（消息已落盘，切回时经 ResumeAsync 从磁盘重载）。
+        if (_backgroundSessions.Count > MaxBackgroundSessions)
+        {
+            var evicted = _backgroundSessions[0];
+            _backgroundSessions.RemoveAt(0);
+            _sessionToolSetManager.Remove(evicted.Conversation.Id.Value);
+            _logger.LogInformation(
+                "Evicted background session {Id} from memory (keeping {Count} most recent).",
+                evicted.Conversation.Id,
+                MaxBackgroundSessions);
+        }
+
         ForegroundConversation = null;
         _sessionIdHolder.SetCurrent(null);
         return Task.CompletedTask;
     }
+
+    /// <summary>同时驻留内存的后台会话上限；超出后最旧的被驱逐（消息已落盘，切回时重载）。</summary>
+    private const int MaxBackgroundSessions = 8;
 
     /// <summary>
     /// 把前台切换为已有会话（来自磁盘或后台列表）。

@@ -265,7 +265,7 @@ public async Task ExecuteAsync_EmptyPrompt_ReturnsError()
 result.EstimatedInputTokens.Should().Be(15);
 
 // 有界：单个带 schema 的工具必须产生有限开销（上界防高估，下界防漏算）
-singleToolBreakdown.ToolsAndSkills.Should().BeInRange(20, 60);
+singleToolBreakdown.Tools.Should().BeInRange(20, 60);
 
 // 精确增量：系统提示词按字符加权估算的确定性增量
 withPrompt.EstimatedInputTokens.Should().Be(withoutPrompt.EstimatedInputTokens + 7);

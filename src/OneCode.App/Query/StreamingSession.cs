@@ -48,6 +48,12 @@ internal sealed class StreamingSession(
     private bool _usageTurnBoundaryPending;
     private bool _turnStarted;
     private bool _pendingTurnBoundary; // true after seeing tool results — next text starts a new turn
+    private string? _finalTextCache;
+    private int _finalTextCacheLength = -1;
+    private string? _lastTurnTextCache;
+    private int _lastTurnTextCacheLength = -1;
+    private int _lastTurnTextVersion;
+    private int _lastTurnTextCacheVersion = -1;
 
     /// <summary>
     /// 链路三（未知工具自愈）回调：遇到 hallucinate 但已在注册表登记的工具名时自动激活，
@@ -67,10 +73,44 @@ internal sealed class StreamingSession(
     /// <summary>最新一轮模型调用的输入 Token 水位（用于估算当前上下文窗口占用率）。</summary>
     public int LastTurnInputTokens => _currentTurnInputTokens > 0 ? _currentTurnInputTokens : TotalInputTokens;
 
-    public string FinalText => _textBuilder.ToString();
+    /// <summary>
+    /// 本次 run 的完整回复文本。收尾路径会多次读取（落盘、hook、终因判定），
+    /// 每次 <c>StringBuilder.ToString()</c> 都会复制整份文本；按已写长度缓存，只在内容增长后重建。
+    /// </summary>
+    public string FinalText
+    {
+        get
+        {
+            if (_finalTextCache is null || _finalTextCacheLength != _textBuilder.Length)
+            {
+                _finalTextCache = _textBuilder.ToString();
+                _finalTextCacheLength = _textBuilder.Length;
+            }
 
-    /// <summary>最后一轮助手回复的纯文本（不含前序工具轮的中间旁白）。</summary>
-    public string LastTurnText => _lastTurnTextBuilder.ToString();
+            return _finalTextCache;
+        }
+    }
+
+    /// <summary>
+    /// 最后一轮助手回复的纯文本（不含前序工具轮的中间旁白）。缓存按「轮次版本 + 长度」判失效：
+    /// 构建器在每个新轮次开头会被清空重填，仅按长度判等会把恰好等长的上一轮文本当成当前轮返回。
+    /// </summary>
+    public string LastTurnText
+    {
+        get
+        {
+            if (_lastTurnTextCache is null
+                || _lastTurnTextCacheVersion != _lastTurnTextVersion
+                || _lastTurnTextCacheLength != _lastTurnTextBuilder.Length)
+            {
+                _lastTurnTextCache = _lastTurnTextBuilder.ToString();
+                _lastTurnTextCacheLength = _lastTurnTextBuilder.Length;
+                _lastTurnTextCacheVersion = _lastTurnTextVersion;
+            }
+
+            return _lastTurnTextCache;
+        }
+    }
 
     public TokenUsage FinalUsage => new(
         _committedInputTokens + _currentTurnInputTokens,
@@ -250,6 +290,7 @@ internal sealed class StreamingSession(
                         _turnCount++;
                         _turnStarted = true;
                         _lastTurnTextBuilder.Clear();
+                        _lastTurnTextVersion++;
                         if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
                             _textBuilder.Append("\n\n");
                         yield return new TurnStartedEvent(_turnCount);
@@ -285,6 +326,7 @@ internal sealed class StreamingSession(
             _turnCount++;
             _turnStarted = true;
             _lastTurnTextBuilder.Clear();
+            _lastTurnTextVersion++;
             if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
                 _textBuilder.Append("\n\n");
             yield return new TurnStartedEvent(_turnCount);
@@ -389,6 +431,7 @@ internal sealed class StreamingSession(
         _turnCount++;
         _turnStarted = true;
         _lastTurnTextBuilder.Clear();
+        _lastTurnTextVersion++;
         if (_textBuilder.Length > 0 && _textBuilder[^1] != '\n')
             _textBuilder.Append("\n\n");
         turnStartedEvent = new TurnStartedEvent(_turnCount);

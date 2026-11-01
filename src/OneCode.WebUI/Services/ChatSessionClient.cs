@@ -447,6 +447,11 @@ public sealed class ChatSessionClient(
     }
 
     /// <summary>消费一条 <see cref="QueryEvent"/> 流并渲染；查询、命令与工作流恢复共用。</summary>
+    /// <remarks>
+    /// 每个事件都触发一次电路重渲染会让 Blazor 在快模型下每秒 reconcile 数百次；
+    /// 这里按帧节流合并（约 60 FPS），流结束时 <see cref="EndRun"/> 必定再发一次，
+    /// 因此节流不会丢失最后一次状态。
+    /// </remarks>
     private async Task ConsumeEventsAsync(IAsyncEnumerable<QueryEvent> events, string source)
     {
         try
@@ -454,7 +459,8 @@ public sealed class ChatSessionClient(
             await foreach (var evt in events.ConfigureAwait(false))
             {
                 _transcript.Apply(evt, logger);
-                Notify();
+                if (ShouldNotifyNow())
+                    Notify();
             }
         }
         catch (OperationCanceledException)
@@ -470,6 +476,21 @@ public sealed class ChatSessionClient(
         {
             EndRun();
         }
+    }
+
+    /// <summary>渲染节流窗口：约 60 FPS。窗口内的多个事件合并为一次 <see cref="Notify"/>。</summary>
+    private static readonly TimeSpan NotifyInterval = TimeSpan.FromMilliseconds(16);
+
+    private long _lastNotifyTimestamp;
+
+    private bool ShouldNotifyNow()
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (now - _lastNotifyTimestamp < (long)(NotifyInterval.TotalSeconds * Stopwatch.Frequency))
+            return false;
+
+        _lastNotifyTimestamp = now;
+        return true;
     }
 
     /// <summary>停止当前运行。</summary>

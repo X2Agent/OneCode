@@ -669,6 +669,53 @@ public sealed class ChatTranscriptViewTests
         backToFirst.Should().Be(0);
     }
 
+    /// <summary>
+    /// 反证已提交日志的驻留上限：长会话必须丢弃最旧的块，且丢弃后不会在宽度重渲时被重新生成。
+    /// </summary>
+    [Fact]
+    public void CommittedJournal_ExceedsRetentionLimit_DropsOldestBlocksAndStaysConsistent()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        // 每条系统消息 = 一个已提交块；写超过上限的块数。
+        for (var i = 0; i < 450; i++)
+            view.AddSystem($"notice-{i:D3}");
+
+        // 裁剪在绘制期按已解析宽度重渲落地（headless 测试里显式触发同一步骤）。
+        view.RerenderCommittedContent(80);
+
+        var trimmed = view.MessageView.RenderedLines;
+        trimmed.Should().NotContain(l => l.Contains("notice-000", StringComparison.Ordinal),
+            "超上限后最旧的块必须被丢弃");
+        trimmed.Should().Contain(l => l.Contains("notice-449", StringComparison.Ordinal),
+            "最近的块必须保留");
+
+        // 再次重渲不得把已丢弃的块重新生成回来（日志与视图必须同步裁剪）。
+        view.RerenderCommittedContent(80);
+
+        view.MessageView.RenderedLines.Should()
+            .NotContain(l => l.Contains("notice-000", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 反证工具结果的驻留裁剪：超大工具结果只保留受限预览，并在详情里明确标注被截断。
+    /// </summary>
+    [Fact]
+    public void AddToolDone_OversizedResult_RetainsOnlyCappedPreview()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        var huge = new string('x', 64 * 1024) + "-tail-marker";
+
+        view.BeginStreaming();
+        view.AddToolStart("Read", "big.txt", "call_big");
+        view.AddToolDone("Read", isError: false, toolInput: "big.txt", result: huge, toolId: "call_big");
+        view.EndStreaming();
+
+        var rendered = string.Join('\n', view.MessageView.RenderedLines);
+        rendered.Should().NotContain("tail-marker",
+            "超出驻留上限的尾部不得留在转录行里");
+    }
+
     private static int CountOccurrences(string haystack, string needle)
     {
         var count = 0;

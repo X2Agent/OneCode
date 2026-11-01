@@ -25,6 +25,12 @@ public interface ISessionEventStore
     /// <summary>按序读取指定会话的事件。</summary>
     Task<IReadOnlyList<SessionEvent>> ReadAsync(SessionId sessionId, CancellationToken ct = default);
 
+    /// <summary>
+    /// 只取单个会话的日志戳（不解析内容）。调用方据此判断进程内投影缓存是否仍然有效，
+    /// 避免为了一次有效性检查而重读整份日志。
+    /// </summary>
+    Task<SessionEventLogStamp?> GetLogStampAsync(SessionId sessionId, CancellationToken ct = default);
+
     /// <summary>列出已有事件日志的会话及其日志戳（只取元信息，不解析内容）。</summary>
     Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default);
 

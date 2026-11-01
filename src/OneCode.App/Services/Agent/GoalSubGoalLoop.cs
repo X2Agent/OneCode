@@ -155,7 +155,8 @@ internal sealed class GoalSubGoalLoop(
             // 已设置），此处不再放一条 System 消息。
             var messages = new List<ChatMessage>
             {
-                QueryStreamHelpers.BuildUserMessage(userPrompt, options.ImagePaths, _logger),
+                await QueryStreamHelpers.BuildUserMessageAsync(userPrompt, options.ImagePaths, _logger, ct)
+                    .ConfigureAwait(false),
             };
 
             _logger.LogInformation("Sub-goal {Id} executing with LoopAgent (max {Max} iterations): {Description}",

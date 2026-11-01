@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using OneCode.App.Services.Compact;
+using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 using OneCode.Infrastructure.Agent;
 
@@ -15,6 +16,7 @@ namespace OneCode.App.Services.Agent;
 public sealed class AgentSessionPersistence(
     ISessionConversationAccess sessionManager,
     ISessionChatHistoryReader chatHistoryReader,
+    ContextTokenTallyObserver tally,
     ILogger<AgentSessionPersistence> logger)
 {
     private const string MafSessionMetadataKey = "mafSession";
@@ -34,7 +36,7 @@ public sealed class AgentSessionPersistence(
         HistorySeedBoundary? historySeedBoundary = null,
         bool stripPlanExclusiveTools = false)
         => new TranscriptChatHistoryProvider(
-            _chatHistoryReader, conversationId, historySeedBoundary, stripPlanExclusiveTools);
+            _chatHistoryReader, conversationId, historySeedBoundary, stripPlanExclusiveTools, tally);
 
     /// <summary>
     /// Restores an <see cref="AgentSession"/> from <see cref="Conversation.Metadata"/> when a prior run

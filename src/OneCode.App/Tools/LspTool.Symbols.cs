@@ -55,12 +55,17 @@ public sealed partial class LspTool
             }
         }
 
-        // Code-index fallback
+        // Code-index fallback：索引按需构建（预热阶段不再全仓扫描），首次查询时在这里触发构建。
         if (_indexService is null)
             return ToolResult.Error("Symbol search unavailable: code index service not configured and no LSP server is running.");
 
-        if (!_indexService.LastIndexedAt.HasValue && !_indexService.IsIndexing)
-            return ToolResult.Error("Code index is still building. Please retry in a moment, or ensure an LSP server is running for semantic search.");
+        if (!_indexService.LastIndexedAt.HasValue)
+        {
+            if (_indexService.IsIndexing)
+                return ToolResult.Error("Code index is still building. Please retry in a moment, or ensure an LSP server is running for semantic search.");
+
+            await _indexService.BuildIndexAsync(_wd.WorkingDirectory, ct).ConfigureAwait(false);
+        }
 
         var matches = _indexService.Search(query, MaxSymbolResults, null, pathScope);
         if (matches.Count == 0)

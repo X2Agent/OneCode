@@ -79,7 +79,30 @@ public sealed record ToolLineTag(
     string? Result,
     bool IsExpanded,
     IReadOnlyList<ToolGroupEntry>? Group = null,
-    SubagentProgressEvent? LiveProgress = null);
+    SubagentProgressEvent? LiveProgress = null,
+    bool ResultTruncated = false)
+{
+    /// <summary>
+    /// 按驻留上限裁剪结果文本后构造 tag。工具结果最长可达
+    /// <c>ToolExecutionBudgetMiddleware.DefaultMaxResultChars</c>（150K 字符），
+    /// 把原文整份挂在行里会让每次工具调用都在转录与已提交日志里各留一份大字符串。
+    /// </summary>
+    public static ToolLineTag Create(
+        string name,
+        string? args,
+        string? result,
+        bool isExpanded,
+        IReadOnlyList<ToolGroupEntry>? group = null,
+        SubagentProgressEvent? liveProgress = null)
+        => new(
+            name,
+            args,
+            TranscriptTextLimits.Cap(result, out var truncated),
+            isExpanded,
+            group,
+            liveProgress,
+            truncated);
+}
 
 /// <summary>工具组行内单条调用的展示数据（组展开时逐条列出）。</summary>
 public sealed record ToolGroupEntry(string? Args, string? Result, string Duration, bool IsError);
@@ -88,7 +111,12 @@ public sealed record ToolGroupEntry(string? Args, string? Result, string Duratio
 public sealed record ToolDetailLineTag;
 
 /// <summary>Metadata attached to a thinking summary line for click-to-expand/collapse.</summary>
-public sealed record ThinkingLineTag(string Content, bool IsExpanded);
+public sealed record ThinkingLineTag(string Content, bool IsExpanded)
+{
+    /// <summary>按驻留上限裁剪思考文本后构造 tag（长 reasoning 会与正文同量级）。</summary>
+    public static ThinkingLineTag Create(string? content, bool isExpanded)
+        => new(TranscriptTextLimits.Cap(content, out _), isExpanded);
+}
 
 /// <summary>Marker tag for lines inserted below an expanded thinking summary.</summary>
 public sealed record ThinkingDetailLineTag;

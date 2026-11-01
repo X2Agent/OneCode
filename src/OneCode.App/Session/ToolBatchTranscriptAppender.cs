@@ -14,18 +14,31 @@ internal sealed class ToolBatchTranscriptAppender(
     private readonly ConcurrentDictionary<SessionId, SemaphoreSlim> _transcriptLocks = new();
 
     /// <summary>追加批次并一次性持久化；重复批次幂等去重，持久化失败回滚内存追加后重新抛出。</summary>
-    public async Task AppendAsync(
+    public Task AppendAsync(
         SessionId conversationId,
         IReadOnlyList<CompletedToolBatch> batches,
         CancellationToken ct = default)
+        => AppendAsync(conversationId, batches, fromIndex: 0, ct);
+
+    /// <summary>
+    /// 只处理 <paramref name="batches"/> 中从 <paramref name="fromIndex"/> 起的尾部。
+    /// 逐批落盘的调用方据此避免为「已落盘前缀」复制一份引用列表。
+    /// </summary>
+    public async Task AppendAsync(
+        SessionId conversationId,
+        IReadOnlyList<CompletedToolBatch> batches,
+        int fromIndex,
+        CancellationToken ct = default)
     {
-        if (batches.Count == 0)
+        if (fromIndex < 0 || fromIndex > batches.Count)
+            throw new ArgumentOutOfRangeException(nameof(fromIndex));
+        if (batches.Count == fromIndex)
             return;
 
-        foreach (var batch in batches)
+        for (var i = fromIndex; i < batches.Count; i++)
         {
-            if (!batch.IsComplete)
-                throw new InvalidOperationException($"Tool batch '{batch.BatchId}' is incomplete.");
+            if (!batches[i].IsComplete)
+                throw new InvalidOperationException($"Tool batch '{batches[i].BatchId}' is incomplete.");
         }
 
         var transcriptLock = _transcriptLocks.GetOrAdd(conversationId, static _ => new SemaphoreSlim(1, 1));
@@ -42,8 +55,9 @@ internal sealed class ToolBatchTranscriptAppender(
             }
 
             List<Message> appended = [];
-            foreach (var batch in batches)
+            for (var i = fromIndex; i < batches.Count; i++)
             {
+                var batch = batches[i];
                 var batchMessageId = ToolBatchMessageId(batch.BatchId);
                 if (conversation.Messages.Any(message =>
                         string.Equals(message.Id, batchMessageId, StringComparison.Ordinal)))

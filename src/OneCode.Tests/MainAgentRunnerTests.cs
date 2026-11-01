@@ -13,6 +13,8 @@ using OneCode.Core.Permissions;
 using OneCode.Core.Prompt;
 using OneCode.Core.Tokens;
 using OneCode.Core.Tools;
+using OneCode.App.Services.Observability;
+using OneCode.Infrastructure;
 using OneCode.Infrastructure.Agent;
 using OneCode.Infrastructure.Api;
 using OneCode.Infrastructure.Config;
@@ -68,7 +70,7 @@ public sealed class MainAgentRunnerTests : IDisposable
             new AgentContextPipeline(sharedBuilder, mainContextBuilder),
             _pipelineAssembly,
             new CompactionStrategyFactory(chatClient, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
-            new AgentSessionPersistence(null!, null!, NullLogger<AgentSessionPersistence>.Instance),
+            new AgentSessionPersistence(null!, null!, new ContextTokenTallyObserver(new TokenEstimator()), NullLogger<AgentSessionPersistence>.Instance),
             chatClient,
             NullLoggerFactory.Instance,
             Substitute.For<IServiceProvider>(),

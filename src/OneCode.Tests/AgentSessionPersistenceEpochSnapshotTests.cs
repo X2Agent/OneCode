@@ -4,7 +4,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using OneCode.App.Services.Agent;
 using OneCode.App.Services.Compact;
+using OneCode.App.Services.Observability;
 using OneCode.App.Session;
+using OneCode.Infrastructure;
 using System.Text.Json;
 
 namespace OneCode.Tests;
@@ -88,7 +90,8 @@ public sealed class AgentSessionPersistenceEpochSnapshotTests
     {
         var manager = Substitute.For<ISessionConversationAccess>();
         manager.GetConversation(conversation.Id).Returns(conversation);
-        return new AgentSessionPersistence(manager, null!, NullLogger<AgentSessionPersistence>.Instance);
+        return new AgentSessionPersistence(
+            manager, null!, new ContextTokenTallyObserver(new TokenEstimator()), NullLogger<AgentSessionPersistence>.Instance);
     }
 
     private static Conversation CreateConversationWithEpoch(int epoch)

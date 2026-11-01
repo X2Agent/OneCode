@@ -98,7 +98,7 @@ internal static class ConversationRenderer
         else if (effectiveIsError)
             segments.Add(new(" \u00b7 error", statusColor));
 
-        var tag = new ToolLineTag(name, toolInput, result, IsExpanded: false, Group: group);
+        var tag = ToolLineTag.Create(name, toolInput, result, isExpanded: false, group: group);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }
 

@@ -20,6 +20,16 @@ public interface ISessionManager : ISessionConversationAccess, ISessionChatHisto
     Task AppendAssistantMessageAsync(SessionId conversationId, string content, TokenUsage? usage = null, CancellationToken ct = default);
     Task AppendAssistantMessageAsync(SessionId conversationId, string content, TokenUsage? usage = null, IReadOnlyList<ToolUseBlock>? toolCalls = null, CancellationToken ct = default);
     Task AppendCompletedToolBatchesAsync(SessionId conversationId, IReadOnlyList<CompletedToolBatch> batches, CancellationToken ct = default);
+
+    /// <summary>
+    /// 从 <paramref name="fromIndex"/> 起追加已封口的批次：run 中途逐批落盘后只需补剩余增量，
+    /// 由实现按索引切片，避免调用方 <c>Skip(n).ToList()</c> 复制前缀引用。
+    /// </summary>
+    Task AppendCompletedToolBatchesAsync(
+        SessionId conversationId,
+        IReadOnlyList<CompletedToolBatch> batches,
+        int fromIndex,
+        CancellationToken ct = default);
     IReadOnlyList<ChatMessage> GetForegroundChatHistory();
 
     Task SaveAsync(CancellationToken ct = default);

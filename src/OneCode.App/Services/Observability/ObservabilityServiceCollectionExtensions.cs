@@ -28,6 +28,7 @@ public static class ObservabilityServiceCollectionExtensions
         services.AddSingleton<ITokenUsageTracker>(sp => sp.GetRequiredService<TokenUsageTracker>());
         services.AddSingleton<TokenBreakdownEstimator>();
         services.AddSingleton<ITokenBreakdownEstimator>(sp => sp.GetRequiredService<TokenBreakdownEstimator>());
+        services.AddSingleton<ContextTokenTallyObserver>();
 
         return services;
     }

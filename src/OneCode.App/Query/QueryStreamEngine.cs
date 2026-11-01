@@ -111,7 +111,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
         string? harnessPrompt = null,
         bool unattended = false)
     {
-        var userMessage = QueryStreamHelpers.BuildUserMessage(prompt, imagePaths, _logger);
+        var userMessage = await QueryStreamHelpers.BuildUserMessageAsync(prompt, imagePaths, _logger, ct)
+            .ConfigureAwait(false);
         await foreach (var evt in StreamInteractiveAsync(
             [userMessage], systemPrompt, modelId, thinkingBudget,
             sessionId: null, workingDirectory: null, ct, workingMode, fileChangeCallback, harnessPrompt, unattended))
@@ -460,10 +461,12 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 yield return new ErrorEvent(runException.Message + PromptTooLongHint(runException));
                 yield break;
             }
-            aggregatedText.Append(session.FinalText);
+            // 收尾路径要多次消费最终文本：只物化一次，避免每次 ToString() 复制整份回复。
+            var finalText = session.FinalText;
+            aggregatedText.Append(finalText);
             aggregatedTurns += session.TurnCount;
             aggregatedUsage = QueryStreamHelpers.SumUsage(aggregatedUsage, session.FinalUsage);
-            outcome = QueryStreamHelpers.ResolveTerminalOutcome(session, options, runResult, session.FinalText);
+            outcome = QueryStreamHelpers.ResolveTerminalOutcome(session, options, runResult, finalText);
             // output 拦截点：最终响应落盘并完成交付前的策略门。终因只用于产品收尾，不作 hook matcher。
             // deny 拦截本次响应并终结本轮（跳过最终助手消息落盘，防止被拒响应污染会话历史）——
             // 纠偏、预算终结与异常收尾都不是该节点的职责。
@@ -472,7 +475,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 request.SessionId,
                 request.WorkingDirectory,
                 ct,
-                configure: p => p with { OutputText = session.FinalText }).ConfigureAwait(false);
+                configure: p => p with { OutputText = finalText }).ConfigureAwait(false);
             if (outputResult?.BlockingErrors is { Count: > 0 } outputBlocks)
             {
                 _logger.LogInformation("output hook blocked final response: {Error}", outputBlocks[0].Error);
@@ -483,7 +486,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
                 yield break;
             }
             var transcriptPersisted = await _transcriptPersistence.PersistAsync(
-                request, session, session.FinalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
+                request, session, finalText, session.FinalUsage, ct, alreadyPersistedBatchCount: persistedBatchCount).ConfigureAwait(false);
             if (!transcriptPersisted)
                 yield return new NoticeEvent(
                     "Session transcript failed to persist; the latest turn may be missing after restart.");
@@ -669,7 +672,7 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             : [];
         var breakdown = _tokenBreakdownEstimator.Estimate(
             request.SystemPrompt, toolsForBreakdown, messagesForBreakdown, session.LastTurnInputTokens);
-        _tokenUsageTracker.Record(finalUsage, breakdown);
+        _tokenUsageTracker.Record(finalUsage, breakdown, session.LastTurnInputTokens);
     }
 
     /// <summary>

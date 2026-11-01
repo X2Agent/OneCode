@@ -1,3 +1,4 @@
+using System.Text;
 using OneCode.Core.Goals;
 
 namespace OneCode.WebUI.Services;
@@ -6,16 +7,73 @@ namespace OneCode.WebUI.Services;
 public enum WebRole { User, Assistant, System }
 
 /// <summary>一条对话消息。</summary>
+/// <remarks>
+/// 流式正文/思考以 <see cref="StringBuilder"/> 增量累积，读取时才物化成字符串并缓存：
+/// 直接对属性做 <c>Content += delta</c> 是每 token O(n) 复制，长回复退化为 O(n²)
+/// 并持续产出大临时字符串。
+/// 物化与追加以实例锁互斥：事件流在后台线程逐 token 追加，Blazor 渲染在电路线程读取，
+/// <c>StringBuilder</c> 不是线程安全类型——无锁并发读写下 <c>ToString()</c> 会产出撕裂文本甚至抛异常。
+/// </remarks>
 public sealed class WebMessage(WebRole role, string content)
 {
+    private readonly object _gate = new();
+    private readonly StringBuilder _content = new(content);
+    private readonly StringBuilder _thinking = new();
+    private string? _cachedContent = content;
+    private string? _cachedThinking;
+
     public WebRole Role { get; } = role;
 
-    public string Content { get; set; } = content;
+    public string Content
+    {
+        get { lock (_gate) return _cachedContent ??= _content.ToString(); }
+        set
+        {
+            lock (_gate)
+            {
+                _content.Clear();
+                _content.Append(value);
+                _cachedContent = value;
+            }
+        }
+    }
 
     /// <summary>该轮回复的思考过程（为空表示没有）。</summary>
-    public string Thinking { get; set; } = string.Empty;
+    public string Thinking
+    {
+        get { lock (_gate) return _cachedThinking ??= _thinking.ToString(); }
+        set
+        {
+            lock (_gate)
+            {
+                _thinking.Clear();
+                _thinking.Append(value);
+                _cachedThinking = value;
+            }
+        }
+    }
 
     public bool IsStreaming { get; set; }
+
+    /// <summary>追加正文增量（O(Δ)，不复制已有内容）。</summary>
+    public void AppendContent(string text)
+    {
+        lock (_gate)
+        {
+            _content.Append(text);
+            _cachedContent = null;
+        }
+    }
+
+    /// <summary>追加思考增量。</summary>
+    public void AppendThinking(string text)
+    {
+        lock (_gate)
+        {
+            _thinking.Append(text);
+            _cachedThinking = null;
+        }
+    }
 }
 
 /// <summary>工具调用卡片状态。</summary>

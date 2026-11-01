@@ -37,6 +37,9 @@ public sealed partial class ChatTranscriptView
 
         RebuildExpandedThinkingLines();
 
+        // 推理模型以与正文相同的频率吐 thinking 增量。这里保持「状态行立即生效」语义
+        // （思考块可见时必须即时刷新），但重建本身已增量：已完成行原地复用，
+        // 只有尾段会重新换行并生成新行对象。
         RebuildStreamingPreview();
     }
 
@@ -98,7 +101,7 @@ public sealed partial class ChatTranscriptView
     private FormattedLine BuildThinkingSummary(string title, bool isExpanded = false)
     {
         var thinking = _stream.ThinkingBuffer.ToString();
-        var tag = new ThinkingLineTag(thinking, IsExpanded: isExpanded);
+        var tag = ThinkingLineTag.Create(thinking, isExpanded);
         var icon = isExpanded ? TuiGlyphs.Expanded : TuiGlyphs.Collapsed;
         return FormattedLine.FromSegmentsWithTag(new[]
         {
@@ -448,15 +451,23 @@ public sealed partial class ChatTranscriptView
         => AddFileChange(fileName, null, addedLines, removedLines);
 
     /// <summary>带代理归属的重载：diff 头标注执行修改的代理 ID。</summary>
+    /// <remarks>
+    /// 变更行在进入日志条目闭包前就按上限裁剪：闭包会跨 resize 长期驻留，
+    /// 整份 diff 原文（可达上千行）挂在闭包里等于把一次大改写永久留在内存。
+    /// </remarks>
     public void AddFileChange(string fileName, string? agentName, IReadOnlyList<string> addedLines, IReadOnlyList<string> removedLines)
     {
         _logger.LogDebug(
             "[AddFileChange] streaming={Streaming}, statusLines={StatusLines}, lineCountInView={LineCountInView}, file={File}, +{Added}/-{Removed}, agent={Agent}",
             _stream.IsStreaming, _stream.StatusLines.Count, _stream.PreviewLineCount, fileName, addedLines.Count, removedLines.Count, agentName);
+
+        var cappedAdded = TranscriptTextLimits.CapLines(addedLines).Lines;
+        var cappedRemoved = TranscriptTextLimits.CapLines(removedLines).Lines;
+
         if (_stream.IsStreaming)
         {
             AddFormattedLines(ChatBlockRenderers.RenderDiffBlock(
-                fileName, addedLines, removedLines,
+                fileName, cappedAdded, cappedRemoved,
                 addedSummary: addedLines.Count,
                 removedSummary: removedLines.Count,
                 agentName: agentName,
@@ -465,7 +476,7 @@ public sealed partial class ChatTranscriptView
         else
         {
             AppendCommittedBlock(width => ChatBlockRenderers.RenderDiffBlock(
-                fileName, addedLines, removedLines,
+                fileName, cappedAdded, cappedRemoved,
                 addedSummary: addedLines.Count,
                 removedSummary: removedLines.Count,
                 agentName: agentName,

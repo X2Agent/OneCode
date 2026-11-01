@@ -58,7 +58,8 @@ public static class SafetyInvariantMiddleware
                     $"[SAFETY] Parameter extraction failed for tool '{ctx.Function.Name}' — blocked to prevent fail-open.");
             }
 
-            // 目标路径在这里解析一次：各不变量与 Layer 1 边界校验共享同一结论，不再各自猜参数名。
+            // 各中间件（Layer 0 / Layer 1 / Edit 事务）各自独立调用同一纯函数解析器，结论必然一致；
+            // 本层把解析结果共享给全部不变量，不变量不得各自按参数名猜路径。
             var targetPath = ToolTargetPathResolver.Resolve(ctx.Function, parameters);
             if (targetPath.Kind == ToolTargetPathKind.Unresolvable)
             {

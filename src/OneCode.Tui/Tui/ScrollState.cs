@@ -45,6 +45,19 @@ internal sealed class ScrollState(
         _needsScrollToBottom = false;
     }
 
+    /// <summary>
+    /// 头部滑出 <paramref name="count"/> 行后校正偏移：用户正读的那一段内容行号整体前移，
+    /// 不校正会让视口跳回内容更靠后的位置（在用户视角是"自己往下滚了"）。
+    /// </summary>
+    public void OnLinesTrimmed(int count)
+    {
+        if (count <= 0)
+            return;
+
+        _scrollOffset = Math.Max(0, _scrollOffset - count);
+        _onScrolled?.Invoke(_scrollOffset);
+    }
+
     public void ScrollUp(int lines = 3)
     {
         _autoScroll = false;

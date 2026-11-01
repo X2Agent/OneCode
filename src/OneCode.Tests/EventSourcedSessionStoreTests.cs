@@ -276,6 +276,62 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
         verifying.ReadCount.Should().Be(0, "回退解析后必须回写索引");
     }
 
+    [Fact]
+    public async Task SaveAsync_RepeatedSaves_DoNotRereadEventLog()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var counting = new CountingSessionEventStore(new FileSessionEventStore(_root));
+        var store = CreateStore(counting);
+        var conversation = CreateConversation();
+        conversation.Messages.Add(new UserMessage("u1", "hello", DateTimeOffset.UtcNow));
+
+        await store.SaveAsync(conversation, ct);
+        counting.ResetReadCount();
+
+        // 连续追加多轮：每次保存都要判定「已落盘消息是否为当前列表前缀」，
+        // 该判定必须走进程内投影缓存，而不是重读整份事件日志。
+        for (var i = 0; i < 5; i++)
+        {
+            conversation.Messages.Add(new UserMessage($"u{i + 2}", $"turn {i}", DateTimeOffset.UtcNow));
+            await store.SaveAsync(conversation, ct);
+        }
+
+        counting.ReadCount.Should().Be(0,
+            "自身写入后回填投影：后续保存不得随轮数线性重读事件日志");
+    }
+
+    [Fact]
+    public async Task SaveAsync_AfterExternalAppend_RereadsEventLogBeforePrefixCheck()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var fileStore = new FileSessionEventStore(_root);
+        var counting = new CountingSessionEventStore(fileStore);
+        var store = CreateStore(counting);
+        var conversation = CreateConversation();
+        conversation.Messages.Add(new UserMessage("u1", "hello", DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+        counting.ResetReadCount();
+
+        // 另一持有者追加：日志戳变化必须让投影缓存失效——
+        // 否则前缀判定会基于陈旧视图，写出与磁盘不一致的增量事件。
+        await fileStore.AppendAsync(
+            [new UserMessageEvent(
+                conversation.Id,
+                0,
+                DateTimeOffset.UtcNow,
+                new UserMessage("u2", "external", DateTimeOffset.UtcNow))],
+            ct);
+
+        conversation.Messages.Add(new UserMessage("u3", "local", DateTimeOffset.UtcNow));
+        await store.SaveAsync(conversation, ct);
+
+        counting.ReadCount.Should().BeGreaterThan(0,
+            "日志戳变化后必须重新读取日志，缓存不得掩盖外部写入");
+        (await store.LoadAsync(conversation.Id, ct))!.Messages.Select(m => m.Id)
+            .Should().Equal(["u1", "u3"],
+                "外部写入使前缀不再匹配，本地保存以当前会话为准整体替换既有语义");
+    }
+
     private EventSourcedSessionStore CreateStore(ISessionEventStore events) =>
         new(events,
             new FileSessionSummaryIndex(_root, NullLogger<FileSessionSummaryIndex>.Instance),
@@ -316,6 +372,9 @@ public sealed class EventSourcedSessionStoreTests : IDisposable
             ReadCount++;
             return inner.ReadAsync(sessionId, ct);
         }
+
+        public Task<SessionEventLogStamp?> GetLogStampAsync(SessionId sessionId, CancellationToken ct = default) =>
+            inner.GetLogStampAsync(sessionId, ct);
 
         public Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default) =>
             inner.ListLogsAsync(ct);

@@ -40,7 +40,7 @@
                         var (head, tail, tailStart) = SplitStreamingTail(message.Content);
                         if (!string.IsNullOrEmpty(head))
                         {
-                            <div class="markdown">@((MarkupString)Renderer.ToHtml(head))</div>
+                            <div class="markdown">@((MarkupString)RenderStreamingHead(message, head))</div>
                         }
                         if (tail is not null && StreamingTextTokenizer.IsPlainText(tail))
                         {
@@ -119,6 +119,12 @@
     // 已完结消息的渲染结果：内容不变就复用，避免流式期间反复解析 + 消毒整条历史。
     private readonly Dictionary<WebMessage, RenderedMessage> _rendered = [];
 
+    // 流式消息「稳定头段」的 Markdown 渲染缓存：头段在一次渲染内只有长度增长，
+    // 但内容前缀不变——不缓存则每次状态刷新都要把已经完结的整段历史重新解析 + 消毒。
+    private WebMessage? _streamingHeadOwner;
+    private int _streamingHeadLength = -1;
+    private string? _streamingHeadHtml;
+
     // 流式尾段的字级错峰状态（当前流式消息专属，会话切换时复位）。
     private readonly StreamingTailState _tail = new();
 
@@ -181,6 +187,25 @@
     private sealed record RenderedMessage(string Content, IReadOnlyList<RenderedPart> Parts);
 
     private sealed record RenderedPart(string? Html, string? Artifact);
+
+    /// <summary>
+    /// 流式消息稳定头段的 HTML：头段内容只追加不改写（拆分点在空行之后），
+    /// 因此按 (消息实例, 头段长度) 缓存即可复用——不命中才走 Markdig 解析 + 消毒。
+    /// </summary>
+    private string RenderStreamingHead(WebMessage message, string head)
+    {
+        if (ReferenceEquals(_streamingHeadOwner, message)
+            && _streamingHeadLength == head.Length
+            && _streamingHeadHtml is not null)
+        {
+            return _streamingHeadHtml;
+        }
+
+        _streamingHeadOwner = message;
+        _streamingHeadLength = head.Length;
+        _streamingHeadHtml = Renderer.ToHtml(head);
+        return _streamingHeadHtml;
+    }
 
     /// <summary>
     /// 流式渲染拆分：已完结块走稳定渲染，最后一个未完成块独立成尾段，

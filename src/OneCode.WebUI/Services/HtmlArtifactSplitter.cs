@@ -31,7 +31,7 @@ public static class HtmlArtifactSplitter
         var body = new StringBuilder();
         string? language = null;
 
-        foreach (var rawLine in content.Split('\n'))
+        foreach (var rawLine in EnumerateLines(content))
         {
             var line = rawLine.TrimEnd('\r');
             var trimmed = line.TrimStart();
@@ -97,4 +97,24 @@ public static class HtmlArtifactSplitter
     private static bool LooksLikeDocument(string html)
         => html.Contains("<html", StringComparison.OrdinalIgnoreCase)
             || html.Contains("<!doctype html", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 按行枚举而不 <c>Split('\n')</c>：整条消息一次性切行会分配「行数」个字符串，
+    /// 而这里只需要顺序扫过每一行。最后一行不含尾部换行时同样返回。
+    /// </summary>
+    private static IEnumerable<string> EnumerateLines(string content)
+    {
+        var start = 0;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] != '\n')
+                continue;
+
+            yield return content[start..i];
+            start = i + 1;
+        }
+
+        // 与 Split('\n') 语义一致：末尾换行后仍产出一个空行。
+        yield return content[start..];
+    }
 }

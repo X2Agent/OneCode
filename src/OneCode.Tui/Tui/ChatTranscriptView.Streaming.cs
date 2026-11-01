@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace OneCode.Tui;
 
 /// <summary>
@@ -178,6 +180,11 @@ public sealed partial class ChatTranscriptView
         return true;
     }
 
+    /// <summary>
+    /// 光标闪烁只影响预览最后一行。重建走增量补丁路径（<see cref="MessageListView.ReplaceStreamingPreview"/>）：
+    /// 未变化的行原地保留，只重写闪烁的那一行，因此这里无需再单独维护「只改最后一行」的分支。
+    /// </summary>
+
     public void AppendStreamingToken(string text)
     {
         if (!_stream.IsStreaming) return;
@@ -254,22 +261,28 @@ public sealed partial class ChatTranscriptView
 
             // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
             // incomplete paragraph (and any newly completed ones) on each rebuild.
-            var fullText = _stream.TextBuffer.ToString();
             var wrapWidth = width - ConversationRenderer.ContentIndent - 2;
-            UpdateStreamingWrapCache(fullText, wrapWidth);
+            UpdateStreamingWrapCache(wrapWidth);
 
             if (_stream.WrappedTextLines.Count > 0 && pending.Count > 0)
                 pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            for (var i = 0; i < _stream.WrappedTextLines.Count; i++)
+
+            var lastIndex = _stream.WrappedTextLines.Count - 1;
+            var showCursor = _stream.IsStreaming && _streamingCursorVisible && lastIndex >= 0;
+            for (var i = 0; i <= lastIndex; i++)
             {
-                var line = _stream.WrappedTextLines[i];
-                if (_stream.IsStreaming && _streamingCursorVisible && i == _stream.WrappedTextLines.Count - 1)
+                if (showCursor && i == lastIndex)
                 {
-                    var withCursor = line + TuiGlyphs.StreamingCursor;
+                    var withCursor = _stream.WrappedTextLines[i] + TuiGlyphs.StreamingCursor;
                     if (TextWidthHelper.GetDisplayWidth(withCursor) <= Math.Max(1, wrapWidth))
-                        line = withCursor;
+                    {
+                        pending.Add(FormattedLine.Plain(
+                            $"{ConversationRenderer.Indent}{withCursor}", TuiPalette.AssistantMessage));
+                        continue;
+                    }
                 }
-                pending.Add(FormattedLine.Plain($"{ConversationRenderer.Indent}{line}", TuiPalette.AssistantMessage));
+
+                pending.Add(_stream.WrappedFormattedLines[i]);
             }
 
             return pending;
@@ -287,36 +300,46 @@ public sealed partial class ChatTranscriptView
     /// the open trailing paragraph is re-wrapped when new tokens arrive.
     /// Width changes invalidate the entire cache.
     /// </summary>
-    private void UpdateStreamingWrapCache(string fullText, int wrapWidth)
+    /// <remarks>
+    /// 已完成段落直接留在 <see cref="StreamingTranscriptState.WrappedTextLines"/> 的稳定前缀里，
+    /// 每次只删掉尾段再追加新尾段：旧实现每帧清空整表再回填全部已完成行，
+    /// 长回复下这部分工作与回复长度成正比，且每帧都物化整个缓冲区字符串。
+    /// </remarks>
+    private void UpdateStreamingWrapCache(int wrapWidth)
     {
         if (wrapWidth <= 0) wrapWidth = 40;
 
+        var buffer = _stream.TextBuffer;
         if (wrapWidth != _stream.WrappedWidth)
         {
-            _stream.WrappedCompleteLines.Clear();
-            _stream.WrappedCompletedEnd = 0;
+            _stream.WrappedTextLines.Clear();
+            _stream.WrappedFormattedLines.Clear();
+            _stream.WrappedStableCount = 0;
             _stream.WrappedWidth = wrapWidth;
             _stream.WrappedBufferLength = 0;
+            _stream.WrappedCompletedEnd = 0;
         }
 
         // Nothing new and width unchanged — keep existing lines.
-        if (fullText.Length == _stream.WrappedBufferLength && _stream.WrappedTextLines.Count > 0)
+        if (buffer.Length == _stream.WrappedBufferLength && _stream.WrappedTextLines.Count > 0)
             return;
 
         // Advance completed-paragraph frontier.
-        var lastNl = fullText.LastIndexOf('\n');
+        var lastNl = LastIndexOfNewline(buffer);
         var completedEnd = lastNl >= 0 ? lastNl + 1 : 0;
 
         if (completedEnd < _stream.WrappedCompletedEnd)
         {
             // Buffer shrank (shouldn't happen mid-stream) — full rebuild.
-            _stream.WrappedCompleteLines.Clear();
+            _stream.WrappedTextLines.Clear();
+            _stream.WrappedFormattedLines.Clear();
+            _stream.WrappedStableCount = 0;
             _stream.WrappedCompletedEnd = 0;
         }
 
         if (completedEnd > _stream.WrappedCompletedEnd)
         {
-            var chunk = fullText[_stream.WrappedCompletedEnd..completedEnd];
+            var chunk = CopyRange(buffer, _stream.WrappedCompletedEnd, completedEnd - _stream.WrappedCompletedEnd);
             // chunk always ends with '\n'. Split yields a trailing empty element
             // representing the still-open next paragraph — skip it so the live
             // tail owns that paragraph instead of inserting a phantom blank line.
@@ -324,25 +347,89 @@ public sealed partial class ChatTranscriptView
             for (var i = 0; i < parts.Length - 1; i++)
             {
                 if (parts[i].Length == 0)
-                    _stream.WrappedCompleteLines.Add("");
+                    AppendWrappedLine(string.Empty);
                 else
-                    _stream.WrappedCompleteLines.AddRange(
-                        ConversationRenderer.WordWrapStreaming(parts[i], wrapWidth));
+                    foreach (var wrapped in ConversationRenderer.WordWrapStreaming(parts[i], wrapWidth))
+                        AppendWrappedLine(wrapped);
             }
+
             _stream.WrappedCompletedEnd = completedEnd;
+            _stream.WrappedStableCount = _stream.WrappedTextLines.Count;
         }
 
-        _stream.WrappedTextLines.Clear();
-        _stream.WrappedTextLines.AddRange(_stream.WrappedCompleteLines);
-
-        if (completedEnd < fullText.Length)
+        // 只重算尾段：稳定前缀（含其渲染行实例）原地保留。
+        var tailCount = _stream.WrappedTextLines.Count - _stream.WrappedStableCount;
+        if (tailCount > 0)
         {
-            var tail = fullText[completedEnd..];
-            _stream.WrappedTextLines.AddRange(
-                ConversationRenderer.WordWrapStreaming(tail, wrapWidth));
+            _stream.WrappedTextLines.RemoveRange(_stream.WrappedStableCount, tailCount);
+            _stream.WrappedFormattedLines.RemoveRange(_stream.WrappedStableCount, tailCount);
         }
 
-        _stream.WrappedBufferLength = fullText.Length;
+        if (completedEnd < buffer.Length)
+        {
+            var tail = CopyRange(buffer, completedEnd, buffer.Length - completedEnd);
+            foreach (var wrapped in ConversationRenderer.WordWrapStreaming(tail, wrapWidth))
+                AppendWrappedLine(wrapped);
+        }
+
+        _stream.WrappedBufferLength = buffer.Length;
+    }
+
+    private void AppendWrappedLine(string text)
+    {
+        _stream.WrappedTextLines.Add(text);
+        // 渲染行只依赖文本（缩进/配色恒定）：宽度变化会整体清空缓存，故可安全复用实例。
+        _stream.WrappedFormattedLines.Add(FormattedLine.Plain(
+            $"{ConversationRenderer.Indent}{text}", TuiPalette.AssistantMessage));
+    }
+
+    /// <summary>在 <see cref="StringBuilder"/> 上找最后一个换行，逐块倒序扫描，不物化整串。</summary>
+    private static int LastIndexOfNewline(StringBuilder buffer)
+    {
+        var offset = buffer.Length;
+        foreach (var chunk in buffer.GetChunks())
+        {
+            offset -= chunk.Length;
+            var index = chunk.Span.LastIndexOf('\n');
+            if (index >= 0)
+                return offset + index;
+        }
+
+        return -1;
+    }
+
+    /// <summary>按区间取子串（跨块拼接），避免为取一小段而物化整个缓冲区。</summary>
+    private static string CopyRange(StringBuilder buffer, int start, int length)
+    {
+        if (length <= 0)
+            return string.Empty;
+
+        var remaining = length;
+        var cursor = 0;
+        StringBuilder? parts = null;
+        foreach (var chunk in buffer.GetChunks())
+        {
+            var chunkEnd = cursor + chunk.Length;
+            if (chunkEnd <= start)
+            {
+                cursor = chunkEnd;
+                continue;
+            }
+
+            var from = Math.Max(start, cursor) - cursor;
+            var take = Math.Min(chunk.Length - from, remaining);
+            if (parts is null && take == length)
+                return chunk.Slice(from, take).ToString();
+
+            parts ??= new StringBuilder(length);
+            parts.Append(chunk.Slice(from, take));
+            remaining -= take;
+            cursor = chunkEnd;
+            if (remaining == 0)
+                break;
+        }
+
+        return parts?.ToString() ?? string.Empty;
     }
 
     /// <summary>
@@ -422,7 +509,7 @@ public sealed partial class ChatTranscriptView
             {
                 var preview = TextWidthHelper.TruncateByWidth(wrapped[0], Math.Max(16, wrapWidth - 16));
                 var remainingText = string.Join('\n', wrapped.Skip(1));
-                var tag = new ThinkingLineTag(remainingText, IsExpanded: false);
+                var tag = ThinkingLineTag.Create(remainingText, isExpanded: false);
                 lines.Add(FormattedLine.FromSegmentsWithTag(
                 [
                     new LineSegment(ConversationRenderer.Indent, TuiPalette.BgPrimary),

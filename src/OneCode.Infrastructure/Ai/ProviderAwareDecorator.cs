@@ -35,10 +35,8 @@ public sealed class ProviderAwareDecorator(
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        // 始终复制：Anthropic 策略会替换列表元素（clone-on-write），绝不能写回调用方的列表
-        var messageList = messages.ToList();
-        options = ApplyProviderStrategy(messageList, options);
-        return await base.GetResponseAsync(messageList, options, cancellationToken);
+        var (requestMessages, requestOptions) = PrepareRequest(messages, options);
+        return await base.GetResponseAsync(requestMessages, requestOptions, cancellationToken);
     }
 
     public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -46,29 +44,35 @@ public sealed class ProviderAwareDecorator(
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var messageList = messages.ToList();
-        options = ApplyProviderStrategy(messageList, options);
-        return base.GetStreamingResponseAsync(messageList, options, cancellationToken);
+        var (requestMessages, requestOptions) = PrepareRequest(messages, options);
+        return base.GetStreamingResponseAsync(requestMessages, requestOptions, cancellationToken);
     }
 
-    private ChatOptions? ApplyProviderStrategy(IList<ChatMessage> messages, ChatOptions? options)
+    /// <summary>
+    /// 按 provider 补齐请求：非 Anthropic 不改写消息列表，直接透传调用方的可枚举
+    /// （整份历史复制一次在长会话里是纯粹的浪费）；Anthropic 因需要替换列表元素
+    /// （clone-on-write 断点标记），必须在自己的副本上做，绝不写回调用方列表。
+    /// </summary>
+    private (IEnumerable<ChatMessage> Messages, ChatOptions? Options) PrepareRequest(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options)
     {
-        switch (_providerId)
-        {
-            case CoreConstants.ModelProviders.Anthropic:
-                InjectAnthropicStrategy(messages);
-                break;
+        if (_providerId != CoreConstants.ModelProviders.Anthropic)
+            return (messages, ApplyOllamaStrategy(options));
 
-            case CoreConstants.ModelProviders.Ollama:
-                if (options is null && (_ollamaNumCtx is > 0 || _ollamaTemperature is >= 0.0 and <= 2.0))
-                    options = new ChatOptions();
-                InjectOllamaStrategy(options, _ollamaNumCtx, _ollamaTemperature);
-                break;
+        var messageList = messages.ToList();
+        InjectAnthropicStrategy(messageList, options);
+        return (messageList, options);
+    }
 
-                // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning，
-                // 无需任何 provider 私有注入。
-        }
+    private ChatOptions? ApplyOllamaStrategy(ChatOptions? options)
+    {
+        if (_providerId != CoreConstants.ModelProviders.Ollama)
+            return options; // OpenAI：前缀缓存由服务端自动完成，推理强度走 ChatOptions.Reasoning
 
+        if (options is null && (_ollamaNumCtx is > 0 || _ollamaTemperature is >= 0.0 and <= 2.0))
+            options = new ChatOptions();
+        InjectOllamaStrategy(options, _ollamaNumCtx, _ollamaTemperature);
         return options;
     }
 
@@ -81,32 +85,41 @@ public sealed class ProviderAwareDecorator(
     ///   - 最后一条消息的最后一个可缓存块（对话前缀）→ 默认 5m
     /// </summary>
     /// <remarks>
-    /// 主体正文经 <see cref="ChatOptions.Instructions"/> 下发，Anthropic 适配器把它拼成 system 块时
-    /// 不带 cache_control，所以 1h 断点只在确实存在 system 消息时才有意义——这里不合成 system 消息，
-    /// 否则会和 Instructions 里的正文重复。
+    /// 主体正文默认经 <see cref="ChatOptions.Instructions"/> 下发，而 Anthropic 适配器把
+    /// Instructions 拼成 system 块时不带 cache_control——稳定前缀会退化到只搭尾部断点的 5m TTL。
+    /// 故 <see cref="ChatOptions.Instructions"/> 非空且无显式 system 消息时，先把 Instructions
+    /// 提升为显式 System 消息（并清空 Instructions 防止正文重复下发），再打 1h 断点；
+    /// fork 路径自带显式 System 消息，不提升。
     /// 断点写在消息<b>副本</b>上（clone-on-write，见 <see cref="WithCacheBreakpoint"/>），
     /// 每次请求都从干净实例重建，因此单个请求恰好只有上述 2 个断点。
     /// </remarks>
-    private static void InjectAnthropicStrategy(IList<ChatMessage> messages)
+    private static void InjectAnthropicStrategy(IList<ChatMessage> messages, ChatOptions? options)
     {
+        if (options is { Instructions: { Length: > 0 } instructions }
+            && !HasSystemMessage(messages))
+        {
+            messages.Insert(0, new ChatMessage(ChatRole.System, instructions));
+            options.Instructions = null;
+        }
+
         var lastSystemIndex = -1;
         var lastPersistentConversationIndex = -1;
         var lastNonSystemIndex = -1;
 
         for (var i = 0; i < messages.Count; i++)
         {
-            if (messages[i].Role == ChatRole.System)
+            var message = messages[i];
+            if (LastCacheableIndex(message) < 0)
+                continue;
+
+            if (message.Role == ChatRole.System)
             {
-                if (LastCacheableIndex(messages[i]) >= 0)
-                    lastSystemIndex = i;
+                lastSystemIndex = i;
                 continue;
             }
 
-            if (LastCacheableIndex(messages[i]) < 0)
-                continue;
-
             lastNonSystemIndex = i;
-            if (messages[i].GetAgentRequestMessageSourceType() != AgentRequestMessageSourceType.AIContextProvider)
+            if (message.GetAgentRequestMessageSourceType() != AgentRequestMessageSourceType.AIContextProvider)
                 lastPersistentConversationIndex = i;
         }
 
@@ -187,6 +200,17 @@ public sealed class ProviderAwareDecorator(
         }
 
         return -1;
+    }
+
+    private static bool HasSystemMessage(IEnumerable<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            if (message.Role == ChatRole.System)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>

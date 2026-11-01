@@ -643,7 +643,7 @@ public sealed partial class QueryStreamEngineTests
                 Substitute.For<IPermissionChecker>(),
                 new TokenLedger()),
             new CompactionStrategyFactory(chatClient, modelManager, new OneCode.App.Services.Compact.CompactPromptBuilder(promptManager)),
-            new AgentSessionPersistence(sessionManager, sessionManager, NullLoggerFactory.Instance.CreateLogger<AgentSessionPersistence>()),
+            new AgentSessionPersistence(sessionManager, sessionManager, new ContextTokenTallyObserver(new TokenEstimator()), NullLoggerFactory.Instance.CreateLogger<AgentSessionPersistence>()),
             chatClient,
             NullLoggerFactory.Instance,
             serviceProvider,

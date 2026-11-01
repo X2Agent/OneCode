@@ -17,14 +17,46 @@ public sealed class WebTranscript
     private readonly List<WebContextItem> _context = [];
     private readonly object _gate = new();
 
-    public IReadOnlyList<WebMessage> Messages { get { lock (_gate) return [.. _messages]; } }
+    // 只读快照：内容未变时复用同一实例，避免每次读取都复制整个列表
+    // （UI 每次渲染都会读取，逐 token 复制会把临时分配放大到与消息数成正比）。
+    private IReadOnlyList<WebMessage>? _messagesSnapshot;
+    private IReadOnlyList<WebToolCall>? _toolCallsSnapshot;
+    private IReadOnlyList<WebActivity>? _activitiesSnapshot;
+    private IReadOnlyList<WebContextItem>? _contextSnapshot;
+    private bool _messagesDirty = true;
+    private bool _toolCallsDirty = true;
+    private bool _activitiesDirty = true;
+    private bool _contextDirty = true;
 
-    public IReadOnlyList<WebToolCall> ToolCalls { get { lock (_gate) return [.. _toolCalls]; } }
+    public IReadOnlyList<WebMessage> Messages => GetSnapshot(ref _messagesSnapshot, ref _messagesDirty, _messages);
 
-    public IReadOnlyList<WebActivity> Activities { get { lock (_gate) return [.. _activities]; } }
+    public IReadOnlyList<WebToolCall> ToolCalls => GetSnapshot(ref _toolCallsSnapshot, ref _toolCallsDirty, _toolCalls);
+
+    public IReadOnlyList<WebActivity> Activities => GetSnapshot(ref _activitiesSnapshot, ref _activitiesDirty, _activities);
 
     /// <summary>会话级上下文：读写过的文件与访问过的链接（切换会话后由历史重建）。</summary>
-    public IReadOnlyList<WebContextItem> ContextItems { get { lock (_gate) return [.. _context]; } }
+    public IReadOnlyList<WebContextItem> ContextItems => GetSnapshot(ref _contextSnapshot, ref _contextDirty, _context);
+
+    private IReadOnlyList<T> GetSnapshot<T>(ref IReadOnlyList<T>? snapshot, ref bool dirty, List<T> source)
+    {
+        lock (_gate)
+        {
+            if (snapshot is null || dirty)
+            {
+                snapshot = [.. source];
+                dirty = false;
+            }
+
+            return snapshot;
+        }
+    }
+
+    /// <summary>列表内容变更后标记快照失效（调用方必须已持有 <see cref="_gate"/>）。</summary>
+    private void Invalidate<T>(ref IReadOnlyList<T>? snapshot, ref bool dirty)
+    {
+        snapshot = null;
+        dirty = true;
+    }
 
     /// <summary>最近一轮完成的用量（DoneEvent 回填，切换/重置转录时清零）。</summary>
     public int InputTokens { get; private set; }
@@ -49,6 +81,8 @@ public sealed class WebTranscript
                 {
                     _toolCalls.Add(new WebToolCall(start.ToolId, start.ToolName, start.ToolInput, start.AgentName));
                     WebContextTracker.AccumulateToolUse(_context, start.ToolName, start.ToolInput, logger);
+                    Invalidate(ref _toolCallsSnapshot, ref _toolCallsDirty);
+                    Invalidate(ref _contextSnapshot, ref _contextDirty);
                 }
                 break;
 
@@ -62,6 +96,7 @@ public sealed class WebTranscript
                         _toolCalls.Add(call);
                     }
                     call.Complete(done.IsError, done.Result);
+                    Invalidate(ref _toolCallsSnapshot, ref _toolCallsDirty);
                 }
                 break;
 
@@ -76,7 +111,10 @@ public sealed class WebTranscript
 
             case FileChangeEvent change:
                 lock (_gate)
+                {
                     WebContextTracker.AccumulateFileChange(_context, change);
+                    Invalidate(ref _contextSnapshot, ref _contextDirty);
+                }
                 break;
 
             case NoticeEvent notice:
@@ -105,6 +143,7 @@ public sealed class WebTranscript
                 {
                     _activities.RemoveAll(a => a.Key == "goal-plan");
                     _activities.Add(new WebActivity("goal-plan", "Goal 计划", string.Join(" / ", plan.Steps)));
+                    Invalidate(ref _activitiesSnapshot, ref _activitiesDirty);
                 }
                 break;
 
@@ -190,6 +229,10 @@ public sealed class WebTranscript
             _activities.Clear();
             _context.Clear();
             _context.AddRange(context);
+            Invalidate(ref _messagesSnapshot, ref _messagesDirty);
+            Invalidate(ref _toolCallsSnapshot, ref _toolCallsDirty);
+            Invalidate(ref _activitiesSnapshot, ref _activitiesDirty);
+            Invalidate(ref _contextSnapshot, ref _contextDirty);
         }
         InputTokens = 0;
         OutputTokens = 0;
@@ -244,20 +287,26 @@ public sealed class WebTranscript
     public void BeginStreamingReply()
     {
         lock (_gate)
+        {
             _messages.Add(new WebMessage(WebRole.Assistant, string.Empty) { IsStreaming = true });
+            Invalidate(ref _messagesSnapshot, ref _messagesDirty);
+        }
     }
 
     private void AppendAssistant(string text)
     {
         lock (_gate)
-            GetOrCreateStreamingAssistant().Content += text;
+        {
+            GetOrCreateStreamingAssistant().AppendContent(text);
+            // 消息对象被原地增改：快照里的元素是同一批对象，无需重建列表
+        }
     }
 
     /// <summary>思考增量挂到当前这一轮的助手消息上：思考属于该轮回复，不能脱离消息流单独累积。</summary>
     private void AppendThinking(string text)
     {
         lock (_gate)
-            GetOrCreateStreamingAssistant().Thinking += text;
+            GetOrCreateStreamingAssistant().AppendThinking(text);
     }
 
     private WebMessage GetOrCreateStreamingAssistant()
@@ -267,6 +316,7 @@ public sealed class WebTranscript
         {
             last = new WebMessage(WebRole.Assistant, string.Empty) { IsStreaming = true };
             _messages.Add(last);
+            Invalidate(ref _messagesSnapshot, ref _messagesDirty);
         }
 
         return last;
@@ -275,7 +325,10 @@ public sealed class WebTranscript
     public void AddSystem(string text)
     {
         lock (_gate)
+        {
             _messages.Add(new WebMessage(WebRole.System, text));
+            Invalidate(ref _messagesSnapshot, ref _messagesDirty);
+        }
     }
 
     private void UpsertActivity(string key, string kind, string text)
@@ -287,6 +340,7 @@ public sealed class WebTranscript
                 _activities.Add(new WebActivity(key, kind, text));
             else
                 existing.Text = text;
+            Invalidate(ref _activitiesSnapshot, ref _activitiesDirty);
         }
     }
 }

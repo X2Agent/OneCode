@@ -47,8 +47,8 @@ public sealed class TokenUsageTrackerTests
     public void Record_WithBreakdown_StoresLastBreakdown()
     {
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown1 = new TokenBreakdown(100, 200, 300, 50, 650);
-        var breakdown2 = new TokenBreakdown(110, 220, 330, 40, 700);
+        var breakdown1 = new TokenBreakdown(100, 200, 0, 300, new Dictionary<string, int>(), 50, 650);
+        var breakdown2 = new TokenBreakdown(110, 220, 0, 330, new Dictionary<string, int>(), 40, 700);
 
         sut.Record(new TokenUsage(650, 50), breakdown1);
         sut.Record(new TokenUsage(700, 60), breakdown2);
@@ -73,7 +73,7 @@ public sealed class TokenUsageTrackerTests
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
         sut.Record(new TokenUsage(100, 50, CacheReadTokens: 200, CacheWriteTokens: 30));
         sut.Record(new TokenUsage(80, 40, CacheReadTokens: 150, CacheWriteTokens: 20),
-            new TokenBreakdown(10, 20, 30, 0, 60));
+            new TokenBreakdown(10, 20, 0, 30, new Dictionary<string, int>(), 0, 60));
 
         sut.Reset();
 
@@ -83,6 +83,8 @@ public sealed class TokenUsageTrackerTests
         sut.TotalCacheWriteTokens.Should().Be(0);
         sut.QueryCount.Should().Be(0);
         sut.LastBreakdown.Should().BeNull();
+        sut.LastTurnInputTokens.Should().Be(0);
+        sut.CumulativeBreakdown.Should().BeNull();
     }
 
     [Fact]
@@ -95,13 +97,71 @@ public sealed class TokenUsageTrackerTests
         sut.TotalAllTokens.Should().Be(380); // 300+50+30
     }
 
+    [Fact]
+    public void Record_LastTurnInputTokens_StoresLatestWatermark()
+    {
+        var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
+
+        sut.Record(new TokenUsage(1000, 50), lastTurnInputTokens: 22_000);
+        sut.Record(new TokenUsage(800, 40), lastTurnInputTokens: 25_000);
+
+        sut.LastTurnInputTokens.Should().Be(25_000, "占用水位随每次记录覆盖为最新值");
+    }
+
+    [Fact]
+    public void Record_AccumulatesCumulativeBreakdown_PerComponent()
+    {
+        var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
+
+        sut.Record(new TokenUsage(1000, 50), new TokenBreakdown(
+            100, 60, 40, 200,
+            new Dictionary<string, int> { ["TodoProvider"] = 10, ["ModeProvider"] = 5 },
+            0, 415));
+        sut.Record(new TokenUsage(1000, 50), new TokenBreakdown(
+            110, 70, 50, 300,
+            new Dictionary<string, int> { ["TodoProvider"] = 20 },
+            10, 560));
+
+        var cumulative = sut.CumulativeBreakdown;
+        cumulative.Should().NotBeNull();
+        cumulative!.SystemPrompt.Should().Be(210);
+        cumulative.ProductTools.Should().Be(130);
+        cumulative.McpTools.Should().Be(90);
+        cumulative.Messages.Should().Be(500);
+        cumulative.Other.Should().Be(10);
+        cumulative.ContextProviders["TodoProvider"].Should().Be(30, "同一 sourceId 跨查询累计");
+        cumulative.ContextProviders["ModeProvider"].Should().Be(5);
+        cumulative.TotalEstimated.Should().Be(210 + 130 + 90 + 500 + 10 + 30 + 5);
+    }
+
+    [Fact]
+    public void Record_WithoutBreakdown_LeavesCumulativeNull()
+    {
+        var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
+
+        sut.Record(new TokenUsage(100, 50));
+
+        sut.CumulativeBreakdown.Should().BeNull("无分场景估算时不产生累计快照");
+    }
+
+    [Fact]
+    public void Record_NonPositiveWatermark_KeepsPreviousValue()
+    {
+        var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
+
+        sut.Record(new TokenUsage(1000, 50), lastTurnInputTokens: 22_000);
+        sut.Record(new TokenUsage(800, 40), lastTurnInputTokens: 0);
+
+        sut.LastTurnInputTokens.Should().Be(22_000, "0 哨兵不回退已有水位");
+    }
+
     // Calibration factor (migrated from TokenUsageTrackerCalibrationTests)
 
     [Fact]
     public void CalibrationFactor_BelowMinSamples_StaysAtOne()
     {
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown = new TokenBreakdown(100, 200, 300, 0, 600);
+        var breakdown = new TokenBreakdown(100, 200, 0, 300, new Dictionary<string, int>(), 0, 600);
         sut.Record(new TokenUsage(720, 100), breakdown);
 
         sut.CalibrationFactor.Should().Be(1.0);
@@ -112,8 +172,8 @@ public sealed class TokenUsageTrackerTests
     public void CalibrationFactor_AfterTwoSamples_ConvergesToAverage()
     {
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown1 = new TokenBreakdown(100, 200, 300, 0, 600);
-        var breakdown2 = new TokenBreakdown(110, 220, 330, 0, 660);
+        var breakdown1 = new TokenBreakdown(100, 200, 0, 300, new Dictionary<string, int>(), 0, 600);
+        var breakdown2 = new TokenBreakdown(110, 220, 0, 330, new Dictionary<string, int>(), 0, 660);
 
         sut.Record(new TokenUsage(720, 100), breakdown1);
         sut.Record(new TokenUsage(792, 110), breakdown2);
@@ -128,13 +188,13 @@ public sealed class TokenUsageTrackerTests
 
         for (int i = 0; i < 10; i++)
         {
-            sut.Record(new TokenUsage(1000, 100), new TokenBreakdown(500, 300, 200, 0, 1000));
+            sut.Record(new TokenUsage(1000, 100), new TokenBreakdown(500, 300, 0, 200, new Dictionary<string, int>(), 0, 1000));
         }
         sut.CalibrationFactor.Should().BeApproximately(1.0, 0.001);
 
         for (int i = 0; i < 5; i++)
         {
-            sut.Record(new TokenUsage(1500, 100), new TokenBreakdown(500, 300, 200, 0, 1000));
+            sut.Record(new TokenUsage(1500, 100), new TokenBreakdown(500, 300, 0, 200, new Dictionary<string, int>(), 0, 1000));
         }
         // 最近 10 次 = 5 个 1.0 + 5 个 1.5，平均 1.25
         sut.CalibrationFactor.Should().BeApproximately(1.25, 0.01);
@@ -144,7 +204,7 @@ public sealed class TokenUsageTrackerTests
     public void CalibrationFactor_Reset_ReturnsToOne()
     {
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown = new TokenBreakdown(100, 200, 300, 0, 600);
+        var breakdown = new TokenBreakdown(100, 200, 0, 300, new Dictionary<string, int>(), 0, 600);
         sut.Record(new TokenUsage(720, 100), breakdown);
         sut.Record(new TokenUsage(720, 100), breakdown);
 
@@ -158,7 +218,7 @@ public sealed class TokenUsageTrackerTests
     public void CalibrationFactor_ZeroEstimate_DoesNotRecord()
     {
         var sut = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown = new TokenBreakdown(0, 0, 0, 0, 0);
+        var breakdown = new TokenBreakdown(0, 0, 0, 0, new Dictionary<string, int>(), 0, 0);
 
         sut.Record(new TokenUsage(100, 50), breakdown);
         sut.Record(new TokenUsage(100, 50), breakdown);

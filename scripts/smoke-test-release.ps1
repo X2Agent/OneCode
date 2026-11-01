@@ -117,97 +117,14 @@ foreach ($rel in $requiredResources) {
 }
 
 # ── 4. 启动层契约（快路径 / --cwd / 退出码）─────────────────────────
-# 这一节无需 TTY:--version 走 DI 容器之前的快路径,--cwd 用法错误走两层启动之前的分支,
-# 两者在无终端环境下都给出确定的 stdout/stderr 与退出码,因此可被 CI 断言。
-# 用真实子进程而不是 `&` 调用,才能独立取到 stdout 与 stderr,并区分二者。
-
-function Get-CommandLine {
-    # Start 只接受一整条命令行字符串,含空白或引号的参数必须自行加引号,
-    # 否则 PublishDir 带空格时会被拆成多个参数。
-    param([string[]]$Arguments)
-
-    ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + $_ + '"' } else { $_ } }) -join ' '
-}
-
-function Invoke-OneCodeBinary {
-    param([string[]]$Arguments)
-
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $exePath
-    $startInfo.Arguments = Get-CommandLine $Arguments
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    # 提示信息含中文,固定按 UTF-8 解码,避免因宿主默认代码页不同而断言失败。
-    $startInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-    $startInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
-
-    $proc = [System.Diagnostics.Process]::Start($startInfo)
-    # 必须异步读两个流:顺序 ReadToEnd 会在子进程写满缓冲区时死锁。
-    $outTask = $proc.StandardOutput.ReadToEndAsync()
-    $errTask = $proc.StandardError.ReadToEndAsync()
-    $proc.WaitForExit()
-
-    [pscustomobject]@{
-        ExitCode = $proc.ExitCode
-        StdOut   = $outTask.Result
-        StdErr   = $errTask.Result
-    }
-}
-
-$missingDir = Join-Path $PublishDir ("__missing__" + [guid]::NewGuid().ToString("N"))
-# 形状允许 semver 预发布后缀（如 1.0.0-beta.1 (OneCode)）。
-$versionShape = '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)? \(OneCode\)$'
-
-$startupCases = @(
-    @{ Name = "--version 快路径";            Args = @("--version"); Exit = 0; OutLike = $versionShape; Err = $null }
-    @{ Name = "-v 短别名";                   Args = @("-v");        Exit = 0; OutLike = $versionShape; Err = $null }
-    @{ Name = "-V 短别名";                   Args = @("-V");        Exit = 0; OutLike = $versionShape; Err = $null }
-    @{ Name = "--cwd <有效目录> --version";  Args = @("--cwd", $PublishDir, "--version"); Exit = 0; OutLike = $versionShape; Err = $null }
-    @{ Name = "-C <有效目录> --version";     Args = @("-C", $PublishDir, "--version");    Exit = 0; OutLike = $versionShape; Err = $null }
-    @{ Name = "--cwd 缺少目录参数";          Args = @("--cwd");               Exit = 2; OutLike = $null; Err = "用法错误" }
-    @{ Name = "--cwd= 空路径";               Args = @("--cwd=");              Exit = 2; OutLike = $null; Err = "用法错误" }
-    @{ Name = "--cwd <不存在的目录>";        Args = @("--cwd", $missingDir);  Exit = 2; OutLike = $null; Err = "目录不存在" }
-)
-
-foreach ($case in $startupCases) {
-    Write-Step $case.Name
-    $result = Invoke-OneCodeBinary $case.Args
-
-    if ($result.ExitCode -ne $case.Exit) {
-        Write-Fail "退出码不符: 期望 $($case.Exit),实际 $($result.ExitCode)"
-        Write-Host "  参数: $($case.Args -join ' ')" -ForegroundColor Yellow
-        Write-Host "  stdout: $($result.StdOut)" -ForegroundColor Yellow
-        Write-Host "  stderr: $($result.StdErr)" -ForegroundColor Yellow
-        exit 1
-    }
-
-    if ($null -ne $case.OutLike -and $result.StdOut.Trim() -notmatch $case.OutLike) {
-        Write-Fail "stdout 形状不符: 期望匹配 $($case.OutLike)"
-        Write-Host "  实际: $($result.StdOut)" -ForegroundColor Yellow
-        exit 1
-    }
-
-    # 正常路径不得往 stderr 写内容,否则会污染下游脚本对错误的判定。
-    if ($null -eq $case.Err -and $result.StdErr.Trim().Length -ne 0) {
-        Write-Fail "正常路径不应输出 stderr: $($result.StdErr)"
-        exit 1
-    }
-
-    # 错误路径必须只写 stderr:stdout 保持干净,且不能悄悄退化成启动 TUI。
-    if ($null -ne $case.Err) {
-        if ($result.StdErr -notmatch [regex]::Escape($case.Err)) {
-            Write-Fail "stderr 缺少提示: 期望包含 $($case.Err)"
-            Write-Host "  实际: $($result.StdErr)" -ForegroundColor Yellow
-            exit 1
-        }
-        if ($result.StdOut.Trim().Length -ne 0) {
-            Write-Fail "用法错误不应写 stdout: $($result.StdOut)"
-            exit 1
-        }
-    }
-
-    Write-Pass "退出码 $($case.Exit) / 契约成立"
+# 用例与断言规格统一定义在 scripts/test-binary-contract.ps1:发布目录里的产物与
+# 安装后的 onecode.exe 共用同一份脚本,本地端到端验证因此不必重复实现这些断言。
+Write-Step "启动层契约"
+$contractScript = Join-Path $PSScriptRoot "test-binary-contract.ps1"
+& $contractScript -ExePath $exePath -ExpectedVersion $ExpectedVersion
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "启动层契约失败（见上方逐用例输出）"
+    exit 1
 }
 
 # ── 摘要 ──────────────────────────────────────────────────────────

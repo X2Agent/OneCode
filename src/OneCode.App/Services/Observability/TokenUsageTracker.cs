@@ -31,12 +31,11 @@ public sealed class TokenUsageTracker(ITokenLedger tokenLedger, ISessionIdProvid
     private const int MaxCalibrationSamples = 10;
     private readonly Queue<double> _calibrationRatios = new();
     private double _calibrationFactor = 1.0;
+    private int _lastTurnInputTokens;
+    private BreakdownAccumulator _cumulative = new();
 
-    // Fallback accumulators (used when the ledger or sessionId is not available)
-    private long _fallbackInputTokens;
-    private long _fallbackOutputTokens;
-    private long _fallbackCacheReadTokens;
-    private long _fallbackCacheWriteTokens;
+    // 无会话 id 时的兜底累加器（有会话时一律读账本会话桶）
+    private SessionTokenUsage _fallback = new();
 
     private SessionTokenUsage? SessionInfo
     {
@@ -49,45 +48,21 @@ public sealed class TokenUsageTracker(ITokenLedger tokenLedger, ISessionIdProvid
         }
     }
 
-    public long TotalInputTokens
-    {
-        get
-        {
-            if (SessionInfo is { } si) return si.TotalInputTokens;
-            lock (_gate) return _fallbackInputTokens;
-        }
-    }
+    public long TotalInputTokens => Read(static usage => usage.TotalInputTokens);
+    public long TotalOutputTokens => Read(static usage => usage.TotalOutputTokens);
+    public long TotalCacheReadTokens => Read(static usage => usage.TotalCacheReadTokens);
+    public long TotalCacheWriteTokens => Read(static usage => usage.TotalCacheWriteTokens);
 
-    public long TotalOutputTokens
-    {
-        get
-        {
-            if (SessionInfo is { } si) return si.TotalOutputTokens;
-            lock (_gate) return _fallbackOutputTokens;
-        }
-    }
-
-    public long TotalCacheReadTokens
-    {
-        get
-        {
-            if (SessionInfo is { } si) return si.TotalCacheReadTokens;
-            lock (_gate) return _fallbackCacheReadTokens;
-        }
-    }
-
-    public long TotalCacheWriteTokens
-    {
-        get
-        {
-            if (SessionInfo is { } si) return si.TotalCacheWriteTokens;
-            lock (_gate) return _fallbackCacheWriteTokens;
-        }
-    }
+    private long Read(Func<SessionTokenUsage, long> selector)
+        => selector(SessionInfo ?? _fallback);
 
     public int QueryCount { get { lock (_gate) return _queryCount; } }
 
     public TokenBreakdown? LastBreakdown { get { lock (_gate) return _lastBreakdown; } }
+
+    public int LastTurnInputTokens { get { lock (_gate) return _lastTurnInputTokens; } }
+
+    public TokenBreakdown? CumulativeBreakdown { get { lock (_gate) return _cumulative.ToBreakdown(); } }
 
     public double CalibrationFactor { get { lock (_gate) return _calibrationFactor; } }
 
@@ -97,36 +72,36 @@ public sealed class TokenUsageTracker(ITokenLedger tokenLedger, ISessionIdProvid
     public double CacheHitRate =>
         TotalInputTokens > 0 ? (double)TotalCacheReadTokens / TotalInputTokens : 0;
 
-    public void Record(TokenUsage? usage, TokenBreakdown? breakdown = null)
+    public void Record(TokenUsage? usage, TokenBreakdown? breakdown = null, int lastTurnInputTokens = 0)
     {
         if (usage is null) return;
 
         lock (_gate)
         {
-            // Fallback accumulation — only when sessionId is not available (no active session)
-            var sessionId = _sessionIdProvider.CurrentSessionId;
-            if (sessionId is null)
-            {
-                _fallbackInputTokens += usage.InputTokens;
-                _fallbackOutputTokens += usage.OutputTokens;
-                _fallbackCacheReadTokens += usage.CacheReadTokens;
-                _fallbackCacheWriteTokens += usage.CacheWriteTokens;
-            }
+            // 无会话 id 时账本不落桶，退回本地累加
+            if (_sessionIdProvider.CurrentSessionId is null)
+                _fallback.Add(usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens);
+
+            if (lastTurnInputTokens > 0)
+                _lastTurnInputTokens = lastTurnInputTokens;
 
             _queryCount++;
-            if (breakdown is not null)
-                _lastBreakdown = breakdown;
 
-            if (breakdown is not null && breakdown.TotalEstimated > 0 && usage.InputTokens > 0)
-            {
-                var ratio = (double)usage.InputTokens / breakdown.TotalEstimated;
-                _calibrationRatios.Enqueue(ratio);
-                while (_calibrationRatios.Count > MaxCalibrationSamples)
-                    _calibrationRatios.Dequeue();
+            if (breakdown is null)
+                return;
 
-                if (_calibrationRatios.Count >= MinSamplesForCalibration)
-                    _calibrationFactor = _calibrationRatios.Average();
-            }
+            _cumulative.Add(breakdown);
+            _lastBreakdown = breakdown;
+
+            if (breakdown.TotalEstimated <= 0 || usage.InputTokens <= 0)
+                return;
+
+            _calibrationRatios.Enqueue((double)usage.InputTokens / breakdown.TotalEstimated);
+            while (_calibrationRatios.Count > MaxCalibrationSamples)
+                _calibrationRatios.Dequeue();
+
+            if (_calibrationRatios.Count >= MinSamplesForCalibration)
+                _calibrationFactor = _calibrationRatios.Average();
         }
     }
 
@@ -134,14 +109,58 @@ public sealed class TokenUsageTracker(ITokenLedger tokenLedger, ISessionIdProvid
     {
         lock (_gate)
         {
-            _fallbackInputTokens = 0;
-            _fallbackOutputTokens = 0;
-            _fallbackCacheReadTokens = 0;
-            _fallbackCacheWriteTokens = 0;
+            _fallback = new();
             _lastBreakdown = null;
+            _lastTurnInputTokens = 0;
             _queryCount = 0;
             _calibrationRatios.Clear();
             _calibrationFactor = 1.0;
+            _cumulative = new();
         }
+    }
+
+    /// <summary>分项会话累计：每查询的估算分量逐项相加（ContextProviders 按 sourceId 归并）。</summary>
+    private sealed class BreakdownAccumulator
+    {
+        private readonly Dictionary<string, long> _providers = new(StringComparer.Ordinal);
+        private long _systemPrompt;
+        private long _productTools;
+        private long _mcpTools;
+        private long _messages;
+        private long _other;
+        private bool _any;
+
+        public void Add(TokenBreakdown breakdown)
+        {
+            _any = true;
+            _systemPrompt += breakdown.SystemPrompt;
+            _productTools += breakdown.ProductTools;
+            _mcpTools += breakdown.McpTools;
+            _messages += breakdown.Messages;
+            _other += breakdown.Other;
+            foreach (var (sourceId, tokens) in breakdown.ContextProviders)
+                _providers[sourceId] = _providers.GetValueOrDefault(sourceId) + tokens;
+        }
+
+        public TokenBreakdown? ToBreakdown()
+        {
+            if (!_any)
+                return null;
+
+            var providers = _providers.ToDictionary(kv => kv.Key, kv => ToInt(kv.Value));
+            var total = _systemPrompt + _productTools + _mcpTools + _messages + _other
+                + _providers.Values.Sum();
+
+            return new TokenBreakdown(
+                ToInt(_systemPrompt),
+                ToInt(_productTools),
+                ToInt(_mcpTools),
+                ToInt(_messages),
+                providers,
+                ToInt(_other),
+                ToInt(total));
+        }
+
+        private static int ToInt(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
     }
 }

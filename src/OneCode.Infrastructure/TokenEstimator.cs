@@ -17,6 +17,9 @@ public sealed class TokenEstimator : ITokenEstimator
         return EstimateByCharClasses(text);
     }
 
+    /// <inheritdoc />
+    public int EstimateTokens(ReadOnlySpan<char> text) => EstimateByCharClasses(text);
+
     public int EstimateTokens(string? text, string? modelId)
     {
         // 字符加权启发式与模型无关，统一估算
@@ -56,7 +59,7 @@ public sealed class TokenEstimator : ITokenEstimator
     ///   - CJK（中日韩）：~1.5 chars/token
     ///   - 其他 Unicode（emoji 等）：~1 char/token
     /// </summary>
-    private static int EstimateByCharClasses(string text)
+    private static int EstimateByCharClasses(ReadOnlySpan<char> text)
     {
         int ascii = 0;
         int cjk = 0;

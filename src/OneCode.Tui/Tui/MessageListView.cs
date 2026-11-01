@@ -223,6 +223,17 @@ public sealed partial class MessageListView : View
             _streamingPreviewStart = _lines.Count;
 
         var start = Math.Min(_streamingPreviewStart, _lines.Count);
+
+        // 尾部交互区域（内联选择器 / 向导）若落在预览窗口内，需先摘出再重排。
+        var windowEnd = _tailRegionStart is >= 0 and var tailProbe
+            && tailProbe >= start && tailProbe <= _lines.Count
+                ? tailProbe
+                : _lines.Count;
+
+        var pending = addLines as IReadOnlyList<FormattedLine> ?? addLines?.ToList();
+        if (TryPatchStreamingPreview(start, windowEnd, pending))
+            return;
+
         // Detach the tail region when it sits inside the preview window.
         // A tail region above the preview start is left untouched (not our window).
         List<LineEntry>? tailLines = null;
@@ -264,7 +275,56 @@ public sealed partial class MessageListView : View
         SetNeedsDraw();
     }
 
-    // 仅单元测试使用：生产代码当前无调用方（测试接缝）。
+    /// <summary>
+    /// 尝试把新预览<b>增量</b>写进现有预览窗口：只替换内容真正变化的行，其余行保留原
+    /// <see cref="LineEntry"/>（连带用户已展开的详情行）。
+    /// </summary>
+    /// <remarks>
+    /// 流式期窗口内绝大多数行（已完成的工具行、思考摘要、历史段落）逐帧不变，
+    /// 每次都整体删除重建会让每帧产生 O(窗口行数) 的对象分配，并让已展开的详情行反复
+    /// 摘除/重建。命中条件：行数不变且至少一行内容变化。命中时原位赋值并返回 true，
+    /// 未命中（行数变化、窗口内有展开详情、用户正在预览内展开）返回 false 交由整体重建。
+    /// </remarks>
+    private bool TryPatchStreamingPreview(
+        int start,
+        int windowEnd,
+        IReadOnlyList<FormattedLine>? pending)
+    {
+        if (pending is null || windowEnd - start != pending.Count || pending.Count == 0)
+            return false;
+
+        // 展开的详情行会占额外行，位置映射不再一一对应——交给整体重建保证正确。
+        for (var i = start; i < windowEnd; i++)
+        {
+            if (_lines[i].Tag is ToolDetailLineTag or ThinkingDetailLineTag)
+                return false;
+        }
+
+        var changed = false;
+        for (var i = 0; i < pending.Count; i++)
+        {
+            var line = pending[i];
+            var target = start + i;
+            var existing = _lines[target];
+
+            if (ReferenceEquals(existing.Tag, line.Tag)
+                && existing.Bg == line.Bg
+                && string.Equals(existing.Text, line.FullText, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            _lines[target] = new LineEntry(line.FullText, line.Color, line.Segments, line.Bg, line.Tag);
+            changed = true;
+        }
+
+        if (!changed)
+            return true;
+
+        _scroll.RequestScrollToBottomIfAutoScroll();
+        SetNeedsDraw();
+        return true;
+    }
     internal bool TryToggleExpansionAt(int lineIdx)
     {
         if (lineIdx < 0 || lineIdx >= _lines.Count)
@@ -406,6 +466,16 @@ public sealed partial class MessageListView : View
     }
 
     public void ScrollToBottom() => _scroll.ScrollToBottom();
+
+    /// <summary>
+    /// 头部滑出已提交行后校正滚动偏移（转录日志裁剪路径专用）：用户未贴底时内容
+    /// 行号整体前移 count 行，不校正视口会跳到更靠后的内容；贴底跟随时无需校正。
+    /// </summary>
+    public void OnHeadLinesTrimmed(int count)
+    {
+        if (count > 0 && !_scroll.AutoScroll)
+            _scroll.OnLinesTrimmed(count);
+    }
 
     // —— 尾部交互区域 ——
     // 内联选择器 / 提问向导的行整体挂在对话尾部，可整体替换或移除。

@@ -3,7 +3,9 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using NSubstitute;
 using OneCode.App.Services.Agent;
+using OneCode.App.Services.Observability;
 using OneCode.App.Session;
+using OneCode.Infrastructure;
 using OneCode.Tests.TestSupport;
 
 namespace OneCode.Tests;
@@ -107,6 +109,55 @@ public sealed class TranscriptChatHistoryProviderTests
         second[2].Contents.OfType<FunctionCallContent>().Should()
             .ContainSingle(call => call.CallId == "call-1");
         reader.ReceivedCalls().Should().HaveCount(1, "状态非空后不得重读转录");
+    }
+
+    /// <summary>
+    /// 反证历史克隆缓存：历史未变时第二次组装必须复用同一批消息实例，
+    /// 而不是再克隆一次（每次模型调用都整段克隆会让成本变成 O(历史 × 轮数)）。
+    /// </summary>
+    [Fact]
+    public async Task InvokingAsync_HistoryUnchanged_ReusesStampedInstances()
+    {
+        var reader = CreateReader(
+        [
+            new ChatMessage(ChatRole.System, "SYS"),
+            new ChatMessage(ChatRole.User, "TASK"),
+        ]);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId);
+        var session = await CreateSessionAsync();
+
+        var first = (await provider.InvokingAsync(CreateSessionContext(
+            session, new ChatMessage(ChatRole.User, "TASK")))).ToList();
+        var second = (await provider.InvokingAsync(CreateSessionContext(
+            session, new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-x", "ok")])))).ToList();
+
+        var firstSystem = first.Single(m => m.Text == "SYS");
+        var secondSystem = second.Single(m => m.Text == "SYS");
+        secondSystem.Should().BeSameAs(firstSystem,
+            "历史未变时不得重新克隆——下游会原地改写消息，克隆只应在追加新消息时发生");
+    }
+
+    /// <summary>
+    /// 失效反证：回写新消息后必须重新展开快照，新消息既进入请求历史，
+    /// 也进入审批恢复去重所用的 CallId 集合。
+    /// </summary>
+    [Fact]
+    public async Task InvokedThenInvoking_NewMessageIsStampedAndIndexed()
+    {
+        var reader = CreateReader([]);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId);
+        var session = await CreateSessionAsync();
+
+        await provider.InvokedAsync(CreateInvoked(
+            session,
+            requestMessages: [new ChatMessage(ChatRole.User, "first")],
+            responseMessages: [AssistantWithToolCall()]));
+
+        var history = (await provider.InvokingAsync(CreateSessionContext(session, ToolResult()))).ToList();
+
+        history.Should().Contain(m => m.Text == "first", "回写的新消息必须进入下一次请求历史");
+        history.Single(m => m.Role == ChatRole.Assistant).Contents
+            .OfType<FunctionCallContent>().Should().ContainSingle(c => c.CallId == "call-1");
     }
 
     /// <summary>失败路径：基类契约保证异常调用不回写，状态保持上次成功调用的内容。</summary>
@@ -322,6 +373,10 @@ public sealed class TranscriptChatHistoryProviderTests
         call1Messages.Select(m => m.Text).Should().Equal(
             "SYS", "### Current todo list", "You are in BUILD MODE", "create file");
         call1Messages[^1].Role.Should().Be(ChatRole.User, "首轮请求末尾必须是真实 User 提问");
+        call1Messages[^1].GetAgentRequestMessageSourceType().Should().NotBe(AgentRequestMessageSourceType.AIContextProvider,
+            "锚定纪律：末条消息来源恒为持久内容——ProviderAwareDecorator 的尾部缓存断点据此永不落在瞬态消息上");
+        call1Messages.FindLastIndex(static m => m.GetAgentRequestMessageSourceType() == AgentRequestMessageSourceType.AIContextProvider)
+            .Should().BeLessThan(call1Messages.Count - 1, "瞬态上下文必须整体位于末条持久消息之前");
 
         // Call 1 结束回写：持久化 User 提问与模型返回的原始 Assistant(tool_call)
         var originalAssistantCall = AssistantWithToolCall();
@@ -350,6 +405,8 @@ public sealed class TranscriptChatHistoryProviderTests
             ChatRole.Assistant,
             ChatRole.Tool);
         call2Messages[^1].Role.Should().Be(ChatRole.Tool, "审批重入后的工具迭代末尾必须是最新 Tool 结果");
+        call2Messages[^1].GetAgentRequestMessageSourceType().Should().NotBe(AgentRequestMessageSourceType.AIContextProvider,
+            "工具迭代末条（最新 Tool 结果）同样不得是瞬态来源");
         call2Messages.Count(m => m.Role == ChatRole.Assistant).Should().Be(1,
             "FICC 在审批恢复时合成的同 CallId Assistant(tool_call) 必须被去重");
 
@@ -365,6 +422,53 @@ public sealed class TranscriptChatHistoryProviderTests
             .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
             .Select(c => c.CallId)
             .Should().Equal(["call-1"], "回写侧同样必须过滤重复合成的 Assistant(tool_call)");
+    }
+
+    /// <summary>
+    /// C2 分桶契约：incoming 循环在原始贡献者 sourceId 被重打标覆盖前分桶估算 token，
+    /// 逐次模型调用<b>覆盖发布</b>；无 provider 注入时发布空桶，防上一轮快照泄入下一查询。
+    /// </summary>
+    /// <remarks>
+    /// 生产里消息级贡献者均为 user-role（harness TodoProvider 等）。System-role 的 provider
+    /// 消息经 MAF 基类预处理会丢失 sourceId（实测），将落 "(unknown)" 桶——生产无此形态
+    /// （mode / lsp / skills / design 均经 AIContext.Instructions 合并，不走消息）。
+    /// </remarks>
+    [Fact]
+    public async Task InvokingAsync_TalliesContextProviderTokens_ByOriginalSourceId()
+    {
+        var reader = CreateReader([new ChatMessage(ChatRole.System, "SYS")]);
+        var estimator = new TokenEstimator();
+        var tally = new ContextTokenTallyObserver(estimator);
+        var provider = new TranscriptChatHistoryProvider(reader, ConversationId, tally: tally);
+        var session = await CreateSessionAsync();
+
+        var userPrompt = new ChatMessage(ChatRole.User, "create file");
+        var todoContext = new ChatMessage(ChatRole.User, "### Current todo list - none yet")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "TodoProvider");
+        var memoryContext = new ChatMessage(ChatRole.User, "## Related memories")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "MemoryProvider");
+
+        await provider.InvokingAsync(CreateSessionContext(session, userPrompt, todoContext, memoryContext));
+
+        var first = tally.Consume();
+        first.Keys.Should().BeEquivalentTo(["TodoProvider", "MemoryProvider"],
+            "按原始贡献者 sourceId 分桶（重打标前的唯一读取点）");
+        first["TodoProvider"].Should().Be(estimator.EstimateTokens(todoContext.Text));
+        first["MemoryProvider"].Should().Be(estimator.EstimateTokens(memoryContext.Text));
+
+        // 下一次模型调用由装配点换代：不与上一轮累加，同桶消息在单次调用内累加
+        var extraTodo = new ChatMessage(ChatRole.User, "extra todo line")
+            .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "TodoProvider");
+        await provider.InvokingAsync(CreateSessionContext(session, extraTodo));
+
+        var second = tally.Consume();
+        second.Keys.Should().BeEquivalentTo(["TodoProvider"]);
+        second["TodoProvider"].Should().Be(estimator.EstimateTokens(extraTodo.Text),
+            "新一轮调用整体替换上一轮快照");
+
+        // 无 provider 注入 → 空桶（本轮没有贡献者）
+        await provider.InvokingAsync(CreateSessionContext(session, new ChatMessage(ChatRole.User, "follow up")));
+        tally.Consume().Should().BeEmpty("无注入时本轮分桶为空");
     }
 
     private static ISessionChatHistoryReader CreateReader(IReadOnlyList<ChatMessage> history)

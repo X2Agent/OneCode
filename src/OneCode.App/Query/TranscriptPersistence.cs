@@ -22,14 +22,13 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
             if (request.ConversationId is { } completedConversationId)
             {
                 // 逐批落盘的批次已入账（appender 按 batchId 幂等去重），这里只补剩余增量。
-                var pendingBatches = session.ToolBatchCollector.CompletedBatches
-                    .Skip(alreadyPersistedBatchCount)
-                    .ToList();
-                if (pendingBatches.Count > 0)
+                var batches = session.ToolBatchCollector.CompletedBatches;
+                if (batches.Count > alreadyPersistedBatchCount)
                 {
                     await _sessionManager.AppendCompletedToolBatchesAsync(
                             completedConversationId,
-                            pendingBatches,
+                            batches,
+                            fromIndex: alreadyPersistedBatchCount,
                             ct)
                         .ConfigureAwait(false);
                 }
@@ -92,7 +91,8 @@ internal sealed class TranscriptPersistence(ISessionManager sessionManager, ILog
         {
             await _sessionManager.AppendCompletedToolBatchesAsync(
                     conversationId,
-                    batches.Skip(persistedBatchCount).ToList(),
+                    batches,
+                    fromIndex: persistedBatchCount,
                     ct)
                 .ConfigureAwait(false);
             return batches.Count;

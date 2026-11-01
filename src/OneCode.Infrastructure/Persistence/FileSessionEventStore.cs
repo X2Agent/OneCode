@@ -1,3 +1,4 @@
+using System.Buffers;
 using OneCode.Core.Domain;
 using OneCode.Core.Session;
 using InfraConstants = OneCode.Infrastructure.Config.Constants;
@@ -217,6 +218,19 @@ public sealed class FileSessionEventStore : ISessionEventStore
     }
 
     /// <inheritdoc />
+    public Task<SessionEventLogStamp?> GetLogStampAsync(SessionId sessionId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var file = GetEventFile(sessionId);
+        if (!File.Exists(file))
+            return Task.FromResult<SessionEventLogStamp?>(null);
+
+        var info = new FileInfo(file);
+        return Task.FromResult<SessionEventLogStamp?>(
+            new SessionEventLogStamp(sessionId, info.Length, new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero)));
+    }
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -254,6 +268,10 @@ public sealed class FileSessionEventStore : ISessionEventStore
         finally
         {
             sessionLock.Release();
+            // 已删会话的写入锁从字典移除即可：并发场景下另一持有者可能正在同把信号量上
+            // 等待/释放，Dispose 会让它抛 ObjectDisposedException。移出字典后新调用方
+            // 自建新锁，旧实例交由 GC 回收（未触达 AvailableWaitHandle 即无非托管资源）。
+            _sessionLocks.TryRemove(sessionId, out _);
         }
     }
 
@@ -331,7 +349,8 @@ public sealed class FileSessionEventStore : ISessionEventStore
         if (!File.Exists(file))
             return [];
 
-        List<string> lines = [];
+        var result = new List<SessionEvent>();
+        var lineIndex = 0;
         await using var stream = new FileStream(
             file,
             FileMode.Open,
@@ -340,34 +359,38 @@ public sealed class FileSessionEventStore : ISessionEventStore
             bufferSize: 16 * 1024,
             options: FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var reader = new StreamReader(stream);
-        string? line;
-        while ((line = await reader.ReadLineAsync(ct).ConfigureAwait(false)) is not null)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
 
-            lines.Add(line);
-        }
-
-        var result = new List<SessionEvent>(lines.Count);
-        for (var index = 0; index < lines.Count; index++)
+        // 预读一行判定「当前行是否末行」：StreamReader.EndOfStream 在缓冲耗尽时会同步阻塞
+        //（异步方法中禁用），预读走的是异步路径且天然给出「还有没有下一行」。
+        var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+        while (line is not null)
         {
-            try
+            var next = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(line))
             {
-                result.Add(Deserialize(lines[index]));
+                try
+                {
+                    // 逐行直接反序列化：旧实现先把所有行收进 List<string> 再解析，
+                    // 等于为整份日志额外保留一份等量字符串副本。
+                    result.Add(Deserialize(line));
+                }
+                catch (JsonException) when (next is null)
+                {
+                    // 末行不完整（进程被杀时正写到一半）：截断读取，不视为损坏。
+                    break;
+                }
+                catch (JsonException ex)
+                {
+                    // 中段坏行：跳过并上报——一条坏行不再废掉整个会话（列表、加载、后续追加全不可用）。
+                    // 投影层（EventSourcedSessionStore 的前缀比对）会把缺口自愈为 MessagesReplaced。
+                    _logger?.LogWarning(ex,
+                        "Session {SessionId} event log has a corrupted line at index {Index}; skipping it",
+                        sessionId, lineIndex);
+                }
             }
-            catch (JsonException) when (index == lines.Count - 1)
-            {
-                break;
-            }
-            catch (JsonException ex)
-            {
-                // 中段坏行：跳过并上报——一条坏行不再废掉整个会话（列表、加载、后续追加全不可用）。
-                // 投影层（EventSourcedSessionStore 的前缀比对）会把缺口自愈为 MessagesReplaced。
-                _logger?.LogWarning(ex,
-                    "Session {SessionId} event log has a corrupted line at index {Index}; skipping it",
-                    sessionId, index);
-            }
+
+            lineIndex++;
+            line = next;
         }
 
         return result;
@@ -417,9 +440,31 @@ public sealed class FileSessionEventStore : ISessionEventStore
             sessionEvent.Type,
             sessionEvent.Ignorable,
             payload);
-        return JsonSerializer.SerializeToUtf8Bytes(envelope, _jsonOptions)
-            .Append((byte)'\n')
-            .ToArray();
+        return SerializeWithTrailingNewline(envelope);
+    }
+
+    /// <summary>
+    /// 把信封直接写进可增长的缓冲并补上换行，返回精确长度的 byte[]。
+    /// 旧实现 <c>SerializeToUtf8Bytes(...).Append('\n').ToArray()</c> 对大事件
+    /// （快照 / 全量消息替换）会连续分配两份等量大数组，直接落在 LOH 上。
+    /// </summary>
+    private byte[] SerializeWithTrailingNewline(PersistedSessionEvent envelope)
+    {
+        var buffer = new ArrayBufferWriter<byte>(512);
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+        {
+            Indented = false,
+            Encoder = _jsonOptions.Encoder,
+            SkipValidation = false,
+        }))
+        {
+            JsonSerializer.Serialize(writer, envelope, _jsonOptions);
+        }
+
+        var length = buffer.WrittenCount;
+        buffer.GetSpan(1)[0] = (byte)'\n';
+        buffer.Advance(1);
+        return buffer.WrittenSpan.ToArray();
     }
 
     private SessionEvent Deserialize(string line)

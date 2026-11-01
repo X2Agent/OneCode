@@ -18,7 +18,7 @@ public sealed class ConfigManager : IConfigManager, IDisposable
     private ConfigSnapshot _current = CreateDefaultSnapshot();
     private FileSystemWatcher? _globalWatcher;
     private FileSystemWatcher? _projectWatcher;
-    private DateTime _lastReloadTime;
+    private Timer? _reloadTimer;
     private readonly ILogger _logger;
 
     public ConfigManager(string? configDir = null, string? projectConfigDir = null, ILogger? logger = null)
@@ -180,16 +180,23 @@ public sealed class ConfigManager : IConfigManager, IDisposable
         }
     }
 
+    /// <summary>
+    /// 配置热重载：以定时器窗口合并文件系统事件。
+    /// 「当前时间减去上次重载时间」不是合并——编辑器一次保存常产生多个间隔大于窗口的事件，
+    /// 每个都会触发一次完整的整份配置重解析。<see cref="Reload"/> 内部再按文件 mtime/size
+    /// 判等，避免内容未变时重复重建快照。
+    /// </summary>
     private void OnSettingsFileChanged(object sender, FileSystemEventArgs e)
     {
         lock (_gate)
         {
-            if ((DateTime.UtcNow - _lastReloadTime).TotalMilliseconds < ReloadDebounceMs)
-                return;
-            _lastReloadTime = DateTime.UtcNow;
+            _reloadTimer ??= new Timer(
+                static state => ((ConfigManager)state!).Reload(),
+                this,
+                Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+            _reloadTimer.Change(ReloadDebounceMs, Timeout.Infinite);
         }
-
-        Reload();
     }
 
     private bool TryResolveSnapshot(
@@ -532,6 +539,11 @@ public sealed class ConfigManager : IConfigManager, IDisposable
     {
         DisposeWatcher(ref _globalWatcher);
         DisposeWatcher(ref _projectWatcher);
+        lock (_gate)
+        {
+            _reloadTimer?.Dispose();
+            _reloadTimer = null;
+        }
         _applyGate.Dispose();
     }
 

@@ -59,6 +59,18 @@ public sealed class InMemorySessionEventStore : ISessionEventStore
     }
 
     /// <inheritdoc />
+    public Task<SessionEventLogStamp?> GetLogStampAsync(SessionId sessionId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult(_stamps.TryGetValue(sessionId, out var stamp)
+                ? (SessionEventLogStamp?)stamp
+                : null);
+        }
+    }
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<SessionEventLogStamp>> ListLogsAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

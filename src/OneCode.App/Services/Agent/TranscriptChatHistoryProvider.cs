@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OneCode.App.Query;
+using OneCode.App.Services.Observability;
 using OneCode.App.Session;
 
 namespace OneCode.App.Services.Agent;
@@ -32,7 +33,8 @@ internal sealed class TranscriptChatHistoryProvider(
     ISessionChatHistoryReader chatHistoryReader,
     SessionId conversationId,
     HistorySeedBoundary? seedBoundary = null,
-    bool stripPlanExclusiveTools = false)
+    bool stripPlanExclusiveTools = false,
+    ContextTokenTallyObserver? tally = null)
     : ChatHistoryProvider(
         provideOutputMessageFilter: ExcludeContextProviderMessages,
         storeInputRequestMessageFilter: ExcludeEphemeralRequestMessages)
@@ -57,6 +59,26 @@ internal sealed class TranscriptChatHistoryProvider(
         /// </summary>
         [JsonIgnore]
         public List<ChatMessage> TurnContextMessages { get; set; } = [];
+
+        /// <summary>
+        /// <see cref="Messages"/> 中已出现的 assistant 工具调用 <c>CallId</c> 集合，随回写增量维护。
+        /// 审批恢复去重（<see cref="IsDuplicateSynthesizedToolCallMessage"/>）每次模型调用都要判定，
+        /// 重扫整段历史会随工具轮数退化为 O(历史 × 轮数)。序列化快照不带该集合，反序列化后按需重建。
+        /// </summary>
+        [JsonIgnore]
+        public HashSet<string>? AssistantCallIds { get; set; }
+
+        /// <summary>
+        /// 已打 <c>ChatHistory</c> 来源标记的历史快照（<see cref="Messages"/> 的克隆）。
+        /// 每次模型调用都要把整段历史交给下游，逐次克隆会让成本变成 O(历史 × 轮数)；
+        /// 这里缓存已打标的克隆，只对新增尾部克隆一次。
+        /// </summary>
+        [JsonIgnore]
+        public List<ChatMessage>? StampedHistory { get; set; }
+
+        /// <summary>构建 <see cref="StampedHistory"/> 时已处理的 <see cref="Messages"/> 前缀长度；变更即需要增量补齐。</summary>
+        [JsonIgnore]
+        public int StampedSourceCount { get; set; } = -1;
     }
 
     private readonly ProviderSessionState<HistoryState> _sessionState = new(
@@ -76,7 +98,14 @@ internal sealed class TranscriptChatHistoryProvider(
         if (state.Messages.Count == 0)
         {
             state.Messages = SeedFromTranscript(context);
+            // 播种整体替换了历史：缓存派生视图必须作废，否则会拿到上一次运行的旧快照
+            state.StampedHistory = null;
+            state.StampedSourceCount = -1;
+            state.AssistantCallIds = null;
         }
+
+        // 一次模型调用的组装起点：消息级分桶换代（待办清单等逐轮重复注入，累进会翻倍）
+        tally?.BeginModelCall();
 
         var incomingContextMessages = new List<ChatMessage>();
         var nonContextRequestMessages = new List<ChatMessage>();
@@ -85,12 +114,21 @@ internal sealed class TranscriptChatHistoryProvider(
             var sourceType = message.GetAgentRequestMessageSourceType();
             if (sourceType == AgentRequestMessageSourceType.AIContextProvider)
             {
+                // 分桶只能在此处做：下方重发路径会用本 provider 自己的类型名重打标
+                // （见 WithAgentRequestMessageSource），原始贡献者 sourceId 即不可再考。
+                // 先读后克隆：DetachAttribution 的克隆与原消息共享内部集合（实测 Clone 为浅别名），
+                // Remove(_attribution) 会就地清掉原始标记——sourceId 读取必须发生在克隆之前。
+                // 已知边界：System-role 的 provider 消息经 MAF 基类预处理会丢 sourceId → 落 "(unknown)" 桶。
+                var contributorId = message.GetAgentRequestMessageSourceId();
+                var contributorText = message.Text;
                 incomingContextMessages.Add(DetachAttribution(message));
+                if (!string.IsNullOrEmpty(contributorText))
+                    tally?.AddMessageTokens(contributorId, contributorText);
                 continue;
             }
 
             if (sourceType == AgentRequestMessageSourceType.ChatHistory
-                || IsDuplicateSynthesizedToolCallMessage(state.Messages, message))
+                || IsDuplicateSynthesizedToolCallMessage(state, message))
             {
                 continue;
             }
@@ -121,8 +159,7 @@ internal sealed class TranscriptChatHistoryProvider(
         }
 
         var sourceId = GetType().FullName!;
-        var historyMessages = ExcludeContextProviderMessages(state.Messages)
-            .Select(m => DetachAttribution(m).WithAgentRequestMessageSource(AgentRequestMessageSourceType.ChatHistory, sourceId));
+        var historyMessages = GetStampedHistory(state, sourceId);
 
         var conversationMessages = new List<ChatMessage>(state.Messages.Count + nonContextRequestMessages.Count);
         conversationMessages.AddRange(historyMessages);
@@ -167,19 +204,23 @@ internal sealed class TranscriptChatHistoryProvider(
         var state = _sessionState.GetOrInitializeState(context.Session);
         foreach (var requestMessage in context.RequestMessages)
         {
-            if (IsDuplicateSynthesizedToolCallMessage(state.Messages, requestMessage))
+            if (IsDuplicateSynthesizedToolCallMessage(state, requestMessage))
             {
                 continue;
             }
 
-            state.Messages.Add(DetachAttribution(requestMessage));
+            var stored = DetachAttribution(requestMessage);
+            state.Messages.Add(stored);
+            TrackAssistantCallIds(state, stored);
         }
 
         if (context.ResponseMessages is { } responses)
         {
             foreach (var responseMessage in responses)
             {
-                state.Messages.Add(DetachAttribution(responseMessage));
+                var stored = DetachAttribution(responseMessage);
+                state.Messages.Add(stored);
+                TrackAssistantCallIds(state, stored);
             }
         }
 
@@ -187,29 +228,87 @@ internal sealed class TranscriptChatHistoryProvider(
     }
 
     /// <summary>
+    /// 把消息里的工具调用 <c>CallId</c> 增量并入 <see cref="HistoryState.AssistantCallIds"/>，
+    /// 使审批恢复去重判定为 O(1) 而非每次重扫整段历史。
+    /// </summary>
+    private static void TrackAssistantCallIds(HistoryState state, ChatMessage message)
+    {
+        if (state.AssistantCallIds is null)
+        {
+            // 首次需要时按现有历史整体重建（已含刚追加的这条），之后只增量补齐
+            state.AssistantCallIds = BuildAssistantCallIds(state.Messages);
+            return;
+        }
+
+        foreach (var content in message.Contents)
+        {
+            if (content is FunctionCallContent { CallId: { Length: > 0 } callId })
+                state.AssistantCallIds.Add(callId);
+        }
+    }
+
+    private static HashSet<string> BuildAssistantCallIds(IReadOnlyList<ChatMessage> messages)
+    {
+        var callIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var message in messages)
+        {
+            if (message.Role != ChatRole.Assistant)
+                continue;
+
+            foreach (var content in message.Contents)
+            {
+                if (content is FunctionCallContent { CallId: { Length: > 0 } callId })
+                    callIds.Add(callId);
+            }
+        }
+
+        return callIds;
+    }
+
+    /// <summary>
     /// 判定请求消息是否为 <c>ToolApprovalAgent</c> 审批恢复时由 <c>FunctionInvokingChatClient</c>
     /// 合成的重复 <c>Assistant(FunctionCallContent)</c> 消息。
     /// </summary>
-    private static bool IsDuplicateSynthesizedToolCallMessage(
-        IReadOnlyList<ChatMessage> existingHistory,
-        ChatMessage candidate)
+    private static bool IsDuplicateSynthesizedToolCallMessage(HistoryState state, ChatMessage candidate)
     {
+        var existingHistory = state.Messages;
         if (candidate.Role != ChatRole.Assistant || existingHistory.Count == 0)
             return false;
 
-        var candidateCalls = candidate.Contents.OfType<FunctionCallContent>().ToList();
-        if (candidateCalls.Count == 0 || candidateCalls.Count != candidate.Contents.Count)
+        List<FunctionCallContent>? candidateCalls = null;
+        var assistantContentCount = 0;
+        foreach (var content in candidate.Contents)
+        {
+            if (content is FunctionCallContent call)
+            {
+                candidateCalls ??= [];
+                candidateCalls.Add(call);
+            }
+
+            // 只有「整条消息都由工具调用构成」才可能是 FICC 合成的重复消息
+            assistantContentCount++;
+        }
+
+        if (candidateCalls is null || candidateCalls.Count != assistantContentCount)
             return false;
 
-        var existingCallIds = existingHistory
-            .Where(static m => m.Role == ChatRole.Assistant)
-            .SelectMany(static m => m.Contents.OfType<FunctionCallContent>())
-            .Select(static c => c.CallId)
-            .Where(static id => !string.IsNullOrEmpty(id))
-            .ToHashSet(StringComparer.Ordinal);
+        var existingCallIds = state.AssistantCallIds;
+        if (existingCallIds is null)
+        {
+            existingCallIds = BuildAssistantCallIds(existingHistory);
+            state.AssistantCallIds = existingCallIds;
+        }
 
-        return existingCallIds.Count > 0
-            && candidateCalls.All(c => !string.IsNullOrEmpty(c.CallId) && existingCallIds.Contains(c.CallId));
+        if (existingCallIds.Count == 0)
+            return false;
+
+        foreach (var call in candidateCalls)
+        {
+            if (string.IsNullOrEmpty(call.CallId) || !existingCallIds.Contains(call.CallId))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>从转录播种历史，排除本轮输入用户消息（RequestMessages 已携带，避免重复送达）。</summary>
@@ -239,6 +338,36 @@ internal sealed class TranscriptChatHistoryProvider(
     }
 
     private const int MaxPriorPhaseErrorResultChars = 240;
+
+    /// <summary>
+    /// 取「已打 <c>ChatHistory</c> 来源标记」的历史快照，只对自上次构建以来新增的消息做克隆与打标。
+    /// 返回只读包装：底层列表是会话状态本身（缓存复用），调用方对其增删/重排会写坏后续
+    /// 模型调用的历史顺序，因此以类型层禁改而非约定。持有旧包装的调用方会看到后续追加
+    /// （同一底层列表），与「历史是活状态」语义一致。
+    /// </summary>
+    private static IReadOnlyList<ChatMessage> GetStampedHistory(HistoryState state, string sourceId)
+    {
+        var stamped = state.StampedHistory;
+        if (stamped is null || state.StampedSourceCount > state.Messages.Count)
+        {
+            stamped = new List<ChatMessage>(state.Messages.Count);
+            state.StampedSourceCount = 0;
+        }
+
+        for (var i = state.StampedSourceCount; i < state.Messages.Count; i++)
+        {
+            // 瞬态上下文消息不进请求历史的持久前缀（由 TurnContextMessages 单独锚定注入）。
+            if (state.Messages[i].GetAgentRequestMessageSourceType() == AgentRequestMessageSourceType.AIContextProvider)
+                continue;
+
+            stamped.Add(DetachAttribution(state.Messages[i])
+                .WithAgentRequestMessageSource(AgentRequestMessageSourceType.ChatHistory, sourceId));
+        }
+
+        state.StampedHistory = stamped;
+        state.StampedSourceCount = state.Messages.Count;
+        return stamped.AsReadOnly();
+    }
 
     /// <summary>
     /// 剥离指定范围内的 <c>SubmitPlan</c> 工具调用与对应结果，并将阶段边界之前冗长的失败工具结果

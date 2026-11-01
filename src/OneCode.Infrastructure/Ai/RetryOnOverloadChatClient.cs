@@ -416,17 +416,24 @@ public sealed class RetryOnOverloadChatClient(
             ModelId = update.ModelId,
         };
 
-    private static string BuildToolCallKey(FunctionCallContent functionCall)
+    /// <summary>
+    /// 工具调用的身份键（name + 参数 JSON）。仅在 <c>CallId</c> 无法匹配时才需要：
+    /// 参数序列化是反射式的，跨重试逐条比对时是回放路径上最贵的一步。
+    /// </summary>
+    private static string BuildToolCallKey(string? name, IDictionary<string, object?>? arguments)
         => string.Create(
             CultureInfo.InvariantCulture,
-            $"{functionCall.Name}:{JsonSerializer.Serialize(functionCall.Arguments)}");
+            $"{name}:{JsonSerializer.Serialize(arguments)}");
 
     private sealed class StreamingReplayState
     {
         private readonly List<ReplaySegment> _segments = [];
+        // 当前未封口的文本段分片：逐片 Append 是 O(1)，只在封口（遇到工具调用 / 建游标）时
+        // 拼接一次。旧实现直接 `段值 + 分片` 累积，每个 SSE 分片都复制已累积全文，整段 O(n²)。
+        private readonly List<string> _pendingText = [];
         private bool _hasVisibleContent;
 
-        public bool HasHistory => _segments.Count > 0;
+        public bool HasHistory => _segments.Count > 0 || _pendingText.Count > 0;
 
         /// <summary>
         /// 本轮请求（跨全部重试尝试累计）是否产出过任何可见内容（文本/工具调用/推理/多模态）。
@@ -450,7 +457,8 @@ public sealed class RetryOnOverloadChatClient(
                         break;
 
                     case FunctionCallContent functionCall:
-                        _segments.Add(ReplaySegment.Tool(BuildToolCallKey(functionCall)));
+                        SealPendingText();
+                        _segments.Add(ReplaySegment.Tool(functionCall));
                         EmittedToolCallCount++;
                         _hasVisibleContent = true;
                         break;
@@ -467,19 +475,28 @@ public sealed class RetryOnOverloadChatClient(
             }
         }
 
-        public StreamingReplayCursor CreateCursor() => new(_segments);
+        public StreamingReplayCursor CreateCursor()
+        {
+            SealPendingText();
+            return new StreamingReplayCursor(_segments);
+        }
 
         private void AppendText(string text)
         {
             EmittedTextLength += text.Length;
+            _pendingText.Add(text);
+        }
 
-            if (_segments.Count > 0 && _segments[^1].Kind == ReplaySegmentKind.Text)
-            {
-                _segments[^1] = _segments[^1] with { Value = _segments[^1].Value + text };
+        private void SealPendingText()
+        {
+            if (_pendingText.Count == 0)
                 return;
-            }
 
-            _segments.Add(ReplaySegment.Text(text));
+            var value = _pendingText.Count == 1
+                ? _pendingText[0]
+                : string.Concat(_pendingText);
+            _pendingText.Clear();
+            _segments.Add(ReplaySegment.TextSegment(value));
         }
     }
 
@@ -513,7 +530,7 @@ public sealed class RetryOnOverloadChatClient(
                     return MarkDivergedAndReturn(remaining);
                 }
 
-                var expected = segment.Value.AsSpan(_textOffset);
+                var expected = segment.Text.AsSpan(_textOffset);
                 var matched = GetCommonPrefixLength(remaining.AsSpan(), expected);
                 MatchedTextChars += matched;
 
@@ -554,7 +571,7 @@ public sealed class RetryOnOverloadChatClient(
                 return false;
             }
 
-            if (!string.Equals(segment.Value, BuildToolCallKey(functionCall), StringComparison.Ordinal))
+            if (!MatchesToolCall(segment, functionCall))
             {
                 MarkDiverged();
                 return false;
@@ -566,12 +583,31 @@ public sealed class RetryOnOverloadChatClient(
             return true;
         }
 
+        /// <summary>
+        /// 工具调用身份比对：两侧都有 <c>CallId</c> 时按它命中（零分配）；
+        /// 缺 <c>CallId</c> 的 provider 才回落到「名称 + 参数 JSON」键。
+        /// </summary>
+        private static bool MatchesToolCall(ReplaySegment segment, FunctionCallContent functionCall)
+        {
+            if (segment.CallId is { Length: > 0 } recordedCallId
+                && functionCall.CallId is { Length: > 0 } incomingCallId)
+            {
+                return string.Equals(recordedCallId, incomingCallId, StringComparison.Ordinal)
+                    && string.Equals(segment.Name, functionCall.Name, StringComparison.Ordinal);
+            }
+
+            return string.Equals(
+                segment.ToolKey,
+                BuildToolCallKey(functionCall.Name, functionCall.Arguments),
+                StringComparison.Ordinal);
+        }
+
         private void AdvanceTextSegment(int matched)
         {
             _textOffset += matched;
             while (HasPendingReplay
                 && _segments[_segmentIndex].Kind == ReplaySegmentKind.Text
-                && _textOffset >= _segments[_segmentIndex].Value.Length)
+                && _textOffset >= (_segments[_segmentIndex].Text?.Length ?? 0))
             {
                 _segmentIndex++;
                 _textOffset = 0;
@@ -610,10 +646,29 @@ public sealed class RetryOnOverloadChatClient(
         ToolCall,
     }
 
-    private sealed record ReplaySegment(ReplaySegmentKind Kind, string Value)
+    /// <summary>
+    /// 回放段：文本段保存已封口的完整文本，工具段优先按 <c>CallId</c> 识别。
+    /// 仅当 provider 不提供 <c>CallId</c> 时才预先算出「名称 + 参数 JSON」键
+    /// （参数原始字典不入段，避免在回放期继续持有大参数对象）。
+    /// </summary>
+    private sealed record ReplaySegment(
+        ReplaySegmentKind Kind,
+        string? Text = null,
+        string? CallId = null,
+        string? Name = null,
+        string? ToolKey = null)
     {
-        public static ReplaySegment Text(string value) => new(ReplaySegmentKind.Text, value);
+        public static ReplaySegment TextSegment(string value) => new(ReplaySegmentKind.Text, Text: value);
 
-        public static ReplaySegment Tool(string value) => new(ReplaySegmentKind.ToolCall, value);
+        public static ReplaySegment Tool(FunctionCallContent functionCall)
+            => string.IsNullOrEmpty(functionCall.CallId)
+                ? new ReplaySegment(
+                    ReplaySegmentKind.ToolCall,
+                    Name: functionCall.Name,
+                    ToolKey: BuildToolCallKey(functionCall.Name, functionCall.Arguments))
+                : new ReplaySegment(
+                    ReplaySegmentKind.ToolCall,
+                    CallId: functionCall.CallId,
+                    Name: functionCall.Name);
     }
 }

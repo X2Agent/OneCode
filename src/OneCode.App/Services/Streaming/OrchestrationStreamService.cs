@@ -28,8 +28,14 @@ public sealed class OrchestrationStreamService(
     IGoalRunApplicationService goalRunApplicationService,
     GoalWorkflowHost goalWorkflowHost,
     IGoalWorkflowRuntimeFactory goalRuntimeFactory,
-    ITokenLedger tokenLedger)
+    ITokenLedger         tokenLedger)
 {
+    /// <summary>
+    /// Goal 定义 hash 的签名成分所用的序列化选项。每次流式/恢复都新建实例只为让它进入
+    /// <c>DescribeSerializerOptions</c> 的签名文本，内容恒等；共享只读实例避免每次分配。
+    /// </summary>
+    private static readonly JsonSerializerOptions DefinitionHashSerializerOptions = new();
+
     /// <summary>
     /// GOAL 工具面经能力门解析（<see cref="IToolCapabilityResolver"/>）：
     /// 全量可见工具 − PlanExclusive（SubmitPlan），与 BUILD/PLAN 共用同一真相源——
@@ -67,7 +73,7 @@ public sealed class OrchestrationStreamService(
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
         // Checkpoint 序列化选项单一来源：BeginAsync 计算 DefinitionHash 与执行期 Compile
         // 校验必须使用同一实例，否则 hash 恒不一致（GoalRun definition hash mismatch）。
-        var serializerOptions = new JsonSerializerOptions();
+        var serializerOptions = DefinitionHashSerializerOptions;
         var originalWorkingDirectory = wd.WorkingDirectory;
         var goalRun = await goalRunApplicationService.BeginAsync(
             conversationId,
@@ -134,7 +140,7 @@ public sealed class OrchestrationStreamService(
         var toolCapabilityHash = GoalWorkflowCompiler.ComputeToolCapabilityHash(tools.Select(tool => tool.Name));
         // 与 StreamGoalAsync 同源：hash 契约含「显式 JsonSerializerOptions」签名成分，
         // 漏传会使 DescribeSerializerOptions 落到 "default"，与 Begin 持久化的 hash 恒不一致。
-        var serializerOptions = new JsonSerializerOptions();
+        var serializerOptions = DefinitionHashSerializerOptions;
         var expectedHash = GoalWorkflowCompiler.ComputeDefinitionHash(
             goalRun,
             currentModelId,

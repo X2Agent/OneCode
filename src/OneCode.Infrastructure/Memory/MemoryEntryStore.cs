@@ -61,7 +61,7 @@ public sealed partial class MemoryEntryStore(
     {
         try
         {
-            return await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+            return await LoadCachedAsync(scope, ct).ConfigureAwait(false);
         }
         catch (MemoryStoreReadException ex)
         {
@@ -69,6 +69,36 @@ public sealed partial class MemoryEntryStore(
             return [];
         }
     }
+
+    /// <summary>
+    /// 查询路径的读取缓存：<c>MEMORY.md</c> 每个 agent turn 都要读两次（user + project），
+    /// 内容却只在写入或外部编辑时变化。以 <c>(路径, mtime, size)</c> 判定有效性——
+    /// 本类的写入路径在替换文件后必然改变 mtime，外部编辑器同样如此。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, CachedMemoryFile> _readCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<IReadOnlyList<MemoryEntry>> LoadCachedAsync(MemoryScope scope, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var filePath = GetFilePath(ResolveDirectory(scope));
+        if (!File.Exists(filePath))
+        {
+            _readCache.TryRemove(filePath, out _);
+            return [];
+        }
+
+        var info = new FileInfo(filePath);
+        var stamp = (info.LastWriteTimeUtc, info.Length);
+        if (_readCache.TryGetValue(filePath, out var cached) && cached.Stamp == stamp)
+            return cached.Entries;
+
+        var entries = await LoadForMutationAsync(scope, ct).ConfigureAwait(false);
+        _readCache[filePath] = new CachedMemoryFile(stamp, entries);
+        return entries;
+    }
+
+    private sealed record CachedMemoryFile((DateTime LastWriteUtc, long Length) Stamp, IReadOnlyList<MemoryEntry> Entries);
 
     /// <summary>
     /// Read the store for a read-modify-write operation: returns an empty list only when the file
@@ -164,6 +194,7 @@ public sealed partial class MemoryEntryStore(
         var filePath = GetFilePath(dir);
         if (File.Exists(filePath))
             File.Delete(filePath);
+        _readCache.TryRemove(filePath, out _);
     }
 
     /// <inheritdoc/>
@@ -405,6 +436,9 @@ public sealed partial class MemoryEntryStore(
                 File.Replace(tempPath, filePath, destinationBackupFileName: null);
             else
                 File.Move(tempPath, filePath);
+
+            // 写入后立刻失效读缓存：mtime 精度较低的平台上，同一 tick 内写入可能让旧缓存看起来仍有效。
+            _readCache.TryRemove(filePath, out _);
         }
         catch
         {
@@ -461,7 +495,31 @@ public sealed partial class MemoryEntryStore(
     private static SemaphoreSlim GetLock(string memoryDir)
     {
         var normalized = Path.GetFullPath(memoryDir);
+        // 锁按目录键增长：工作目录越多（多项目 / worktree）字典越大。上限内复用，
+        // 超限时丢弃最旧的未占用锁——它没有等待者，重建一把等价。
+        if (s_locks.Count > MaxLockEntries)
+            TrimIdleLocks();
+
         return s_locks.GetOrAdd(normalized, _ => new SemaphoreSlim(1, 1));
+    }
+
+    private const int MaxLockEntries = 64;
+
+    private static void TrimIdleLocks()
+    {
+        foreach (var (key, gate) in s_locks)
+        {
+            if (s_locks.Count <= MaxLockEntries)
+                return;
+
+            // 只移除未持有的锁（CurrentCount == 1）。不做 Dispose：从判定到移除之间
+            // 另一线程可能已取得该锁，Dispose 会让它的 Release 抛 ObjectDisposedException；
+            // 移出字典后新调用方自建新锁，旧实例未触达 AvailableWaitHandle 即无非托管资源。
+            if (gate.CurrentCount != 1)
+                continue;
+
+            s_locks.TryRemove(key, out _);
+        }
     }
 
     /// <summary>

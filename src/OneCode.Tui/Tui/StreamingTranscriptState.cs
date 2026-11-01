@@ -11,8 +11,16 @@ internal sealed class StreamingTranscriptState
 {
     public StringBuilder TextBuffer { get; } = new();
     public StringBuilder ThinkingBuffer { get; } = new();
-    public List<string> WrappedCompleteLines { get; } = [];
     public List<string> WrappedTextLines { get; } = [];
+
+    /// <summary>
+    /// 与 <see cref="WrappedTextLines"/> 一一对应的渲染行：稳定前缀跨帧复用同一批
+    /// <see cref="FormattedLine"/> 实例，只有尾段随 token 重算，避免每帧重物化整段回复。
+    /// </summary>
+    public List<FormattedLine> WrappedFormattedLines { get; } = [];
+
+    /// <summary><see cref="WrappedTextLines"/> 前缀中已完成段落占用的行数：这些行跨帧稳定，只追加不重算。</summary>
+    public int WrappedStableCount { get; set; }
     public List<FormattedLine> StatusLines { get; } = [];
     public StreamingToolTracker ToolTracker { get; } = new();
 
@@ -93,8 +101,9 @@ internal sealed class StreamingTranscriptState
         BuildRunStatusLineCount = 0;
         ModeProgressLineIndex = -1;
         ModeProgressLineCount = 0;
-        WrappedCompleteLines.Clear();
         WrappedTextLines.Clear();
+        WrappedFormattedLines.Clear();
+        WrappedStableCount = 0;
         WrappedCompletedEnd = 0;
         WrappedBufferLength = 0;
         WrappedWidth = 0;

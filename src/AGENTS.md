@@ -593,7 +593,7 @@ public sealed class PermissionCheckerTests
 4. **危险命令二次确认** — `BashCommandClassifier` / `PowerShellCommandClassifier` 标记的命令必须在执行前请求用户确认
 
 5. **工具目标路径只认 schema** — 安全不变量与权限边界不得按参数名白名单猜路径（猜不到即放行，等于新工具默认没有边界保护）。
-   路径统一由 `ToolTargetPathResolver` 读工具 JSON Schema 解析（schema 中出现的全部规范路径键都会被检查），
+   路径统一由 `ToolTargetPathResolver` 读工具 JSON Schema 解析（规范键与全部以 `path` 结尾的参数都会被检查），
    `SafetyInvariantMiddleware` 是 `Unresolvable` 的唯一拒绝点；保护范围由 `ToolPathScope`（Write/ReadOnly/Dynamic/None）决定。
    新增工具若带路径参数，须使用路径语义键名（`filePath`/`file_path`/`path`/`file` 或以 `path` 结尾），
    否则该工具落在 `None`、不做路径检查。详见 [docs/adr/0018-tool-target-path-resolution.md](../docs/adr/0018-tool-target-path-resolution.md)。
@@ -742,6 +742,22 @@ finally
 - 使用 `ReadOnlySpan<char>` / `AsSpan()` 避免子字符串分配
 - 使用 `string.Create()` 或 `StringBuilder` 替代字符串拼接
 - 对大量字符串比较使用 `StringComparison.Ordinal`
+
+#### 9.4 内存与驻留（判据与性能不同）
+
+性能看的是「CPU 时间与分配速率」，内存看的是「**同一份数据存了几份、谁会无限长大、大对象是否进 LOH**」。
+以下四条必须逐条核对，缺一条都可能让长会话缓慢劣化：
+
+| 判据 | 反模式 | 正确做法 |
+|------|--------|---------|
+| **单一归属** | 同一段文本同时挂在数据模型、UI 行、重渲闭包三处 | 指定唯一权威副本；展示层只持受限预览或引用（id / 偏移），需要全文时回源取 |
+| **无界增长** | 转录行、缓存字典、后台会话随会话单调增长 | 显式上限 + 头部/最旧淘汰；淘汰后必须让视图与数据源同步重建，否则重渲会把它生成回来 |
+| **LOH 与整文件缓冲** | `SerializeToUtf8Bytes(...).Append(x).ToArray()`（两份大数组）、整文件 `ReadAllText` 后再切分、每帧 `new string(' ', width)` | `ArrayBufferWriter` / `Utf8JsonWriter` 一次写出；逐行流式读取；按宽度复用缓冲串 |
+| **容量回收** | `StringBuilder.Clear()` 后大数组仍驻留 | 超阈值后 `Capacity = 0`；或直接丢弃实例 |
+
+热路径上的「重复副本」优先用**缓存 + 显式失效凭据**（mtime / 日志戳 / 内容长度）解决，不要用「每次重新克隆」
+换正确性——克隆是 O(数据量 × 调用次数)，而缓存失效判断是 O(1)。
+缓存必须配**反证测试**：破坏失效判断后，测试要变红。
 
 ---
 

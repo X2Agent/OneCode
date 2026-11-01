@@ -167,6 +167,8 @@ curl -fsSL https://raw.githubusercontent.com/X2Agent/OneCode/main/scripts/instal
 
 安装脚本从 `X2Agent/OneCode` 的 latest GitHub Release 下载与当前系统匹配的资产，并在无法获取 Release 时直接失败，不会回退到虚构版本。安装后直接运行 `onecode` 进入交互界面（`onecode --version` 查看版本）。
 
+Windows 安装脚本没有命令行参数：安装目录（`%USERPROFILE%\.onecode\bin`）、下载域名、API 域名与 PATH 写入都在脚本顶部配置块内固定；存在 `GITHUB_TOKEN` / `GH_TOKEN` 时 API 请求会带认证以缓解匿名限流。
+
 ### 手动构建
 
 ```powershell

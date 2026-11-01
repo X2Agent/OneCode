@@ -138,6 +138,15 @@ internal static class MessageRenderer
                         Tag: marker));
                 }
             }
+
+            if (tag.ResultTruncated)
+            {
+                lines.Add(new LineEntry(
+                    $"{detailIndent}… (超出转录驻留上限，完整结果已发送给模型)",
+                    TuiPalette.FgMuted,
+                    null,
+                    Tag: marker));
+            }
         }
 
         if (lines.Count == 0)

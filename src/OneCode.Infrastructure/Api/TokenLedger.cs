@@ -36,9 +36,43 @@ public sealed class TokenLedger : ITokenLedger, ITokenLedgerFlush, IDisposable, 
         _logger = logger;
         if (stateStore is not null)
         {
-            RebuildMemory(stateStore.Load());
+            // 水合（跨进程锁 + 读文件）与后台写者一起放到线程池：构造发生在 DI 解析期，
+            // 同步阻塞会让「首帧之前」多出一段与文件大小成正比的等待。
+            // 读侧在此之前看到的是空账本——与「历史用量尚未恢复」等价，不是错误状态。
+            _hydration = Task.Run(() => Hydrate(stateStore));
             _worker = Task.Run(WorkerAsync);
         }
+    }
+
+    private readonly Task? _hydration;
+
+    /// <summary>等待首次水合完成（写入路径必须先完成水合，否则会用空账本覆盖历史）。</summary>
+    /// <remarks>
+    /// 对工程规范「禁止 <c>GetAwaiter().GetResult()</c>」的<b>登记在案的豁免点</b>：
+    /// <see cref="ITokenLedger"/> 契约是同步方法，等待无法下放给调用方；调用方
+    /// 全部在引擎后台线程（无同步上下文，无死锁面），且只在进程启动后首次记账
+    /// /读取的短窗口内可能阻塞。若契约未来异步化，此处应改为直接 await 并删除本豁免。
+    /// </remarks>
+    private void EnsureHydrated()
+    {
+        if (_hydration is not { IsCompleted: false } hydration)
+            return;
+
+        try
+        {
+            hydration.GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Token usage hydration failed; continuing with in-memory ledger");
+        }
+    }
+
+    private void Hydrate(JsonUsageStateStore stateStore)
+    {
+        var persisted = stateStore.Load();
+        lock (_sync)
+            RebuildMemory(persisted);
     }
 
     public void RecordUsage(UsageRecord record) => RecordCore(null, record);
@@ -47,6 +81,7 @@ public sealed class TokenLedger : ITokenLedger, ITokenLedgerFlush, IDisposable, 
 
     private void RecordCore(SessionId? sessionId, UsageRecord record)
     {
+        EnsureHydrated();
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -99,7 +134,10 @@ public sealed class TokenLedger : ITokenLedger, ITokenLedgerFlush, IDisposable, 
     }
 
     public SessionTokenUsage? GetSessionUsage(SessionId sessionId)
-        => Volatile.Read(ref _sessionUsage).TryGetValue(sessionId, out var info) ? info : null;
+    {
+        EnsureHydrated();
+        return Volatile.Read(ref _sessionUsage).TryGetValue(sessionId, out var info) ? info : null;
+    }
 
     public void RemoveSession(SessionId sessionId)
     {
@@ -117,12 +155,19 @@ public sealed class TokenLedger : ITokenLedger, ITokenLedgerFlush, IDisposable, 
         _stateStore?.RemoveSession(sessionId);
     }
 
-    public long GetTotalTokens() => Interlocked.Read(ref _totalTokens);
+    public long GetTotalTokens()
+    {
+        EnsureHydrated();
+        return Interlocked.Read(ref _totalTokens);
+    }
 
     public async Task FlushAsync(CancellationToken ct = default)
     {
         if (_stateStore is null)
             return;
+
+        // flush 会用磁盘状态重建内存账本：必须等首次水合完成，否则历史用量被判为 0。
+        EnsureHydrated();
 
         await _flushGate.WaitAsync(ct).ConfigureAwait(false);
         try

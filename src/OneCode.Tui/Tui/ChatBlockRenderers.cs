@@ -66,8 +66,18 @@ public static partial class ChatBlockRenderers
         // 换行预算按续行前缀（6 列）扣除——首行前缀只有 3 列，若按首行预算
         // （viewWidth - 4）折行，续行（前缀 6 列）会超出视口 2 列被绘制层裁掉。
         var diffWidth = Math.Max(8, viewWidth - 6);
-        foreach (var l in addedLines) AddDiffLines(list, "+" + l, TuiPalette.DiffAdded, diffWidth);
-        foreach (var l in removedLines) AddDiffLines(list, "-" + l, TuiPalette.DiffRemoved, diffWidth);
+        var (addedPreview, addedHidden) = TranscriptTextLimits.CapLines(addedLines);
+        foreach (var l in addedPreview) AddDiffLines(list, "+" + l, TuiPalette.DiffAdded, diffWidth);
+        var (removedPreview, removedHidden) = TranscriptTextLimits.CapLines(removedLines);
+        foreach (var l in removedPreview) AddDiffLines(list, "-" + l, TuiPalette.DiffRemoved, diffWidth);
+
+        if (addedHidden > 0 || removedHidden > 0)
+        {
+            list.Add(FormattedLine.Plain(
+                $"   … 另有 {addedHidden + removedHidden} 行变更未展开（完整 diff 见文件）",
+                TuiPalette.FgMuted));
+        }
+
         return list;
     }
 

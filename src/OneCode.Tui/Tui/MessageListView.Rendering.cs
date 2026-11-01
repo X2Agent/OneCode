@@ -19,10 +19,11 @@ public sealed partial class MessageListView
         if (viewport.Width <= 0 || viewport.Height <= 0) return false;
 
         SetAttribute(new Attribute(TuiPalette.FgPrimary, TuiPalette.BgPrimary));
+        var blankRow = GetBlankRow(viewport.Width);
         for (var row = 0; row < viewport.Height; row++)
         {
             Move(0, row);
-            AddStr(new string(' ', viewport.Width));
+            AddStr(blankRow);
         }
 
         if (_lines.Count == 0) return false;
@@ -49,7 +50,7 @@ public sealed partial class MessageListView
             // This clears stale characters from previous frames regardless of
             // which content path (segments/plain) runs below.
             SetAttribute(new Attribute(entry.Color, lineBg));
-            AddStr(new string(' ', viewport.Width));
+            AddStr(blankRow);
 
             Move(leftPad, i);
 
@@ -135,6 +136,21 @@ public sealed partial class MessageListView
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 按宽度缓存的全空格行串：每次绘制每行都要清一遍背景，逐行 <c>new string(' ', width)</c>
+    /// 会让绘制热路径每帧分配「行数 × 宽度」字节的临时字符串。宽度不变时复用同一实例。
+    /// </summary>
+    private string _blankRow = string.Empty;
+
+    private string GetBlankRow(int width)
+    {
+        if (_blankRow.Length == width)
+            return _blankRow;
+
+        _blankRow = new string(' ', Math.Max(0, width));
+        return _blankRow;
     }
 
     /// <summary>

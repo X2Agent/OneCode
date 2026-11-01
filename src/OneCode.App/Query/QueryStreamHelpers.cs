@@ -51,10 +51,15 @@ internal static class QueryStreamHelpers
     /// constructs a multi-content message with text + image <see cref="DataContent"/> blocks
     /// following the MAF multimodal pattern.
     /// </summary>
-    public static ChatMessage BuildUserMessage(
+    /// <remarks>
+    /// 异步读取：图片可能有数 MB，同步整文件读会在流式启动前阻塞线程池线程。
+    /// 超过 <see cref="MaxImageBytes"/> 的图片按失败处理，避免把超大文件整份塞进请求体。
+    /// </remarks>
+    public static async Task<ChatMessage> BuildUserMessageAsync(
         string prompt,
         IReadOnlyList<string>? imagePaths,
-        ILogger logger)
+        ILogger logger,
+        CancellationToken ct = default)
     {
         if (imagePaths is not { Count: > 0 })
             return new ChatMessage(ChatRole.User, prompt);
@@ -67,7 +72,18 @@ internal static class QueryStreamHelpers
         {
             try
             {
-                var bytes = File.ReadAllBytes(path);
+                var info = new FileInfo(path);
+                if (info.Exists && info.Length > MaxImageBytes)
+                {
+                    logger.LogWarning(
+                        "Image {Path} is {Size:N0} bytes, exceeding the {Limit:N0}-byte limit; skipping attachment",
+                        path, info.Length, MaxImageBytes);
+                    contents.Add(new TextContent(
+                        $"[Image too large to attach: {Path.GetFileName(path)} ({info.Length / (1024 * 1024)} MB)]"));
+                    continue;
+                }
+
+                var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
                 var ext = Path.GetExtension(path).ToLowerInvariant();
                 var mediaType = ext switch
                 {
@@ -79,6 +95,10 @@ internal static class QueryStreamHelpers
                 };
                 contents.Add(new DataContent(bytes, mediaType));
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to read image {Path}", path);
@@ -88,6 +108,9 @@ internal static class QueryStreamHelpers
 
         return new ChatMessage(ChatRole.User, contents);
     }
+
+    /// <summary>单张图片附件上限：主流 provider 的单图上限约 20 MB，留余量取 10 MB。</summary>
+    internal const int MaxImageBytes = 10 * 1024 * 1024;
 
     public static string PromptTooLongHint(Exception runException) =>
         PromptTooLongDetector.IsPromptTooLong(runException)

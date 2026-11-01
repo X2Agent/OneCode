@@ -26,12 +26,56 @@ public sealed class TokenBreakdownEstimatorTests
         // 58 个 ASCII 字符 → ceil(58 / 4) = 15。
         breakdown.SystemPrompt.Should().Be(15);
         // 无 schema 的工具退化为 name + description 估算：ceil(4 / 4) + ceil(11 / 4) = 4。
-        breakdown.ToolsAndSkills.Should().Be(4);
+        breakdown.ProductTools.Should().Be(4);
+        breakdown.McpTools.Should().Be(0);
+        breakdown.Tools.Should().Be(4);
         // "Hello, can you help me?" 23 字符 → 6，"Of course! What do you need?" 28 字符 → 7。
         breakdown.Messages.Should().Be(13);
         breakdown.Other.Should().Be(0); // 无 actualInputTokens 时 Other=0
         breakdown.TotalEstimated.Should().Be(
-            breakdown.SystemPrompt + breakdown.ToolsAndSkills + breakdown.Messages);
+            breakdown.SystemPrompt + breakdown.Tools + breakdown.Messages);
+    }
+
+    [Fact]
+    public void Estimate_SplitsMcpToolsFromProductTools()
+    {
+        var sut = new TokenBreakdownEstimator(TestTokenEstimators.Default);
+        var tools = new List<AIFunction>
+        {
+            CreateFakeTool("Read", "Read a file from disk"),
+            CreateFakeTool("mcp__filesystem__read_file", "MCP filesystem read"),
+        };
+
+        var breakdown = sut.Estimate(null, tools, null);
+
+        breakdown.ProductTools.Should().BeGreaterThan(0, "产品工具按 `mcp__` 前缀排除在 MCP 桶外");
+        breakdown.McpTools.Should().BeGreaterThan(0, "`mcp__` 前缀工具必须单列（McpToolNaming 命名规约）");
+        breakdown.Tools.Should().Be(breakdown.ProductTools + breakdown.McpTools);
+    }
+
+    [Fact]
+    public void Estimate_UsesContextProviderTallySnapshot_AndComputesResidual()
+    {
+        var estimator = TestTokenEstimators.Default;
+        var tally = new ContextTokenTallyObserver(estimator);
+        tally.AddMessageTokens("Microsoft.Agents.AI.TodoProvider", "### Current todo list");
+
+        var sut = new TokenBreakdownEstimator(estimator, tally: tally);
+
+        var breakdown = sut.Estimate("sys", tools: null, messages: null, actualInputTokens: 1000);
+        var expected = new Dictionary<string, int>
+        {
+            ["Microsoft.Agents.AI.TodoProvider"] = estimator.EstimateTokens("### Current todo list"),
+        };
+
+        breakdown.ContextProviders.Should().BeEquivalentTo(expected, "分桶取自组装点的消息级快照");
+        // Other 为残差：actual − (system + 分桶之和)
+        breakdown.Other.Should().Be(1000 - breakdown.SystemPrompt - expected.Values.Sum());
+        breakdown.TotalEstimated.Should().Be(1000);
+
+        // 读取即消费：下一轮不会重复计入上一轮的注入
+        sut.Estimate("sys", tools: null, messages: null, actualInputTokens: 1000)
+            .ContextProviders.Should().BeEmpty("分桶在每次查询结束时被取走");
     }
 
     [Fact]
@@ -55,15 +99,16 @@ public sealed class TokenBreakdownEstimatorTests
         // null inputs 和 empty inputs 走相同的早返回路径
         var nullBreakdown = sut.Estimate(null, null, null, actualInputTokens: null);
         nullBreakdown.SystemPrompt.Should().Be(0);
-        nullBreakdown.ToolsAndSkills.Should().Be(0);
+        nullBreakdown.Tools.Should().Be(0);
         nullBreakdown.Messages.Should().Be(0);
         nullBreakdown.Other.Should().Be(0);
         nullBreakdown.TotalEstimated.Should().Be(0);
         nullBreakdown.SystemPromptDetail.Should().BeNull();
+        nullBreakdown.ContextProviders.Should().BeEmpty();
 
         var emptyBreakdown = sut.Estimate("", [], []);
         emptyBreakdown.SystemPrompt.Should().Be(0);
-        emptyBreakdown.ToolsAndSkills.Should().Be(0);
+        emptyBreakdown.Tools.Should().Be(0);
         emptyBreakdown.Messages.Should().Be(0);
     }
 
@@ -87,9 +132,9 @@ public sealed class TokenBreakdownEstimatorTests
 
         // 单个工具（含 schema）必须产生有限的开销：若实现改为序列化整个 AIFunction
         // 对象，token 数会显著膨胀并突破上界；若 schema 未被纳入估算则会低于下界。
-        singleToolBreakdown.ToolsAndSkills.Should().BeInRange(20, 60);
+        singleToolBreakdown.Tools.Should().BeInRange(20, 60);
         // 多个工具的 token 数应大于单个工具
-        multiToolBreakdown.ToolsAndSkills.Should().BeGreaterThan(singleToolBreakdown.ToolsAndSkills);
+        multiToolBreakdown.Tools.Should().BeGreaterThan(singleToolBreakdown.Tools);
     }
 
     [Fact]
@@ -153,8 +198,8 @@ public sealed class TokenBreakdownEstimatorTests
     public void Estimate_WithCalibratedTracker_AppliesCalibrationFactor()
     {
         var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var breakdown1 = new TokenBreakdown(50, 30, 20, 0, 100);
-        var breakdown2 = new TokenBreakdown(50, 30, 20, 0, 100);
+        var breakdown1 = Breakdown(system: 50, tools: 30, messages: 20, total: 100);
+        var breakdown2 = Breakdown(system: 50, tools: 30, messages: 20, total: 100);
         tracker.Record(new TokenUsage(200, 50), breakdown1);
         tracker.Record(new TokenUsage(200, 50), breakdown2);
         tracker.CalibrationFactor.Should().BeApproximately(2.0, 0.001);
@@ -179,7 +224,7 @@ public sealed class TokenBreakdownEstimatorTests
 
         var result = sut.Estimate("prompt", null, null, actualInputTokens: 1000);
 
-        result.Other.Should().Be(1000 - result.SystemPrompt - result.Messages - result.ToolsAndSkills,
+        result.Other.Should().Be(1000 - result.SystemPrompt - result.Messages - result.Tools,
             "Other should be the residual when actualInputTokens is provided");
         result.TotalEstimated.Should().Be(1000);
     }
@@ -188,8 +233,8 @@ public sealed class TokenBreakdownEstimatorTests
     public void Estimate_CalibrationFactorPropagatesToAllScenarios()
     {
         var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
-        var b1 = new TokenBreakdown(100, 60, 40, 0, 200);
-        var b2 = new TokenBreakdown(100, 60, 40, 0, 200);
+        var b1 = Breakdown(system: 100, tools: 60, messages: 40, total: 200);
+        var b2 = Breakdown(system: 100, tools: 60, messages: 40, total: 200);
         tracker.Record(new TokenUsage(400, 50), b1);
         tracker.Record(new TokenUsage(400, 50), b2);
 
@@ -211,6 +256,10 @@ public sealed class TokenBreakdownEstimatorTests
             rawResult.Messages * 2 - 2,
             rawResult.Messages * 2 + 2);
     }
+
+    /// <summary>新形状的便捷构造（ContextProviders 空桶、无 Other）。</summary>
+    private static TokenBreakdown Breakdown(int system, int tools, int messages, int total)
+        => new(system, tools, 0, messages, new Dictionary<string, int>(), 0, total);
 
     private static AIFunction CreateFakeTool(string name, string description, string? schemaJson = null)
     {

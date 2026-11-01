@@ -134,6 +134,115 @@ public sealed class ProviderWireContractTests
     }
 
     [Fact]
+    public async Task Anthropic_Instructions_ArePromotedToSystemMessageWith1hBreakpoint()
+    {
+        var (sut, capture) = CreateAnthropicSut();
+        var options = new ChatOptions { Instructions = "stable product prefix" };
+
+        await sut.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], options,
+            TestContext.Current.CancellationToken);
+
+        var body = Body(capture);
+
+        // Instructions 提升为显式 system 消息：稳定前缀获得独立 1h 断点
+        // （提升前它只能搭尾部断点的 5m TTL，空闲 >5 分钟即按写入溢价整段重写）
+        var systemBlock = body.GetProperty("system")[0];
+        systemBlock.GetProperty("text").GetString().Should().Be("stable product prefix");
+        systemBlock.GetProperty("cache_control").GetProperty("type").GetString().Should().Be("ephemeral");
+        systemBlock.GetProperty("cache_control").GetProperty("ttl").GetString().Should().Be("1h");
+
+        // 正文只出现一次：提升后 Instructions 必须清空，不得在 messages 里再复制一份
+        body.GetProperty("messages").GetArrayLength().Should().Be(1);
+        body.GetProperty("messages")[0].GetProperty("role").GetString().Should().Be("user");
+        // 尾部 5m 断点不受提升影响
+        body.GetProperty("messages")[0].GetProperty("content")[0]
+            .GetProperty("cache_control").GetProperty("ttl").GetString().Should().Be("5m");
+        // 断点预算：整个请求恰好 2 个断点（system 1h + 尾部 5m），远低于 Anthropic 4 断点上限
+        CountCacheBreakpoints(body).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Anthropic_TailBreakpoint_SkipsTransientProviderMessagesAtListTail()
+    {
+        var (sut, capture) = CreateAnthropicSut();
+        List<ChatMessage> messages =
+        [
+            new(ChatRole.System, "system"),
+            new(ChatRole.Assistant, "earlier history"),
+            new(ChatRole.User, "persistent tail"),
+            new ChatMessage(ChatRole.User, "transient todo context")
+                .WithAgentRequestMessageSource(AgentRequestMessageSourceType.AIContextProvider, "TodoProvider"),
+        ];
+
+        await sut.GetResponseAsync(messages, cancellationToken: TestContext.Current.CancellationToken);
+
+        var body = Body(capture);
+
+        // 瞬态 provider 消息占据列表尾部时：断点必须回退到最后一条持久消息上，
+        // 宁可不缓存瞬态尾巴，绝不把它纳入缓存前缀（纳入后每轮替换都会打散跨轮命中）
+        var persistentBlock = body.GetProperty("messages").EnumerateArray()
+            .Single(m => m.GetProperty("role").GetString() == "user"
+                && m.GetProperty("content")[0].GetProperty("text").GetString() == "persistent tail")
+            .GetProperty("content")[0];
+        persistentBlock.GetProperty("cache_control").GetProperty("ttl").GetString().Should().Be("5m");
+
+        var transientBlock = body.GetProperty("messages").EnumerateArray()
+            .Single(m => m.GetProperty("content")[0].GetProperty("text").GetString() == "transient todo context")
+            .GetProperty("content")[0];
+        transientBlock.TryGetProperty("cache_control", out _).Should().BeFalse(
+            "瞬态 provider 消息绝不能携带 cache_control");
+
+        CountCacheBreakpoints(body).Should().Be(2, "system 1h + 持久尾部 5m，瞬态尾巴不占断点");
+    }
+
+    /// <summary>统计请求体里 cache_control 断点总数（system 数组 + messages 内容块）。</summary>
+    private static int CountCacheBreakpoints(JsonElement body)
+    {
+        var count = 0;
+        if (body.TryGetProperty("system", out var system) && system.ValueKind == JsonValueKind.Array)
+            count += system.EnumerateArray().Count(b => b.TryGetProperty("cache_control", out _));
+        if (body.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+            foreach (var message in messages.EnumerateArray())
+            {
+                if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+                    continue;
+                count += content.EnumerateArray().Count(b => b.TryGetProperty("cache_control", out _));
+            }
+
+        return count;
+    }
+
+    [Fact]
+    public async Task Anthropic_Instructions_AndExplicitSystemMessage_AreNotDuplicated()
+    {
+        var (sut, capture) = CreateAnthropicSut();
+        var options = new ChatOptions { Instructions = "harness body" };
+        List<ChatMessage> messages =
+        [
+            new(ChatRole.System, "explicit fork system"),
+            new(ChatRole.User, "hi"),
+        ];
+
+        await sut.GetResponseAsync(messages, options, TestContext.Current.CancellationToken);
+
+        var body = Body(capture);
+
+        // fork 路径已有显式 System 消息：不得再提升 Instructions（否则 system 字段出现三块）
+        body.GetProperty("system").GetArrayLength().Should().Be(2);
+        var systemTexts = body.GetProperty("system").EnumerateArray()
+            .Select(b => b.GetProperty("text").GetString()).ToList();
+        systemTexts.Should().Contain("harness body");
+        systemTexts.Should().Contain("explicit fork system");
+
+        // 1h 断点落在显式 System 消息上（fork 既有行为保持不变）
+        var withBreakpoint = body.GetProperty("system").EnumerateArray()
+            .Where(b => b.TryGetProperty("cache_control", out _)).ToList();
+        withBreakpoint.Should().HaveCount(1);
+        withBreakpoint[0].GetProperty("text").GetString().Should().Be("explicit fork system");
+        withBreakpoint[0].GetProperty("cache_control").GetProperty("ttl").GetString().Should().Be("1h");
+    }
+
+    [Fact]
     public async Task Anthropic_ReasoningOption_ProducesEnabledThinkingWithABudget()
     {
         var (sut, capture) = CreateAnthropicSut();

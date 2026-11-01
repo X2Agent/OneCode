@@ -165,16 +165,61 @@ public sealed class ToolTargetPathResolverTests
     }
 
     [Fact]
-    public void Resolve_CanonicalKeyWinsOverSuffixKey()
+    public void Resolve_CanonicalKeyTakesPriority_BothPathsCollected()
     {
-        // 同时存在 path 与某 *Path 参数时，规范键优先（工具真实主目标）。
+        // 同时存在规范键与后缀参数时：规范键决定 PrimaryPath 的优先级，但后缀参数同样必须受检——
+        // 只收规范键会让 backupPath 之类的第二个路径形参数完全脱离边界校验。
         var function = Function("Custom", (string path, string? backupPath = null) => path + backupPath);
 
         var result = ToolTargetPathResolver.Resolve(
             function, ArgsOf(("path", "main.cs"), ("backupPath", "bak.cs")));
 
         result.Kind.Should().Be(ToolTargetPathKind.Resolved);
-        result.Paths.Should().Equal("main.cs");
+        result.Paths.Should().Equal("main.cs", "bak.cs");
+        result.PrimaryPath.Should().Be("main.cs");
+    }
+
+    [Fact]
+    public void Resolve_MultipleSuffixParams_AllCollectedInSchemaOrder()
+    {
+        // 反证锚点：无规范键时若只收第一个后缀参数，模型把越界目标放进 targetPath 即可绕过
+        // 工作区边界（MCP 文件工具的典型形态）——两条路径都必须进入校验集合。
+        var function = Function(
+            "Copy", (string sourcePath, string targetPath) => sourcePath + targetPath);
+
+        var result = ToolTargetPathResolver.Resolve(
+            function, ArgsOf(("sourcePath", "src/a.cs"), ("targetPath", "dst/b.cs")));
+
+        result.Kind.Should().Be(ToolTargetPathKind.Resolved);
+        result.Paths.Should().Equal("src/a.cs", "dst/b.cs");
+        result.PrimaryPath.Should().Be("src/a.cs");
+    }
+
+    [Fact]
+    public void Resolve_SecondSuffixParamRequiredButMissing_ReturnsUnresolvable()
+    {
+        // 越界目标的另一形态：必填后缀参数缺失必须拒绝整次调用，
+        // 不让第一个合法路径掩盖第二个路径参数的不可用。
+        var function = Function(
+            "Copy", (string sourcePath, string targetPath) => sourcePath + targetPath);
+
+        var result = ToolTargetPathResolver.Resolve(
+            function, ArgsOf(("sourcePath", "src/a.cs")));
+
+        result.Kind.Should().Be(ToolTargetPathKind.Unresolvable);
+        result.Reason.Should().Contain("targetPath");
+    }
+
+    [Fact]
+    public void Resolve_PathShapedNameInAnyCase_IsCollected()
+    {
+        // 参数取值按 OrdinalIgnoreCase；PascalCase 的 Path 形态也必须被收集，不因大小写掉出保护范围。
+        var function = Function("Custom", (string? Path = null) => Path);
+
+        var result = ToolTargetPathResolver.Resolve(function, ArgsOf(("Path", "src/x.cs")));
+
+        result.Kind.Should().Be(ToolTargetPathKind.Resolved);
+        result.Paths.Should().Equal("src/x.cs");
     }
 
     // ---- 多规范键：Lsp 的 file 是主参数，path 是可选检索范围 ----

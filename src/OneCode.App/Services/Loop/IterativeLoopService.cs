@@ -138,7 +138,8 @@ public sealed class IterativeLoopService(
             {
                 var messages = new List<ChatMessage>
                 {
-                    QueryStreamHelpers.BuildUserMessage(request.Task ?? string.Empty, imagePaths, NullLogger.Instance),
+                    await QueryStreamHelpers.BuildUserMessageAsync(
+                        request.Task ?? string.Empty, imagePaths, NullLogger.Instance, ct).ConfigureAwait(false),
                 };
                 await foreach (var _ in loopAgent.RunStreamingAsync(
                     messages, cancellationToken: ct).ConfigureAwait(false))

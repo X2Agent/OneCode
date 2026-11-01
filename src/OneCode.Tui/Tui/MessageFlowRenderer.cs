@@ -444,7 +444,7 @@ public sealed class MessageFlowRenderer
         var showThinking = GetShowThinking?.Invoke() ?? ShowThinking;
         if (!showThinking)
         {
-            var collapsedTag = new ThinkingLineTag(thinking, IsExpanded: false);
+            var collapsedTag = ThinkingLineTag.Create(thinking, isExpanded: false);
             lines.Add(FormattedLine.FromSegmentsWithTag(new[]
             {
                 new LineSegment($"{Indent}", TuiPalette.BgPrimary),
@@ -453,7 +453,7 @@ public sealed class MessageFlowRenderer
             return;
         }
 
-        var expandedTag = new ThinkingLineTag(thinking, IsExpanded: true);
+        var expandedTag = ThinkingLineTag.Create(thinking, isExpanded: true);
         lines.Add(FormattedLine.FromSegmentsWithTag(new[]
         {
             new LineSegment($"{Indent}", TuiPalette.BgPrimary),
@@ -519,7 +519,7 @@ public sealed class MessageFlowRenderer
             segments.Add(new(suffix, TuiPalette.Error));
         // detailArgs 为空串时抑制详情行（live 进度行的标题即进度文本，重复展示为
         // "Args: ..." 反而误导）；null 时沿用 args（工具启动/完成行的既有语义）。
-        var tag = new ToolLineTag(name, detailArgs ?? args, result, IsExpanded: false, LiveProgress: liveProgress);
+        var tag = ToolLineTag.Create(name, detailArgs ?? args, result, isExpanded: false, liveProgress: liveProgress);
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }
 

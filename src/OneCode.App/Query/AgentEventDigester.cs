@@ -44,11 +44,7 @@ internal static class AgentEventDigester
                     CompactRelaxedOptions), 100);
             }
 
-            var json = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, new System.Text.Json.JsonSerializerOptions
-            {
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                WriteIndented = false
-            });
+            var json = System.Text.Json.JsonSerializer.Serialize(fcc.Arguments, CompactRelaxedOptions);
             return Truncate(json, 100);
         }
         catch (Exception ex)
@@ -67,11 +63,7 @@ internal static class AgentEventDigester
         if (arguments is null) return "{}";
         try
         {
-            return System.Text.Json.JsonSerializer.Serialize(arguments, new System.Text.Json.JsonSerializerOptions
-            {
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                WriteIndented = false,
-            });
+            return System.Text.Json.JsonSerializer.Serialize(arguments, CompactRelaxedOptions);
         }
         catch (Exception ex)
         {

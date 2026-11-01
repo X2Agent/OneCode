@@ -8,10 +8,11 @@ namespace OneCode.Core.Tools;
 ///
 /// 解析分两级：
 /// <list type="number">
-///   <item><description>Tier A——规范键 <c>filePath</c> / <c>file_path</c> / <c>path</c> / <c>file</c>：
-///   schema 里出现的全部纳入，<see cref="ToolTargetPathResult.Paths"/> 按此优先级排列；</description></item>
-///   <item><description>Tier B——schema 里没有任何规范键时，取第一个以 <c>path</c> 结尾的参数名
-///   （<c>targetPath</c>、<c>dirPath</c> 等）。</description></item>
+///   <item><description>Tier A——规范键 <c>filePath</c> / <c>file_path</c> / <c>path</c> / <c>file</c>
+///   （大小写不敏感）：schema 里出现的全部纳入，<see cref="ToolTargetPathResult.Paths"/> 按此优先级排列；</description></item>
+///   <item><description>Tier B——其余以 <c>path</c> 结尾的参数名（<c>targetPath</c>、<c>sourcePath</c>、
+///   <c>dirPath</c> 等）全部纳入，按 schema 声明顺序排在规范键之后。安全校验必须覆盖所有路径形参数：
+///   只挑一个，模型就能把真实目标挪到未校验的参数上绕过工作区边界。</description></item>
 /// </list>
 /// 刻意不把 <c>target</c> / <c>directory</c> 这类通用名词列为规范键：它们在不碰文件系统的工具上
 /// 会把「无路径概念」误判成「路径不可用」，从而误拒正常调用。
@@ -117,8 +118,9 @@ public static class ToolTargetPathResolver
         => Resolve(function, arguments).PrimaryPath;
 
     /// <summary>
-    /// 找出 schema 声明的目标路径参数：Tier A 规范键全部返回（按 <see cref="CanonicalPathKeys"/> 优先级），
-    /// 没有任何规范键时才退到 Tier B 的第一个 <c>*path</c> 参数。
+    /// 找出 schema 声明的全部目标路径参数：Tier A 规范键按 <see cref="CanonicalPathKeys"/> 优先级排列在前，
+    /// 其余以 <c>path</c> 结尾的参数全部追加在后（schema 声明顺序）。
+    /// 安全校验必须覆盖所有路径形参数——只挑一个，模型就能把真实目标挪到未校验的参数上绕过边界。
     /// </summary>
     private static List<(string Name, JsonElement Schema)> FindPathParameters(JsonElement schema)
     {
@@ -129,24 +131,35 @@ public static class ToolTargetPathResolver
             return [];
         }
 
-        List<(string Name, JsonElement Schema)> canonical = [];
+        List<(string Name, JsonElement Schema)> result = [];
+
+        // Tier A：按优先级收集规范键。与参数取值（ReadArgument）的 OrdinalIgnoreCase 口径一致，
+        // 此处同样忽略大小写——Path/FILEPATH 形态不能依赖 Tier B 兜底。
         foreach (var key in CanonicalPathKeys)
         {
-            if (properties.TryGetProperty(key, out var canonicalSchema))
-                canonical.Add((key, canonicalSchema));
+            foreach (var property in properties.EnumerateObject())
+            {
+                if (string.Equals(property.Name, key, StringComparison.OrdinalIgnoreCase))
+                    result.Add((property.Name, property.Value));
+            }
         }
 
-        if (canonical.Count > 0)
-            return canonical;
-
+        // Tier B：其余以 path 结尾的参数全部纳入（不再只取第一个）。
         foreach (var property in properties.EnumerateObject())
         {
+            if (IsCanonicalKey(property.Name))
+                continue;
+
             if (property.Name.EndsWith(PathSuffix, StringComparison.OrdinalIgnoreCase))
-                return [(property.Name, property.Value)];
+                result.Add((property.Name, property.Value));
         }
 
-        return [];
+        return result;
     }
+
+    /// <summary>参数名是否命中 Tier A 规范键（大小写不敏感）；Tier B 收集时用于跳过已纳入的规范键。</summary>
+    private static bool IsCanonicalKey(string name) =>
+        CanonicalPathKeys.Contains(name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>读取 schema 声明的类型集合；空集合表示未声明（按字符串处理）。</summary>
     private static List<string> ReadTypes(JsonElement propertySchema)

@@ -29,9 +29,11 @@ public sealed class StatusCommandStatsTests
             new TokenUsage(400, 200, CacheReadTokens: 300, CacheWriteTokens: 50),
             new TokenBreakdown(
                 SystemPrompt: 50,
-                ToolsAndSkills: 80,
+                ProductTools: 60,
+                McpTools: 20,
                 Messages: 70,
-                Other: 100,
+                ContextProviders: new Dictionary<string, int> { ["Microsoft.Agents.AI.TodoProvider"] = 40 },
+                Other: 60,
                 TotalEstimated: 300,
                 SystemPromptDetail: new SystemPromptBreakdown(
                     TemplateBody: 20, Environment: 10, ProjectContext: 15, Memory: 5, OtherSections: 0)));
@@ -49,16 +51,51 @@ public sealed class StatusCommandStatsTests
         text.Should().Contain("Cache read:      300");
         text.Should().Contain("hit rate"); // 缓存命中率
         text.Should().Contain("Cache write:     50");
+        // Total = Input(400, 已含缓存读 300) + Output(200) + CacheWrite(50) = 650——缓存读不得再加一遍
+        text.Should().Contain("Total tokens:    650");
         text.Should().Contain("Token Breakdown");
         text.Should().Contain("System prompt:  50");
-        text.Should().Contain("Tools & skills: 80");
+        // 工具拆分：产品工具与 MCP 工具单列
+        text.Should().Contain("Tools:          80 (product 60 | mcp 20)");
+        // 消息级 provider 分桶（sourceId → 友好短名）
+        text.Should().Contain("Context providers:");
+        text.Should().Contain("TodoProvider: 40");
         text.Should().Contain("Messages:       70");
-        text.Should().Contain("Other context:  100");
+        text.Should().Contain("Other context:  60");
+        // 分项会话累计段（记录一次后与最近查询同值）
+        text.Should().Contain("Token Breakdown (cumulative, estimated):");
         // System prompt 细分
         text.Should().Contain("Template:");
         text.Should().Contain("Environment:");
         text.Should().Contain("Project ctx:");
         text.Should().Contain("Memory:");
+    }
+
+    [Fact]
+    public async Task Window_UsesLastTurnInputTokensAsOccupancy_NotCumulativeUsage()
+    {
+        var sessionManager = CreateSessionManager();
+        await sessionManager.CreateAsync(new ConversationOptions(
+            WorkingDirectory: Path.GetTempPath()), TestContext.Current.CancellationToken);
+        sessionManager.ForegroundConversation!.TotalUsage = new TokenUsage(300_000, 40_000);
+
+        var appState = Substitute.For<IAppStateAccessor>();
+        appState.Current.Returns(new AppState());
+        var modeProvider = new PermissionModeProvider(TestSupport.TestConfigManager.Create());
+        var tracker = new TokenUsageTracker(new TokenLedger(), TestSupport.NullSessionIdProvider.Instance);
+
+        // 模拟长会话：累计 input+output（340K）远超窗口，但最近一轮实际输入只有 50K。
+        // 占用必须取 50K / 默认窗口 128K，绝不能把累计消费当窗口占用（那必然爆表）。
+        tracker.Record(new TokenUsage(300_000, 40_000), lastTurnInputTokens: 50_000);
+
+        var sut = new StatusCommand(sessionManager, appState, modeProvider, tracker, modelManager: null!, goalRunService: Substitute.For<IGoalRunApplicationService>());
+
+        var result = await sut.ExecuteAsync(new[] { "window" }, TestContext.Current.CancellationToken);
+
+        var text = ((CommandResult.TextResult)result).Value;
+        text.Should().Contain("Occupancy:  50,000 / 128,000 tokens (39%)");
+        text.Should().Contain("Cumulative: 340,000 tokens billed across all turns");
+        text.Should().NotContain("Used:", "旧口径（累计当占用）的行名不得残留");
     }
 
     [Fact]

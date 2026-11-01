@@ -181,6 +181,30 @@ public sealed class StreamingSessionTests
     }
 
     [Fact]
+    public void LastTurnText_SecondTurnRefilledToSameLength_DoesNotReturnStaleFirstTurnText()
+    {
+        var sut = CreateSut();
+
+        // 轮 1 与轮 2 文本恰好等长：轮次构建器是「清空重填」，只按长度判缓存的实现
+        // 会在第二次读取时命中轮 1 的旧缓存，把上一轮文本当成当前轮返回。
+        DigestAll(
+            sut,
+            new AgentResponseUpdate { Contents = { new FunctionCallContent("call_v1", "Read", null) } },
+            new AgentResponseUpdate { Contents = { new FunctionResultContent("call_v1", "ok") } },
+            new AgentResponseUpdate { Contents = { new TextContent("aaa") } });
+        sut.LastTurnText.Should().Be("aaa");
+
+        DigestAll(
+            sut,
+            new AgentResponseUpdate { Contents = { new FunctionCallContent("call_v2", "Read", null) } },
+            new AgentResponseUpdate { Contents = { new FunctionResultContent("call_v2", "ok") } },
+            new AgentResponseUpdate { Contents = { new TextContent("bbb") } });
+
+        sut.LastTurnText.Should().Be("bbb",
+            "轮次版本必须参与缓存失效：等长重填不得命中上一轮的缓存");
+    }
+
+    [Fact]
     public void Digest_ThinkingContent_EmitsThinkingDelta_WithoutAffectingTurns()
     {
         var sut = CreateSut();

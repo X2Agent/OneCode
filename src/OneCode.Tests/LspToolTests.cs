@@ -486,12 +486,33 @@ public sealed class LspToolTests
     }
 
     [Fact]
-    public async Task ExecuteLspAsync_WorkspaceSymbol_IndexNotBuiltYet_ReturnsHelpfulMessage()
+    public async Task ExecuteLspAsync_WorkspaceSymbol_IndexNotBuiltYet_BuildsOnDemandThenSearches()
     {
         var ct = TestContext.Current.CancellationToken;
         var index = Substitute.For<ICodeIndexService>();
         index.LastIndexedAt.Returns((DateTimeOffset?)null);
         index.IsIndexing.Returns(false);
+        index.Search(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<string?>())
+            .Returns([new CodeSymbolMatch(new CodeSymbol("Foo", "class", "Foo.cs", 1, 1), 1.0)]);
+        var manager = Substitute.For<ILspServerManager>();
+        manager.GetStatus().Returns(new List<LspServerStatus>());
+        var sut = CreateSut(manager, index);
+
+        var result = await sut.ExecuteLspAsync("workspaceSymbol", file: "", query: "Foo", ct: ct);
+
+        // 索引不再在预热阶段全仓构建：首次符号查询必须自建索引后再检索，而不是让用户重试。
+        await index.Received(1).BuildIndexAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        result.IsError.Should().BeFalse();
+        result.Content.Should().Contain("Foo");
+    }
+
+    [Fact]
+    public async Task ExecuteLspAsync_WorkspaceSymbol_IndexBuildingAlready_ReturnsHelpfulMessage()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var index = Substitute.For<ICodeIndexService>();
+        index.LastIndexedAt.Returns((DateTimeOffset?)null);
+        index.IsIndexing.Returns(true);
         var manager = Substitute.For<ILspServerManager>();
         manager.GetStatus().Returns(new List<LspServerStatus>());
         var sut = CreateSut(manager, index);
@@ -499,6 +520,7 @@ public sealed class LspToolTests
         var result = await sut.ExecuteLspAsync("workspaceSymbol", file: "", query: "Foo", ct: ct);
 
         result.Content.Should().Contain("still building");
+        await index.DidNotReceive().BuildIndexAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>

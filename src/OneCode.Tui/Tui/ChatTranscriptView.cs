@@ -359,6 +359,42 @@ public sealed partial class ChatTranscriptView : View
     }
 
     /// <summary>
+    /// 已提交块保留上限。转录行与这些块一一对应（块是行来源），长会话下两者同步无限增长：
+    /// 数百轮工具调用叠加 diff 块后，驻留内存远超界面能展示的范围。
+    /// 超限时整体丢弃最旧的块，并立即按当前宽度重渲，使视图与日志重新一致——
+    /// 只删视图行而不删日志条目会在下一次 resize 把它们全部重建回来。
+    /// </summary>
+    private const int MaxCommittedJournalEntries = 400;
+
+    private void TrimCommittedJournalIfNeeded()
+    {
+        var overflow = _committedJournal.Count - MaxCommittedJournalEntries;
+        if (overflow <= 0)
+            return;
+
+        // 被裁块的行数必须在删日志前按当前宽度统计——日志条目是行的唯一来源，删除后无法回溯。
+        // 滚动偏移按该行数回退，保证重渲后视口仍锚定在用户正读的内容上（贴底跟随时跳过）。
+        var trimmedLineCount = 0;
+        for (var i = 0; i < overflow; i++)
+            trimmedLineCount += _committedJournal[i](ContentWidth).Count;
+
+        _committedJournal.RemoveRange(0, overflow);
+        // 尾部 banner 的下标随头部滑出一起前移；滑出后不再指向有效条目时作废。
+        _trailingBannerJournalIndex = _trailingBannerJournalIndex >= overflow
+            ? _trailingBannerJournalIndex - overflow
+            : -1;
+
+        _logger.LogDebug("[Transcript] Trimmed {Count} oldest committed blocks ({Lines} lines, limit {Limit})",
+            overflow, trimmedLineCount, MaxCommittedJournalEntries);
+
+        _messageView.OnHeadLinesTrimmed(trimmedLineCount);
+
+        // 流式中的状态行/预览窗口由视图另行维护，重渲已提交块不会触及它们。
+        _contentRerenderRequested = true;
+        SetNeedsDraw();
+    }
+
+    /// <summary>
     /// 追加一个已提交块：先按当前宽度渲染进消息视图，同时登记按宽度重渲的
     /// 闭包。<paramref name="withSpacing"/> 为 true 时按 AppendWithSpacing
     /// 语义在视图已有内容时前置空行；间距在追加时确定并固化进日志条目——
@@ -395,6 +431,8 @@ public sealed partial class ChatTranscriptView : View
 
         if (resumeStreaming)
             _messageView.BeginStreamingPreview();
+
+        TrimCommittedJournalIfNeeded();
     }
 
     /// <summary>
@@ -503,17 +541,23 @@ public sealed partial class ChatTranscriptView : View
     private static Func<int, IReadOnlyList<FormattedLine>> MemoizeByWidth(
         Func<int, IReadOnlyList<FormattedLine>> renderAtWidth)
     {
-        int w1 = -1, w2 = -1;
-        IReadOnlyList<FormattedLine>? r1 = null, r2 = null;
+        // 最近若干个宽度各自缓存一份渲染结果：拖拽侧边栏 / 缓慢 resize 会反复经过相邻宽度，
+        // 只留 2 个槽位时几乎每次都击不中，导致整块重跑 Markdig + 换行。
+        const int MaxCachedWidths = 4;
+        var cache = new Dictionary<int, IReadOnlyList<FormattedLine>>(MaxCachedWidths);
+        var order = new Queue<int>(MaxCachedWidths);
+
         return width =>
         {
-            if (width == w1 && r1 is not null) return r1;
-            if (width == w2 && r2 is not null) return r2;
+            if (cache.TryGetValue(width, out var cached))
+                return cached;
+
             var result = renderAtWidth(width);
-            w2 = w1;
-            r2 = r1;
-            w1 = width;
-            r1 = result;
+            if (order.Count == MaxCachedWidths)
+                cache.Remove(order.Dequeue());
+
+            cache[width] = result;
+            order.Enqueue(width);
             return result;
         };
     }

@@ -26,64 +26,59 @@ public sealed record SystemPromptBreakdown(
 
 /// <summary>
 /// 分场景 Token 估算结果。
-/// 由于 API 返回的 Usage 只给总 input/output，不细分场景，
-/// 此结构通过客户端 TokenEstimator 估算各部分 token 数。
+/// API 返回的 Usage 只给总 input/output，不细分场景；本结构通过客户端 TokenEstimator
+/// 估算各部分 token，并用 API 实际 InputTokens 反算残差（Other）。
 ///
-/// 场景分类（用户指定）：
-///   - SystemPrompt：系统提示词（PromptConfigBuilder 构造的字符串）
-///   - ToolsAndSkills：工具 JSON schema + 技能描述（用户认为工具和技能同一类）
-///   - Messages：历史对话消息文本总和
-///   - Other：其他 AIContextProvider 注入的内容（memory、design、plan mode、todo 等）
-///            = API 实际 InputTokens - 上述三者（反算）
-///
-/// SystemPromptDetail（可选）：将 SystemPrompt 进一步按 markdown 标题细分为
-/// TemplateBody / Environment / ProjectContext / Memory / OtherSections。
+/// 场景分类：
+///   - SystemPrompt：产品模板正文估算
+///   - ProductTools / McpTools：工具 JSON schema（`mcp__` 前缀单列）
+///   - Messages：持久对话历史（provider 注入内容不落转录，不在此桶）
+///   - ContextProviders：消息级 AIContextProvider 注入的逐贡献者分桶（sourceId → tokens，
+///     由 TranscriptChatHistoryProvider 在组装点累加；经 AIContext.Instructions 注入的
+///     skills / memory / design 等无 sourceId——合并进 ChatOptions.Instructions 后不可分辨，
+///     当前落在 Other）
+///   - Other：API 实际 InputTokens 减上述各项的残差（harness 片段 + 协议开销 + 估算误差）
 /// </summary>
 public sealed record TokenBreakdown(
     int SystemPrompt,
-    int ToolsAndSkills,
+    int ProductTools,
+    int McpTools,
     int Messages,
+    IReadOnlyDictionary<string, int> ContextProviders,
     int Other,
     int TotalEstimated,
     SystemPromptBreakdown? SystemPromptDetail = null)
 {
+    /// <summary>全部工具 schema 之和（产品工具 + MCP）。</summary>
+    public int Tools => ProductTools + McpTools;
+
     /// <summary>
-    /// 从 API 实际 InputTokens 反算 Other 部分。
-    /// 当 actualInputTokens 可用时，Other = actual - (system + tools + messages)。
-    /// 当 actualInputTokens 不可用时，Other = 0，TotalEstimated 为估算总和。
-    ///
-    /// 接受 double 参数以避免逐组件取整后再求和导致的累积误差：
-    /// round(a*c) + round(b*c) + round(c*c) ≠ round((a+b+c)*c)，
-    /// Other 应从未取整的精确和反算，再统一取整。
+    /// 从各分量估算构造，Other 用 API 实际 InputTokens 反算。
+    /// 接受 double 分量以避免逐组件取整后再求和的累积误差：
+    /// round(a·c) + round(b·c) ≠ round((a+b)·c)，Other 应从未取整的精确和反算，再统一取整。
     /// </summary>
     public static TokenBreakdown FromEstimates(
         double systemPrompt,
-        double toolsAndSkills,
+        double productTools,
+        double mcpTools,
         double messages,
+        IReadOnlyDictionary<string, int>? contextProviders,
         int? actualInputTokens = null,
         SystemPromptBreakdown? systemPromptDetail = null)
     {
-        var sum = systemPrompt + toolsAndSkills + messages;
+        var providers = contextProviders ?? new Dictionary<string, int>();
+        var sum = systemPrompt + productTools + mcpTools + messages + providers.Values.Sum(v => (double)v);
+        // 有实际值时 Other 是残差（总量钉在实际 InputTokens 上），否则 Other = 0、总量取估算和。
+        var actual = actualInputTokens is > 0 ? actualInputTokens : null;
 
-        if (actualInputTokens is { } actual && actual > 0)
-        {
-            var other = Math.Max(0, actual - sum);
-            return new TokenBreakdown(
-                (int)Math.Round(systemPrompt),
-                (int)Math.Round(toolsAndSkills),
-                (int)Math.Round(messages),
-                (int)Math.Round(other),
-                actual,
-                systemPromptDetail);
-        }
-
-        var total = (int)Math.Round(sum);
         return new TokenBreakdown(
             (int)Math.Round(systemPrompt),
-            (int)Math.Round(toolsAndSkills),
+            (int)Math.Round(productTools),
+            (int)Math.Round(mcpTools),
             (int)Math.Round(messages),
-            0,
-            total,
+            providers,
+            (int)Math.Round(actual is { } a ? Math.Max(0, a - sum) : 0),
+            actual ?? (int)Math.Round(sum),
             systemPromptDetail);
     }
 }
@@ -95,19 +90,29 @@ public sealed record TokenBreakdown(
 public sealed partial class TokenBreakdownEstimator(
     ITokenEstimator estimator,
     ITokenUsageTracker? tracker = null,
-    ILogger<TokenBreakdownEstimator>? logger = null) : ITokenBreakdownEstimator
+    ILogger<TokenBreakdownEstimator>? logger = null,
+    ContextTokenTallyObserver? tally = null) : ITokenBreakdownEstimator
 {
     private readonly ITokenEstimator _estimator = estimator ?? throw new ArgumentNullException(nameof(estimator));
     private readonly ITokenUsageTracker? _tracker = tracker;
     private readonly ILogger<TokenBreakdownEstimator> _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<TokenBreakdownEstimator>.Instance;
+    private readonly ContextTokenTallyObserver? _tally = tally;
+
+    /// <summary>
+    /// 单个工具 schema 的估算结果缓存：工具目录在一次查询内不变，每次估算都重新序列化
+    /// 全部 schema 是纯重复工作。键含 name/description/schema 原文，schema 变更即失效。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (string Fingerprint, int Tokens)> _toolSchemaTokens =
+        new(StringComparer.Ordinal);
 
     /// <summary>
     /// 估算分场景 token 数。
     /// 当注入了 TokenUsageTracker 且校准系数有效时，估算值会乘以校准系数修正。
+    /// provider 注入分桶从 <see cref="ContextTokenTallyObserver"/> 取走（读取即消费，一次查询一次）。
     /// </summary>
     /// <param name="systemPrompt">系统提示词字符串。</param>
-    /// <param name="tools">工具列表（AIFunction，估算 JsonSchema + Name + Description）。</param>
-    /// <param name="messages">历史对话消息。</param>
+    /// <param name="tools">工具列表（AIFunction，估算 JsonSchema + Name + Description；`mcp__` 前缀单列）。</param>
+    /// <param name="messages">历史对话消息（持久转录）。</param>
     /// <param name="actualInputTokens">API 实际返回的 InputTokens（用于反算 Other）。</param>
     public TokenBreakdown Estimate(
         string? systemPrompt,
@@ -117,50 +122,69 @@ public sealed partial class TokenBreakdownEstimator(
     {
         var calibration = _tracker?.CalibrationFactor ?? 1.0;
 
+        // SystemPrompt 取 SystemPromptDetail 之和：整段再估一遍会因分段取整产生与细项不一致的偏差。
         var systemDetail = ParseSystemPromptSections(systemPrompt, calibration);
-        var systemTokens = EstimateText(systemPrompt) * calibration;
-        var toolTokens = EstimateTools(tools) * calibration;
+        var (productToolTokens, mcpToolTokens) = EstimateTools(tools, calibration);
         var messageTokens = EstimateMessages(messages) * calibration;
 
-        return TokenBreakdown.FromEstimates(systemTokens, toolTokens, messageTokens, actualInputTokens, systemDetail);
+        return TokenBreakdown.FromEstimates(
+            systemDetail?.Total ?? 0, productToolTokens, mcpToolTokens, messageTokens,
+            _tally?.Consume(), actualInputTokens, systemDetail);
     }
 
-    private int EstimateText(string? text)
-        => string.IsNullOrEmpty(text) ? 0 : _estimator.EstimateTokens(text);
-
     /// <summary>
-    /// 估算工具列表的 token 数。
+    /// 估算工具列表的 token 数，按 `mcp__` 命名前缀拆分产品工具与 MCP 工具
+    /// （命名规约见 McpToolNaming）。
     /// 每个 AIFunction 仅序列化 Name + Description + JsonSchema（API 层面实际发送给 LLM 的内容），
     /// 不包含运行时字段（Metadata、底层委托等），避免高估。
     /// </summary>
-    private int EstimateTools(IReadOnlyList<AIFunction>? tools)
+    private (double productTools, double mcpTools) EstimateTools(IReadOnlyList<AIFunction>? tools, double calibration)
     {
-        if (tools is null or { Count: 0 }) return 0;
+        if (tools is null or { Count: 0 }) return (0, 0);
 
-        var total = 0;
+        var product = 0;
+        var mcp = 0;
+        void Bucket(string name, int tokens)
+        {
+            if (name.StartsWith("mcp__", StringComparison.OrdinalIgnoreCase))
+                mcp += tokens;
+            else
+                product += tokens;
+        }
+
         foreach (var tool in tools)
         {
             try
             {
-                // 构造精简 DTO：只包含 LLM 实际看到的 schema 信息。
-                // 估算路径非 AOT 关键路径，使用反射式序列化即可。
-                var dto = new ToolSchemaDto(
-                    tool.Name,
-                    tool.Description,
-                    tool.JsonSchema);
-                var json = JsonSerializer.Serialize(dto);
-                total += _estimator.EstimateTokens(json);
+                Bucket(tool.Name, EstimateToolSchemaTokens(tool));
             }
             catch (Exception ex)
             {
                 // 序列化失败时用 name + description 兜底
                 _logger.LogDebug(ex, "Token estimate: tool schema serialize failed for {Tool}, falling back to name+description", tool.Name);
-                total += _estimator.EstimateTokens(tool.Name) +
-                         _estimator.EstimateTokens(tool.Description);
+                Bucket(tool.Name, _estimator.EstimateTokens(tool.Name) + _estimator.EstimateTokens(tool.Description));
             }
         }
 
-        return total;
+        return (product * calibration, mcp * calibration);
+    }
+
+    private int EstimateToolSchemaTokens(AIFunction tool)
+    {
+        var schemaText = tool.JsonSchema.GetRawText();
+        var fingerprint = $"{tool.Name}\u0000{tool.Description}\u0000{schemaText}";
+
+        if (_toolSchemaTokens.TryGetValue(tool.Name, out var cached)
+            && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return cached.Tokens;
+        }
+
+        // 构造精简 DTO：只包含 LLM 实际看到的 schema 信息。
+        var json = JsonSerializer.Serialize(new ToolSchemaDto(tool.Name, tool.Description, tool.JsonSchema));
+        var tokens = _estimator.EstimateTokens(json);
+        _toolSchemaTokens[tool.Name] = (fingerprint, tokens);
+        return tokens;
     }
 
     /// <summary>
@@ -247,7 +271,7 @@ public sealed partial class TokenBreakdownEstimator(
             var sectionEnd = i < matches.Count ? matches[i].Index : systemPrompt.Length;
             var sectionText = systemPrompt.AsSpan(sectionStart, sectionEnd - sectionStart);
 
-            var tokens = (int)Math.Round(_estimator.EstimateTokens(sectionText.ToString()) * calibration);
+            var tokens = (int)Math.Round(_estimator.EstimateTokens(sectionText) * calibration);
 
             if (i == 0)
             {

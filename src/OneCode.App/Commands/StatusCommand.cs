@@ -115,46 +115,30 @@ public sealed class StatusCommand(
         // tokenUsageTracker 可能为 null（如 SessionManager 内部降级路径），此时从 Conversation.TotalUsage 读取基本统计
         if (tokenUsageTracker is not null)
         {
-            var inputTokens = tokenUsageTracker.TotalInputTokens;
-            var outputTokens = tokenUsageTracker.TotalOutputTokens;
-            var cacheReadTokens = tokenUsageTracker.TotalCacheReadTokens;
-            var cacheWriteTokens = tokenUsageTracker.TotalCacheWriteTokens;
-            var queryCount = tokenUsageTracker.QueryCount;
-            var cacheHitRate = tokenUsageTracker.CacheHitRate;
-            var breakdown = tokenUsageTracker.LastBreakdown;
+            if (tokenUsageTracker.QueryCount > 0)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  LLM queries:     {tokenUsageTracker.QueryCount}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Input tokens:    {tokenUsageTracker.TotalInputTokens:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Output tokens:   {tokenUsageTracker.TotalOutputTokens:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache read:      {tokenUsageTracker.TotalCacheReadTokens:N0}  ({tokenUsageTracker.CacheHitRate:P1} hit rate)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache write:     {tokenUsageTracker.TotalCacheWriteTokens:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Total tokens:    {tokenUsageTracker.TotalAllTokens:N0}");
+            // 口径标注：stats 读 ledger 会话桶（API usage 原始口径、水合跨重启累计）。
+            // Total = Input + Output + CacheWrite——MEAI 契约下 Input 已含缓存读，不得再加一遍；
+            // window 子命令的占用口径是最近一次请求的实际输入；预算熔断另用 billable 折算（缓存读×0.1）。
+            sb.AppendLine("  Caliber:         raw API usage (ledger session bucket, input includes cache read)");
 
-            if (queryCount > 0)
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  LLM queries:     {queryCount}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Input tokens:    {inputTokens:N0}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Output tokens:   {outputTokens:N0}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache read:      {cacheReadTokens:N0}  ({cacheHitRate:P1} hit rate)");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Cache write:     {cacheWriteTokens:N0}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Total tokens:    {inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens:N0}");
-            // 口径标注：stats 读 ledger 会话桶（API usage 原始口径、水合跨重启累计），
-            // 与 window 子命令（原始 Input+Output）、预算熔断（billable 折算）三套口径互不相同。
-            sb.AppendLine("  Caliber:         raw API usage (ledger session bucket, persists across restarts)");
-
-            // 分场景 token 估算（来自 TokenBreakdownEstimator）
-            if (breakdown is not null)
+            if (tokenUsageTracker.LastBreakdown is { } breakdown)
             {
                 sb.AppendLine();
                 sb.AppendLine("  Token Breakdown (last query, estimated):");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    System prompt:  {breakdown.SystemPrompt:N0}");
-                // 系统提示词内部分场景（按 markdown 标题切分）
-                if (breakdown.SystemPromptDetail is { } detail)
-                {
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Template:      {detail.TemplateBody:N0}");
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Environment:   {detail.Environment:N0}");
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Project ctx:   {detail.ProjectContext:N0}");
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Memory:        {detail.Memory:N0}");
-                    if (detail.OtherSections > 0)
-                        sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Other sections:{detail.OtherSections:N0}");
-                }
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    Tools & skills: {breakdown.ToolsAndSkills:N0}");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    Messages:       {breakdown.Messages:N0}");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    Other context:  {breakdown.Other:N0}");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    ───────────────");
-                sb.AppendLine(CultureInfo.InvariantCulture, $"    Total:          {breakdown.TotalEstimated:N0}");
+                AppendBreakdown(sb, breakdown, includeSystemDetail: true);
+            }
+
+            if (tokenUsageTracker.CumulativeBreakdown is { } cumulative)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  Token Breakdown (cumulative, estimated):");
+                AppendBreakdown(sb, cumulative, includeSystemDetail: false);
             }
         }
         else
@@ -162,16 +146,48 @@ public sealed class StatusCommand(
             // 降级：仅从 Conversation.TotalUsage 读取基本统计，无 query count / cache hit / breakdown
             var usage = conv?.TotalUsage;
             var inputTokens = usage?.InputTokens ?? 0;
-            var outputTokens = usage?.OutputTokens ?? 0;
-            var cacheReadTokens = usage?.CacheReadTokens ?? 0;
-            var cacheWriteTokens = usage?.CacheWriteTokens ?? 0;
             sb.AppendLine(CultureInfo.InvariantCulture, $"  Input tokens:    {inputTokens:N0}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Output tokens:   {outputTokens:N0}");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  Total tokens:    {inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Output tokens:   {usage?.OutputTokens ?? 0:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture,
+                $"  Total tokens:    {inputTokens + (usage?.OutputTokens ?? 0) + (usage?.CacheWriteTokens ?? 0):N0}");
         }
 
         return CommandResult.Text(sb.ToString().TrimEnd());
     }
+
+    /// <summary>渲染一段分场景估算：system 细分仅最近查询段展示，累计段只给大项。</summary>
+    private static void AppendBreakdown(StringBuilder sb, TokenBreakdown breakdown, bool includeSystemDetail)
+    {
+        sb.AppendLine(CultureInfo.InvariantCulture, $"    System prompt:  {breakdown.SystemPrompt:N0}");
+        if (includeSystemDetail && breakdown.SystemPromptDetail is { } detail)
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Template:      {detail.TemplateBody:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Environment:   {detail.Environment:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Project ctx:   {detail.ProjectContext:N0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Memory:        {detail.Memory:N0}");
+            if (detail.OtherSections > 0)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"      ├ Other sections:{detail.OtherSections:N0}");
+        }
+
+        sb.AppendLine(CultureInfo.InvariantCulture,
+            $"    Tools:          {breakdown.Tools:N0} (product {breakdown.ProductTools:N0} | mcp {breakdown.McpTools:N0})");
+
+        // 消息级 provider 注入的逐贡献者分桶（skills / design 经 instructions 合并，归入 System prompt）
+        if (breakdown.ContextProviders.Count > 0)
+        {
+            sb.AppendLine("    Context providers:");
+            foreach (var (sourceId, tokens) in breakdown.ContextProviders.OrderByDescending(kv => kv.Value))
+                sb.AppendLine(CultureInfo.InvariantCulture, $"      {FriendlyProviderName(sourceId)}: {tokens:N0}");
+        }
+
+        sb.AppendLine(CultureInfo.InvariantCulture, $"    Messages:       {breakdown.Messages:N0}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"    Other context:  {breakdown.Other:N0}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"    ───────────────");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"    Total:          {breakdown.TotalEstimated:N0}");
+    }
+
+    /// <summary>sourceId（provider 类型全名，嵌套类型以 '+' 分隔）→ 末段短名。</summary>
+    private static string FriendlyProviderName(string sourceId) => sourceId.Split('.', '+')[^1];
 
     private CommandResult ShowWindow()
     {
@@ -184,19 +200,24 @@ public sealed class StatusCommand(
         // 与 /status stats 和 AutoCompactService 使用同一数据源。
         var maxTokens = TokenBudget.GetMaxContextTokens(model, modelManager);
 
-        var usedTokens = (usage?.InputTokens ?? 0) + (usage?.OutputTokens ?? 0);
-        var pct = maxTokens > 0 ? (double)usedTokens / maxTokens : 0;
-        var barLen = 30;
-        var filled = (int)(pct * barLen);
-        var bar = new string('█', Math.Min(filled, barLen)) + new string('░', Math.Max(barLen - filled, 0));
+        // 占用口径：最近一次模型调用的实际输入（tracker 由 QueryStreamEngine 每次查询后回填）。
+        // 会话累计消费（input+output）随轮数线性增长，不能当「窗口占用」——长会话必然爆表。
+        var occupancy = tokenUsageTracker?.LastTurnInputTokens ?? 0;
+        var pct = maxTokens > 0 ? (double)occupancy / maxTokens : 0;
+        const int barLen = 30;
+        var filled = Math.Min((int)(pct * barLen), barLen);
+        var bar = new string('█', filled) + new string('░', barLen - filled);
+
+        var cumulative = (usage?.InputTokens ?? 0) + (usage?.OutputTokens ?? 0);
 
         return CommandResult.Text($"""
             Context Window:
-              Model:     {model}
-              Used:      {usedTokens:N0} / {maxTokens:N0} tokens ({pct:P0})
+              Model:      {model}
+              Occupancy:  {occupancy:N0} / {maxTokens:N0} tokens ({pct:P0})
               [{bar}]
-              Messages:  {conv?.Messages.Count ?? 0}
-              Caliber:   raw input+output of the current conversation (not billable-discounted)
+              Messages:   {conv?.Messages.Count ?? 0}
+              Cumulative: {cumulative:N0} tokens billed across all turns (raw input+output)
+              Caliber:    occupancy = last request actual input; AutoCompact 70% warning uses transcript estimate (TokenBudget.Estimate)
             """);
     }
 }
