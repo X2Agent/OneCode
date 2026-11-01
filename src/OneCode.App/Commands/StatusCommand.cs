@@ -208,16 +208,20 @@ public sealed class StatusCommand(
         var filled = Math.Min((int)(pct * barLen), barLen);
         var bar = new string('█', filled) + new string('░', barLen - filled);
 
+        // 百分号按数值显式拼出，不走 `P` 格式符：`P` 的数字与符号间距由区域的
+        // PercentPositivePattern 决定（Windows 不变区域为 "39%"，Linux/ICU 下同一写法是 "39 %"），
+        // 同一条状态输出不应随宿主区域变形。
+        var pctText = (pct * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
         var cumulative = (usage?.InputTokens ?? 0) + (usage?.OutputTokens ?? 0);
 
-        return CommandResult.Text($"""
+        return CommandResult.Text(string.Create(CultureInfo.InvariantCulture, $"""
             Context Window:
               Model:      {model}
-              Occupancy:  {occupancy:N0} / {maxTokens:N0} tokens ({pct:P0})
+              Occupancy:  {occupancy:N0} / {maxTokens:N0} tokens ({pctText})
               [{bar}]
               Messages:   {conv?.Messages.Count ?? 0}
               Cumulative: {cumulative:N0} tokens billed across all turns (raw input+output)
               Caliber:    occupancy = last request actual input; AutoCompact 70% warning uses transcript estimate (TokenBudget.Estimate)
-            """);
+            """));
     }
 }

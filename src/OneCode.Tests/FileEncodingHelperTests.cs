@@ -15,15 +15,23 @@ public sealed class FileEncodingHelperTests : IDisposable
         await File.WriteAllTextAsync(path, "before", TestContext.Current.CancellationToken);
         var creationTime = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
         File.SetCreationTimeUtc(path, creationTime);
-        var attributes = File.GetAttributes(path) | FileAttributes.Hidden;
-        File.SetAttributes(path, attributes);
+        // Hidden 语义按平台不同：Unix 没有文件隐藏位，SetAttributes(Hidden) 实际不生效，
+        // 断言「写回后属性不变」在 Linux 上会永远失败。只在属性真正可设置时才纳入断言。
+        var requestedAttributes = File.GetAttributes(path) | FileAttributes.Hidden;
+        File.SetAttributes(path, requestedAttributes);
+        var effectiveAttributes = File.GetAttributes(path);
 
         await FileEncodingHelper.WriteWithEncodingAsync(
             path, "after", new UTF8Encoding(false), TestContext.Current.CancellationToken);
 
         (await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken)).Should().Be("after");
+        File.GetAttributes(path).Should().Be(effectiveAttributes, "写回必须保留平台实际生效的文件属性");
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        // 创建时间只有 Windows 才有稳定语义：Unix 的 birth time 由文件系统决定且不可任意改写。
         File.GetCreationTimeUtc(path).Should().Be(creationTime);
-        File.GetAttributes(path).Should().Be(attributes);
+        effectiveAttributes.Should().HaveFlag(FileAttributes.Hidden, "Windows 上 Hidden 位必须可设置");
     }
 
     [Fact]

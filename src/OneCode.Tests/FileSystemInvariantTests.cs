@@ -11,7 +11,10 @@ namespace OneCode.Tests;
 /// </summary>
 public sealed class FileSystemInvariantTests
 {
-    private const string WorkingDir = @"C:\work\repo";
+    // 必须是当前平台的绝对路径：Path.GetFullPath(relative, basePath) 在 basePath 不是本平台
+    // 根格式时抛 ArgumentException（Windows 风格 `C:\...` 在 Linux 上正属此种），
+    // 会让所有相对路径用例走到「非法路径」的拒绝分支，测不到真正的路径判定。
+    private static readonly string WorkingDir = Path.Combine(Path.GetTempPath(), "onecode-invariant-probe");
 
     private static Task<InvariantCheckResult> CheckAsync(string toolName, params string[] paths)
     {
