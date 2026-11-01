@@ -48,6 +48,10 @@ $SmokeScript = Join-Path $PSScriptRoot "smoke-test-release.ps1"
 $ContractScript = Join-Path $PSScriptRoot "test-binary-contract.ps1"
 $ServerScript = Join-Path $PSScriptRoot "local-release-server.ps1"
 $InstallerScript = Join-Path $PSScriptRoot "install.ps1"
+$InjectionLibrary = Join-Path $PSScriptRoot "lib/installer-injection.ps1"
+
+# 注入实现与真实 Release 验证共用：锚点唯一性与还原比对规则只有一份。
+. $InjectionLibrary
 
 $PwshPath = Join-Path $PSHOME "pwsh.exe"
 if (-not (Test-Path -LiteralPath $PwshPath -PathType Leaf)) {
@@ -227,80 +231,6 @@ function Stop-ReleaseServers {
     }
 }
 
-# ── 配置注入 ──────────────────────────────────────────────────────
-function New-InjectedInstaller {
-    param(
-        [Parameter(Mandatory = $true)][string]$SourceText,
-        [Parameter(Mandatory = $true)][string]$TargetPath,
-        [Parameter(Mandatory = $true)][int]$Port,
-        [Parameter(Mandatory = $true)][string]$TargetInstallDir
-    )
-
-    if ($TargetInstallDir -like '*$*') {
-        throw "安装目录不能包含 `$ 字符（会破坏注入副本的字符串求值）: $TargetInstallDir"
-    }
-
-    # 锚点为 install.ps1 配置块的字面量整行：命中数必须恰为 1，否则说明配置块结构变了。
-    $replacements = @(
-        [pscustomobject]@{ Old = '$GitHubBase     = "https://github.com/$RepoOwner/$RepoName"'; New = ('$GitHubBase     = "http://127.0.0.1:{0}/X2Agent/OneCode"' -f $Port) }
-        [pscustomobject]@{ Old = '$ApiBase        = "https://api.github.com"';                   New = ('$ApiBase        = "http://127.0.0.1:{0}"' -f $Port) }
-        [pscustomobject]@{ Old = '$InstallDir     = Join-Path $env:USERPROFILE ".onecode\bin"';  New = ('$InstallDir     = "{0}"' -f $TargetInstallDir) }
-        [pscustomobject]@{ Old = '$WritePathToEnv = $true';                                      New = '$WritePathToEnv = $false' }
-    )
-
-    $edits = foreach ($replacement in $replacements) {
-        $index = $SourceText.IndexOf($replacement.Old, [System.StringComparison]::Ordinal)
-        if ($index -lt 0) {
-            throw "配置块锚点漂移：未找到 [$($replacement.Old)]"
-        }
-        if ($SourceText.IndexOf($replacement.Old, $index + 1, [System.StringComparison]::Ordinal) -ge 0) {
-            throw "配置块锚点不唯一：[$($replacement.Old)] 出现多次"
-        }
-        [pscustomobject]@{ Index = $index; Old = $replacement.Old; New = $replacement.New }
-    }
-
-    # 从头拼接重建：替换值长度与锚点不同，不能复用源文本偏移做原地改写。
-    $builder = [System.Text.StringBuilder]::new()
-    $cursor = 0
-    foreach ($edit in ($edits | Sort-Object Index)) {
-        [void]$builder.Append($SourceText.Substring($cursor, $edit.Index - $cursor))
-        [void]$builder.Append($edit.New)
-        $cursor = $edit.Index + $edit.Old.Length
-    }
-    [void]$builder.Append($SourceText.Substring($cursor))
-    $injected = $builder.ToString()
-
-    # 还原比对：逐条把注入值退回后必须与源文件逐字符相等，证明没有波及其他逻辑。
-    $restored = $injected
-    foreach ($edit in $edits) {
-        $index = $restored.IndexOf($edit.New, [System.StringComparison]::Ordinal)
-        if ($index -lt 0 -or $restored.IndexOf($edit.New, $index + 1, [System.StringComparison]::Ordinal) -ge 0) {
-            throw "注入值不唯一，无法还原比对: [$($edit.New)]"
-        }
-        $restored = $restored.Remove($index, $edit.New.Length).Insert($index, $edit.Old)
-    }
-    if (-not [string]::Equals($restored, $SourceText, [System.StringComparison]::Ordinal)) {
-        throw "注入副本还原后与源文件不一致"
-    }
-
-    Set-Content -LiteralPath $TargetPath -Value $injected -Encoding utf8
-    return $replacements.Count
-}
-
-# ── 环境指纹 ──────────────────────────────────────────────────────
-function Get-UserPathHash {
-    $value = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ([string]::IsNullOrEmpty($value)) { return "" }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($value))
-    }
-    finally {
-        $sha.Dispose()
-    }
-    return ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
-}
-
 # ── 主流程 ────────────────────────────────────────────────────────
 $pathHashBefore = Get-UserPathHash
 $globalStep = 0
@@ -332,7 +262,7 @@ try {
     if (-not (Test-Path -LiteralPath $ProjectFile -PathType Leaf)) {
         throw "找不到 TUI 项目: $ProjectFile"
     }
-    foreach ($required in @($SmokeScript, $ContractScript, $ServerScript, $InstallerScript)) {
+    foreach ($required in @($SmokeScript, $ContractScript, $ServerScript, $InstallerScript, $InjectionLibrary)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "找不到依赖脚本: $required"
         }
@@ -426,7 +356,7 @@ try {
 
     $sourceText = Get-Content -LiteralPath $InstallerScript -Raw
     $injectedPath = Join-Path $PayloadDir "install-injected.ps1"
-    $replacementCount = New-InjectedInstaller -SourceText $sourceText -TargetPath $injectedPath `
+    $replacementCount = New-LocalInstaller -SourceText $sourceText -TargetPath $injectedPath `
         -Port $server.Port -TargetInstallDir $InstallDir
     Write-Ok "已替换 $replacementCount 处配置，还原比对通过"
     Add-Step "配置注入" $stopwatch.Elapsed.TotalSeconds
@@ -634,7 +564,7 @@ try {
     $stopwatch.Restart()
 
     $tamperedInjectedPath = Join-Path $PayloadDir "install-tampered.ps1"
-    $null = New-InjectedInstaller -SourceText $sourceText -TargetPath $tamperedInjectedPath `
+    $null = New-LocalInstaller -SourceText $sourceText -TargetPath $tamperedInjectedPath `
         -Port $server.Port -TargetInstallDir $TamperedInstallDir
 
     $TamperPath = "$assetPath.sha256"
@@ -665,7 +595,7 @@ try {
 
     $fallbackServer = Start-ReleaseServer -Root $ReleaseDir -Tag $tag -FailApi
     $fallbackInjectedPath = Join-Path $PayloadDir "install-fallback.ps1"
-    $null = New-InjectedInstaller -SourceText $sourceText -TargetPath $fallbackInjectedPath `
+    $null = New-LocalInstaller -SourceText $sourceText -TargetPath $fallbackInjectedPath `
         -Port $fallbackServer.Port -TargetInstallDir $FallbackInstallDir
 
     $fallback = Invoke-PwshScript -ScriptPath $fallbackInjectedPath -LogPath (Join-Path $RunDir "install-fallback.log")
