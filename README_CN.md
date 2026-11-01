@@ -179,6 +179,25 @@ cd OneCode
 
 默认发布到仓库根目录 `artifacts/Publish/<RID>/`。正式 Release 使用 self-contained + single-file；推送 `v<major>.<minor>.<patch>` Tag 后，GitHub Actions 会执行 Build → Test → 跨平台 Publish → 冒烟测试 → ZIP/TAR.GZ 打包 → SHA256 → GitHub Release。
 
+### 验证发布产物
+
+发布链路有两级验证，都可本地复现：
+
+```powershell
+# 全链路（不依赖 GitHub）：发布 → 冒烟 → 打包 → SHA256 → 本地 Release 源 → 安装 → 契约 → 篡改反证
+./scripts/local-release-e2e.ps1 -Version 1.1.0-local
+
+# 真实 Release 的下载与安装（对已发布的 tag）
+./scripts/verify-github-release.ps1 -Tag v1.1.0
+
+# 复用上次下载的产物做离线回归
+./scripts/verify-github-release.ps1 -Tag v1.1.0 -SkipDownload
+```
+
+`verify-github-release.ps1` 会校验资产齐全、独立重算归档 SHA256、检查解包后的运行时资源、对发布产物与安装出的 `onecode.exe` 各跑一遍启动契约，最后确认用户 PATH 未被改动。完整性口径是**每个归档一份 SHA256**：它能发现下载损坏与传输篡改，但不防发布源本身被替换——当前没有签名、逐文件清单与 SBOM。
+
+预发布 tag（如 `v1.1.0-rc.1`）按设计不占 `/releases/latest`，一键安装会取不到它，因此验证预发布版本需显式传入 `-Tag`。
+
 ### 快速开始
 
 ```bash
