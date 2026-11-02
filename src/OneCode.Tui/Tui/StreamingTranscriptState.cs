@@ -11,16 +11,19 @@ internal sealed class StreamingTranscriptState
 {
     public StringBuilder TextBuffer { get; } = new();
     public StringBuilder ThinkingBuffer { get; } = new();
-    public List<string> WrappedTextLines { get; } = [];
 
     /// <summary>
-    /// 与 <see cref="WrappedTextLines"/> 一一对应的渲染行：稳定前缀跨帧复用同一批
-    /// <see cref="FormattedLine"/> 实例，只有尾段随 token 重算，避免每帧重物化整段回复。
+    /// 已闭合 markdown 块的渲染结果。流式预览与最终提交共用同一个渲染器，
+    /// 因此用户看到的形态在流结束瞬间不再跳变。
     /// </summary>
-    public List<FormattedLine> WrappedFormattedLines { get; } = [];
+    public List<FormattedLine> CommittedBlocks { get; } = [];
 
-    /// <summary><see cref="WrappedTextLines"/> 前缀中已完成段落占用的行数：这些行跨帧稳定，只追加不重算。</summary>
-    public int WrappedStableCount { get; set; }
+    /// <summary>已渲染进 <see cref="CommittedBlocks"/> 的源偏移（下一个待切块起点）。</summary>
+    public int CommittedBufferEnd { get; set; }
+
+    /// <summary>生成 <see cref="CommittedBlocks"/> 时的宽度：宽度变化即整体失效。</summary>
+    public int BlocksWidth { get; set; }
+
     public List<FormattedLine> StatusLines { get; } = [];
     public StreamingToolTracker ToolTracker { get; } = new();
 
@@ -29,11 +32,7 @@ internal sealed class StreamingTranscriptState
     public bool IsStreaming { get; set; }
     public bool HasThinking { get; set; }
     public bool HasReplyStarted { get; set; }
-    public int PreviewLineCount { get; set; }
     public int TrailingModeBannerLineCount { get; set; }
-    public int WrappedCompletedEnd { get; set; }
-    public int WrappedBufferLength { get; set; }
-    public int WrappedWidth { get; set; }
     public int BuildRunStatusLineIndex { get; set; } = -1;
     public int BuildRunStatusLineCount { get; set; }
     public int ModeProgressLineIndex { get; set; } = -1;
@@ -49,13 +48,11 @@ internal sealed class StreamingTranscriptState
         IsStreaming = true;
         Assistant = assistant;
         PendingLines = [];
-        PreviewLineCount = 0;
         ResetTurnState(clearSeenTools: true);
     }
 
     public void ResetForNextTurn()
     {
-        PreviewLineCount = 0;
         ResetTurnState(clearSeenTools: false);
         IsStreaming = true;
     }
@@ -63,7 +60,6 @@ internal sealed class StreamingTranscriptState
     public void CompleteStream()
     {
         IsStreaming = false;
-        PreviewLineCount = 0;
         PendingLines = null;
         StatusLines.Clear();
         BuildRunStatusLineIndex = -1;
@@ -86,7 +82,6 @@ internal sealed class StreamingTranscriptState
         IsStreaming = false;
         Assistant = null;
         PendingLines = null;
-        PreviewLineCount = 0;
         TrailingModeBannerLineCount = 0;
         RebuildTimer = null;
         RebuildPending = false;
@@ -101,12 +96,9 @@ internal sealed class StreamingTranscriptState
         BuildRunStatusLineCount = 0;
         ModeProgressLineIndex = -1;
         ModeProgressLineCount = 0;
-        WrappedTextLines.Clear();
-        WrappedFormattedLines.Clear();
-        WrappedStableCount = 0;
-        WrappedCompletedEnd = 0;
-        WrappedBufferLength = 0;
-        WrappedWidth = 0;
+        CommittedBlocks.Clear();
+        CommittedBufferEnd = 0;
+        BlocksWidth = 0;
         HasThinking = false;
         HasReplyStarted = false;
         ThinkingSummaryLineIndex = -1;

@@ -654,7 +654,8 @@ public sealed class QueryStreamEngine : IConversationRunner, ICacheSafeParamsPro
             outcome.Reason,
             request.ConversationId,
             outcome.TransactionRolledBack,
-            outcome.ValidationFailureSummary);
+            outcome.ValidationFailureSummary,
+            session.LastTurnInputTokens);
 
         UpdateCacheSafeParams(request, request.LocalTools);
     }

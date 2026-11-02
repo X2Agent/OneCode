@@ -138,7 +138,7 @@ public sealed class MessageFlowRenderer
                 {
                     case TextBlock tb when !string.IsNullOrEmpty(tb.Text):
                         FlushRun();
-                        RenderMarkdownBlock(lines, tb.Text);
+                        RenderMarkdownBlock(lines, tb.Text, CurrentWidth);
                         break;
                     case ThinkingBlock thb:
                         FlushRun();
@@ -259,7 +259,7 @@ public sealed class MessageFlowRenderer
                     // Route assistant text through the Markdown renderer so
                     // code blocks, headings, lists, and tables render properly.
                     // 回放路径与流式路径同样剥掉回复起点的模型前导缩进。
-                    RenderMarkdownBlock(lines, MessageFlowRenderer.TrimReplyLeadingWhitespace(tb.Text));
+                    RenderMarkdownBlock(lines, MessageFlowRenderer.TrimReplyLeadingWhitespace(tb.Text), CurrentWidth);
                     break;
                 case ToolUseBlock tub:
                     lines.Add(MakeToolLine(tub.Name, null, null));
@@ -274,24 +274,6 @@ public sealed class MessageFlowRenderer
     }
 
     /// <summary>
-    /// Appends assistant text content to the given line list, using
-    /// the markdown renderer so code blocks, headings, lists, and tables
-    /// render properly.
-    /// 
-    /// This is the public entry point used by <see cref="ChatTranscriptView"/>
-    /// to commit the final rendered text after streaming completes, ensuring
-    /// markdown syntax is rendered properly rather than left as raw
-    /// word-wrapped text.
-    /// </summary>
-    public void AppendAssistantText(List<FormattedLine> lines, string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        RenderMarkdownBlock(lines, text);
-    }
-
-    /// <summary>
     /// 去掉一段回复文本开头的空格/制表符。部分模型在 reasoning/text 交错的
     /// 流式输出里会给文本段带上大段前导缩进，原样渲染会让整段看起来居中。
     /// 只处理回复开头——正文与代码块内部的缩进是有语义的，不动。
@@ -302,12 +284,25 @@ public sealed class MessageFlowRenderer
     }
 
     /// <summary>
+    /// 渲染一段助手回复文本为渲染行（含 Markdig 解析与角色配色）。
+    /// 流式预览与提交共用同一入口——两者形态必须一致，否则流结束瞬间整段会跳变。
+    /// </summary>
+    public static List<FormattedLine> RenderMarkdownLines(string text, int width)
+    {
+        List<FormattedLine> lines = [];
+        if (string.IsNullOrWhiteSpace(text))
+            return lines;
+
+        RenderMarkdownBlock(lines, text, width);
+        return lines;
+    }
+    /// <summary>
     /// Renders a block of markdown text into the message's FormattedLine list.
     /// Falls back to plain wrapped text if the markdown is trivial (single
     /// line, no markdown syntax) to avoid unnecessary overhead and preserve
     /// the original look for short replies.
     /// </summary>
-    private void RenderMarkdownBlock(List<FormattedLine> lines, string text)
+    private static void RenderMarkdownBlock(List<FormattedLine> lines, string text, int width)
     {
         // Fast path: single-line, no markdown punctuation → wrap as before.
         // This keeps short assistant replies rendering identically to the
@@ -316,14 +311,13 @@ public sealed class MessageFlowRenderer
             || text.Contains("\n\n");
         if (!hasMarkdown)
         {
-            RenderWrapped(lines, text, TuiPalette.AssistantMessage);
+            RenderWrapped(lines, text, width);
             return;
         }
 
         try
         {
-            var convLines = MarkdownRenderer.Render(text, CurrentWidth);
-            foreach (var cl in convLines)
+            foreach (var cl in MarkdownRenderer.Render(text, width))
             {
                 var color = cl.Role switch
                 {
@@ -335,8 +329,7 @@ public sealed class MessageFlowRenderer
                     _ => TuiPalette.AssistantMessage,
                 };
 
-                // If the ConvLine carries multi-color segments (e.g. code block
-                // header with language label + copy icon), use FromSegmentsWithTag.
+                // 带分段（代码块表头等）时保留多色，纯色行走 Plain。
                 if (cl.Segments is { Count: > 0 } segments)
                 {
                     if (cl.Tag is not null)
@@ -358,7 +351,7 @@ public sealed class MessageFlowRenderer
         {
             // If Markdig chokes on malformed markdown, fall back to plain text
             // so the message still renders.
-            RenderWrapped(lines, text, TuiPalette.AssistantMessage);
+            RenderWrapped(lines, text, width);
         }
     }
 
@@ -523,23 +516,21 @@ public sealed class MessageFlowRenderer
         return FormattedLine.FromSegmentsWithTag(segments.ToArray(), tag);
     }
 
-    private void RenderWrapped(List<FormattedLine> lines, string text, Color color)
+    private static void RenderWrapped(List<FormattedLine> lines, string text, int width)
     {
-        // Pass the raw width to WordWrapByWidth — it defaults to 40 when
-        // maxWidth <= 0 (e.g., in test contexts where Viewport.Width is 0).
-        // This keeps the committed-text path consistent with the streaming
-        // preview path, which also relies on WordWrapByWidth's default.
-        var availableWidth = CurrentWidth - ContentIndent;
+        // WordWrapByWidth 在 maxWidth <= 0 时回落到 40（测试里视口宽度为 0），
+        // 因此这里不需要另行兜底。
+        var availableWidth = width - ContentIndent;
         var wrapped = WordWrap(text, availableWidth);
 
         foreach (var word in wrapped)
         {
             if (word == "\n")
             {
-                lines.Add(FormattedLine.Plain("", color));
+                lines.Add(FormattedLine.Plain("", TuiPalette.AssistantMessage));
                 continue;
             }
-            lines.Add(FormattedLine.Plain($"{Indent}{word}", color));
+            lines.Add(FormattedLine.Plain($"{Indent}{word}", TuiPalette.AssistantMessage));
         }
     }
 

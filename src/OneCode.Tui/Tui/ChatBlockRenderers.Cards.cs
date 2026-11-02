@@ -175,16 +175,22 @@ public static partial class ChatBlockRenderers
         if (!string.IsNullOrWhiteSpace(markdown))
         {
             list.Add(FormattedLine.Plain("  完整计划", TuiPalette.ModePlanFg));
-            foreach (var line in MarkdownRenderer.Render(markdown, Math.Max(20, viewWidth - 2)))
+            // 缩进 2 列由本层补齐，所以折行宽度先扣掉它，否则每行都会被绘制层裁掉尾部。
+            foreach (var line in MarkdownRenderer.Render(markdown, Math.Max(20, viewWidth - 4)))
             {
                 var color = line.Role switch
                 {
                     LineRole.Error => TuiPalette.Error,
                     LineRole.DiffAdded => TuiPalette.DiffAdded,
                     LineRole.DiffRemoved => TuiPalette.DiffRemoved,
+                    LineRole.DiffHunk => TuiPalette.FgMuted,
                     _ => TuiPalette.FgSecondary,
                 };
-                list.Add(FormattedLine.Plain("  " + line.Text, color));
+
+                // 代码块的 gutter、diff 行的分色都在 Segments 里：退化成 Plain 会连缩进一起丢。
+                list.Add(line.Segments is { Count: > 0 } segments
+                    ? FormattedLine.FromSegments([new LineSegment("  ", TuiPalette.BgPrimary), .. segments])
+                    : FormattedLine.Plain("  " + line.Text, color));
             }
             list.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
             list.Add(FormattedLine.Plain("  执行步骤", TuiPalette.ModePlanFg));

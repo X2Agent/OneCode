@@ -67,6 +67,11 @@ public sealed record BuildRunStateEvent(
 public sealed record BuildRunCompletedEvent(OneCode.Core.Build.BuildRunResult Result) : QueryEvent;
 
 /// <summary>查询完成 — 含 token 统计和终止原因。</summary>
+/// <remarks>
+/// <see cref="Usage"/> 是整个 run 的累计值（含每轮工具调用重复发送的完整输入），
+/// 不能当作上下文窗口占用率——20 轮工具调用就会轻易超过窗口大小。
+/// 上下文占用看 <see cref="LastTurnInputTokens"/>：最后一次模型调用的实际输入快照。
+/// </remarks>
 public sealed record DoneEvent(
     string? FullText,
     TokenUsage? Usage,
@@ -74,7 +79,8 @@ public sealed record DoneEvent(
     OneCode.Core.Workflows.RunTerminalReason TerminalReason,
     SessionId? SessionId = null,
     bool TransactionRolledBack = false,
-    string? ValidationFailureSummary = null) : QueryEvent;
+    string? ValidationFailureSummary = null,
+    int LastTurnInputTokens = 0) : QueryEvent;
 
 /// <summary>轮次开始 — 每轮 API 查询开始前触发。</summary>
 public sealed record TurnStartedEvent(int TurnNumber) : QueryEvent;

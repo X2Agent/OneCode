@@ -127,18 +127,18 @@ public sealed class TranscriptWidthAdaptiveTests
     }
 
     [Fact]
-    public void Markdown_FencedCodeOverWideLine_WrapsWithinBoxWidth()
+    public void Markdown_FencedCodeOverWideLine_WrapsWithinGutterWidth()
     {
-        // 旧实现超宽代码行不换行，右侧边框被推出视口、代码尾部不可见。
+        // 超宽代码行必须换行，否则尾部被绘制层裁掉、内容不可见。
         var code = new string('x', 100);
         var lines = MarkdownRenderer.Render($"```csharp\n{code}\n```", viewWidth: 40);
 
         lines.Select(l => TextWidthHelper.GetDisplayWidth(l.Text))
             .Should().OnlyContain(w => w <= 40);
-        // 代码内容逐字保留（硬换行不丢字符），且每行代码都有右边框。
+        // 代码内容逐字保留（硬换行不丢字符），且每行代码都带 gutter。
         string.Concat(lines.Select(l => l.Text)).Count(ch => ch == 'x').Should().Be(100);
         lines.Where(l => l.Text.Contains('x'))
-            .Should().OnlyContain(l => l.Text.TrimEnd().EndsWith("│"));
+            .Should().OnlyContain(l => l.Text.TrimStart().StartsWith("│"));
     }
 
     [Fact]

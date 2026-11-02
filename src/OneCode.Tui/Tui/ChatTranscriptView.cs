@@ -232,9 +232,9 @@ public sealed partial class ChatTranscriptView : View
     /// </summary>
     public void UpdateModeBanner(IReadOnlyList<FormattedLine> bannerLines)
     {
+        // 预览行数只有一个真相源（视图区间）。历史实现另有 _stream.PreviewLineCount，
+        // 两者不同步时这里按错误行数 InsertBeforeLast，会在预览里插出孤儿行。
         var previewCount = _messageView.StreamingPreviewLineCount;
-        if (previewCount == 0)
-            previewCount = _stream.PreviewLineCount;
         if (_stream.IsStreaming && previewCount > 0)
         {
             if (_stream.TrailingModeBannerLineCount > 0)
@@ -342,9 +342,6 @@ public sealed partial class ChatTranscriptView : View
         }
 
         _messageView.RerenderAll(() => BuildCommittedLinesAt(width), previewLines);
-
-        if (_stream.IsStreaming)
-            _stream.PreviewLineCount = _messageView.StreamingPreviewLineCount;
     }
 
     private IReadOnlyList<FormattedLine> BuildCommittedLinesAt(int width)

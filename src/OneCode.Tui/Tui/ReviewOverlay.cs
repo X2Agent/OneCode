@@ -44,7 +44,9 @@ public sealed class ReviewOverlay : CenteredOverlay
         {
             X = TuiSpacing.OverlayContentX,
             Y = TuiSpacing.OverlayContentY,
-            Width = PreferredWidth - 6,
+            // 宽度必须相对实际尺寸求解：按 PreferredWidth 写死时，宿主把浮层钳窄后
+            // 标签仍按 80 列铺开，把右侧外框竖线整段盖掉。
+            Width = Dim.Fill(TuiSpacing.OverlayContentX),
             Height = 1,
             Text = _files.Count > 0 ? $"变更文件 ({_files.Count})" : "变更文件",
             CanFocus = false,

@@ -64,13 +64,13 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
                 key.Handled = true;
         };
 
-        _newButton = CreateButton($"{TuiGlyphs.Pending} _新会话", Pos.AnchorEnd(28));
+        _newButton = TuiButtons.Create($"{TuiGlyphs.Pending} _新会话");
         _newButton.Accepting += (_, _) => RequestClose(OverlayCloseReason.Cancelled);
 
-        _resumeButton = CreateButton($"{TuiGlyphs.Complete} _恢复", Pos.AnchorEnd(14));
+        _resumeButton = TuiButtons.Create($"{TuiGlyphs.Complete} _恢复");
         _resumeButton.Accepting += (_, _) => CompleteWithSelected();
 
-        Add(label, _listView, _newButton, _resumeButton);
+        Add(label, _listView, TuiButtons.CreateRightAlignedRow(_newButton, _resumeButton));
     }
 
     protected override string? GetDismissedResult(OverlayCloseReason reason) => null;
@@ -152,18 +152,6 @@ public sealed class ResumeChooserOverlay : ResultOverlay<string?>
         var index = _listView.SelectedItem ?? -1;
         if (index >= 0 && index < _entries.Count)
             Complete(_entries[index].Id);
-    }
-
-    private static Button CreateButton(string text, Pos x)
-    {
-        var button = new Button
-        {
-            Text = text,
-            X = x,
-            Y = Pos.AnchorEnd(TuiSpacing.Sm),
-        };
-        button.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
-        return button;
     }
 }
 

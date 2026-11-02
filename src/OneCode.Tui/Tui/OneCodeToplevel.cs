@@ -341,6 +341,8 @@ public sealed partial class OneCodeToplevel : Window
     {
         ClearConversationView();
         _shell.Transcript.LoadConversation(conversation);
+        // 恢复的会话没有「上一轮实际输入」记录，占用率按未知处理（0）；会话累计
+        // TotalUsage 是跨轮账单，拿它当占用率会让恢复后立刻显示虚高的百分比。
         ApplyRuntimeModel(conversation.Model, currentContextTokens: 0);
         _shell.ModeController.Mode = conversation.Metadata.TryGetValue("mode", out var rawMode)
             && WorkingModeController.TryParseMode(rawMode, out var restoredMode)
@@ -362,6 +364,7 @@ public sealed partial class OneCodeToplevel : Window
         _outputTokens = 0;
         _cacheReadTokens = 0;
         _cacheWriteTokens = 0;
+        _lastRoundInputTokens = 0;
         _turnNumber = 0;
         _shell.SessionContextBar.SetTokens(0, 0);
         _shell.SessionContextBar.SetTurn(0);

@@ -459,7 +459,7 @@ public sealed partial class ChatTranscriptView
     {
         _logger.LogDebug(
             "[AddFileChange] streaming={Streaming}, statusLines={StatusLines}, lineCountInView={LineCountInView}, file={File}, +{Added}/-{Removed}, agent={Agent}",
-            _stream.IsStreaming, _stream.StatusLines.Count, _stream.PreviewLineCount, fileName, addedLines.Count, removedLines.Count, agentName);
+            _stream.IsStreaming, _stream.StatusLines.Count, _messageView.StreamingPreviewLineCount, fileName, addedLines.Count, removedLines.Count, agentName);
 
         var cappedAdded = TranscriptTextLimits.CapLines(addedLines).Lines;
         var cappedRemoved = TranscriptTextLimits.CapLines(removedLines).Lines;

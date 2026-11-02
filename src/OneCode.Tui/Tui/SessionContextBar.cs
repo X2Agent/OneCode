@@ -257,56 +257,84 @@ public sealed class SessionContextBar : View
     /// 构建右侧消耗指标的分段列表（轮次 · token · 上下文进度条）。
     /// 各段之间用 " · " 分隔，整体右对齐渲染。
     /// </summary>
+    /// <remarks>
+    /// 按<b>优先级</b>组装：上下文进度条 &gt; token 用量 &gt; 轮次。装不下时从最低优先级
+    /// 整组丢弃，而不是让 Terminal.Gui 裁掉右侧——否则进度条会顶出视口，
+    /// 用户看到的正是「条满屏、百分比不见」。
+    /// </remarks>
     private List<(string Text, Color Color)> BuildRightSegments(int viewportWidth)
     {
-        List<(string Text, Color Color)> segs = [];
+        List<List<(string Text, Color Color)>> groups = [];
 
-        // 轮次 (if > 0, hidden on very narrow terminals)
-        if (_turnNumber > 0 && viewportWidth >= 60)
-        {
-            if (segs.Count > 0) segs.Add((" · ", TuiPalette.FgMuted));
-            segs.Add(($"轮次 {_turnNumber}", TuiPalette.FgSecondary));
-        }
+        if (_turnNumber > 0)
+            groups.Add([($"轮次 {_turnNumber}", TuiPalette.FgSecondary)]);
 
-        // Token usage (if any, hidden on narrow terminals)
         if (_inputTokens > 0 || _outputTokens > 0)
         {
-            if (viewportWidth >= 70)
-            {
-                if (segs.Count > 0) segs.Add((" · ", TuiPalette.FgMuted));
-                var tokenStr = $"{FormatTokens(_inputTokens)}{TuiGlyphs.ArrowDown} {FormatTokens(_outputTokens)}{TuiGlyphs.ArrowUp}";
-                segs.Add((tokenStr, TuiPalette.FgSecondary));
-            }
+            var tokenStr = $"{FormatTokens(_inputTokens)}{TuiGlyphs.ArrowDown} {FormatTokens(_outputTokens)}{TuiGlyphs.ArrowUp}";
+            groups.Add([(tokenStr, TuiPalette.FgSecondary)]);
         }
 
-        // Context window usage — visual progress bar with max context (if available)
-        // Hidden on narrow terminals (<50) to avoid overflow; hidden entirely in
-        // GOAL mode (per-run orchestration makes the snapshot meaningless).
-        if (_maxContextTokens > 0 && viewportWidth >= 50 && ShowsContextGauge(_mode))
+        // GOAL 模式不显示占用条：每轮由编排层自管，单轮快照没有参考价值。
+        if (_maxContextTokens > 0 && ShowsContextGauge(_mode))
+            groups.Add(BuildContextGaugeSegments());
+
+        // 从最低优先级（列表头部）开始整组丢弃，直到总宽装得下。
+        var budget = Math.Max(0, viewportWidth - 2);
+        while (groups.Count > 0 && MeasureRightWidth(groups) > budget)
+            groups.RemoveAt(0);
+
+        List<(string Text, Color Color)> segs = [];
+        foreach (var group in groups)
         {
             if (segs.Count > 0) segs.Add((" · ", TuiPalette.FgMuted));
-
-            var ratio = (double)_currentContextTokens / _maxContextTokens;
-            var pct = Math.Min(100, (int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero));
-            var pctColor = pct >= 80 ? TuiPalette.Error
-                : pct >= 50 ? TuiPalette.Warning
-                : TuiPalette.FgSecondary;
-
-            const int barWidth = 10;
-            var filledWidth = (int)Math.Round(ratio * barWidth, MidpointRounding.AwayFromZero);
-            var emptyWidth = barWidth - filledWidth;
-
-            segs.Add(("ctx ", TuiPalette.FgMuted));
-            segs.Add(($"{FormatTokens(_maxContextTokens)} ", TuiPalette.FgSecondary));
-            segs.Add(("[", TuiPalette.FgMuted));
-            if (filledWidth > 0)
-                segs.Add((new string(TuiGlyphs.BlockFull[0], filledWidth), pctColor));
-            if (emptyWidth > 0)
-                segs.Add((new string(TuiGlyphs.BlockLight[0], emptyWidth), TuiPalette.FgMuted));
-            segs.Add(("] ", TuiPalette.FgMuted));
-            segs.Add(($"{pct,3}%", pctColor));
+            segs.AddRange(group);
         }
+        return segs;
+    }
 
+    internal List<(string Text, Color Color)> BuildRightSegmentsForTest(int viewportWidth)
+        => BuildRightSegments(viewportWidth);
+
+    /// <summary>当前上下文占用快照（测试接缝）。</summary>
+    internal int CurrentContextTokensForTest => _currentContextTokens;
+
+    /// <summary>run 累计输入快照（测试接缝）。</summary>
+    internal int TotalInputTokensForTest => _inputTokens;
+
+    private static int MeasureRightWidth(List<List<(string Text, Color Color)>> groups)
+    {
+        var width = (groups.Count - 1) * 3; // " · " 分隔符
+        foreach (var group in groups)
+            foreach (var (text, _) in group)
+                width += TextWidthHelper.GetDisplayWidth(text);
+        return width;
+    }
+
+    private List<(string Text, Color Color)> BuildContextGaugeSegments()
+    {
+        const int barWidth = 10;
+        var ratio = _maxContextTokens <= 0 ? 0 : (double)_currentContextTokens / _maxContextTokens;
+        var pct = Math.Min(100, (int)Math.Round(ratio * 100, MidpointRounding.AwayFromZero));
+        var pctColor = pct >= 80 ? TuiPalette.Error
+            : pct >= 50 ? TuiPalette.Warning
+            : TuiPalette.FgSecondary;
+
+        // 占用可能超过窗口（历史口径下累计输入必然越界），条形必须钳制在 barWidth 内。
+        var filledWidth = Math.Clamp((int)Math.Round(ratio * barWidth, MidpointRounding.AwayFromZero), 0, barWidth);
+        var emptyWidth = barWidth - filledWidth;
+
+        List<(string Text, Color Color)> segs = [
+            ("ctx ", TuiPalette.FgMuted),
+            ($"{FormatTokens(_maxContextTokens)} ", TuiPalette.FgSecondary),
+            ("[", TuiPalette.FgMuted),
+        ];
+        if (filledWidth > 0)
+            segs.Add((new string(TuiGlyphs.BlockFull[0], filledWidth), pctColor));
+        if (emptyWidth > 0)
+            segs.Add((new string(TuiGlyphs.BlockLight[0], emptyWidth), TuiPalette.FgMuted));
+        segs.Add(("] ", TuiPalette.FgMuted));
+        segs.Add(($"{pct,3}%", pctColor));
         return segs;
     }
 }

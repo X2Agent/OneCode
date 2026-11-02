@@ -11,137 +11,59 @@ namespace OneCode.Tui;
 internal static partial class MarkdownRenderer
 {
     /// <summary>
-    /// 渲染带顶部语言栏的围栏代码块：
+    /// 渲染围栏代码块：语言标签行 + 单侧 gutter 边线。
     ///
-    ///   ┌─ csharp ─────────────────────┐
-    ///   │ var x = 1;                    │
-    ///   │ var y = 2;                    │
-    ///   └───────────────────────────────┘
+    ///   csharp
+    ///   │ var x = 1;
+    ///   │ var y = 2;
+    ///
+    /// 单侧边线不依赖左右对称，超宽行换行后仍与 gutter 对齐；语言标签行也不再需要
+    /// 按宽度摊平横线（旧实现里 dashCount 在长 lang 下会算成 0，表头比底边短一截）。
     /// </summary>
     private static void RenderFencedCode(FencedCodeBlock code, List<ConvLine> lines, int viewWidth)
     {
-        var lang = code.Info ?? "";
-        var codeLines = ExtractCodeLines(code);
-
-        // 计算代码正文的最小内宽（两侧边框内的可用列数）
-        var maxCodeWidth = 0;
-        foreach (var ln in codeLines)
+        var lang = code.Info ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(lang))
         {
-            var w = TextWidthHelper.GetDisplayWidth(ln);
-            if (w > maxCodeWidth) maxCodeWidth = w;
+            lines.Add(new ConvLine(LineRole.System, $"  {lang}", [
+                new LineSegment("  ", TuiPalette.Border),
+                new LineSegment(lang, TuiPalette.Accent),
+            ]));
         }
 
-        // 代码块总宽度（含 2 列前导缩进）= innerWidth + 6：
-        //   indent(2) + │(1) + space(1) + code(innerWidth) + space(1) + │(1)
-        var maxInner = Math.Max(10, viewWidth - 6);
-
-        // 标题行最小内宽需容纳语言标签及基础横线
-        var langDisplayWidth = TextWidthHelper.GetDisplayWidth(lang);
-        var headerMinInner = string.IsNullOrEmpty(lang) ? 2 : langDisplayWidth + 3;
-
-        var innerWidth = Math.Max(maxCodeWidth, headerMinInner);
-        if (innerWidth > maxInner) innerWidth = maxInner;
-
-        // 目标总显示宽度（含前导缩进）——代码行与首尾边框严格对齐此宽度
-        var totalWidth = innerWidth + 6;
-
-        var headerLeft = string.IsNullOrEmpty(lang)
-            ? $"  {TuiGlyphs.RoundedBorderTopLeft}{TuiGlyphs.BorderHorizontal}"
-            : $"  {TuiGlyphs.RoundedBorderTopLeft}{TuiGlyphs.BorderHorizontal} ";
-        var headerLang = string.IsNullOrEmpty(lang) ? "" : lang;
-        var headerLangSep = string.IsNullOrEmpty(lang) ? "" : " ";
-        var headerRight = $"{TuiGlyphs.BorderHorizontal}{TuiGlyphs.RoundedBorderTopRight}";
-
-        var fixedDisplayWidth = TextWidthHelper.GetDisplayWidth(headerLeft)
-                              + TextWidthHelper.GetDisplayWidth(headerLang)
-                              + TextWidthHelper.GetDisplayWidth(headerLangSep)
-                              + TextWidthHelper.GetDisplayWidth(headerRight);
-        var dashCount = Math.Max(0, totalWidth - fixedDisplayWidth);
-        var dashes = new string(TuiGlyphs.BorderHorizontal[0], dashCount);
-
-        var headerText = $"{headerLeft}{headerLang}{headerLangSep}{dashes}{headerRight}";
-        List<LineSegment> headerSegments = string.IsNullOrEmpty(lang)
-            ? [new(headerText, TuiPalette.Border)]
-            : [
-                new(headerLeft, TuiPalette.Border),
-                new(headerLang, TuiPalette.Accent),
-                new($"{headerLangSep}{dashes}{headerRight}", TuiPalette.Border),
-            ];
-        lines.Add(new ConvLine(LineRole.System, headerText, headerSegments));
-
-        // Code body lines — 超宽行按 innerWidth 硬换行成多行盒内片段，
-        // 否则右侧边框被推出视口、代码尾部不可见。
-        foreach (var ln in codeLines)
-        {
-            var role = DetectDiffLineRole(ln);
-            var fragments = TextWidthHelper.WordWrapByWidth(ln, innerWidth);
-            if (fragments.Count == 0)
-                fragments = [""];
-            foreach (var fragment in fragments)
-            {
-                var displayWidth = TextWidthHelper.GetDisplayWidth(fragment);
-                var padding = Math.Max(0, innerWidth - displayWidth);
-                var paddedLine = fragment + new string(' ', padding);
-                var codeColor = role switch
-                {
-                    LineRole.DiffAdded => TuiPalette.DiffAdded,
-                    LineRole.DiffRemoved => TuiPalette.DiffRemoved,
-                    LineRole.DiffHunk => TuiPalette.DiffHunk,
-                    _ => TuiPalette.FgPrimary,
-                };
-                lines.Add(new ConvLine(role,
-                    $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}",
-                    new[] {
-                        new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
-                        new LineSegment(paddedLine, codeColor),
-                        new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border),
-                    }));
-            }
-        }
-
-        var bottomDashes = new string(TuiGlyphs.BorderHorizontal[0], innerWidth + 2);
-        var bottomText = $"  {TuiGlyphs.RoundedBorderBottomLeft}{bottomDashes}{TuiGlyphs.RoundedBorderBottomRight}";
-        lines.Add(new ConvLine(LineRole.System, bottomText,
-            new[] { new LineSegment(bottomText, TuiPalette.Border) }));
+        RenderCodeLines(ExtractCodeLines(code), lines, viewWidth);
     }
 
     private static void RenderCodeBlock(CodeBlock code, List<ConvLine> lines, int viewWidth)
+        => RenderCodeLines(ExtractCodeLines(code), lines, viewWidth);
+
+    /// <summary>代码正文：每行前置 <c>│ </c> gutter，超宽行按可用宽度换行后仍然对齐。</summary>
+    private static void RenderCodeLines(List<string> codeLines, List<ConvLine> lines, int viewWidth)
     {
-        // Indented code block (no language) — render with simple left border.
-        var codeLines = ExtractCodeLines(code);
-        var maxCodeWidth = 0;
-        foreach (var ln in codeLines)
-        {
-            var w = TextWidthHelper.GetDisplayWidth(ln);
-            if (w > maxCodeWidth) maxCodeWidth = w;
-        }
-        var maxInner = Math.Max(10, viewWidth - 6);
-        var innerWidth = Math.Min(maxCodeWidth, maxInner);
+        const int gutterWidth = 4; // "  " + "│" + " "
+        var innerWidth = Math.Max(10, viewWidth - gutterWidth);
 
         foreach (var ln in codeLines)
         {
             var role = DetectDiffLineRole(ln);
-            // 超宽行按 innerWidth 硬换行——缩进代码块同样受视口约束。
+            var codeColor = role switch
+            {
+                LineRole.DiffAdded => TuiPalette.DiffAdded,
+                LineRole.DiffRemoved => TuiPalette.DiffRemoved,
+                LineRole.DiffHunk => TuiPalette.DiffHunk,
+                _ => TuiPalette.FgPrimary,
+            };
+
             var fragments = TextWidthHelper.WordWrapByWidth(ln, innerWidth);
             if (fragments.Count == 0)
                 fragments = [""];
+
             foreach (var fragment in fragments)
             {
-                var displayWidth = TextWidthHelper.GetDisplayWidth(fragment);
-                var padding = Math.Max(0, innerWidth - displayWidth);
-                var paddedLine = fragment + new string(' ', padding);
-                var lineText = $"  {TuiGlyphs.BorderVertical} {paddedLine} {TuiGlyphs.BorderVertical}";
-                var codeColor = role switch
-                {
-                    LineRole.DiffAdded => TuiPalette.DiffAdded,
-                    LineRole.DiffRemoved => TuiPalette.DiffRemoved,
-                    LineRole.DiffHunk => TuiPalette.DiffHunk,
-                    _ => TuiPalette.FgPrimary,
-                };
-                lines.Add(new ConvLine(role, lineText,
-                    new[] { new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
-                            new LineSegment(paddedLine, codeColor),
-                            new LineSegment($" {TuiGlyphs.BorderVertical}", TuiPalette.Border) }));
+                lines.Add(new ConvLine(role, $"  {TuiGlyphs.BorderVertical} {fragment}", [
+                    new LineSegment($"  {TuiGlyphs.BorderVertical} ", TuiPalette.Border),
+                    new LineSegment(fragment, codeColor),
+                ]));
             }
         }
     }
@@ -189,93 +111,10 @@ internal static partial class MarkdownRenderer
 
         if (colCount == 0) return;
 
-        // 窄面板（如计划侧边栏）放不下网格列：等比压缩会把每列压到 4-5 列，
-        // 内容全是省略号。改用记录式渲染——每行一条记录（列名: 值 换行展示），
-        // 任意宽度都可读。宽屏（对话流）保持网格表格。
-        var headers = ExtractHeaders(table, colCount);
-        if (viewWidth < 60 || colCount * 8 + (colCount + 1) * 3 + 4 > viewWidth)
-        {
-            RenderTableAsRecords(table, headers, lines, viewWidth);
-            return;
-        }
-
-        // Use display width (not char count) so CJK cells don't misalign columns.
-        var colWidths = new int[colCount];
-        foreach (var row in table.OfType<TableRow>())
-        {
-            for (var i = 0; i < row.Count && i < colCount; i++)
-            {
-                var cellText = ExtractTableCellText(row[i]);
-                colWidths[i] = Math.Max(colWidths[i], TextWidthHelper.GetDisplayWidth(cellText));
-            }
-        }
-
-        for (var i = 0; i < colWidths.Length; i++)
-            colWidths[i] = Math.Min(colWidths[i], 40);
-
-        // Layout: "  │ " + cells joined by " │ " + " │".
-        // Total display width = 2 + sum(colWidths) + (colCount+1)*3.
-        // Cap to viewWidth - 2 so the table fits within the terminal.
-        var totalWidth = colWidths.Sum() + (colCount + 1) * 3 + 2;
-        var maxTableWidth = Math.Max(20, viewWidth - 2);
-        if (totalWidth > maxTableWidth)
-        {
-            var scale = (double)maxTableWidth / totalWidth;
-            for (var i = 0; i < colWidths.Length; i++)
-                colWidths[i] = Math.Max(4, (int)(colWidths[i] * scale));
-
-            // Math.Max(4, …) 的下限会在"多窄列"场景把总宽重新顶回上限之上
-            // （缩放后不足 4 列的列被抬到 4），逐列从最宽者收缩保证网格不超宽。
-            while (colWidths.Sum() + (colCount + 1) * 3 + 2 > maxTableWidth)
-            {
-                var widest = 0;
-                for (var i = 1; i < colWidths.Length; i++)
-                    if (colWidths[i] > colWidths[widest]) widest = i;
-                if (colWidths[widest] <= 1) break;
-                colWidths[widest]--;
-            }
-        }
-
-        // 单元格内容按列宽 wrap 成多行——表格列宽有限，截断会让长文本
-        // （对照表、规则说明等）完全不可读。空缺行以空格补齐保持列对齐。
-        var isFirstRow = true;
-        foreach (var row in table.OfType<TableRow>())
-        {
-            var cellLines = new string[colCount][];
-            var maxLineCount = 1;
-            for (var i = 0; i < colCount; i++)
-            {
-                var text = i < row.Count ? ExtractTableCellText(row[i]) : "";
-                var wrapped = WordWrap(text, maxWidth: colWidths[i]);
-                cellLines[i] = wrapped.Count > 0 ? [.. wrapped] : [""];
-                if (cellLines[i].Length > maxLineCount)
-                    maxLineCount = cellLines[i].Length;
-            }
-
-            for (var r = 0; r < maxLineCount; r++)
-            {
-                var cells = new string[colCount];
-                for (var i = 0; i < colCount; i++)
-                {
-                    var seg = r < cellLines[i].Length ? cellLines[i][r] : "";
-                    var padCount = Math.Max(0, colWidths[i] - TextWidthHelper.GetDisplayWidth(seg));
-                    cells[i] = seg + new string(' ', padCount);
-                }
-
-                lines.Add(new ConvLine(LineRole.System,
-                    $"  │ {string.Join(" │ ", cells)} │"));
-            }
-
-            if (isFirstRow)
-            {
-                isFirstRow = false;
-                var sep = new string[colCount];
-                for (var i = 0; i < colCount; i++)
-                    sep[i] = new string('─', colWidths[i]);
-                lines.Add(new ConvLine(LineRole.System,
-                    $"  ├─{string.Join("─┼─", sep)}─┤"));
-            }
-        }
+        // 网格表格要求每列等宽、格内折行、CJK 与 ASCII 混排仍不错位——三个前提在终端里
+        // 很难同时成立，等比压缩后每列只剩 4-5 列、内容全成省略号。统一走记录式：
+        // 每行一条记录，列名做前缀，任意宽度都可读。
+        RenderTableAsRecords(table, ExtractHeaders(table, colCount), lines, viewWidth);
     }
 
     private static string ExtractTableCellText(Block cell)

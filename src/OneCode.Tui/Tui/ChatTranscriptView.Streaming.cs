@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace OneCode.Tui;
 
 /// <summary>
@@ -37,7 +35,7 @@ public sealed partial class ChatTranscriptView
     {
         _logger.LogDebug(
             "[ContinueStreaming] statusLines={StatusLines}, lineCountInView={LineCountInView}",
-            _stream.StatusLines.Count, _stream.PreviewLineCount);
+            _stream.StatusLines.Count, _messageView.StreamingPreviewLineCount);
         // Commit the current turn's text/tools as permanent lines before starting
         // a new turn. Thinking from this turn is finalized as a summary and
         // committed along with the other status lines — each turn's thinking
@@ -96,7 +94,7 @@ public sealed partial class ChatTranscriptView
     {
         _logger.LogDebug(
             "[EndStreaming] pendingLines={PendingLines}, statusLines={StatusLines}, lineCountInView={LineCountInView}",
-            _stream.PendingLines?.Count ?? -1, _stream.StatusLines.Count, _stream.PreviewLineCount);
+            _stream.PendingLines?.Count ?? -1, _stream.StatusLines.Count, _messageView.StreamingPreviewLineCount);
         _stream.IsStreaming = false;
         StopCursorBlink();
 
@@ -110,10 +108,8 @@ public sealed partial class ChatTranscriptView
 
         if (_stream.PendingLines is { Count: > 0 })
         {
-            // Rebuild the final committed lines with proper markdown rendering.
-            // During streaming, the preview used plain word-wrap for performance;
-            // now we render the complete text through the Markdown renderer so
-            // code blocks, headings, lists, and tables display correctly.
+            // 收尾按同一渲染器重渲一次并登记按宽度重渲的日志条目。
+            // 预览与提交共用 MarkdownRenderer、共用宽度，形态因此不跳变。
             _committedJournal.Add(BuildCommittedStreamJournalEntry(
                 _stream.StatusLines.ToList(), _stream.TextBuffer.ToString()));
             var finalLines = BuildFinalCommittedLines();
@@ -175,7 +171,7 @@ public sealed partial class ChatTranscriptView
         }
 
         _streamingCursorVisible = !_streamingCursorVisible;
-        if (_stream.WrappedTextLines.Count > 0)
+        if (_stream.TextBuffer.Length > 0)
             RebuildStreamingPreview();
         return true;
     }
@@ -220,7 +216,7 @@ public sealed partial class ChatTranscriptView
         // The first token after a gap rebuilds immediately so the user sees
         // the response start without the cadence delay; subsequent bursts
         // coalesce into ~60 FPS rebuilds.
-        if (_stream.PreviewLineCount == 0)
+        if (_messageView.StreamingPreviewLineCount == 0)
         {
             RebuildStreamingPreview();
         }
@@ -239,197 +235,102 @@ public sealed partial class ChatTranscriptView
     {
         _stream.PendingLines = BuildStreamingPreviewLines(ContentWidth);
         _messageView.ReplaceStreamingPreview(_stream.PendingLines);
-        _stream.PreviewLineCount = _messageView.StreamingPreviewLineCount;
     }
 
     /// <summary>
-    /// 构建当前流式预览的行（状态行 + 间隔 + 按宽度换行的回复文本）。
+    /// 构建当前流式预览的行（状态行 + 间隔 + markdown 渲染后的回复）。
     /// 独立成方法供 token 到达时的常规重建与宽度变化后的整体重渲共用。
     /// </summary>
+    /// <remarks>
+    /// 流式期间走与提交时<b>同一个</b> markdown 渲染器：用户看到的形态从第一个 token 起
+    /// 就是最终形态，不再出现「生成时全是原始标记、结束时整段跳变」。
+    /// 已完成块（以围栏外的空行分隔）渲染一次即缓存，每帧只重渲最后一个未闭合块。
+    /// </remarks>
     private List<FormattedLine> BuildStreamingPreviewLines(int width)
     {
-        var (prevMode, prevWidth) = (_renderer.CurrentMode, _renderer.CurrentWidth);
-        _renderer.CurrentWidth = width;
-        try
-        {
-            List<FormattedLine> pending = [];
+        List<FormattedLine> pending = [.. _stream.StatusLines];
 
-            for (var i = 0; i < _stream.StatusLines.Count; i++)
-            {
-                pending.Add(_stream.StatusLines[i]);
-            }
-
-            // Incremental wrap: cache completed paragraphs; only re-wrap the trailing
-            // incomplete paragraph (and any newly completed ones) on each rebuild.
-            var wrapWidth = width - ConversationRenderer.ContentIndent - 2;
-            UpdateStreamingWrapCache(wrapWidth);
-
-            if (_stream.WrappedTextLines.Count > 0 && pending.Count > 0)
-                pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-
-            var lastIndex = _stream.WrappedTextLines.Count - 1;
-            var showCursor = _stream.IsStreaming && _streamingCursorVisible && lastIndex >= 0;
-            for (var i = 0; i <= lastIndex; i++)
-            {
-                if (showCursor && i == lastIndex)
-                {
-                    var withCursor = _stream.WrappedTextLines[i] + TuiGlyphs.StreamingCursor;
-                    if (TextWidthHelper.GetDisplayWidth(withCursor) <= Math.Max(1, wrapWidth))
-                    {
-                        pending.Add(FormattedLine.Plain(
-                            $"{ConversationRenderer.Indent}{withCursor}", TuiPalette.AssistantMessage));
-                        continue;
-                    }
-                }
-
-                pending.Add(_stream.WrappedFormattedLines[i]);
-            }
-
+        var text = _stream.TextBuffer.ToString();
+        if (text.Length == 0)
             return pending;
-        }
-        finally
+
+        UpdateCommittedBlocks(text, width);
+
+        if (pending.Count > 0)
+            pending.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
+        pending.AddRange(_stream.CommittedBlocks);
+
+        var tail = text[_stream.CommittedBufferEnd..];
+        if (!string.IsNullOrWhiteSpace(tail))
+            pending.AddRange(MessageFlowRenderer.RenderMarkdownLines(tail, width));
+
+        if (_stream.IsStreaming && _streamingCursorVisible && pending.Count > 0)
         {
-            _renderer.CurrentMode = prevMode;
-            _renderer.CurrentWidth = prevWidth;
+            var last = pending[^1];
+            // 光标落在最后一行行尾；整行已占满时不追加（会被绘制层裁掉，反而看起来少一个字）。
+            if (TextWidthHelper.GetDisplayWidth(last.FullText) + 1 < width)
+            {
+                pending[^1] = last.Segments is { Count: > 0 } segments
+                    ? FormattedLine.FromSegments([.. segments, new LineSegment(TuiGlyphs.StreamingCursor, last.Color)])
+                    : FormattedLine.Plain(last.FullText + TuiGlyphs.StreamingCursor, last.Color);
+            }
         }
+
+        return pending;
     }
 
     /// <summary>
-    /// Updates the streaming word-wrap cache. Completed paragraphs (those ending
-    /// with a newline in the source buffer) are wrapped once and retained; only
-    /// the open trailing paragraph is re-wrapped when new tokens arrive.
-    /// Width changes invalidate the entire cache.
+    /// 把「已闭合的 markdown 块」渲染结果追加到缓存，只处理新增区间。
+    /// 宽度变化即整体失效：缓存的是按宽度排版好的行，换宽度必须全部重排。
     /// </summary>
-    /// <remarks>
-    /// 已完成段落直接留在 <see cref="StreamingTranscriptState.WrappedTextLines"/> 的稳定前缀里，
-    /// 每次只删掉尾段再追加新尾段：旧实现每帧清空整表再回填全部已完成行，
-    /// 长回复下这部分工作与回复长度成正比，且每帧都物化整个缓冲区字符串。
-    /// </remarks>
-    private void UpdateStreamingWrapCache(int wrapWidth)
+    private void UpdateCommittedBlocks(string text, int width)
     {
-        if (wrapWidth <= 0) wrapWidth = 40;
-
-        var buffer = _stream.TextBuffer;
-        if (wrapWidth != _stream.WrappedWidth)
+        if (text.Length < _stream.CommittedBufferEnd || _stream.BlocksWidth != width)
         {
-            _stream.WrappedTextLines.Clear();
-            _stream.WrappedFormattedLines.Clear();
-            _stream.WrappedStableCount = 0;
-            _stream.WrappedWidth = wrapWidth;
-            _stream.WrappedBufferLength = 0;
-            _stream.WrappedCompletedEnd = 0;
+            _stream.BlocksWidth = width;
+            _stream.CommittedBlocks.Clear();
+            _stream.CommittedBufferEnd = 0;
         }
 
-        // Nothing new and width unchanged — keep existing lines.
-        if (buffer.Length == _stream.WrappedBufferLength && _stream.WrappedTextLines.Count > 0)
+        var split = FindBlockSplit(text, _stream.CommittedBufferEnd);
+        if (split <= _stream.CommittedBufferEnd)
             return;
 
-        // Advance completed-paragraph frontier.
-        var lastNl = LastIndexOfNewline(buffer);
-        var completedEnd = lastNl >= 0 ? lastNl + 1 : 0;
-
-        if (completedEnd < _stream.WrappedCompletedEnd)
-        {
-            // Buffer shrank (shouldn't happen mid-stream) — full rebuild.
-            _stream.WrappedTextLines.Clear();
-            _stream.WrappedFormattedLines.Clear();
-            _stream.WrappedStableCount = 0;
-            _stream.WrappedCompletedEnd = 0;
-        }
-
-        if (completedEnd > _stream.WrappedCompletedEnd)
-        {
-            var chunk = CopyRange(buffer, _stream.WrappedCompletedEnd, completedEnd - _stream.WrappedCompletedEnd);
-            // chunk always ends with '\n'. Split yields a trailing empty element
-            // representing the still-open next paragraph — skip it so the live
-            // tail owns that paragraph instead of inserting a phantom blank line.
-            var parts = chunk.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-            for (var i = 0; i < parts.Length - 1; i++)
-            {
-                if (parts[i].Length == 0)
-                    AppendWrappedLine(string.Empty);
-                else
-                    foreach (var wrapped in ConversationRenderer.WordWrapStreaming(parts[i], wrapWidth))
-                        AppendWrappedLine(wrapped);
-            }
-
-            _stream.WrappedCompletedEnd = completedEnd;
-            _stream.WrappedStableCount = _stream.WrappedTextLines.Count;
-        }
-
-        // 只重算尾段：稳定前缀（含其渲染行实例）原地保留。
-        var tailCount = _stream.WrappedTextLines.Count - _stream.WrappedStableCount;
-        if (tailCount > 0)
-        {
-            _stream.WrappedTextLines.RemoveRange(_stream.WrappedStableCount, tailCount);
-            _stream.WrappedFormattedLines.RemoveRange(_stream.WrappedStableCount, tailCount);
-        }
-
-        if (completedEnd < buffer.Length)
-        {
-            var tail = CopyRange(buffer, completedEnd, buffer.Length - completedEnd);
-            foreach (var wrapped in ConversationRenderer.WordWrapStreaming(tail, wrapWidth))
-                AppendWrappedLine(wrapped);
-        }
-
-        _stream.WrappedBufferLength = buffer.Length;
+        _stream.CommittedBlocks.AddRange(
+            MessageFlowRenderer.RenderMarkdownLines(text[_stream.CommittedBufferEnd..split], width));
+        _stream.CommittedBufferEnd = split;
     }
 
-    private void AppendWrappedLine(string text)
+    /// <summary>
+    /// 返回自 <paramref name="from"/> 起、最后一个「可安全切块」的位置：围栏代码块之外的
+    /// 最后一个空行之后。围栏内的空行不能切——否则代码块会被切成多个互不相连的边框。
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="from"/> 恒落在两个块之间（上一次的切块点），此处围栏一定是关闭的，
+    /// 因此可以只扫新增区间，避免每帧重扫整段回复。
+    /// </remarks>
+    internal static int FindBlockSplit(string text, int from = 0)
     {
-        _stream.WrappedTextLines.Add(text);
-        // 渲染行只依赖文本（缩进/配色恒定）：宽度变化会整体清空缓存，故可安全复用实例。
-        _stream.WrappedFormattedLines.Add(FormattedLine.Plain(
-            $"{ConversationRenderer.Indent}{text}", TuiPalette.AssistantMessage));
-    }
+        var split = from;
+        var inFence = false;
+        var lineStart = Math.Clamp(from, 0, text.Length);
 
-    /// <summary>在 <see cref="StringBuilder"/> 上找最后一个换行，逐块倒序扫描，不物化整串。</summary>
-    private static int LastIndexOfNewline(StringBuilder buffer)
-    {
-        var offset = buffer.Length;
-        foreach (var chunk in buffer.GetChunks())
+        while (lineStart < text.Length)
         {
-            offset -= chunk.Length;
-            var index = chunk.Span.LastIndexOf('\n');
-            if (index >= 0)
-                return offset + index;
+            var newline = text.IndexOf('\n', lineStart);
+            var lineEnd = newline < 0 ? text.Length : newline;
+            var nextStart = newline < 0 ? text.Length : newline + 1;
+
+            var line = text.AsSpan(lineStart, lineEnd - lineStart).Trim();
+            if (line.StartsWith("```") || line.StartsWith("~~~"))
+                inFence = !inFence;
+            else if (!inFence && line.IsEmpty)
+                split = nextStart;
+
+            lineStart = nextStart;
         }
 
-        return -1;
-    }
-
-    /// <summary>按区间取子串（跨块拼接），避免为取一小段而物化整个缓冲区。</summary>
-    private static string CopyRange(StringBuilder buffer, int start, int length)
-    {
-        if (length <= 0)
-            return string.Empty;
-
-        var remaining = length;
-        var cursor = 0;
-        StringBuilder? parts = null;
-        foreach (var chunk in buffer.GetChunks())
-        {
-            var chunkEnd = cursor + chunk.Length;
-            if (chunkEnd <= start)
-            {
-                cursor = chunkEnd;
-                continue;
-            }
-
-            var from = Math.Max(start, cursor) - cursor;
-            var take = Math.Min(chunk.Length - from, remaining);
-            if (parts is null && take == length)
-                return chunk.Slice(from, take).ToString();
-
-            parts ??= new StringBuilder(length);
-            parts.Append(chunk.Slice(from, take));
-            remaining -= take;
-            cursor = chunkEnd;
-            if (remaining == 0)
-                break;
-        }
-
-        return parts?.ToString() ?? string.Empty;
+        return split;
     }
 
     /// <summary>
@@ -456,11 +357,9 @@ public sealed partial class ChatTranscriptView
     }
 
     /// <summary>
-    /// Builds the final committed line list for the just-completed streaming
-    /// turn. Unlike the streaming preview (which uses plain word-wrap for
-    /// performance), this routes the accumulated text buffer through the
-    /// Markdown renderer so code blocks, headings, lists, and tables render
-    /// with proper formatting and syntax highlighting.
+    /// 构建本轮结束时的已提交行（状态行 + 回复的 markdown 渲染）。
+    /// 与流式预览同一个渲染器、同一宽度：收尾只是把预览窗口封印成历史，
+    /// 不重新排版，因此不存在形态跳变。
     /// </summary>
     private IReadOnlyList<FormattedLine> BuildFinalCommittedLines()
         => BuildCommittedStreamLines(_stream.StatusLines, _stream.TextBuffer.ToString(), ContentWidth);
@@ -536,22 +435,11 @@ public sealed partial class ChatTranscriptView
     {
         List<FormattedLine> lines = [.. statusLines];
 
-        // Re-render the accumulated text through the Markdown renderer.
         if (!string.IsNullOrWhiteSpace(text))
         {
             if (lines.Count > 0)
                 lines.Add(FormattedLine.Plain("", TuiPalette.BgPrimary));
-            var (prevMode, prevWidth) = (_renderer.CurrentMode, _renderer.CurrentWidth);
-            _renderer.CurrentWidth = width;
-            try
-            {
-                _renderer.AppendAssistantText(lines, text);
-            }
-            finally
-            {
-                _renderer.CurrentMode = prevMode;
-                _renderer.CurrentWidth = prevWidth;
-            }
+            lines.AddRange(MessageFlowRenderer.RenderMarkdownLines(text, width));
         }
 
         return lines;

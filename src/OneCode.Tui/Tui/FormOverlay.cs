@@ -106,8 +106,15 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
             CanFocus = true,
             TabStop = TabBehavior.TabGroup,
         };
-        _formContent.VerticalScrollBar.Visible = true;
+        // 滚动容器默认会用自身背景铺满整块视口，把浮层外框的左右竖线整段抹掉
+        // （设置页曾出现整片无框的区域）。设为透明，只画行内容不动外框。
+        _formContent.ViewportSettings |= ViewportSettingsFlags.Transparent;
+        _formContent.VerticalScrollBar.Visible = false;
         Add(_formContent);
+
+        // 视口尺寸变化（浮层首次定位、终端拉伸）后内容宽度必须同步收缩，
+        // 否则 Dim.Fill 会按旧的内容宽度求解，行内容画到外框之外。
+        _formContent.ViewportChanged += (_, _) => UpdateContentSize();
 
         _errorLabel = new Label
         {
@@ -211,39 +218,14 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
         _errorLabel.Y = Pos.AnchorEnd(3);
         Add(_errorLabel);
 
-        var secondary = new Button
-        {
-            Text = secondaryText,
-            X = Pos.AnchorEnd(),
-            Y = 0,
-        };
-        secondary.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
-        secondary.Accepting += (_, _) => secondaryAction();
-
-        var primary = new Button
-        {
-            Text = primaryText,
-            X = 0,
-            Y = 0,
-        };
-        primary.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
+        var primary = TuiButtons.Create(primaryText);
         primary.Accepting += (_, _) => primaryAction();
 
-        var actions = new View
-        {
-            X = Pos.AnchorEnd(),
-            Y = Pos.AnchorEnd(TuiSpacing.Sm),
-            Width = Dim.Auto(),
-            Height = 1,
-            CanFocus = true,
-            TabStop = TabBehavior.TabGroup,
-        };
-        _actions = actions;
-        secondary.X = Pos.Right(primary) + TuiSpacing.Sm;
-        primary.Y = 0;
-        secondary.Y = 0;
-        actions.Add(primary, secondary);
-        Add(actions);
+        var secondary = TuiButtons.Create(secondaryText);
+        secondary.Accepting += (_, _) => secondaryAction();
+
+        _actions = TuiButtons.CreateRightAlignedRow(primary, secondary);
+        Add(_actions);
         PreferredHeight = _nextRowY + TuiSpacing.OverlayContentY + 4;
         UpdateContentSize();
         return (primary, secondary);
@@ -305,8 +287,13 @@ public abstract class FormOverlay<TResult> : ResultOverlay<TResult>
     private void UpdateContentSize()
     {
         var contentHeight = Math.Max(1, _nextRowY);
-        var contentWidth = Math.Max(1, PreferredWidth);
-        _formContent.SetContentSize(new System.Drawing.Size(contentWidth, contentHeight));
+        // 宽度必须取当前视口宽度：内容尺寸一旦大于视口，子行的 Dim.Fill 会按
+        // 内容宽度求解，于是整行越过浮层边框画到框外（右侧竖线被行内容覆盖）。
+        // 首次绘制前视口还是 0，退回偏好宽度。
+        var contentWidth = _formContent.Viewport.Width > 0
+            ? _formContent.Viewport.Width
+            : PreferredWidth;
+        _formContent.SetContentSize(new System.Drawing.Size(Math.Max(1, contentWidth), contentHeight));
     }
 
     private void EnsureVisible(View? target)

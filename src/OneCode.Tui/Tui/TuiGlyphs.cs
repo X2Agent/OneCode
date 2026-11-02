@@ -64,7 +64,7 @@ internal static class TuiGlyphs
     public const string BorderLeftTee = "├";
     public const string BorderRightTee = "┤";
 
-    // 圆角单线边框角字符（DESIGN.md 规范：Overlay 与代码块外框用圆角）
+    // 圆角单线边框角字符（DESIGN.md 规范：Overlay 外框用圆角）
     public const string RoundedBorderTopLeft = "╭";
     public const string RoundedBorderTopRight = "╮";
     public const string RoundedBorderBottomLeft = "╰";

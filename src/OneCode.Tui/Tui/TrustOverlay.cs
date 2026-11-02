@@ -5,11 +5,11 @@ public sealed class TrustOverlay : ResultOverlay<bool>
 {
     private readonly string _cwd;
     private readonly bool _isHomeDir;
-    private Button? _yesButton;
-    private Button? _noButton;
+    private readonly Button _yesButton;
+    private readonly Button _noButton;
 
-    internal Button YesButton => _yesButton!;
-    internal Button NoButton => _noButton!;
+    internal Button YesButton => _yesButton;
+    internal Button NoButton => _noButton;
 
     protected override View? InitialFocusView => _yesButton;
 
@@ -18,6 +18,8 @@ public sealed class TrustOverlay : ResultOverlay<bool>
     {
         _cwd = cwd;
         _isHomeDir = isHomeDir;
+        _yesButton = TuiButtons.Create($"{TuiGlyphs.Complete} _是，我信任此文件夹");
+        _noButton = TuiButtons.Create($"{TuiGlyphs.Failed} _否，退出");
         BuildUi();
     }
 
@@ -64,13 +66,10 @@ public sealed class TrustOverlay : ResultOverlay<bool>
         };
         accessNote.SetScheme(TuiStyles.MakeFieldScheme(TuiPalette.FgSecondary, TuiPalette.BgCard));
 
-        _noButton = CreateButton($"{TuiGlyphs.Failed} _否，退出", Pos.AnchorEnd(14));
+        _yesButton.Accepting += (_, _) => Complete(true);
         _noButton.Accepting += (_, _) => RequestClose(OverlayCloseReason.Cancelled);
 
-        _yesButton = CreateButton($"{TuiGlyphs.Complete} _是，我信任此文件夹", Pos.AnchorEnd(34));
-        _yesButton.Accepting += (_, _) => Complete(true);
-
-        Add(dirLabel, warningText, accessNote, _yesButton, _noButton);
+        Add(dirLabel, warningText, accessNote, TuiButtons.CreateRightAlignedRow(_yesButton, _noButton));
     }
 
     protected override bool OnKeyDown(Key kb)
@@ -93,9 +92,6 @@ public sealed class TrustOverlay : ResultOverlay<bool>
 
     private bool CycleTabStop(bool forward)
     {
-        if (_yesButton is null || _noButton is null)
-            return false;
-
         View[] stops = [_yesButton, _noButton];
         var index = Array.IndexOf(stops, MostFocused);
         var next = forward
@@ -103,17 +99,5 @@ public sealed class TrustOverlay : ResultOverlay<bool>
             : (index <= 0 ? stops.Length - 1 : index - 1);
         stops[next].SetFocus();
         return true;
-    }
-
-    private static Button CreateButton(string text, Pos x)
-    {
-        var button = new Button
-        {
-            Text = text,
-            X = x,
-            Y = Pos.AnchorEnd(TuiSpacing.Sm),
-        };
-        button.SetScheme(TuiStyles.MakeButtonScheme(TuiPalette.FgPrimary, TuiPalette.BgCard, TuiPalette.BgActive));
-        return button;
     }
 }

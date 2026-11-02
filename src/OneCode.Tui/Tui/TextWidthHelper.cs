@@ -1,123 +1,82 @@
+using System.Buffers;
 using System.Text;
 
 namespace OneCode.Tui;
 
 /// <summary>
-/// Calculates the display width of text in a monospace terminal, accounting
-/// for wide characters (CJK, fullwidth, emoji) that occupy two columns.
-/// Also provides width-aware word-wrapping and truncation.
+/// 终端显示宽度测量、换行与裁剪。
+///
+/// 宽度口径唯一来源是 Terminal.Gui 的 <see cref="Terminal.Gui.Text.RuneExtensions.GetColumns"/>（wcwidth 移植）：
+/// 自建区间表会与终端/框架的判定分叉（例如符号区段实际占 1 列，按 2 列测量会让所有补白算错、
+/// 边框与竖线错位）。绘制层由 Terminal.Gui 排版，测量层必须用同一套规则。
 /// </summary>
 public static class TextWidthHelper
 {
     /// <summary>
-    /// Returns the number of terminal columns the given character occupies.
-    /// Wide characters (CJK, fullwidth, emoji) return 2; combining marks return 0; others return 1.
+    /// 单个 rune 的终端列宽。不可打印字符（GetColumns 返回 -1）按 0 列计，
+    /// 与绘制层“画不出来也不占位”的语义一致。
     /// </summary>
-    public static int GetCharDisplayWidth(char c)
+    private static int RuneColumns(Rune rune)
     {
-        // Combining marks — zero width
-        if (c >= '\u0300' && c <= '\u036F') return 0;
-        if (c >= '\u1AB0' && c <= '\u1AFF') return 0;
-        if (c >= '\u1DC0' && c <= '\u1DFF') return 0;
-        if (c >= '\u20D0' && c <= '\u20FF') return 0;
-        if (c >= '\uFE20' && c <= '\uFE2F') return 0;
-
-        // CJK Unified Ideographs and extensions
-        if (c >= '\u4E00' && c <= '\u9FFF') return 2;  // CJK Unified
-        if (c >= '\u3400' && c <= '\u4DBF') return 2;  // CJK Extension A
-        if (c >= '\uF900' && c <= '\uFAFF') return 2;  // CJK Compatibility Ideographs
-        // CJK Extension B (U+20000-U+2A6DF) are surrogate pairs, handled separately above
-
-        // CJK Radicals and punctuation
-        if (c >= '\u2E80' && c <= '\u2EFF') return 2;  // CJK Radicals Supplement
-        if (c >= '\u2F00' && c <= '\u2FDF') return 2;  // Kangxi Radicals
-        if (c >= '\u3000' && c <= '\u303F') return 2;  // CJK Symbols and Punctuation
-        if (c >= '\u31C0' && c <= '\u31EF') return 2;  // CJK Strokes
-
-        // Hiragana and Katakana
-        if (c >= '\u3040' && c <= '\u309F') return 2;  // Hiragana
-        if (c >= '\u30A0' && c <= '\u30FF') return 2;  // Katakana
-        if (c >= '\u31F0' && c <= '\u31FF') return 2;  // Katakana Phonetic Extensions
-
-        // Fullwidth forms
-        if (c >= '\uFF01' && c <= '\uFF60') return 2;  // Fullwidth punctuation/letters
-        if (c >= '\uFFE0' && c <= '\uFFE6') return 2;  // Fullwidth signs
-
-        // Hangul Syllables (Korean)
-        if (c >= '\uAC00' && c <= '\uD7AF') return 2;
-        if (c >= '\u1100' && c <= '\u11FF') return 2;  // Hangul Jamo
-        if (c >= '\uA960' && c <= '\uA97F') return 2;  // Hangul Jamo Extended-A
-
-        // Misc symbols that are typically wide in terminals
-        if (c >= '\u2600' && c <= '\u27BF') return 2;  // Misc symbols & dingbats (includes many emoji)
-
-        return 1;
+        var columns = Terminal.Gui.Text.RuneExtensions.GetColumns(rune);
+        return columns < 0 ? 0 : columns;
     }
 
-    /// <summary>
-    /// Calculates the total display width of a string in terminal columns.
-    /// Handles surrogate pairs (emoji above U+FFFF) as width 2.
-    /// </summary>
+    /// <summary>字符串占用的终端列数。</summary>
     public static int GetDisplayWidth(string text)
     {
-        if (string.IsNullOrEmpty(text)) return 0;
+        if (string.IsNullOrEmpty(text))
+            return 0;
 
         var width = 0;
-        for (var i = 0; i < text.Length; i++)
+        var span = text.AsSpan();
+        while (!span.IsEmpty)
         {
-            var c = text[i];
-            // Surrogate pair — emoji and CJK Extension B
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-            {
-                width += 2;
-                i++; // skip low surrogate
-                continue;
-            }
-            // 孤立代理项会被 StripInvalidScalars 剔除，宽度记 0 保持测量一致。
-            if (char.IsSurrogate(c)) continue;
-            width += GetCharDisplayWidth(c);
+            // 孤立代理项不是合法标量值：绘制前会被剔除，测量时同样记 0 列以保持两侧一致。
+            if (Rune.DecodeFromUtf16(span, out var rune, out var consumed) == OperationStatus.Done)
+                width += RuneColumns(rune);
+            span = span[consumed..];
         }
+
         return width;
     }
 
     /// <summary>
-    /// 移除字符串中的孤立代理项（不成对的 high/low surrogate），合法代理对原样保留。
+    /// 移除孤立代理项（不成对的 high/low surrogate），合法代理对原样保留。
     /// 孤立代理项不是合法 Unicode 标量值，传入 View.AddStr 会令 Terminal.Gui 抛
     /// <see cref="ArgumentException"/> 整屏崩溃。
     /// </summary>
     private static string StripInvalidScalars(string text)
     {
-        if (string.IsNullOrEmpty(text)) return text;
+        if (string.IsNullOrEmpty(text))
+            return text;
 
-        for (var i = 0; i < text.Length; i++)
+        var span = text.AsSpan();
+        var cursor = 0;
+        while (!span.IsEmpty)
         {
-            var c = text[i];
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            var status = Rune.DecodeFromUtf16(span, out _, out var consumed);
+            if (status == OperationStatus.Done)
             {
-                i++;
+                cursor += consumed;
+                span = span[consumed..];
                 continue;
             }
-            if (!char.IsSurrogate(c)) continue;
 
             // 干净文本不进此分支，零分配；重建时合法代理对整体保留。
-            var sb = new StringBuilder(text.Length - 1);
-            sb.Append(text, 0, i);
-            for (; i < text.Length; i++)
+            var builder = new StringBuilder(text.Length);
+            builder.Append(text, 0, cursor);
+            while (!span.IsEmpty)
             {
-                c = text[i];
-                if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-                {
-                    sb.Append(c);
-                    sb.Append(text[i + 1]);
-                    i++;
-                }
-                else if (!char.IsSurrogate(c))
-                {
-                    sb.Append(c);
-                }
+                var inner = Rune.DecodeFromUtf16(span, out _, out var innerConsumed);
+                if (inner == OperationStatus.Done)
+                    builder.Append(span[..innerConsumed]);
+                span = span[innerConsumed..];
             }
-            return sb.ToString();
+
+            return builder.ToString();
         }
+
         return text;
     }
 
@@ -154,58 +113,34 @@ public static class TextWidthHelper
     }
 
     /// <summary>
-    /// Truncates text to fit within the given display width, appending an
-    /// ellipsis if truncation occurs.
+    /// 按显示宽度截断，超出时追加省略号（占用 1 列，因此可用宽度预算为 <c>maxDisplayWidth - 1</c>）。
+    /// <paramref name="maxDisplayWidth"/> 为 0 时返回空串。
     /// </summary>
     public static string TruncateByWidth(string text, int maxDisplayWidth)
     {
         if (maxDisplayWidth <= 0) return "";
         if (string.IsNullOrEmpty(text)) return text;
 
+        text = StripInvalidScalars(text);
+        var budget = maxDisplayWidth - 1;
         var width = 0;
-        for (var i = 0; i < text.Length; i++)
+        var index = 0;
+        foreach (var rune in text.EnumerateRunes())
         {
-            var c = text[i];
-            int charWidth;
-
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-            {
-                charWidth = 2;
-                // Check if adding this pair would overflow (leave room for ellipsis)
-                if (width + charWidth > maxDisplayWidth - 1)
-                {
-                    return maxDisplayWidth > 1
-                        ? text[..i] + "\u2026"
-                        : text[..i];
-                }
-                width += charWidth;
-                i++; // skip low surrogate
-                continue;
-            }
-
-            charWidth = GetCharDisplayWidth(c);
-            if (width + charWidth > maxDisplayWidth - 1)
-            {
-                return maxDisplayWidth > 1
-                    ? text[..i] + "\u2026"
-                    : text[..i];
-            }
-            width += charWidth;
+            var columns = RuneColumns(rune);
+            if (width + columns > budget)
+                return text[..index] + "\u2026";
+            width += columns;
+            index += rune.Utf16SequenceLength;
         }
 
         return text;
     }
 
     /// <summary>
-    /// Clips text to the given display width without appending an ellipsis.
-    /// A wide character (CJK / surrogate pair) that would straddle the boundary
-    /// is dropped whole. Lone surrogates (invalid Unicode scalars) are stripped
-    /// first — passing them to <c>View.AddStr</c> crashes Terminal.Gui. Unlike
-    /// <see cref="TruncateByWidth"/>, no column is
-    /// reserved for an ellipsis: this is the draw-pass hard clip, where a row
-    /// exactly at the content width must keep every character — the reserved
-    /// ellipsis column would replace the last real character with "…" and make
-    /// hard-wrapped rows (tool JSON details) look truncated on every line.
+    /// 按显示宽度硬裁剪，不追加省略号。跨边界的宽字符整字丢弃。
+    /// 这是绘制期的视口硬边界：恰好满宽的行必须保留每个字符，为省略号预留列会把
+    /// 行尾真实字符替换成 "…"，让换行后的工具 JSON 行看起来"右侧显示不全"。
     /// </summary>
     public static string ClipByWidth(string text, int maxDisplayWidth)
     {
@@ -216,33 +151,22 @@ public static class TextWidthHelper
         text = StripInvalidScalars(text);
 
         var width = 0;
-        for (var i = 0; i < text.Length; i++)
+        var index = 0;
+        foreach (var rune in text.EnumerateRunes())
         {
-            var c = text[i];
-
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-            {
-                if (width + 2 > maxDisplayWidth) return text[..i];
-                width += 2;
-                i++; // skip low surrogate
-                continue;
-            }
-
-            var charWidth = GetCharDisplayWidth(c);
-            if (width + charWidth > maxDisplayWidth) return text[..i];
-            width += charWidth;
+            var columns = RuneColumns(rune);
+            if (width + columns > maxDisplayWidth)
+                return text[..index];
+            width += columns;
+            index += rune.Utf16SequenceLength;
         }
 
         return text;
     }
 
     /// <summary>
-    /// Word-wraps text to fit within maxWidth terminal columns, using display
-    /// width (not character count) for measurement. Handles:
-    /// - Explicit newlines (\n) preserved as line breaks
-    /// - Spaces as soft break opportunities
-    /// - CJK text without spaces: breaks at any character boundary when line is full
-    /// - Wide characters (CJK/emoji) correctly measured as 2 columns
+    /// 按显示宽度换行：保留显式换行，优先在空格处断行，CJK 等无空格文本任意字符处可断，
+    /// 宽字符按实际列宽累加。
     /// </summary>
     public static List<string> WordWrapByWidth(string text, int maxWidth)
     {
@@ -252,122 +176,86 @@ public static class TextWidthHelper
 
         // 先剔除孤立代理项，与 ClipByWidth 一致：换行产物必须可直接渲染。
         text = StripInvalidScalars(text);
-        var paragraphs = text.Replace("\r\n", "\n").Split('\n');
 
-        foreach (var paragraph in paragraphs)
+        foreach (var paragraph in text.Replace("\r\n", "\n").Split('\n'))
         {
-            if (string.IsNullOrEmpty(paragraph))
-            {
+            if (paragraph.Length == 0)
                 result.Add("");
-                continue;
-            }
-
-            var currentLine = new StringBuilder();
-            var currentWidth = 0;
-            var lastSpaceIdx = -1;  // index in currentLine where last space was appended
-            var lastSpaceWidth = 0; // width at the point of last space
-
-            var i = 0;
-            while (i < paragraph.Length)
-            {
-                char c = paragraph[i];
-
-                if (char.IsHighSurrogate(c) && i + 1 < paragraph.Length && char.IsLowSurrogate(paragraph[i + 1]))
-                {
-                    int charWidth = 2;
-                    string charStr = paragraph.Substring(i, 2);
-
-                    if (currentWidth + charWidth > maxWidth)
-                    {
-                        // Line is full — flush current line
-                        result.Add(currentLine.ToString().TrimEnd());
-                        currentLine.Clear();
-                        currentWidth = 0;
-                        lastSpaceIdx = -1;
-                        lastSpaceWidth = 0;
-                    }
-
-                    currentLine.Append(charStr);
-                    currentWidth += charWidth;
-                    i += 2;
-                    continue;
-                }
-
-                int cw = GetCharDisplayWidth(c);
-
-                if (c == ' ')
-                {
-                    // Record break opportunity
-                    lastSpaceIdx = currentLine.Length;
-                    lastSpaceWidth = currentWidth;
-
-                    if (currentWidth + cw > maxWidth)
-                    {
-                        // Space itself overflows — flush
-                        result.Add(currentLine.ToString().TrimEnd());
-                        currentLine.Clear();
-                        currentWidth = 0;
-                        lastSpaceIdx = -1;
-                        lastSpaceWidth = 0;
-                        i++;
-                        continue;
-                    }
-
-                    currentLine.Append(c);
-                    currentWidth += cw;
-                    i++;
-                    continue;
-                }
-
-                // Regular character or CJK character
-                if (currentWidth + cw > maxWidth)
-                {
-                    // Need to break
-                    if (lastSpaceIdx >= 0 && cw == 1)
-                    {
-                        // Break at last space (for ASCII/mixed text)
-                        var lineContent = currentLine.ToString(0, lastSpaceIdx).TrimEnd();
-                        result.Add(lineContent);
-
-                        // Continue from after the space
-                        var remainder = currentLine.ToString(lastSpaceIdx + 1, currentLine.Length - lastSpaceIdx - 1);
-                        currentLine.Clear();
-                        currentLine.Append(remainder);
-                        currentWidth = currentWidth - lastSpaceWidth - 1; // -1 for the space itself
-                        lastSpaceIdx = -1;
-                        lastSpaceWidth = 0;
-
-                        // Now try to add current character
-                        if (currentWidth + cw > maxWidth)
-                        {
-                            // Still doesn't fit — flush and start fresh
-                            if (currentLine.Length > 0)
-                                result.Add(currentLine.ToString().TrimEnd());
-                            currentLine.Clear();
-                            currentWidth = 0;
-                        }
-                    }
-                    else
-                    {
-                        // No space to break at, or CJK char — break at current position
-                        if (currentLine.Length > 0)
-                            result.Add(currentLine.ToString().TrimEnd());
-                        currentLine.Clear();
-                        currentWidth = 0;
-                        lastSpaceIdx = -1;
-                        lastSpaceWidth = 0;
-                    }
-                }
-
-                currentLine.Append(c);
-                currentWidth += cw;
-                i++;
-            }
-
-            if (currentLine.Length > 0)
-                result.Add(currentLine.ToString().TrimEnd());
+            else
+                WrapParagraph(paragraph, maxWidth, result);
         }
 
         return result;
+    }
+
+    private static void WrapParagraph(string paragraph, int maxWidth, List<string> result)
+    {
+        var lineStart = 0;      // 当前行在 paragraph 中的起始下标
+        var lineWidth = 0;      // 当前行已占列数
+        var lastSpace = -1;     // 最近一个可断行的空格下标
+        var lastSpaceWidth = 0; // 到该空格之前（不含空格）的列数
+
+        var i = 0;
+        while (i < paragraph.Length)
+        {
+            var rune = Rune.GetRuneAt(paragraph, i);
+            var length = rune.Utf16SequenceLength;
+            var columns = RuneColumns(rune);
+
+            if (rune.Value == ' ')
+            {
+                lastSpace = i;
+                lastSpaceWidth = lineWidth;
+
+                if (lineWidth + columns > maxWidth)
+                {
+                    result.Add(paragraph[lineStart..i].TrimEnd());
+                    i += length;
+                    lineStart = i;
+                    lineWidth = 0;
+                    lastSpace = -1;
+                    continue;
+                }
+
+                lineWidth += columns;
+                i += length;
+                continue;
+            }
+
+            if (lineWidth + columns > maxWidth)
+            {
+                if (lastSpace >= 0)
+                {
+                    // 优先在空格处断行：空格本身丢弃，行尾空白裁掉。
+                    result.Add(paragraph[lineStart..lastSpace].TrimEnd());
+                    lineStart = lastSpace + 1;
+                    lineWidth -= lastSpaceWidth + 1;
+                    lastSpace = -1;
+
+                    if (lineWidth + columns > maxWidth && i > lineStart)
+                    {
+                        result.Add(paragraph[lineStart..i].TrimEnd());
+                        lineStart = i;
+                        lineWidth = 0;
+                    }
+                }
+                else
+                {
+                    // 无空格可断（CJK）：在当前位置硬断。
+                    if (i > lineStart)
+                    {
+                        result.Add(paragraph[lineStart..i].TrimEnd());
+                        lineStart = i;
+                        lineWidth = 0;
+                    }
+                }
+            }
+
+            lineWidth += columns;
+            i += length;
+        }
+
+        if (i > lineStart)
+            result.Add(paragraph[lineStart..i].TrimEnd());
     }
 }

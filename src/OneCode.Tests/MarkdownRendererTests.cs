@@ -22,32 +22,33 @@ public sealed class MarkdownRendererTests
     }
 
     [Fact]
-    public void Render_FencedCodeBlock_ReturnsCodeWithBorder()
+    public void Render_FencedCodeBlock_ReturnsLangLabelAndGutter()
     {
         var md = "```csharp\nvar x = 1;\n```";
         var lines = MarkdownRenderer.Render(md);
 
         lines.Should().Contain(l => l.Text.Contains("csharp"));
         lines.Should().Contain(l => l.Text.Contains("var x = 1;"));
-        lines.Should().Contain(l => l.Text.Contains("╭─"));
-        lines.Should().Contain(l => l.Text.Contains("╰─"));
+        lines.Where(l => l.Text.Contains("var x = 1;"))
+            .Should().OnlyContain(l => l.Text.StartsWith("  │"),
+                "代码正文用单侧 gutter 标记块边界");
     }
 
     [Fact]
-    public void Render_FencedCodeBlock_HeaderAlignsWithBottomBorderWithoutCopyTag()
+    public void Render_FencedCodeBlock_LongLanguageLabelDoesNotBreakLineWidth()
     {
-        var md = "```csharp\nvar x = 1;\n```";
-        var lines = MarkdownRenderer.Render(md);
+        // 旧实现按 dashCount 摊平横线，长 lang 下 dashCount 算成 0，表头比底边短。
+        var md = "```some-very-long-language-name\nx\n```";
+        var lines = MarkdownRenderer.Render(md, viewWidth: 40);
 
-        lines.Should().NotContain(l => l.Text.Contains("copy"));
-        lines[0].Tag.Should().BeNull("围栏代码块头部仅渲染语言标签与边框，不附加鼠标复制 Tag");
-        TextWidthHelper.GetDisplayWidth(lines[0].Text).Should().Be(
-            TextWidthHelper.GetDisplayWidth(lines[^1].Text),
-            "代码块首尾边框显示宽度必须严格对齐");
+        lines.Select(l => TextWidthHelper.GetDisplayWidth(l.Text))
+            .Should().OnlyContain(w => w <= 40);
+        lines.Should().NotContain(l => l.Text.Contains("╭"),
+            "单侧 gutter 形态不再绘制上下边框");
     }
 
-    // 窄面板（<60 列）中表格改用记录式渲染：每行一条记录、列名前缀、值换行不截断
-    //（回归场景：42-50 列侧边栏中网格表格被等比压缩，每列只剩省略号）
+    // 表格统一走记录式渲染：每行一条记录、列名前缀、值换行不截断。
+    // 网格形态要求每列等宽 + 格内折行 + CJK/ASCII 混排不错位，终端里无法稳定成立。
     [Fact]
     public void Render_Table_NarrowWidth_RendersAsRecordsWithoutTruncation()
     {
@@ -60,28 +61,29 @@ public sealed class MarkdownRendererTests
         text.Should().NotContain("…",
             "记录式渲染按宽度换行而非截断，不出现省略号");
         text.Should().NotContain("│ 扫描 │",
-            "窄屏不再渲染网格行");
+            "不再渲染网格行");
     }
 
-    // 宽屏（对话流）保持网格表格渲染
     [Fact]
-    public void Render_Table_WideWidth_RendersGridRow()
+    public void Render_Table_WideWidth_AlsoUsesRecords()
     {
         var md = "| 步骤 | 说明 |\n| --- | --- |\n| 扫描 | 检索调用点 |";
         var lines = MarkdownRenderer.Render(md, viewWidth: 100);
+        var text = string.Join("\n", lines.Select(l => l.Text));
 
-        lines.Should().Contain(l => l.Text.Contains("│ 扫描"),
-            "宽屏保持网格表格");
+        text.Should().Contain("步骤 │ 扫描",
+            "宽屏与窄屏同一种形态，避免同一份内容随宽度切换排版");
+        text.Should().NotContain("├─", "不渲染网格分隔线");
     }
 
     [Fact]
-    public void Render_CodeBlockWithoutLang_ReturnsCodeWithBorder()
+    public void Render_CodeBlockWithoutLang_ReturnsCodeWithGutter()
     {
         var md = "```\nhello\n```";
         var lines = MarkdownRenderer.Render(md);
 
         lines.Should().Contain(l => l.Text.Contains("hello"));
-        lines.Should().Contain(l => l.Text.Contains("╭─"));
+        lines.Should().OnlyContain(l => l.Text.StartsWith("  │"), "无语言标签时只有代码正文行");
     }
 
     [Fact]

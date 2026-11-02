@@ -737,6 +737,65 @@ public sealed class ChatTranscriptViewTests
     private static string Normalize(IReadOnlyList<string> lines)
         => string.Concat(lines.Select(l => l.Replace(" ", "", StringComparison.Ordinal)));
 
+    /// <summary>流式预览即最终形态：生成期间就不得出现原始 markdown 标记。</summary>
+    [Fact]
+    public void StreamingPreview_RendersMarkdownWhileStreaming()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+
+        view.BeginStreaming();
+        view.AppendStreamingToken("## 结论\n\n**加粗** 与 `code`\n\n```csharp\nvar x = 1;\n```\n");
+
+        var rendered = string.Join('\n', view.MessageView.RenderedLines);
+        rendered.Should().NotContain("##", "标题标记必须在流式期间即被解析");
+        rendered.Should().NotContain("**", "强调标记必须在流式期间即被解析");
+        rendered.Should().Contain("var x = 1;");
+        rendered.Should().Contain("csharp", "代码块语言标签随流式渲染出现");
+    }
+
+    /// <summary>流式中插入模式横幅不得在预览窗口里留下孤儿行。</summary>
+    [Fact]
+    public void UpdateModeBanner_DuringStreaming_LeavesNoOrphanPreviewLines()
+    {
+        var view = new ChatTranscriptView(CreateImmediateApp());
+        view.BeginStreaming();
+        view.AppendStreamingToken("第一段内容，足够长以产生多行。".PadRight(200, '文'));
+
+        view.UpdateModeBanner([FormattedLine.Plain("BANNER", TuiPalette.Warning)]);
+        view.AppendStreamingToken(" 追加内容继续生成。");
+        view.EndStreaming();
+
+        var lines = view.MessageView.RenderedLines;
+        lines.Count(l => l.Contains("BANNER", StringComparison.Ordinal)).Should().Be(1,
+            "重绘不得复制模式横幅");
+        // 预览窗口被整体替换后不应留下"逐字递减"的残句：正文片段各出现一次。
+        lines.Count(l => l.Contains("第一段内容", StringComparison.Ordinal)).Should().Be(1);
+        lines.Count(l => l.Contains("追加内容", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    /// <summary>围栏代码块内部的空行不是安全的切块点，否则会被切成多个互不相连的块。</summary>
+    [Fact]
+    public void FindBlockSplit_IgnoresBlankLinesInsideFence()
+    {
+        const string text = "para\n\n```cs\nvar a = 1;\n\nvar b = 2;\n```\n\ntail";
+
+        ChatTranscriptView.FindBlockSplit(text).Should().Be(text.IndexOf("tail", StringComparison.Ordinal),
+            "只有围栏外的空行才是切块点");
+    }
+
+    /// <summary>增量扫描必须与整段扫描得到同一个切块点，否则缓存会漂移。</summary>
+    [Fact]
+    public void FindBlockSplit_IncrementalScan_MatchesFullScan()
+    {
+        const string text = "a\n\n```cs\nx\n\ny\n```\n\nb\n\nc";
+
+        var full = ChatTranscriptView.FindBlockSplit(text);
+        var firstSplit = ChatTranscriptView.FindBlockSplit(text[..12], from: 0);
+        var resumed = ChatTranscriptView.FindBlockSplit(text, from: firstSplit);
+
+        resumed.Should().Be(full, "从上一个切块点续扫必须得到同一结果");
+    }
+
     private static IApplication CreateImmediateApp()
     {
         var app = Substitute.For<IApplication>();

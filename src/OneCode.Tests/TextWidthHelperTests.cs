@@ -134,4 +134,32 @@ public sealed class TextWidthHelperTests
     {
         TextWidthHelper.GetDisplayWidth("a\U0001F600b").Should().Be(4);
     }
+
+    // 绘制层用 Terminal.Gui 的 wcwidth 排版，测量层必须同口径。
+    // 旧实现把 U+2600–U+27BF 整段记为 2 列，状态符号一律多算 1 列，
+    // 导致所有「补白到固定宽度」的行（代码块 gutter、表格列、状态栏）错位。
+    [Theory]
+    [InlineData("✓", 1)]
+    [InlineData("✗", 1)]
+    [InlineData("▶", 1)]
+    [InlineData("▸", 1)]
+    [InlineData("●", 1)]
+    [InlineData("│", 1)]
+    [InlineData("中", 2)]
+    public void GetDisplayWidth_MatchesTerminalWcwidth(string text, int expected)
+    {
+        TextWidthHelper.GetDisplayWidth(text).Should().Be(expected);
+    }
+
+    [Fact]
+    public void WordWrapByWidth_MixedCjkAndSymbols_NeverExceedsWidth()
+    {
+        var text = string.Concat(Enumerable.Repeat("✓ 校验通过，中文字符与符号混排 ", 10));
+
+        var wrapped = TextWidthHelper.WordWrapByWidth(text, 30);
+
+        wrapped.Should().OnlyContain(line => TextWidthHelper.GetDisplayWidth(line) <= 30);
+        // 换行不得丢内容（空白在断行处会被裁掉）。
+        string.Concat(wrapped).Count(ch => ch == '✓').Should().Be(10);
+    }
 }

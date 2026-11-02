@@ -94,20 +94,19 @@ public sealed partial class OneCodeToplevel
                 _shell.FocusChatInput();
                 break;
 
-            case DoneEvent { Usage: var usage, TerminalReason: var reason, TurnsCompleted: var tc, TransactionRolledBack: var rolledBack, ValidationFailureSummary: var validationSummary }:
+            case DoneEvent { Usage: var usage, TerminalReason: var reason, TurnsCompleted: var tc, TransactionRolledBack: var rolledBack, ValidationFailureSummary: var validationSummary, LastTurnInputTokens: var lastTurnInput }:
                 var inp = usage?.InputTokens ?? 0;
                 var out_ = usage?.OutputTokens ?? 0;
                 var cr = usage?.CacheReadTokens ?? 0;
                 var cw = usage?.CacheWriteTokens ?? 0;
-                // InputTokens 是 API 返回的本次请求完整上下文快照（含缓存命中部分，见
-                // UsageDetails.InputTokenCount 契约），不是增量。多轮间直接覆盖即可，
-                // 否则累加会让上下文占用百分比随轮次虚高（实际只增长几 K，显示却翻倍）。
-                // OutputTokens / CacheReadTokens / CacheWriteTokens 是增量，仍累加。
+                // Usage.InputTokens 是整个 run 的累计输入（每轮工具调用都要重发完整上下文），
+                // 只适合当"本 run 账单"展示；上下文窗口占用必须用最后一次模型调用的输入快照，
+                // 否则多轮工具调用必然把百分比顶到 100%。
                 _inputTokens = inp;
                 _outputTokens += out_;
                 _cacheReadTokens += cr;
                 _cacheWriteTokens += cw;
-                _lastRoundInputTokens = _inputTokens;
+                _lastRoundInputTokens = lastTurnInput > 0 ? lastTurnInput : inp;
                 _shell.SessionContextBar.SetTokens(_inputTokens, _outputTokens);
                 _shell.SessionContextBar.SetContextUsage(_maxContextTokens, _lastRoundInputTokens);
 

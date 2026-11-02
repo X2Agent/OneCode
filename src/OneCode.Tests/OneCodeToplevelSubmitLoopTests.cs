@@ -138,6 +138,24 @@ public sealed class OneCodeToplevelSubmitLoopTests
         shell.App.DidNotReceive().RequestStop(Arg.Any<Terminal.Gui.App.IRunnable>());
     }
 
+    [Fact]
+    public async Task Submit_DoneEvent_CarriesLastTurnInputAsContextOccupancy()
+    {
+        // 上下文占用必须用最后一轮实际输入（20_000），而不是 run 累计输入；
+        // 后者在多轮工具调用下会远超窗口，把状态栏顶成 100%。
+        using var shell = TuiTestShell.Create(b => b.Stream(
+            new TextDeltaEvent("回复"),
+            new DoneEvent(null, new TokenUsage(900_000, 1_200), 0, RunTerminalReason.Completed,
+                LastTurnInputTokens: 20_000)));
+
+        await shell.SubmitQueryAsync(UserPrompt);
+
+        var sessionBar = shell.Shell.SessionContextBar;
+        sessionBar.CurrentContextTokensForTest.Should().Be(20_000);
+        sessionBar.TotalInputTokensForTest.Should().Be(900_000,
+            "run 累计账单仍按 Usage 展示，两者口径不同不得混用");
+    }
+
     private static async IAsyncEnumerable<QueryEvent> Blocked(
         TaskCompletionSource streamEntered,
         Task gate,
